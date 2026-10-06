@@ -609,6 +609,12 @@ pub enum CerseiError {
     #[error("Unsupported request: {0}")]
     Unsupported(String),
 
+    /// The input of a run or of a delegation is unusable (an empty prompt,
+    /// an impossible limit). Raised before any provider is built or any
+    /// request is sent.
+    #[error("Invalid input: {0}")]
+    InvalidInput(String),
+
     #[error("MCP error: {0}")]
     Mcp(String),
 

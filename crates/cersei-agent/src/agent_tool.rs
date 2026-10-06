@@ -1,40 +1,102 @@
-//! AgentTool: spawn a sub-agent to handle complex sub-tasks.
+//! AgentTool: spawn a sub-agent to handle one sub-task.
 //!
-//! Each sub-agent runs its own agentic loop with independent message history,
-//! cost tracking, and tool access. The `Agent` tool is filtered out of
-//! sub-agents to prevent infinite recursion.
+//! Each sub-agent runs its own agentic loop with independent message
+//! history. The invariants it shares with `delegate` are in
+//! [`crate::subagent`]: an empty task is refused before anything is built,
+//! the child has its parent's permissions and at most its parent's tools
+//! (never a delegation tool), it is cancelled with the parent's run, and a
+//! child stopped at a limit is reported as incomplete.
 
+use crate::delegate::{ToolsetFactory, MAX_DEPTH};
+use crate::subagent;
 use crate::Agent;
 use async_trait::async_trait;
 use cersei_provider::Provider;
-use cersei_tools::permissions::AllowAll;
 use cersei_tools::{PermissionLevel, Tool, ToolContext, ToolResult};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
+/// Default turn limit of a sub-agent.
+pub const DEFAULT_SUBAGENT_TURNS: u32 = 10;
+/// Default largest turn limit a call may ask for.
+pub const DEFAULT_SUBAGENT_TURNS_CAP: u32 = 50;
+
 /// The AgentTool — spawns independent sub-agents.
-///
-/// This must be constructed with a reference to the parent's provider
-/// so sub-agents can make their own API calls.
 pub struct AgentTool {
     provider_factory: Arc<dyn Fn() -> Box<dyn Provider> + Send + Sync>,
-    available_tools: Vec<Box<dyn Tool>>,
+    toolset_factory: ToolsetFactory,
+    /// Tools named at construction that cannot be rebuilt for a child:
+    /// refused at execution rather than silently dropped.
+    unavailable: Vec<String>,
+    max_turns: u32,
+    max_turns_cap: u32,
 }
 
 impl AgentTool {
-    /// Create an AgentTool with a provider factory and available tools.
-    ///
-    /// The provider factory creates a new provider instance for each sub-agent.
-    /// The `available_tools` list will have "Agent" filtered out automatically.
+    /// A tool whose sub-agents get the tools named by `tools` (minus the
+    /// delegation tools), rebuilt from the standard registry. A name the
+    /// registry cannot rebuild makes every call fail with that name; an
+    /// empty list gives the sub-agent no tools. Use
+    /// [`AgentTool::with_toolset`] for tools outside the registry.
     pub fn new(
         provider_factory: impl Fn() -> Box<dyn Provider> + Send + Sync + 'static,
         tools: Vec<Box<dyn Tool>>,
     ) -> Self {
+        let names: Vec<String> = tools
+            .iter()
+            .map(|t| t.name().to_string())
+            .filter(|n| !subagent::DELEGATION_TOOLS.contains(&n.as_str()))
+            .collect();
+        let registry: Vec<String> = cersei_tools::all()
+            .iter()
+            .map(|t| t.name().to_string())
+            .collect();
+        let unavailable = names
+            .iter()
+            .filter(|n| !registry.contains(n))
+            .cloned()
+            .collect();
+        let factory: ToolsetFactory = Arc::new(move || {
+            cersei_tools::all()
+                .into_iter()
+                .filter(|t| names.iter().any(|n| n == t.name()))
+                .collect()
+        });
         Self {
             provider_factory: Arc::new(provider_factory),
-            available_tools: tools,
+            toolset_factory: factory,
+            unavailable,
+            max_turns: DEFAULT_SUBAGENT_TURNS,
+            max_turns_cap: DEFAULT_SUBAGENT_TURNS_CAP,
         }
+    }
+
+    /// A tool whose sub-agents get a fresh set from `toolset_factory`
+    /// (minus the delegation tools).
+    pub fn with_toolset(
+        provider_factory: impl Fn() -> Box<dyn Provider> + Send + Sync + 'static,
+        toolset_factory: ToolsetFactory,
+    ) -> Self {
+        Self {
+            provider_factory: Arc::new(provider_factory),
+            toolset_factory,
+            unavailable: Vec::new(),
+            max_turns: DEFAULT_SUBAGENT_TURNS,
+            max_turns_cap: DEFAULT_SUBAGENT_TURNS_CAP,
+        }
+    }
+
+    /// Turn limit when the call gives none.
+    pub fn with_max_turns(mut self, n: u32) -> Self {
+        self.max_turns = n.max(1);
+        self
+    }
+
+    /// Largest turn limit a call may ask for.
+    pub fn with_max_turns_cap(mut self, n: u32) -> Self {
+        self.max_turns_cap = n.max(1);
+        self
     }
 }
 
@@ -50,6 +112,50 @@ struct AgentInput {
     model: Option<String>,
 }
 
+const CHILD_SYSTEM_PROMPT: &str =
+    "You are a sub-agent working on one task given by another agent. \
+Do that task, within its scope, then reply with your result: what you did, what you found, \
+and anything left undone. Stop as soon as the task is done; do not widen it.";
+
+impl AgentTool {
+    /// Everything that can be refused without building anything.
+    fn check(&self, input: &AgentInput, ctx: &ToolContext) -> Result<u32, String> {
+        if subagent::is_blank(&input.prompt) {
+            return Err(
+                "`prompt` is empty: give the sub-agent a precise task. Nothing was started.".into(),
+            );
+        }
+        if input
+            .model
+            .as_deref()
+            .is_some_and(|m| !subagent::is_blank(m))
+        {
+            return Err("`model` cannot be chosen here: a sub-agent uses its parent's model. Nothing was started.".into());
+        }
+        let turns = input.max_turns.unwrap_or(self.max_turns);
+        if turns == 0 || turns > self.max_turns_cap {
+            return Err(format!(
+                "`max_turns` must be between 1 and {}; got {turns}. Nothing was started.",
+                self.max_turns_cap
+            ));
+        }
+        let depth = subagent::depth_of(&ctx.extensions);
+        if depth + 1 >= MAX_DEPTH {
+            return Err("a sub-agent cannot start another sub-agent. Nothing was started.".into());
+        }
+        if subagent::run_token(&ctx.extensions).is_some_and(|t| t.is_cancelled()) {
+            return Err("the run was cancelled; no sub-agent was started.".into());
+        }
+        if !self.unavailable.is_empty() {
+            return Err(format!(
+                "these tools cannot be given to a sub-agent: {}. Nothing was started.",
+                self.unavailable.join(", ")
+            ));
+        }
+        Ok(turns)
+    }
+}
+
 #[async_trait]
 impl Tool for AgentTool {
     fn name(&self) -> &str {
@@ -57,10 +163,9 @@ impl Tool for AgentTool {
     }
 
     fn description(&self) -> &str {
-        "Launch a new agent to handle complex, multi-step tasks autonomously. \
-         The agent runs its own agentic loop with access to tools and returns \
-         its final result. Use this to delegate sub-tasks, run parallel \
-         workstreams, or handle tasks that require many tool calls."
+        "Launch a sub-agent for one well-defined, multi-step sub-task. It runs its own loop \
+         with your permissions and at most your tools, and returns its result. Give it a \
+         precise, self-contained task; do not use it for work you can do in a few tool calls."
     }
 
     fn permission_level(&self) -> PermissionLevel {
@@ -77,7 +182,8 @@ impl Tool for AgentTool {
                 },
                 "prompt": {
                     "type": "string",
-                    "description": "The complete task for the agent to perform"
+                    "minLength": 1,
+                    "description": "The complete, precise task for the agent to perform"
                 },
                 "system_prompt": {
                     "type": "string",
@@ -85,11 +191,9 @@ impl Tool for AgentTool {
                 },
                 "max_turns": {
                     "type": "integer",
-                    "description": "Max turns for the sub-agent (default 10)"
-                },
-                "model": {
-                    "type": "string",
-                    "description": "Optional model override"
+                    "minimum": 1,
+                    "maximum": self.max_turns_cap,
+                    "description": format!("Max turns for the sub-agent (default {})", self.max_turns)
                 }
             },
             "required": ["description", "prompt"]
@@ -101,54 +205,30 @@ impl Tool for AgentTool {
             Ok(i) => i,
             Err(e) => return ToolResult::error(format!("Invalid input: {}", e)),
         };
+        let max_turns = match self.check(&input, ctx) {
+            Ok(t) => t,
+            Err(e) => return ToolResult::error(e),
+        };
 
         tracing::info!(description = %input.description, "Spawning sub-agent");
 
-        // Create a fresh provider for the sub-agent
-        let provider = (self.provider_factory)();
-
-        // Filter out "Agent" tool to prevent recursion
-        let sub_tools: Vec<Box<dyn Tool>> = self
-            .available_tools
-            .iter()
-            .filter(|t| t.name() != "Agent")
-            .filter_map(|t| {
-                // We can't clone Box<dyn Tool>, so we rebuild tool sets
-                // This is a limitation — in practice, sub-agents get the
-                // standard tool sets minus Agent
-                cersei_tools::all()
-                    .into_iter()
-                    .find(|st| st.name() == t.name())
-            })
-            .collect();
-
-        // Use standard tools if filtering resulted in empty set
-        let sub_tools = if sub_tools.is_empty() {
-            cersei_tools::all()
-                .into_iter()
-                .filter(|t| t.name() != "Agent")
-                .collect()
-        } else {
-            sub_tools
-        };
-
+        let tools = subagent::child_tools((self.toolset_factory)(), &[]);
+        let depth = subagent::depth_of(&ctx.extensions);
         let mut builder = Agent::builder()
-            .provider(provider)
-            .tools(sub_tools)
-            .max_turns(input.max_turns.unwrap_or(10))
-            .permission_policy(AllowAll)
-            .working_dir(&ctx.working_dir);
-
-        if let Some(sys) = input.system_prompt {
-            builder = builder.system_prompt(sys);
-        } else {
-            builder = builder.system_prompt(
-                "You are a specialized sub-agent. Complete the given task thoroughly and return your findings.",
+            .provider_boxed((self.provider_factory)())
+            .tools(tools)
+            .max_turns(max_turns)
+            .permission_policy_arc(Arc::clone(&ctx.permissions))
+            .working_dir(&ctx.working_dir)
+            .extensions(subagent::child_extensions(depth))
+            .system_prompt(
+                input
+                    .system_prompt
+                    .filter(|s| !subagent::is_blank(s))
+                    .unwrap_or_else(|| CHILD_SYSTEM_PROMPT.to_string()),
             );
-        }
-
-        if let Some(model) = input.model {
-            builder = builder.model(model);
+        if let Some(token) = subagent::run_token(&ctx.extensions) {
+            builder = builder.cancel_token(token.child_token());
         }
 
         let agent = match builder.build() {
@@ -156,19 +236,10 @@ impl Tool for AgentTool {
             Err(e) => return ToolResult::error(format!("Failed to build sub-agent: {}", e)),
         };
 
-        match agent.run(&input.prompt).await {
-            Ok(output) => {
-                let text = output.text().to_string();
-                let meta = json!({
-                    "turns": output.turns,
-                    "tool_calls": output.tool_calls.len(),
-                    "input_tokens": output.usage.input_tokens,
-                    "output_tokens": output.usage.output_tokens,
-                });
-                ToolResult::success(text).with_metadata(meta)
-            }
-            Err(e) => ToolResult::error(format!("Sub-agent failed: {}", e)),
-        }
+        let result = agent.run(&input.prompt).await;
+        let partial = subagent::partial_text(&agent);
+        agent.close().await;
+        subagent::tool_result(result, partial)
     }
 }
 

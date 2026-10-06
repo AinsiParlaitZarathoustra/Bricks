@@ -196,6 +196,13 @@ impl Human {
                 self.newline();
                 match outcome {
                     RunOutcome::Succeeded => {}
+                    RunOutcome::Incomplete => {
+                        let _ = writeln!(
+                            err,
+                            "bricks: incomplete: {}",
+                            error.clone().unwrap_or_default()
+                        );
+                    }
                     RunOutcome::Cancelled => {
                         let _ = writeln!(err, "bricks: cancelled");
                     }
@@ -343,6 +350,7 @@ pub async fn run(global: &Global, args: RunArgs) -> i32 {
                 finished = true;
                 code = match (outcome, failure) {
                     (RunOutcome::Succeeded, _) => exit::OK,
+                    (RunOutcome::Incomplete, _) => exit::INCOMPLETE,
                     (RunOutcome::Cancelled, _) => exit::CANCELLED,
                     (RunOutcome::Failed, Some(FailureKind::ApprovalRequired)) => exit::APPROVAL,
                     (RunOutcome::Failed, _) => exit::FAILED,

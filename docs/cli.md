@@ -126,19 +126,45 @@ run.
 | 2 | invalid arguments or configuration, unknown model or session, refused attachment: nothing ran |
 | 3 | a step needed an approval and nobody could give it |
 | 4 | the answer was delivered, but the long-term memory maintenance failed |
+| 5 | the run stopped at a limit before a final answer (`outcome = incomplete`); the partial answer was printed |
 | 130 | cancelled (Ctrl+C) |
 
-## The JSONL schema (version 1)
+### When a run stops
+
+A run ends when the model gives a final answer with no tool call left: tools
+being available is never an obligation to use them, and Bricks adds no
+"use more tools" or "read more files" relaunch. Every other way a run can
+continue has a visible cause and a bound:
+
+| continuation | cause shown | bound |
+|---|---|---|
+| tool calls | `tool_started` / `tool_finished` | `max_turns` (`[agent]`, default 50): `N` allows at most `N` generation turns; reaching it ends the run `incomplete` (`max_turns`) |
+| answer cut by the output-token limit | `notice` "continuing (n/3)"; calls in the cut answer are answered as not run | 3 continuations, each one a turn; then `incomplete` (`output_truncated`) |
+| the same calls returning the same results | `notice` "No progress…" once, after 3 repeated rounds | 5 repeated rounds: `incomplete` (`no_progress`). Different arguments or results (another file, a test run again after an edit) are progress |
+| transport errors (429, 5xx, network) | `notice` "Retrying in …" | 5 retries of one request with backoff; not turns; then `failed` |
+| request refused as too long | `compaction` | the context policy's `max_overflow_recoveries` per turn |
+
+When the run stops at a limit, the history, partial answer and tool results are
+kept, every tool call has a result, and no tool is started afterwards. The
+memory maintenance that follows `run_finished` never restarts the task.
+
+Sub-agents (`Agent` and `delegate` tools, when a program registers them)
+refuse an empty task before anything is built, get their parent's permissions
+and at most its tools (never a delegation tool), are cancelled with the
+parent's run, and report `completed`, `incomplete`, `cancelled` or `failed`
+with their partial answer.
+
+## The JSONL schema (version 2)
 
 Every line is one envelope:
 
 ```json
-{"schema":1,"session_id":"20261006-141502-a1b2c3","run_id":"run_5f…","seq":7,"at":1791300902123,"type":"tool_started","tool_call_id":"call_1","name":"Glob","input":{"pattern":"*.md"}}
+{"schema":2,"session_id":"20261006-141502-a1b2c3","run_id":"run_5f…","seq":7,"at":1791300902123,"type":"tool_started","tool_call_id":"call_1","name":"Glob","input":{"pattern":"*.md"}}
 ```
 
 | field | |
 |---|---|
-| `schema` | `1`; incremented on any change a consumer could notice |
+| `schema` | `2`; incremented on any change a consumer could notice (2: `run_finished` gained `incomplete` and `termination`) |
 | `session_id` | the session |
 | `run_id` | the run (absent for session-level events) |
 | `seq` | 1, 2, 3, … contiguous: a gap never happens silently |
@@ -166,8 +192,8 @@ Events (`type`):
 | `model_changed` | `model, reasoning?, applies` | `next_turn` during a run, `next_run` otherwise |
 | `context_cleared` | `messages_removed` | |
 | `session_saved` | | |
-| `notice` | `message` | retries, configuration diagnostics, engine nudges |
-| `run_finished` | `outcome, failure?, error?, text, turns, approvals_unsatisfied?` | **exactly one per run**; `outcome`: `succeeded`, `failed`, `cancelled`; `failure`: `approval_required`, `error` |
+| `notice` | `message` | retries, configuration diagnostics, continuations after a cut answer, no-progress warnings |
+| `run_finished` | `outcome, failure?, error?, termination?, text, turns, approvals_unsatisfied?` | **exactly one per run**; `outcome`: `succeeded`, `incomplete`, `failed`, `cancelled`; `failure`: `approval_required`, `error`; `termination.kind`: `completed`, `max_turns` (`limit`), `output_truncated` (`continuations`), `no_progress` (`repeats`), `content_filtered`, `empty_response`; `turns`: generation turns that got a response |
 | `memory_maintenance_started` | | after `run_finished` |
 | `memory_maintenance_finished` | `outcome, report?, error?` | `outcome`: `completed`, `cancelled`, `failed` |
 | `command_rejected` | `command, reason` | nothing changed |
@@ -175,12 +201,12 @@ Events (`type`):
 A short run:
 
 ```text
-{"schema":1,"session_id":"…","seq":1,"at":…,"type":"session_opened","working_dir":"/p","model":"demo/scripted","resumed":false,"message_count":0,"warnings":[]}
-{"schema":1,"session_id":"…","run_id":"run_…","seq":2,"at":…,"type":"run_started","prompt":"Find the README","attachments":[],"model":"demo/scripted"}
-{"schema":1,…,"seq":3,"type":"tool_started","tool_call_id":"call_0","name":"Glob","input":{"pattern":"*.md"}}
-{"schema":1,…,"seq":4,"type":"tool_finished","tool_call_id":"call_0","name":"Glob","is_error":false,"duration_ms":3,"output":"README.md"}
-{"schema":1,…,"seq":9,"type":"text_delta","text":"I listed the Markdown files. …"}
-{"schema":1,…,"seq":14,"type":"run_finished","outcome":"succeeded","text":"…","turns":3}
+{"schema":2,"session_id":"…","seq":1,"at":…,"type":"session_opened","working_dir":"/p","model":"demo/scripted","resumed":false,"message_count":0,"warnings":[]}
+{"schema":2,"session_id":"…","run_id":"run_…","seq":2,"at":…,"type":"run_started","prompt":"Find the README","attachments":[],"model":"demo/scripted"}
+{"schema":2,…,"seq":3,"type":"tool_started","tool_call_id":"call_0","name":"Glob","input":{"pattern":"*.md"}}
+{"schema":2,…,"seq":4,"type":"tool_finished","tool_call_id":"call_0","name":"Glob","is_error":false,"duration_ms":3,"output":"README.md"}
+{"schema":2,…,"seq":9,"type":"text_delta","text":"I listed the Markdown files. …"}
+{"schema":2,…,"seq":14,"type":"run_finished","outcome":"succeeded","termination":{"kind":"completed"},"text":"…","turns":3}
 ```
 
 No API key, authentication header or secret appears in any event. The

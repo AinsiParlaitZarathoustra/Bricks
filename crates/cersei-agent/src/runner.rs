@@ -460,6 +460,12 @@ async fn run_loop(
     cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<AgentOutput> {
     let prompt = input.text.as_str();
+    // Nothing to do: refused before the session is loaded or a request sent.
+    if crate::subagent::is_blank(prompt) && input.attachments.is_empty() {
+        return Err(CerseiError::InvalidInput(
+            "the prompt is empty and has no attachment".into(),
+        ));
+    }
     let event_tx = event_tx.clone();
     // Load session history (skip if messages were pre-populated via with_messages)
     if agent.messages.lock().is_empty() {
@@ -514,23 +520,6 @@ async fn run_loop(
         }
     } // end session load guard
 
-    // Add user prompt (with exploration hint for analysis tasks)
-    let is_analysis = prompt.contains("index")
-        || prompt.contains("analyze")
-        || prompt.contains("explore")
-        || prompt.contains("understand")
-        || prompt.contains("tell me about")
-        || prompt.contains("summary");
-
-    let expanded_prompt = if is_analysis {
-        format!(
-            "{}\n\n[system hint: The project_intel section in your context shows the most important files ranked by dependency graph analysis (tree-sitter). Use parallel Read calls to read those files — entry points, stores, commands, and type files listed there. Read at least 10 files before writing output. Focus on files with the most symbols and imports.]",
-            prompt
-        )
-    } else {
-        prompt.to_string()
-    };
-
     let mut notes = std::mem::take(&mut *agent.config_notes.lock());
     notes.extend(agent.connect_mcp().await);
     // Long-term memory: recall for this prompt, within its budget (at most
@@ -581,11 +570,15 @@ async fn run_loop(
     }
 
     if input.attachments.is_empty() {
-        push_message(agent, Message::user(&expanded_prompt));
+        push_message(agent, Message::user(prompt));
     } else {
-        let mut blocks = vec![ContentBlock::Text {
-            text: expanded_prompt.clone(),
-        }];
+        // An attachment-only prompt carries no empty text block.
+        let mut blocks = Vec::new();
+        if !crate::subagent::is_blank(prompt) {
+            blocks.push(ContentBlock::Text {
+                text: prompt.to_string(),
+            });
+        }
         blocks.extend(input.attachments.iter().cloned());
         push_message(agent, Message::user_blocks(blocks));
     }
@@ -595,18 +588,16 @@ async fn run_loop(
     let mut turn: u32 = 0;
     let mut last_stop_reason = StopReason::EndTurn;
     let mut _last_usage = Usage::default();
+    // Continuations after an answer cut by the output-token limit. Each one
+    // is also a turn: they never get past `max_turns`.
     let mut max_tokens_retries: u32 = 0;
     const MAX_TOKENS_RETRY_LIMIT: u32 = 3;
-    let mut had_tool_use = false;
-    let mut depth_nudge_sent = false;
-    // F-08: the no-tool-call nudge fires at most once per session, and its
-    // retry turn carries a one-shot forced tool choice.
-    let mut no_tool_nudge_sent = false;
-    let mut force_tool_choice = false;
+    // Why the loop stopped: every `break` sets it.
+    let termination: crate::Termination;
+    // Benchmark mode only (explicit, bounded): verification nudges.
     let mut benchmark_retries: u32 = 0;
-    const BENCHMARK_MAX_RETRIES: u32 = 4;
-    let mut doom_loop_warned = false;
     let mut completion_verified = false;
+    let mut progress = ProgressTracker::default();
 
     // Runtime guards
     let mut files_read: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -631,6 +622,10 @@ async fn run_loop(
                 },
             )));
     }
+    // Sub-agents started by this run are cancelled with it.
+    agent
+        .extensions
+        .insert(crate::subagent::RunCancellation(cancel.clone()));
     let tool_ctx = ToolContext {
         working_dir: agent.working_dir.clone(),
         // One shell session per agent (not per run): state persists across
@@ -644,10 +639,16 @@ async fn run_loop(
 
     // Agentic loop
     loop {
-        turn += 1;
-        if turn > agent.max_turns {
+        // `max_turns = N` allows N generation turns. Reaching this point
+        // again means the last turn asked to go on (tool results to read,
+        // a continuation): the run stops here, incomplete.
+        if turn >= agent.max_turns {
+            termination = crate::Termination::MaxTurns {
+                limit: agent.max_turns,
+            };
             break;
         }
+        turn += 1;
 
         // Check cancellation
         if cancel.is_cancelled() {
@@ -710,24 +711,18 @@ async fn run_loop(
         if let Some(profile) = agent.reasoning_profile.lock().clone() {
             options.set(cersei_provider::REASONING_PROFILE_OPTION, &profile);
         }
-        // F-08: one-shot — applies only to the retry turn right after the
-        // no-tool-call nudge, then reverts to the provider default (auto).
-        if force_tool_choice {
-            force_tool_choice = false;
-            options.set("tool_choice", "required");
-        }
 
         // Todo nudge: on turns > 2, remind model about incomplete todos
         let system_with_nudge = if turn > 2 {
-            let session_id = agent.session_id.as_deref().unwrap_or("default");
-            let todos = cersei_tools::todo_write::get_todos(session_id);
+            // The key TodoWrite writes under: the tool context's session.
+            let todos = cersei_tools::todo_write::get_todos(&tool_ctx.session_id);
             let incomplete = todos
                 .iter()
                 .filter(|t| t.status != cersei_tools::todo_write::TodoStatus::Completed)
                 .count();
             if incomplete > 0 {
                 let nudge = format!(
-                    "\n\n[system reminder: You have {} incomplete task{} in your TodoWrite list. Make sure to complete all tasks before ending your response. Use tools to make progress on each task.]",
+                    "\n\n[system reminder: You have {} incomplete task{} in your TodoWrite list. Finish the ones the request still needs; mark done ones completed and drop the ones that are no longer needed.]",
                     incomplete,
                     if incomplete == 1 { "" } else { "s" }
                 );
@@ -768,7 +763,6 @@ async fn run_loop(
             );
         }
 
-        let tools_available = !tool_defs.is_empty();
         let mut request = CompletionRequest {
             model: model.clone(),
             messages: messages.clone(),
@@ -933,6 +927,8 @@ async fn run_loop(
                     run_compaction(agent, CompactReason::ContextOverflow, true, Some(&event_tx))
                         .await;
                 if outcome.is_compacted() {
+                    // The same turn again: it produced nothing.
+                    turn -= 1;
                     continue;
                 }
             }
@@ -1039,548 +1035,445 @@ async fn run_loop(
             usage: response.usage.clone(),
         });
 
-        // Handle stop reason
-        match &response.stop_reason {
-            StopReason::EndTurn => {
-                // ── Completion verification nudge ──
-                // If agent is finishing but hasn't verified its output, nudge once.
-                if agent.benchmark_mode && !completion_verified && turn >= 3 {
-                    let recent_has_verify = tool_calls.iter().rev().take(5).any(|tc| {
-                        let cmd = tc
-                            .input
-                            .get("command")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("");
-                        cmd.contains("cat ")
-                            || cmd.contains("python ")
-                            || cmd.contains("test")
-                            || cmd.contains("verify")
-                            || cmd.contains("node ")
-                            || cmd.contains("./")
-                            || cmd.contains("check")
-                    });
-                    if !recent_has_verify {
-                        completion_verified = true;
-                        push_message(agent, Message::user(
-                            "[system] Before finishing, verify your solution is correct:\n\
-                             1. Check that all expected output files exist and have correct content\n\
-                             2. Run your solution to confirm it produces the right output\n\
-                             3. Re-read the original instruction — did you satisfy EVERY requirement?"
-                        ));
-                        let _ = event_tx
-                            .send(AgentEvent::Status(
-                                "Nudging agent to verify before completion".into(),
-                            ))
-                            .await;
-                        continue;
-                    }
+        // What the response asks for is decided by what it contains: its
+        // tool calls are run whatever stop reason the provider gave, and a
+        // "tool use" stop without any call is an answer, never an empty
+        // round. Only an answer cut by the output-token limit is not run:
+        // its calls may be cut mid-arguments.
+        let tool_use_blocks: Vec<(String, String, serde_json::Value)> = response
+            .message
+            .content_blocks()
+            .into_iter()
+            .filter_map(|b| {
+                if let ContentBlock::ToolUse { id, name, input } = b {
+                    Some((id, name, input))
+                } else {
+                    None
                 }
+            })
+            .collect();
 
-                // ── Benchmark self-verification ──
-                // In TB 2.0 tests are run externally by the verifier AFTER the agent
-                // finishes. We only intervene if:
-                // 1) The instruction mentions a specific test/verify command — nudge
-                //    the agent to run it if it hasn't.
-                // 2) The agent ran such a command and it failed — nudge to retry.
-                // We do NOT hardcode /tests/run-tests.sh — that path doesn't exist
-                // during agent execution in TB 2.0.
-                if agent.benchmark_mode && benchmark_retries < BENCHMARK_MAX_RETRIES {
-                    // Check if the instruction mentions a verification command
-                    let has_instruction_tests = prompt.contains("test_outputs.py")
-                        || prompt.contains("run_tests")
-                        || prompt.contains("run-tests")
-                        || prompt.contains("pytest")
-                        || prompt.contains("verify.py")
-                        || prompt.contains("check.py")
-                        || prompt.contains("npm test")
-                        || prompt.contains("cargo test")
-                        || prompt.contains("make test");
-
-                    if has_instruction_tests {
-                        let verification = benchmark_check_tests(&tool_calls);
-                        match verification {
-                            BenchmarkVerification::NotRun => {
-                                if benchmark_retries == 0 {
-                                    benchmark_retries += 1;
-                                    push_message(agent, Message::user(
-                                        "[system] The task instruction mentions a verification command. \
-                                         Run it now to check your solution. Look at the instruction again \
-                                         for the exact command."
-                                    ));
-                                    let _ = event_tx
-                                        .send(AgentEvent::Status(
-                                            "Benchmark: nudge to run instruction's test command"
-                                                .into(),
-                                        ))
-                                        .await;
-                                    continue;
-                                }
-                                break;
-                            }
-                            BenchmarkVerification::Failed(ref test_output) => {
-                                benchmark_retries += 1;
-                                let truncated: String = test_output.chars().take(3000).collect();
-                                push_message(agent, Message::user(
-                                    format!(
-                                        "[system] Verification FAILED (attempt {}/{}).\n\n\
-                                         Output:\n```\n{}\n```\n\n\
-                                         Try a COMPLETELY DIFFERENT approach. Do NOT patch — rewrite.",
-                                        benchmark_retries, BENCHMARK_MAX_RETRIES, truncated
-                                    )
-                                ));
-                                let _ = event_tx
-                                    .send(AgentEvent::Status(format!(
-                                        "Benchmark: retry {}/{}",
-                                        benchmark_retries, BENCHMARK_MAX_RETRIES
-                                    )))
-                                    .await;
-                                continue;
-                            }
-                            BenchmarkVerification::Passed => {
-                                break;
-                            }
-                        }
-                    }
-                    // No test command in instruction — let the agent finish.
-                    // The external verifier will run tests after.
+        if response.stop_reason == StopReason::MaxTokens {
+            max_tokens_retries += 1;
+            // Calls in a cut answer are answered, never run, so the history
+            // stays valid whatever happens next.
+            let mut blocks: Vec<ContentBlock> = tool_use_blocks
+                .iter()
+                .map(|(id, name, _)| ContentBlock::ToolResult {
+                    tool_use_id: id.clone(),
+                    content: ToolResultContent::Text(format!(
+                        "{name} was not run: your answer was cut by the output-token limit, \
+                         possibly inside this call. Send it again if you still need it."
+                    )),
+                    is_error: Some(true),
+                })
+                .collect();
+            if max_tokens_retries > MAX_TOKENS_RETRY_LIMIT {
+                if !blocks.is_empty() {
+                    push_message(agent, Message::user_blocks(blocks));
                 }
-
-                // F-08: a prose-only session with tools available is *the*
-                // characteristic weak-model failure, and it was previously
-                // handled only in benchmark mode. The system prompt orders
-                // "ALWAYS verify information about the codebase using tools
-                // before answering"; this is the once-per-session enforcement.
-                // The retry turn also carries a forced tool choice
-                // (tool_choice: required / {type:"any"} / mode ANY) where the
-                // provider supports it.
-                if !had_tool_use && tools_available && !no_tool_nudge_sent {
-                    no_tool_nudge_sent = true;
-                    force_tool_choice = true;
-                    push_message(
-                        agent,
-                        Message::user(
-                            "[system] You answered without using any tools. Claims about \
-                         the codebase must be verified with tools before answering. \
-                         Gather evidence first (Read, Grep, Glob, Bash, ...), then \
-                         give your final answer grounded in what the tools returned.",
-                        ),
-                    );
-                    let _ = event_tx
-                        .send(AgentEvent::Status(
-                            "Nudging agent to use tools before answering".into(),
-                        ))
-                        .await;
-                    continue; // Don't break — force another round
-                }
-
-                // Depth nudge: if we had tool calls but ended very early (turn <= 3),
-                // push the model to explore deeper before giving final answer.
-                // This prevents shallow 1-round analysis. Only nudge once.
-                if had_tool_use && turn <= 4 && !depth_nudge_sent {
-                    depth_nudge_sent = true;
-                    push_message(agent, Message::user(
-                        "[system] Your analysis is not deep enough yet. You MUST read actual source code files before writing a summary. Use Read to examine at least 8-10 source files (stores, components, commands, types, configs). Use parallel Read calls. Do NOT write the final output until you have read enough source files to provide specific details about implementations, not just file names."
-                    ));
-                    continue; // Don't break — force another round
-                }
+                termination = crate::Termination::OutputTruncated {
+                    continuations: MAX_TOKENS_RETRY_LIMIT,
+                };
                 break;
             }
-            StopReason::ToolUse => {
-                max_tokens_retries = 0;
-                had_tool_use = true;
-                // Process tool calls
-                let tool_use_blocks: Vec<(String, String, serde_json::Value)> = response
-                    .message
-                    .content_blocks()
-                    .into_iter()
-                    .filter_map(|b| {
-                        if let ContentBlock::ToolUse { id, name, input } = b {
-                            Some((id, name, input))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-
-                // Phase 1: Emit ToolStart events for all tools
-                for (tool_id, tool_name, tool_input) in &tool_use_blocks {
-                    let _ = event_tx
-                        .send(AgentEvent::ToolStart {
-                            name: tool_name.clone(),
-                            id: tool_id.clone(),
-                            input: tool_input.clone(),
-                        })
-                        .await;
-                    agent.emit(AgentEvent::ToolStart {
+            blocks.push(ContentBlock::Text {
+                text: "[system] Your answer was cut by the output-token limit. Continue \
+                       from exactly where you stopped."
+                    .into(),
+            });
+            push_message(agent, Message::user_blocks(blocks));
+            send(
+                agent,
+                Some(&event_tx),
+                AgentEvent::Status(format!(
+                    "The answer was cut by the output-token limit; continuing \
+                     ({max_tokens_retries}/{MAX_TOKENS_RETRY_LIMIT})"
+                )),
+            )
+            .await;
+        } else if tool_use_blocks.is_empty() {
+            if response.stop_reason == StopReason::ContentFilter {
+                termination = crate::Termination::ContentFiltered;
+                break;
+            }
+            if !has_visible_text(&response.message) {
+                termination = crate::Termination::EmptyResponse;
+                break;
+            }
+            // A final answer ends the run. Only the explicit benchmark mode
+            // may ask for a verification first, a bounded number of times.
+            if agent.benchmark_mode {
+                if let Some((message, status)) = benchmark_nudge(
+                    prompt,
+                    &tool_calls,
+                    turn,
+                    &mut completion_verified,
+                    &mut benchmark_retries,
+                ) {
+                    push_message(agent, Message::user(message));
+                    send(agent, Some(&event_tx), AgentEvent::Status(status)).await;
+                    continue;
+                }
+            }
+            termination = crate::Termination::Completed;
+            break;
+        } else {
+            max_tokens_retries = 0;
+            // Phase 1: Emit ToolStart events for all tools
+            for (tool_id, tool_name, tool_input) in &tool_use_blocks {
+                let _ = event_tx
+                    .send(AgentEvent::ToolStart {
                         name: tool_name.clone(),
                         id: tool_id.clone(),
                         input: tool_input.clone(),
-                    });
-                }
+                    })
+                    .await;
+                agent.emit(AgentEvent::ToolStart {
+                    name: tool_name.clone(),
+                    id: tool_id.clone(),
+                    input: tool_input.clone(),
+                });
+            }
 
-                // Phase 2: Execute all tools in PARALLEL via join_all
-                let msg_count = agent.messages.lock().len();
-                // Built once, outside the per-call closure: this is the same
-                // `agent.tools` the lookup below uses (so MCP-injected tools
-                // stay consistent), and building it inside the closure would
-                // re-allocate every tool name for every parallel call (F-A15).
-                let registered_tool_names: Vec<String> = agent
-                    .tool_list()
-                    .iter()
-                    .map(|t| t.name().to_string())
-                    .collect();
+            // Phase 2: Execute all tools in PARALLEL via join_all
+            let msg_count = agent.messages.lock().len();
+            // Built once, outside the per-call closure: this is the same
+            // `agent.tools` the lookup below uses (so MCP-injected tools
+            // stay consistent), and building it inside the closure would
+            // re-allocate every tool name for every parallel call (F-A15).
+            let registered_tool_names: Vec<String> = agent
+                .tool_list()
+                .iter()
+                .map(|t| t.name().to_string())
+                .collect();
 
-                // ── Guard: read-before-edit, decided BEFORE dispatch (F-11) ──
-                // This used to run over the *returned* ToolResult, which meant
-                // the file had already been written by the time the model was
-                // told the edit was blocked: disk and conversation disagreed
-                // about whether the edit happened.
-                let refusals =
-                    refusals_for_batch(&tool_use_blocks, &files_read, &tool_ctx.working_dir);
+            // ── Guard: read-before-edit, decided BEFORE dispatch (F-11) ──
+            // This used to run over the *returned* ToolResult, which meant
+            // the file had already been written by the time the model was
+            // told the edit was blocked: disk and conversation disagreed
+            // about whether the edit happened.
+            let refusals = refusals_for_batch(&tool_use_blocks, &files_read, &tool_ctx.working_dir);
 
-                let exec_futures: Vec<_> = tool_use_blocks
-                    .iter()
-                    .map(|(tool_id, tool_name, tool_input)| {
-                        let tool_name = tool_name.clone();
-                        let registered_tool_names = registered_tool_names.clone();
-                        let refusal = refusals.get(tool_id).cloned();
-                        let tool_id = tool_id.clone();
-                        let tool_input = tool_input.clone();
-                        let tool_ctx = tool_ctx.clone();
-                        let permission_policy = Arc::clone(&agent.permission_policy);
-                        let hooks = agent.hooks.clone();
-                        let cumulative_cost = cumulative.cost_usd.unwrap_or(0.0);
+            let exec_futures: Vec<_> = tool_use_blocks
+                .iter()
+                .map(|(tool_id, tool_name, tool_input)| {
+                    let tool_name = tool_name.clone();
+                    let registered_tool_names = registered_tool_names.clone();
+                    let refusal = refusals.get(tool_id).cloned();
+                    let tool_id = tool_id.clone();
+                    let tool_input = tool_input.clone();
+                    let tool_ctx = tool_ctx.clone();
+                    let permission_policy = Arc::clone(&agent.permission_policy);
+                    let hooks = agent.hooks.clone();
+                    let cumulative_cost = cumulative.cost_usd.unwrap_or(0.0);
 
-                        // Find tool reference by name
-                        let tool_ref = agent.tool_by_name(&tool_name);
+                    // Find tool reference by name
+                    let tool_ref = agent.tool_by_name(&tool_name);
 
-                        async move {
-                            let start = Instant::now();
-                            // The change an approval was given for (written
-                            // if the call succeeds).
-                            let mut approved_change: Option<cersei_tools::preview::ChangePreview> = None;
+                    async move {
+                        let start = Instant::now();
+                        // The change an approval was given for (written
+                        // if the call succeeds).
+                        let mut approved_change: Option<cersei_tools::preview::ChangePreview> = None;
 
-                            let result = if let Some(msg) = refusal {
-                                // Refused before dispatch: the tool never runs,
-                                // so nothing reaches disk.
-                                ToolResult::error(msg)
-                            } else if let Some(tool) = tool_ref {
-                                // Check permissions. Session state a shell
-                                // command depends on (aliases, functions) is
-                                // shown to the policy, so it cannot hide what
-                                // will actually run.
-                                let mut description = format!("Execute tool '{}'", tool_name);
-                                if let Some(details) = tool.permission_details(&tool_input, &tool_ctx).await {
-                                    description.push('\n');
-                                    description.push_str(&details);
+                        let result = if let Some(msg) = refusal {
+                            // Refused before dispatch: the tool never runs,
+                            // so nothing reaches disk.
+                            ToolResult::error(msg)
+                        } else if let Some(tool) = tool_ref {
+                            // Check permissions. Session state a shell
+                            // command depends on (aliases, functions) is
+                            // shown to the policy, so it cannot hide what
+                            // will actually run.
+                            let mut description = format!("Execute tool '{}'", tool_name);
+                            if let Some(details) = tool.permission_details(&tool_input, &tool_ctx).await {
+                                description.push('\n');
+                                description.push_str(&details);
+                            }
+                            // What the call would change, computed
+                            // without writing, so the decision is taken
+                            // on it. If a file changes while the decision
+                            // is pending, the change is recomputed and
+                            // asked again: an approval never applies to
+                            // a state it was not given for.
+                            let mut preview = tool.preview(&tool_input, &tool_ctx).await;
+                            let mut stale_rounds = 0;
+                            let decision = loop {
+                                if let Some(reason) = preview.as_ref().and_then(|p| p.refusal.clone()) {
+                                    // The tool would refuse it: nothing to approve.
+                                    break PermissionDecision::Deny(format!("{reason}\nNothing was written."));
                                 }
-                                // What the call would change, computed
-                                // without writing, so the decision is taken
-                                // on it. If a file changes while the decision
-                                // is pending, the change is recomputed and
-                                // asked again: an approval never applies to
-                                // a state it was not given for.
-                                let mut preview = tool.preview(&tool_input, &tool_ctx).await;
-                                let mut stale_rounds = 0;
-                                let decision = loop {
-                                    if let Some(reason) = preview.as_ref().and_then(|p| p.refusal.clone()) {
-                                        // The tool would refuse it: nothing to approve.
-                                        break PermissionDecision::Deny(format!("{reason}\nNothing was written."));
-                                    }
-                                    let perm_req = PermissionRequest {
-                                        tool_name: tool_name.clone(),
-                                        tool_input: tool_input.clone(),
-                                        permission_level: tool.permission_level(),
-                                        description: description.clone(),
-                                        id: tool_id.clone(),
-                                        preview: preview.clone(),
-                                    };
-                                    let d = permission_policy.check(&perm_req).await;
-                                    let allowed = matches!(
-                                        d,
-                                        PermissionDecision::Allow
-                                            | PermissionDecision::AllowOnce
-                                            | PermissionDecision::AllowForSession
-                                    );
-                                    match preview.as_ref().map(|p| p.check_current()) {
-                                        Some(Err(changed)) if allowed => {
-                                            stale_rounds += 1;
-                                            if stale_rounds >= 3 {
-                                                break PermissionDecision::Deny(format!(
-                                                    "{} changed on disk while the change was awaiting approval; \
-                                                     nothing was written. Read the file again and retry.",
-                                                    changed.join(", ")
-                                                ));
-                                            }
-                                            preview = tool.preview(&tool_input, &tool_ctx).await;
-                                        }
-                                        _ => {
-                                            if allowed {
-                                                approved_change = preview.clone();
-                                            }
-                                            break d;
-                                        }
-                                    }
+                                let perm_req = PermissionRequest {
+                                    tool_name: tool_name.clone(),
+                                    tool_input: tool_input.clone(),
+                                    permission_level: tool.permission_level(),
+                                    description: description.clone(),
+                                    id: tool_id.clone(),
+                                    preview: preview.clone(),
                                 };
-
-                                match decision {
+                                let d = permission_policy.check(&perm_req).await;
+                                let allowed = matches!(
+                                    d,
                                     PermissionDecision::Allow
-                                    | PermissionDecision::AllowOnce
-                                    | PermissionDecision::AllowForSession => {
-                                        let hook_ctx = HookContext {
-                                            event: HookEvent::PreToolUse,
-                                            tool_name: Some(tool_name.clone()),
-                                            tool_input: Some(tool_input.clone()),
-                                            tool_result: None,
-                                            tool_is_error: None,
-                                            turn,
-                                            cumulative_cost_usd: cumulative_cost,
-                                            message_count: msg_count,
-                                        };
-                                        let hook_action =
-                                            cersei_hooks::run_hooks(&hooks, &hook_ctx).await;
-
-                                        match hook_action {
-                                            HookAction::Block(reason) => ToolResult::error(
-                                                format!("Blocked by hook: {}", reason),
-                                            ),
-                                            HookAction::ModifyInput(new_input) => {
-                                                tool.execute(new_input, &tool_ctx).await
-                                            }
-                                            _ => tool.execute(tool_input.clone(), &tool_ctx).await,
+                                        | PermissionDecision::AllowOnce
+                                        | PermissionDecision::AllowForSession
+                                );
+                                match preview.as_ref().map(|p| p.check_current()) {
+                                    Some(Err(changed)) if allowed => {
+                                        stale_rounds += 1;
+                                        if stale_rounds >= 3 {
+                                            break PermissionDecision::Deny(format!(
+                                                "{} changed on disk while the change was awaiting approval; \
+                                                 nothing was written. Read the file again and retry.",
+                                                changed.join(", ")
+                                            ));
                                         }
+                                        preview = tool.preview(&tool_input, &tool_ctx).await;
                                     }
-                                    PermissionDecision::Deny(reason) => {
-                                        ToolResult::error(format!("Permission denied: {}", reason))
+                                    _ => {
+                                        if allowed {
+                                            approved_change = preview.clone();
+                                        }
+                                        break d;
                                     }
                                 }
-                            } else {
-                                // F-A15: weak models hallucinate tool names
-                                // constantly, and "Unknown tool: X" gave them
-                                // nothing to correct toward.
-                                cersei_tools::tool_feedback::not_found(
-                                    "tool",
-                                    &tool_name,
-                                    &registered_tool_names,
-                                    "Call ToolSearch with a keyword to find the right tool, then call that tool by its exact name.",
-                                )
                             };
 
-                            let duration = start.elapsed();
-                            (tool_id, tool_name, tool_input, result, duration, approved_change)
-                        }
-                    })
-                    .collect();
+                            match decision {
+                                PermissionDecision::Allow
+                                | PermissionDecision::AllowOnce
+                                | PermissionDecision::AllowForSession => {
+                                    let hook_ctx = HookContext {
+                                        event: HookEvent::PreToolUse,
+                                        tool_name: Some(tool_name.clone()),
+                                        tool_input: Some(tool_input.clone()),
+                                        tool_result: None,
+                                        tool_is_error: None,
+                                        turn,
+                                        cumulative_cost_usd: cumulative_cost,
+                                        message_count: msg_count,
+                                    };
+                                    let hook_action =
+                                        cersei_hooks::run_hooks(&hooks, &hook_ctx).await;
 
-                // Cancelling the turn drops the running tool futures: a shell
-                // command is then interrupted by its own guard instead of
-                // running to its timeout.
-                let results = tokio::select! {
-                    r = futures::future::join_all(exec_futures) => r,
-                    _ = cancel.cancelled() => return Err(CerseiError::Cancelled),
-                };
+                                    match hook_action {
+                                        HookAction::Block(reason) => ToolResult::error(
+                                            format!("Blocked by hook: {}", reason),
+                                        ),
+                                        HookAction::ModifyInput(new_input) => {
+                                            tool.execute(new_input, &tool_ctx).await
+                                        }
+                                        _ => tool.execute(tool_input.clone(), &tool_ctx).await,
+                                    }
+                                }
+                                PermissionDecision::Deny(reason) => {
+                                    ToolResult::error(format!("Permission denied: {}", reason))
+                                }
+                            }
+                        } else {
+                            // F-A15: weak models hallucinate tool names
+                            // constantly, and "Unknown tool: X" gave them
+                            // nothing to correct toward.
+                            cersei_tools::tool_feedback::not_found(
+                                "tool",
+                                &tool_name,
+                                &registered_tool_names,
+                                "Call ToolSearch with a keyword to find the right tool, then call that tool by its exact name.",
+                            )
+                        };
 
-                // Phase 3: Process results sequentially (emit events, build result blocks)
-                let mut result_blocks: Vec<ContentBlock> = Vec::new();
-                let mut raw_blocks: Vec<ContentBlock> = Vec::new();
-
-                for (tool_id, tool_name, tool_input, mut result, duration, change) in results {
-                    if let Some(change) = change.filter(|c| !result.is_error && !c.files.is_empty())
-                    {
-                        send(
-                            agent,
-                            Some(&event_tx),
-                            AgentEvent::EditApplied {
-                                tool_call_id: tool_id.clone(),
-                                tool: tool_name.clone(),
-                                files: change.files,
-                            },
-                        )
-                        .await;
+                        let duration = start.elapsed();
+                        (tool_id, tool_name, tool_input, result, duration, approved_change)
                     }
-                    // ── Bookkeeping for the read-before-edit guard ──
-                    // The refusal itself now happens before dispatch; see
-                    // `refusals_for_batch`. What remains here is recording the
-                    // files whose contents the model can be said to know,
-                    // which needs the result to confirm the call succeeded.
-                    //
-                    // A successful *write* counts as much as a read: the model
-                    // supplied that content, so it is not overwriting anything
-                    // unseen. Recording only reads meant a file the model had
-                    // just created with `Write` could never be written again —
-                    // it existed on disk, was absent from this set, and every
-                    // later `Write`/`Edit` was refused as a blind overwrite of
-                    // content the model itself had authored.
-                    if !result.is_error {
-                        for target in write_targets(&tool_name, &tool_input) {
-                            files_read.insert(resolve_path(&tool_ctx.working_dir, &target));
-                        }
-                    }
+                })
+                .collect();
 
-                    // ── Guard: Per-tool error counter with reflection (F-06) ──
-                    if result.is_error {
-                        let count = tool_error_counts.entry(tool_name.clone()).or_insert(0);
-                        *count += 1;
-                        let note = error_budget_note(&tool_name, *count);
-                        match result.report.as_mut() {
-                            Some(r) => r.notes.push(note),
-                            None => result.content = format!("{}\n\n{}", result.content, note),
-                        }
-                    } else {
-                        tool_error_counts.remove(&tool_name);
-                    }
+            // Cancelling the turn drops the running tool futures: a shell
+            // command is then interrupted by its own guard instead of
+            // running to its timeout.
+            let results = tokio::select! {
+                r = futures::future::join_all(exec_futures) => r,
+                _ = cancel.cancelled() => return Err(CerseiError::Cancelled),
+            };
 
-                    // One rendering for every tool: a header (status,
-                    // duration, code), then the output, notes, suggestion.
-                    // Only the output is reduced for the active context
-                    // (errors too: diagnostics are kept first); the original
-                    // stays in the raw history and, when reduced, in the
-                    // output store.
-                    let report = result.to_report();
-                    let output = report.render_output();
-                    let level = *agent.compression_level.lock();
-                    let processed = agent.compressor.process(
-                        &cersei_compression::ToolOutput {
-                            tool: &tool_name,
-                            input: &tool_input,
-                            content: &output,
-                            is_error: report.status.is_error(),
-                            call_id: &tool_id,
-                            exit_code: report.exit_code,
+            // Phase 3: Process results sequentially (emit events, build result blocks)
+            let mut result_blocks: Vec<ContentBlock> = Vec::new();
+            // (name, input, is_error, output) of each call, for the
+            // progress check.
+            let mut round: Vec<(String, String, bool, String)> = Vec::new();
+            let mut raw_blocks: Vec<ContentBlock> = Vec::new();
+
+            for (tool_id, tool_name, tool_input, mut result, duration, change) in results {
+                // The tool's own output, before the engine adds notes to it
+                // (the failure streak changes them every round).
+                let own_output = result.content.clone();
+                if let Some(change) = change.filter(|c| !result.is_error && !c.files.is_empty()) {
+                    send(
+                        agent,
+                        Some(&event_tx),
+                        AgentEvent::EditApplied {
+                            tool_call_id: tool_id.clone(),
+                            tool: tool_name.clone(),
+                            files: change.files,
                         },
-                        level,
-                    );
-                    if let Some(r) = &processed.raw {
-                        agent.raw_refs.lock().insert(tool_id.clone(), r.clone());
+                    )
+                    .await;
+                }
+                // ── Bookkeeping for the read-before-edit guard ──
+                // The refusal itself now happens before dispatch; see
+                // `refusals_for_batch`. What remains here is recording the
+                // files whose contents the model can be said to know,
+                // which needs the result to confirm the call succeeded.
+                //
+                // A successful *write* counts as much as a read: the model
+                // supplied that content, so it is not overwriting anything
+                // unseen. Recording only reads meant a file the model had
+                // just created with `Write` could never be written again —
+                // it existed on disk, was absent from this set, and every
+                // later `Write`/`Edit` was refused as a blind overwrite of
+                // content the model itself had authored.
+                if !result.is_error {
+                    for target in write_targets(&tool_name, &tool_input) {
+                        files_read.insert(resolve_path(&tool_ctx.working_dir, &target));
                     }
-                    // A file counts as read only when the model saw its exact
-                    // text: a skeleton or a summary is not enough to edit it.
-                    if (tool_name == "Read" || tool_name == "read")
-                        && !result.is_error
-                        && !processed.partial_view
-                    {
-                        if let Some(path) = tool_input.get("file_path").and_then(|v| v.as_str()) {
-                            files_read.insert(resolve_path(&tool_ctx.working_dir, path));
-                        }
-                    }
-                    let capped_content = report.render(&tool_name, duration, Some(&processed.text));
-                    let full_text = report.render(&tool_name, duration, None);
-                    let compression = Some(processed.stats);
-                    raw_blocks.push(ContentBlock::ToolResult {
-                        tool_use_id: tool_id.clone(),
-                        content: ToolResultContent::Text(full_text.clone()),
-                        is_error: Some(result.is_error),
-                    });
+                }
 
-                    let _ = event_tx
-                        .send(AgentEvent::ToolEnd {
-                            name: tool_name.clone(),
-                            id: tool_id.clone(),
-                            result: result.content.clone(),
-                            is_error: result.is_error,
-                            duration,
-                            compression,
-                        })
-                        .await;
-                    agent.emit(AgentEvent::ToolEnd {
+                // ── Guard: Per-tool error counter with reflection (F-06) ──
+                if result.is_error {
+                    let count = tool_error_counts.entry(tool_name.clone()).or_insert(0);
+                    *count += 1;
+                    let note = error_budget_note(&tool_name, *count);
+                    match result.report.as_mut() {
+                        Some(r) => r.notes.push(note),
+                        None => result.content = format!("{}\n\n{}", result.content, note),
+                    }
+                } else {
+                    tool_error_counts.remove(&tool_name);
+                }
+
+                // One rendering for every tool: a header (status,
+                // duration, code), then the output, notes, suggestion.
+                // Only the output is reduced for the active context
+                // (errors too: diagnostics are kept first); the original
+                // stays in the raw history and, when reduced, in the
+                // output store.
+                let report = result.to_report();
+                let output = report.render_output();
+                let level = *agent.compression_level.lock();
+                let processed = agent.compressor.process(
+                    &cersei_compression::ToolOutput {
+                        tool: &tool_name,
+                        input: &tool_input,
+                        content: &output,
+                        is_error: report.status.is_error(),
+                        call_id: &tool_id,
+                        exit_code: report.exit_code,
+                    },
+                    level,
+                );
+                if let Some(r) = &processed.raw {
+                    agent.raw_refs.lock().insert(tool_id.clone(), r.clone());
+                }
+                // A file counts as read only when the model saw its exact
+                // text: a skeleton or a summary is not enough to edit it.
+                if (tool_name == "Read" || tool_name == "read")
+                    && !result.is_error
+                    && !processed.partial_view
+                {
+                    if let Some(path) = tool_input.get("file_path").and_then(|v| v.as_str()) {
+                        files_read.insert(resolve_path(&tool_ctx.working_dir, path));
+                    }
+                }
+                let capped_content = report.render(&tool_name, duration, Some(&processed.text));
+                let full_text = report.render(&tool_name, duration, None);
+                let compression = Some(processed.stats);
+                raw_blocks.push(ContentBlock::ToolResult {
+                    tool_use_id: tool_id.clone(),
+                    content: ToolResultContent::Text(full_text.clone()),
+                    is_error: Some(result.is_error),
+                });
+
+                let _ = event_tx
+                    .send(AgentEvent::ToolEnd {
                         name: tool_name.clone(),
                         id: tool_id.clone(),
                         result: result.content.clone(),
                         is_error: result.is_error,
                         duration,
                         compression,
-                    });
+                    })
+                    .await;
+                agent.emit(AgentEvent::ToolEnd {
+                    name: tool_name.clone(),
+                    id: tool_id.clone(),
+                    result: result.content.clone(),
+                    is_error: result.is_error,
+                    duration,
+                    compression,
+                });
 
-                    tool_calls.push(ToolCallRecord {
-                        name: tool_name,
-                        id: tool_id.clone(),
-                        input: tool_input,
-                        result: full_text,
-                        is_error: result.is_error,
-                        duration,
-                    });
-                    result_blocks.push(ContentBlock::ToolResult {
-                        tool_use_id: tool_id,
-                        content: ToolResultContent::Text(capped_content),
-                        is_error: Some(result.is_error),
-                    });
-                }
-
-                // Add tool results as user message: reduced in the active
-                // history, unreduced in the raw history.
-                agent
-                    .raw_history
-                    .lock()
-                    .push(Message::user_blocks(raw_blocks));
-                agent
-                    .messages
-                    .lock()
-                    .push(Message::user_blocks(result_blocks));
-
-                // ── Doom loop detection ──
-                // Detects two patterns:
-                // 1. 3+ consecutive identical tool calls that all error
-                // 2. Repeating 2-call pattern [A,B][A,B][A,B] (alternating failures)
-                if !doom_loop_warned && tool_calls.len() >= 6 {
-                    let names: Vec<&str> = tool_calls
-                        .iter()
-                        .rev()
-                        .take(6)
-                        .map(|tc| tc.name.as_str())
-                        .collect();
-                    let errors: Vec<bool> = tool_calls
-                        .iter()
-                        .rev()
-                        .take(6)
-                        .map(|tc| tc.is_error)
-                        .collect();
-
-                    // Pattern 1: 3+ identical consecutive failing calls
-                    let is_3_identical = names.len() >= 3
-                        && names[0] == names[1]
-                        && names[1] == names[2]
-                        && errors[0]
-                        && errors[1]
-                        && errors[2];
-
-                    // Pattern 2: [A,B][A,B][A,B] alternating pattern
-                    let is_2_pattern = names.len() >= 6
-                        && names[0] == names[2]
-                        && names[2] == names[4]
-                        && names[1] == names[3]
-                        && names[3] == names[5];
-
-                    if is_3_identical || is_2_pattern {
-                        doom_loop_warned = true;
-                        push_message(agent, Message::user(
-                            "[system] You are stuck in a repetitive loop. Your recent tool calls \
-                             are repeating the same pattern. STOP and reconsider:\n\
-                             1. What exactly is going wrong? Read the error messages carefully.\n\
-                             2. Is there a COMPLETELY different approach to this problem?\n\
-                             3. Try a different tool, different arguments, or a different algorithm.\n\
-                             Do NOT repeat the same commands."
-                        ));
-                        let _ = event_tx
-                            .send(AgentEvent::Status(
-                                "Doom loop detected — forcing new approach".into(),
-                            ))
-                            .await;
-                    }
-                }
+                round.push((
+                    tool_name.clone(),
+                    tool_input.to_string(),
+                    result.is_error,
+                    own_output,
+                ));
+                tool_calls.push(ToolCallRecord {
+                    name: tool_name,
+                    id: tool_id.clone(),
+                    input: tool_input,
+                    result: full_text,
+                    is_error: result.is_error,
+                    duration,
+                });
+                result_blocks.push(ContentBlock::ToolResult {
+                    tool_use_id: tool_id,
+                    content: ToolResultContent::Text(capped_content),
+                    is_error: Some(result.is_error),
+                });
             }
-            StopReason::MaxTokens => {
-                max_tokens_retries += 1;
-                if max_tokens_retries > MAX_TOKENS_RETRY_LIMIT {
-                    break; // Give up after 3 retries
-                }
-                push_message(
+
+            // Add tool results as user message: reduced in the active
+            // history, unreduced in the raw history.
+            agent
+                .raw_history
+                .lock()
+                .push(Message::user_blocks(raw_blocks));
+            // ── Progress check ──
+            // A round that repeats one of the last rounds exactly (same
+            // calls, same arguments, same results) brings nothing new.
+            // Different reads, or a test run again after an edit, are
+            // progress. After a few such rounds the model is told once; if
+            // it keeps going, the run stops, incomplete.
+            let repeats = progress.record(round_signature(&round));
+            if repeats == NO_PROGRESS_WARN {
+                result_blocks.push(ContentBlock::Text {
+                    text: format!(
+                        "[system] Your last {repeats} rounds of tool calls repeated earlier \
+                         ones with the same arguments and got the same results. Repeating \
+                         them again will not help: change the approach, or stop and say \
+                         what is blocking you."
+                    ),
+                });
+                send(
                     agent,
-                    Message::user("Continue from exactly where you stopped."),
-                );
+                    Some(&event_tx),
+                    AgentEvent::Status(format!(
+                        "No progress: the same tool calls returned the same results {repeats} times"
+                    )),
+                )
+                .await;
             }
-            _ => break,
+            agent
+                .messages
+                .lock()
+                .push(Message::user_blocks(result_blocks));
+            if repeats >= NO_PROGRESS_STOP {
+                termination = crate::Termination::NoProgress { repeats };
+                break;
+            }
         }
-
         // After the turn: warn near the limit, and compact proactively once
         // the occupation crosses the policy's threshold.
         if agent.auto_compact {
@@ -1671,6 +1564,7 @@ async fn run_loop(
         stop_reason: last_stop_reason,
         turns: turn,
         tool_calls,
+        termination,
     };
 
     // Notify reporters
@@ -2026,6 +1920,151 @@ async fn preflight(
     )
     .await;
     (central <= limit).then(|| status.clone())
+}
+
+// ─── Progress check ──────────────────────────────────────────────────────────
+
+/// Consecutive rounds that repeat a recent round exactly before the model
+/// is told, once.
+const NO_PROGRESS_WARN: u32 = 3;
+/// Consecutive repeated rounds after which the run stops, incomplete.
+const NO_PROGRESS_STOP: u32 = 5;
+/// Rounds remembered: repeating any of them (an A, B, A, B cycle too)
+/// counts.
+const PROGRESS_WINDOW: usize = 4;
+
+/// The rounds of tool calls of one run, as signatures.
+#[derive(Default)]
+struct ProgressTracker {
+    recent: std::collections::VecDeque<u64>,
+    repeats: u32,
+}
+
+impl ProgressTracker {
+    /// Record a round; returns how many consecutive rounds, this one
+    /// included, repeated one of the rounds before them.
+    fn record(&mut self, signature: u64) -> u32 {
+        if self.recent.contains(&signature) {
+            self.repeats += 1;
+        } else {
+            self.repeats = 0;
+        }
+        self.recent.push_back(signature);
+        if self.recent.len() > PROGRESS_WINDOW {
+            self.recent.pop_front();
+        }
+        self.repeats
+    }
+}
+
+/// A round's calls (name, arguments, error flag, output), in a stable
+/// order: the same calls with the same results give the same signature.
+fn round_signature(round: &[(String, String, bool, String)]) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut calls: Vec<&(String, String, bool, String)> = round.iter().collect();
+    calls.sort();
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    calls.hash(&mut h);
+    h.finish()
+}
+
+/// The message has a text block with something visible in it.
+fn has_visible_text(message: &Message) -> bool {
+    match &message.content {
+        MessageContent::Text(t) => !crate::subagent::is_blank(t),
+        MessageContent::Blocks(blocks) => blocks
+            .iter()
+            .any(|b| matches!(b, ContentBlock::Text { text } if !crate::subagent::is_blank(text))),
+    }
+}
+
+/// Benchmark mode only: the verification asked for before a final answer
+/// is accepted, as (message, status). Bounded: one completion check, then
+/// at most four nudges tied to the instruction's own
+/// test command.
+fn benchmark_nudge(
+    prompt: &str,
+    tool_calls: &[ToolCallRecord],
+    turn: u32,
+    completion_verified: &mut bool,
+    benchmark_retries: &mut u32,
+) -> Option<(String, String)> {
+    const BENCHMARK_MAX_RETRIES: u32 = 4;
+    if !*completion_verified && turn >= 3 {
+        let recent_has_verify = tool_calls.iter().rev().take(5).any(|tc| {
+            let cmd = tc
+                .input
+                .get("command")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            cmd.contains("cat ")
+                || cmd.contains("python ")
+                || cmd.contains("test")
+                || cmd.contains("verify")
+                || cmd.contains("node ")
+                || cmd.contains("./")
+                || cmd.contains("check")
+        });
+        if !recent_has_verify {
+            *completion_verified = true;
+            return Some((
+                "[system] Before finishing, verify your solution is correct:\n\
+                 1. Check that all expected output files exist and have correct content\n\
+                 2. Run your solution to confirm it produces the right output\n\
+                 3. Re-read the original instruction — did you satisfy EVERY requirement?"
+                    .into(),
+                "Benchmark: nudging the agent to verify before completion".into(),
+            ));
+        }
+    }
+    // In TB 2.0 tests are run externally by the verifier after the agent
+    // finishes: only a test command named in the instruction is enforced.
+    if *benchmark_retries >= BENCHMARK_MAX_RETRIES {
+        return None;
+    }
+    let has_instruction_tests = [
+        "test_outputs.py",
+        "run_tests",
+        "run-tests",
+        "pytest",
+        "verify.py",
+        "check.py",
+        "npm test",
+        "cargo test",
+        "make test",
+    ]
+    .iter()
+    .any(|k| prompt.contains(k));
+    if !has_instruction_tests {
+        return None;
+    }
+    match benchmark_check_tests(tool_calls) {
+        BenchmarkVerification::NotRun if *benchmark_retries == 0 => {
+            *benchmark_retries += 1;
+            Some((
+                "[system] The task instruction mentions a verification command. Run it now \
+                 to check your solution. Look at the instruction again for the exact command."
+                    .into(),
+                "Benchmark: nudge to run the instruction's test command".into(),
+            ))
+        }
+        BenchmarkVerification::Failed(test_output) => {
+            *benchmark_retries += 1;
+            let truncated: String = test_output.chars().take(3000).collect();
+            Some((
+                format!(
+                    "[system] Verification FAILED (attempt {}/{}).\n\nOutput:\n```\n{}\n```\n\n\
+                     Try a COMPLETELY DIFFERENT approach. Do NOT patch — rewrite.",
+                    benchmark_retries, BENCHMARK_MAX_RETRIES, truncated
+                ),
+                format!(
+                    "Benchmark: retry {}/{}",
+                    benchmark_retries, BENCHMARK_MAX_RETRIES
+                ),
+            ))
+        }
+        _ => None,
+    }
 }
 
 // ─── Benchmark self-verification helpers ────────────────────────────────────

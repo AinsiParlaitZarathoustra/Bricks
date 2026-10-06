@@ -358,7 +358,7 @@ impl Store {
             }
         }
         #[cfg(test)]
-        if let Some(hook) = tests::BEFORE_COMMIT.lock().take() {
+        if let Some(hook) = tests::BEFORE_COMMIT.with(|h| h.borrow_mut().take()) {
             if let Err(e) = hook() {
                 let _ = s.rollback();
                 return Err(format!("memory transaction rolled back: {e}"));
@@ -861,11 +861,15 @@ impl Store {
 mod tests {
     use super::*;
 
-    /// Runs inside the next transaction, after its writes and before its
-    /// commit; an error rolls the transaction back.
+    /// Runs inside the next transaction of the same thread, after its
+    /// writes and before its commit; an error rolls the transaction back.
+    /// Per thread: tests run in parallel, and a hook set by one must never
+    /// be taken by another test's transaction.
     type CommitHook = Box<dyn FnOnce() -> Result<(), String> + Send>;
-    pub(super) static BEFORE_COMMIT: parking_lot::Mutex<Option<CommitHook>> =
-        parking_lot::Mutex::new(None);
+    thread_local! {
+        pub(super) static BEFORE_COMMIT: std::cell::RefCell<Option<CommitHook>> =
+            const { std::cell::RefCell::new(None) };
+    }
 
     fn mention_ops(entity: &str) -> Vec<(W, P)> {
         vec![
@@ -896,21 +900,24 @@ mod tests {
         for (commit, entity) in [(true, "n1"), (false, "n2")] {
             let (tx, rx) = std::sync::mpsc::channel();
             let reader = s.clone();
-            *BEFORE_COMMIT.lock() = Some(Box::new(move || {
-                let handle = std::thread::spawn(move || reader.adjacent("e1", true, &["MENTIONS"]));
-                // The reader is blocked while the transaction is open.
-                std::thread::sleep(std::time::Duration::from_millis(150));
-                assert!(
-                    !handle.is_finished(),
-                    "a read went through an open transaction"
-                );
-                tx.send(handle).unwrap();
-                if commit {
-                    Ok(())
-                } else {
-                    Err("aborted by the test".into())
-                }
-            }));
+            BEFORE_COMMIT.with(|h| {
+                *h.borrow_mut() = Some(Box::new(move || {
+                    let handle =
+                        std::thread::spawn(move || reader.adjacent("e1", true, &["MENTIONS"]));
+                    // The reader is blocked while the transaction is open.
+                    std::thread::sleep(std::time::Duration::from_millis(150));
+                    assert!(
+                        !handle.is_finished(),
+                        "a read went through an open transaction"
+                    );
+                    tx.send(handle).unwrap();
+                    if commit {
+                        Ok(())
+                    } else {
+                        Err("aborted by the test".into())
+                    }
+                }))
+            });
             let r = s.transaction(mention_ops(entity));
             assert_eq!(r.is_ok(), commit, "{r:?}");
             let seen = rx.recv().unwrap().join().unwrap();

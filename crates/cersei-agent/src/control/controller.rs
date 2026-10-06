@@ -962,14 +962,19 @@ impl Controller {
         // Every event of the run is in the channel now (the agent keeps a
         // sender for tool progress, so the channel itself never closes).
         let _ = done_tx.send(());
-        let streamed = translator.await.unwrap_or_default();
+        let (streamed, turns_done) = translator.await.unwrap_or_default();
         let unsatisfied = self.inner.broker.unsatisfied();
 
         let finished = match &result {
             Ok(out) => Event::RunFinished {
-                outcome: RunOutcome::Succeeded,
+                outcome: if out.is_complete() {
+                    RunOutcome::Succeeded
+                } else {
+                    RunOutcome::Incomplete
+                },
                 failure: None,
-                error: None,
+                error: (!out.is_complete()).then(|| out.termination.describe()),
+                termination: Some(out.termination.clone()),
                 text: out.text().to_string(),
                 turns: out.turns,
                 approvals_unsatisfied: Vec::new(),
@@ -981,24 +986,27 @@ impl Controller {
                     "stopped: {} call(s) needed an approval and the run is non-interactive",
                     unsatisfied.len()
                 )),
+                termination: None,
                 text: streamed,
-                turns: 0,
+                turns: turns_done,
                 approvals_unsatisfied: unsatisfied,
             },
             Err(CerseiError::Cancelled) => Event::RunFinished {
                 outcome: RunOutcome::Cancelled,
                 failure: None,
                 error: None,
+                termination: None,
                 text: streamed,
-                turns: 0,
+                turns: turns_done,
                 approvals_unsatisfied: Vec::new(),
             },
             Err(e) => Event::RunFinished {
                 outcome: RunOutcome::Failed,
                 failure: Some(FailureKind::Error),
                 error: Some(e.to_string()),
+                termination: None,
                 text: streamed,
-                turns: 0,
+                turns: turns_done,
                 approvals_unsatisfied: Vec::new(),
             },
         };
@@ -1068,9 +1076,11 @@ async fn translate(
     run_id: String,
     agent: Arc<Agent>,
     token: CancellationToken,
-) -> String {
+) -> (String, u32) {
     let rid = Some(run_id.as_str());
     let mut text = String::new();
+    // Turns that got a response (reported when the run does not return).
+    let mut turns = 0u32;
     let mut finished = false;
     loop {
         let e = if finished {
@@ -1126,10 +1136,13 @@ async fn translate(
                 duration_ms: duration.as_millis() as u64,
                 output: result,
             },
-            AgentEvent::TurnComplete { usage, .. } => Event::Usage {
-                turn: Box::new(usage),
-                total: Box::new(agent.usage()),
-            },
+            AgentEvent::TurnComplete { usage, .. } => {
+                turns += 1;
+                Event::Usage {
+                    turn: Box::new(usage),
+                    total: Box::new(agent.usage()),
+                }
+            }
             AgentEvent::TokenWarning { pct_used, .. } => Event::Notice {
                 message: format!("context {:.0}% full", pct_used * 100.0),
             },
@@ -1212,5 +1225,5 @@ async fn translate(
         };
         q.push(rid, ev, Some(&token)).await;
     }
-    text
+    (text, turns)
 }

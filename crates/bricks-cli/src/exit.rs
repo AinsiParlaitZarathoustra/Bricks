@@ -10,5 +10,9 @@ pub const USAGE: i32 = 2;
 pub const APPROVAL: i32 = 3;
 /// The answer was delivered, but the long-term memory maintenance failed.
 pub const MEMORY: i32 = 4;
+/// The run stopped at a limit before a final answer (turns, output tokens,
+/// no progress, content filter, empty response); the partial answer was
+/// printed.
+pub const INCOMPLETE: i32 = 5;
 /// Cancelled (Ctrl+C), like a shell's 128 + SIGINT.
 pub const CANCELLED: i32 = 130;

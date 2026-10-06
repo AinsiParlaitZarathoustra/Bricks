@@ -100,9 +100,7 @@ async fn a_run_streams_in_order_and_ends_once() {
             ("c2", "Read", json!({"file_path": "b.txt"})),
             // Relative paths resolve against the session's working directory.
         ]),
-        Reply::text("premier jet"),
-        // The engine asks once for a deeper look after an early answer
-        // (runner nudge); this is the final answer.
+        // The final answer ends the run: no nudge asks for more.
         Reply::chunks(&["Les deux ", "fichiers ", "sont lus."]),
     ])
     .await;
@@ -145,12 +143,22 @@ async fn a_run_streams_in_order_and_ends_once() {
             _ => None,
         })
         .collect();
-    assert_eq!(streamed, "premier jetLes deux fichiers sont lus.");
-    let Event::RunFinished { text, outcome, .. } = &evs.last().unwrap().event else {
+    assert_eq!(streamed, "Les deux fichiers sont lus.");
+    let Event::RunFinished {
+        text,
+        outcome,
+        termination,
+        turns,
+        ..
+    } = &evs.last().unwrap().event
+    else {
         unreachable!()
     };
     assert_eq!(*outcome, RunOutcome::Succeeded);
+    assert_eq!(*termination, Some(cersei_agent::Termination::Completed));
     assert_eq!(text, "Les deux fichiers sont lus.");
+    assert_eq!(*turns, 2);
+    assert_eq!(env.script.requests().len(), 2, "two requests, no relaunch");
     assert!(k.contains(&"usage") && k.contains(&"context"), "{k:?}");
     // JSON round trip of everything delivered.
     for e in &evs {
@@ -667,6 +675,64 @@ async fn a_new_session_needs_a_configured_model() {
     assert!(err.contains("no reasoning profile `turbo`"), "{err}");
 }
 
+/// The same stop contract for every frontend: a run at its turn limit ends
+/// once, as incomplete, with the turns it ran and no extra request.
+#[tokio::test]
+async fn a_run_at_its_turn_limit_ends_once_as_incomplete() {
+    let dir = tempfile::tempdir().unwrap();
+    let script = Script::new(vec![
+        Reply::tool("c1", "Glob", json!({"pattern": "*"})),
+        Reply::text("jamais demandé"),
+    ]);
+    let mut bricks = BricksConfig::default();
+    bricks.agent.model = Some("test/a".into());
+    bricks.agent.max_turns = Some(1);
+    let cfg = EngineConfig::new(
+        dir.path(),
+        ScriptedCatalog::new(&["a"], script.clone()),
+        bricks,
+        dir.path().join("s"),
+    );
+    let (ctl, mut events) = Controller::open(
+        cfg,
+        OpenOptions {
+            session: SessionChoice::New,
+            model: None,
+            reasoning: None,
+        },
+    )
+    .await
+    .unwrap();
+    ctl.send(Command::Submit {
+        prompt: Prompt::text("liste"),
+    })
+    .unwrap();
+    let evs = until_finished(&mut events).await;
+    assert_eq!(
+        kinds(&evs).iter().filter(|k| **k == "run_finished").count(),
+        1
+    );
+    let Event::RunFinished {
+        outcome,
+        termination,
+        turns,
+        error,
+        ..
+    } = &evs.last().unwrap().event
+    else {
+        unreachable!()
+    };
+    assert_eq!(*outcome, RunOutcome::Incomplete);
+    assert_eq!(
+        *termination,
+        Some(cersei_agent::Termination::MaxTurns { limit: 1 })
+    );
+    assert_eq!(*turns, 1);
+    assert!(error.as_deref().unwrap().contains("turn limit"));
+    ctl.wait_idle().await;
+    assert_eq!(script.requests().len(), 1);
+}
+
 mod maintenance {
     use super::*;
     use async_trait::async_trait;
@@ -717,12 +783,7 @@ mod maintenance {
                 .open()
                 .unwrap(),
         );
-        let script = Script::new(vec![
-            Reply::text("réponse"),
-            Reply::text("réponse"),
-            Reply::text("deux"),
-            Reply::text("deux"),
-        ]);
+        let script = Script::new(vec![Reply::text("réponse"), Reply::text("deux")]);
         let mut bricks = BricksConfig::default();
         bricks.agent.model = Some("test/a".into());
         let mut cfg = EngineConfig::new(

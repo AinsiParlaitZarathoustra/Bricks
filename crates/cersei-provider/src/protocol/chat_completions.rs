@@ -190,16 +190,19 @@ fn push_assistant(out: &mut Vec<Value>, msg: &Message, ctx: &BuildCtx) {
         })
         .collect();
 
-    if tool_calls.is_empty() {
-        out.push(json!({ "role": "assistant", "content": text }));
-        return;
-    }
-    let mut m = json!({ "role": "assistant", "tool_calls": tool_calls });
-    if !text.is_empty() {
-        m["content"] = json!(text);
-    }
-    // Some servers (reasoning models behind this protocol) reject a tool turn
-    // whose reasoning was not echoed back. Opt-in per provider/model.
+    let mut m = if tool_calls.is_empty() {
+        json!({ "role": "assistant", "content": text })
+    } else {
+        let mut m = json!({ "role": "assistant", "tool_calls": tool_calls });
+        if !text.is_empty() {
+            m["content"] = json!(text);
+        }
+        m
+    };
+    // Some servers (reasoning models behind this protocol) reject a request
+    // with tools whose earlier assistant turns lost their reasoning — every
+    // turn, not only tool-call turns (DeepSeek thinking mode answers 400).
+    // Opt-in per provider/model.
     if let Some(field) = &ctx.compat.reasoning_field {
         let thinking: String = blocks
             .iter()
@@ -740,6 +743,34 @@ mod tests {
         );
         let on = build_body(&ctx(&c, true), &r).unwrap();
         assert_eq!(on["messages"][0]["reasoning_content"], "plan");
+    }
+
+    /// DeepSeek thinking mode with tools: the reasoning of a final answer
+    /// (no tool call) is sent back too, or the next request is a 400.
+    #[test]
+    fn reasoning_of_a_final_answer_is_echoed_too() {
+        let mut r = req();
+        r.messages.push(Message::assistant_blocks(vec![
+            ContentBlock::Thinking {
+                thinking: "short".into(),
+                signature: String::new(),
+            },
+            ContentBlock::Text {
+                text: "Hello".into(),
+            },
+        ]));
+        let c = Compat::resolve(
+            &Compat {
+                reasoning_field: Some("reasoning_content".into()),
+                ..Default::default()
+            },
+            &Compat::default(),
+        );
+        let on = build_body(&ctx(&c, true), &r).unwrap();
+        assert_eq!(on["messages"][0]["content"], "Hello");
+        assert_eq!(on["messages"][0]["reasoning_content"], "short");
+        let off = build_body(&ctx(&compat(), true), &r).unwrap();
+        assert!(off["messages"][0].get("reasoning_content").is_none());
     }
 
     #[test]

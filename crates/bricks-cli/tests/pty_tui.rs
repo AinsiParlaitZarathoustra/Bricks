@@ -110,8 +110,8 @@ impl Tty {
 #[test]
 fn the_interface_runs_in_a_terminal_and_restores_it() {
     let m = model(vec![
+        // The first answer is final (no relaunch): the next prompt hangs.
         text("Salut depuis le modèle"),
-        text("Salut encore"),
         HANG.to_string(),
     ]);
     let p = Project::new(&m.url, "");

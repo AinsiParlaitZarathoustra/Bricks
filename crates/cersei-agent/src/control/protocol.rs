@@ -11,8 +11,9 @@
 //!   envelope: a gap never happens silently (text and reasoning deltas may
 //!   be merged when the consumer is slow; their text is kept whole).
 //! * Within a run, events keep the order the engine produced them in, and
-//!   the run ends with exactly one `run_finished` (succeeded, failed or
-//!   cancelled). Memory maintenance comes after it, as its own phase.
+//!   the run ends with exactly one `run_finished` (succeeded, incomplete,
+//!   failed or cancelled). Memory maintenance comes after it, as its own
+//!   phase, and never restarts the task.
 //! * `thinking_delta` carries only reasoning the provider exposed; nothing
 //!   is reconstructed.
 //! * No API key or authentication header ever appears in an event.
@@ -26,7 +27,7 @@ use serde::{Deserialize, Serialize};
 
 /// Version of the event and command schema. Incremented on any change a
 /// consumer could notice; documented in `docs/cli.md`.
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 
 /// One delivered event.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -47,7 +48,12 @@ pub struct Envelope {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunOutcome {
+    /// A final answer, no tool call left.
     Succeeded,
+    /// Stopped at a limit before a final answer (turns, output tokens, no
+    /// progress, content filter, empty response): `termination` says which.
+    /// The history and partial results are kept.
+    Incomplete,
     Failed,
     Cancelled,
 }
@@ -201,8 +207,13 @@ pub enum Event {
         failure: Option<FailureKind>,
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
-        /// The final answer (possibly partial when cancelled or failed).
+        /// How the engine ended the run (`succeeded` and `incomplete` only).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        termination: Option<crate::Termination>,
+        /// The final answer (possibly partial when incomplete, cancelled or
+        /// failed).
         text: String,
+        /// Generation turns that got a response.
         turns: u32,
         /// Approvals that were needed and could not be given.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]

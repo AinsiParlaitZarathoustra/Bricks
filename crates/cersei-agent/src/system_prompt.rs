@@ -193,7 +193,14 @@ pub fn build_system_prompt(opts: &SystemPromptOptions) -> String {
         TOOL_USE_GUIDELINES.to_string(),
         // 4. Actions with care
         ACTIONS_SECTION.to_string(),
+        // 4b. Scope and stopping
+        SCOPE_AND_STOPPING.to_string(),
     ];
+
+    // 4c. Task management: only when TodoWrite is registered.
+    if opts.tools_available.iter().any(|t| t == "TodoWrite") {
+        parts.push(TASK_MANAGEMENT.to_string());
+    }
 
     // 5. Safety
     parts.push(SAFETY_GUIDELINES.to_string());
@@ -334,43 +341,49 @@ pub fn build_system_prompt(opts: &SystemPromptOptions) -> String {
 const CORE_CAPABILITIES: &str = r#"
 ## Capabilities
 
-You have access to powerful tools for software engineering tasks:
-- **Read/Write files**: Read any file, write new files, edit existing files with precise diffs
-- **Execute commands**: Run bash commands, PowerShell scripts, background processes
-- **Search**: Glob patterns, regex grep, web search, file content search
-- **LSP**: Language server queries for hover, go-to-definition, references, symbols, diagnostics
-- **Web**: Fetch URLs, search the internet
-- **Agents**: Spawn sub-agents for complex multi-step work
-- **Memory**: Persistent notes across sessions via the memory system
-- **MCP servers**: Connect to external tools and APIs via Model Context Protocol
-- **Jupyter notebooks**: Read and edit notebook cells
-
-## Task Management
-
-You have access to the TodoWrite tool to help you manage and plan tasks. Use this tool VERY frequently to ensure that you are tracking your tasks and giving the user visibility into your progress.
-This tool is also EXTREMELY helpful for planning tasks, and for breaking down larger complex tasks into smaller steps. If you do not use this tool when planning, you may forget to do important tasks - and that is unacceptable.
-
-It is critical that you mark todos as completed as soon as you are done with a task. Do not batch up multiple tasks before marking them as completed.
-
-IMPORTANT: Always use the TodoWrite tool to plan and track tasks throughout the conversation.
+You work with the tools whose definitions come with this conversation (files,
+commands, search, web, and others when they are listed). Use only those tools;
+a capability that is not among them is not available.
 
 ## How to approach tasks
 
 The user will primarily request you perform software engineering tasks. For these tasks:
 - NEVER propose changes to code you haven't read. Read first, then modify.
-- Use the TodoWrite tool to plan the task if required.
 - Be careful not to introduce security vulnerabilities.
 - Avoid over-engineering. Only make changes that are directly requested or clearly necessary.
 - Don't add features, refactor code, or make improvements beyond what was asked.
-- ALWAYS verify information about the codebase using tools before answering. Never rely solely on general knowledge or assumptions about how code works.
+- When an answer depends on this project's code or files, check them with tools instead of
+  guessing. A general or conversational question needs no tool.
 
 ## Tool usage policy
 
 - When doing file search or research, prefer using Bash (with grep, find) or Grep tool for targeted searches.
-- When you need information you don't have, use WebSearch to find it. Do not guess APIs, node types, or library details — search for the current documentation.
+- When you need information you don't have and a web tool is available, search for the current documentation instead of guessing APIs or library details.
 - You can call multiple tools in a single response. Independent calls can be made in parallel; when one call's input depends on another's result, wait for that result first.
 - If the user asks for tools to be run in parallel, send those calls together in a single response.
 - Use specialized tools instead of bash when possible: Read for reading files, Edit for editing, Glob for finding files, Grep for searching content.
+"#;
+
+const TASK_MANAGEMENT: &str = r#"
+## Task Management
+
+For work with several distinct steps, the TodoWrite tool keeps track of them and shows the
+user your progress. Mark a todo completed as soon as it is done, and remove the ones that
+are no longer needed. A simple request needs no todo list.
+"#;
+
+const SCOPE_AND_STOPPING: &str = r#"
+## Scope and stopping
+
+- Do what was asked, completely, and nothing beyond it. Keep going while the requested
+  work is unfinished; don't stop halfway because a step is tedious.
+- Use as many tool calls as the task needs and no more. There is no minimum number of
+  files to read, tools to call or sub-agents to start: one targeted read can be enough,
+  and a conversational question may need none.
+- Verify what you changed when it matters (run the relevant test, re-read the result),
+  and always run a check the user asked for.
+- Once the request is done and verified, give your final answer and stop. Mention
+  further work that seems useful instead of doing it unasked.
 "#;
 
 const TOOL_USE_GUIDELINES: &str = r#"
@@ -381,7 +394,7 @@ const TOOL_USE_GUIDELINES: &str = r#"
 - For file edits: always read the file first, then make targeted edits
 - Bash commands timeout after 2 minutes; use background mode for long operations
 - Use Glob for targeted patterns (`src/**/*.rs`), never glob `**/*` at root
-- Use LSP tool for semantic understanding: symbols, definitions, references, diagnostics
+- When an LSP tool is available, use it for symbols, definitions, references, diagnostics
 - Write down key findings in your response — tool results may be cleared from context later
 - Old tool results are automatically cleared to free space. Summarize important information.
 "#;
@@ -419,11 +432,9 @@ const OUTPUT_EFFICIENCY: &str = r#"
 ## Output efficiency
 
 Be direct and informative. Lead with the answer, not the reasoning.
-- For analysis/explanation: Be thorough and structured. Use tables, lists, and sections.
+- For analysis/explanation: Be accurate and structured, as deep as the question needs.
 - For code changes: Be concise. Show what changed and why.
 - For status updates: One sentence is enough.
-- Never ask "would you like me to investigate more?" — just investigate.
-- Never stop at surface-level answers when deeper investigation would give better results.
 "#;
 
 const SUMMARIZE_TOOL_RESULTS: &str = r#"
@@ -446,10 +457,10 @@ follow-up work. Use TaskCreate/TaskUpdate to track parallel work.
 const SESSION_AGENT_GUIDANCE: &str = r#"
 ## Sub-agents
 
-Use the Agent tool for complex multi-step tasks that benefit from parallel work or
-deep research. Each sub-agent runs independently with its own context window.
-- Launch multiple agents in parallel when tasks are independent
-- Provide each agent with a complete, self-contained prompt
+The Agent tool runs a sub-agent on one substantial, well-defined sub-task, with its own
+context window. Most requests need none: do small tasks yourself.
+- Only start a sub-agent with a precise, self-contained task; never with an empty or vague one
+- Independent sub-tasks can run in parallel
 - The agent's output is not visible to the user — summarize results yourself
 "#;
 
@@ -776,6 +787,39 @@ mod tests {
     fn test_output_efficiency_always_included() {
         let prompt = build_system_prompt(&default_opts());
         assert!(prompt.contains("Output efficiency"));
+    }
+
+    /// The prompt asks for the requested work and a stop after it: no
+    /// minimum of reads, tools or delegations, no "never stop".
+    #[test]
+    fn test_scope_and_stopping_without_quotas() {
+        let prompt = build_system_prompt(&SystemPromptOptions {
+            tools_available: vec!["Read".into(), "Bash".into()],
+            ..default_opts()
+        });
+        assert!(prompt.contains("Scope and stopping"));
+        assert!(prompt.contains("give your final answer and stop"));
+        for zeal in [
+            "at least",
+            "VERY frequently",
+            "just investigate",
+            "Never stop at surface-level",
+            "ALWAYS verify information",
+            "Spawn sub-agents",
+        ] {
+            assert!(!prompt.contains(zeal), "{zeal}");
+        }
+    }
+
+    #[test]
+    fn test_todo_guidance_only_with_todowrite() {
+        let without = build_system_prompt(&default_opts());
+        assert!(!without.contains("TodoWrite"));
+        let with = build_system_prompt(&SystemPromptOptions {
+            tools_available: vec!["TodoWrite".into()],
+            ..default_opts()
+        });
+        assert!(with.contains("Task Management"));
     }
 
     #[test]

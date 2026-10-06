@@ -243,6 +243,13 @@ pub fn cell_lines(cell: &Cell, show_thinking: bool) -> Vec<Line<'static>> {
         } => {
             let (text, style) = match outcome {
                 RunOutcome::Succeeded => (format!("── done in {seconds:.1}s"), dim()),
+                RunOutcome::Incomplete => (
+                    format!(
+                        "── incomplete after {seconds:.1}s: {}",
+                        error.clone().unwrap_or_default()
+                    ),
+                    Style::default().fg(Color::Yellow),
+                ),
                 RunOutcome::Cancelled => (
                     format!("── cancelled after {seconds:.1}s (effects already made remain)"),
                     Style::default().fg(Color::Yellow),

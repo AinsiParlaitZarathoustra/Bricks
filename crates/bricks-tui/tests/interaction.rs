@@ -73,8 +73,8 @@ async fn pump(ui: &mut Ui, events: &mut EventStream) -> Vec<Envelope> {
 fn script() -> Vec<Reply> {
     vec![
         Reply::tool("c1", "Glob", serde_json::json!({"pattern": "*.md"})),
+        // The final answer ends the run.
         Reply::chunks(&["Trouvé ", "le README."]),
-        Reply::text("Réponse finale."),
     ]
 }
 
@@ -121,7 +121,7 @@ async fn the_interface_and_a_direct_submission_drive_the_same_engine_alike() {
         _ => unreachable!(),
     };
     assert_eq!(text(&via_ui), text(&direct));
-    assert_eq!(text(&via_ui).0, "Réponse finale.");
+    assert_eq!(text(&via_ui).0, "Trouvé le README.");
     // The presentation state shows what the engine reported.
     assert!(ui
         .app

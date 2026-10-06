@@ -15,6 +15,7 @@ pub mod events;
 pub mod reporters;
 pub(crate) mod runner;
 pub mod session_memory;
+pub mod subagent;
 pub mod system_prompt;
 
 // Re-export runner utilities
@@ -62,18 +63,74 @@ impl UserInput {
 
 // ─── Agent output ────────────────────────────────────────────────────────────
 
+/// Why a run that returned stopped. A cancelled or failed run returns an
+/// error instead; every variant here except [`Termination::Completed`] is
+/// an incomplete run, whose history and partial results are kept.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Termination {
+    /// The model gave its final answer with no tool call left to run.
+    Completed,
+    /// `limit` generation turns ran and the model still wanted to continue.
+    MaxTurns { limit: u32 },
+    /// The answer was cut by the output-token limit, and the `continuations`
+    /// allowed after a cut ran out.
+    OutputTruncated { continuations: u32 },
+    /// The same tool calls kept returning the same results: stopped
+    /// instead of repeating them.
+    NoProgress { repeats: u32 },
+    /// The provider stopped the answer (content filter or refusal).
+    ContentFiltered,
+    /// The model returned neither text nor a tool call.
+    EmptyResponse,
+}
+
+impl Termination {
+    /// The task ended with a final answer.
+    pub fn is_completed(&self) -> bool {
+        matches!(self, Termination::Completed)
+    }
+
+    /// One line for people and logs.
+    pub fn describe(&self) -> String {
+        match self {
+            Termination::Completed => "completed".into(),
+            Termination::MaxTurns { limit } => {
+                format!("stopped at the turn limit ({limit}) before a final answer")
+            }
+            Termination::OutputTruncated { continuations } => format!(
+                "the answer was cut by the output-token limit ({continuations} continuation(s) allowed)"
+            ),
+            Termination::NoProgress { repeats } => format!(
+                "stopped: the same tool calls returned the same results {repeats} times"
+            ),
+            Termination::ContentFiltered => "the provider stopped the answer (content filter)".into(),
+            Termination::EmptyResponse => "the model returned an empty response".into(),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AgentOutput {
     pub message: Message,
     pub usage: Usage,
+    /// The provider's reason for its last response. How the run ended is
+    /// [`AgentOutput::termination`].
     pub stop_reason: StopReason,
+    /// Generation turns actually run (never more than `max_turns`).
     pub turns: u32,
     pub tool_calls: Vec<ToolCallRecord>,
+    pub termination: Termination,
 }
 
 impl AgentOutput {
     pub fn text(&self) -> &str {
         self.message.get_text().unwrap_or("")
+    }
+
+    /// The run ended with a final answer (not at a limit).
+    pub fn is_complete(&self) -> bool {
+        self.termination.is_completed()
     }
 }
 
@@ -664,6 +721,13 @@ impl AgentBuilder {
 
     pub fn permission_policy(mut self, p: impl PermissionPolicy + 'static) -> Self {
         self.permission_policy = Some(Arc::new(p));
+        self
+    }
+
+    /// [`AgentBuilder::permission_policy`] with a policy already shared, such
+    /// as a parent's (a sub-agent never gets more than its parent).
+    pub fn permission_policy_arc(mut self, p: Arc<dyn PermissionPolicy>) -> Self {
+        self.permission_policy = Some(p);
         self
     }
 

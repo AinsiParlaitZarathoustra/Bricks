@@ -15,15 +15,24 @@
 //!   via `tokio::task::JoinSet`.
 //! - **Best-effort**: a child failure doesn't abort the batch; the parent
 //!   gets an error summary for that task and keeps going.
+//! - **Validated first**: the whole batch is checked (non-empty goals,
+//!   possible limits, depth) before any provider is built; one invalid
+//!   task and nothing starts.
+//! - **No more than the parent**: children get the parent's permission
+//!   policy (read-only when none is given, never `AllowAll` by default),
+//!   are cancelled with it, and never get a delegation tool.
 //!
 //! This module does NOT pull in a Python RPC bridge for code execution —
 //! that's the 0.1.9 lift.
 
+use crate::subagent::{self, ChildStatus};
 use crate::Agent;
 use cersei_provider::Provider;
+use cersei_tools::permissions::{AllowReadOnly, PermissionPolicy};
 use cersei_tools::Tool;
-use cersei_types::Result;
+use cersei_types::{CerseiError, Result};
 use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 
 /// Function that constructs a fresh provider for each child. Needed because
 /// `Provider` trait objects aren't cloneable — each delegated child needs
@@ -92,15 +101,19 @@ impl DelegateTask {
 #[derive(Debug, Clone)]
 pub struct DelegateResult {
     pub goal: String,
+    /// The child's answer (partial when it did not complete).
     pub summary: String,
-    /// None when the child ran cleanly; `Some(err)` when it failed.
+    /// None when the child completed; otherwise why it did not.
     pub error: Option<String>,
     pub turns: u32,
+    /// How the child ended.
+    pub status: ChildStatus,
 }
 
 impl DelegateResult {
+    /// The child completed its task with an answer.
     pub fn is_ok(&self) -> bool {
-        self.error.is_none()
+        self.status == ChildStatus::Completed
     }
 }
 
@@ -125,6 +138,12 @@ pub struct DelegateConfig {
     pub depth: u32,
     /// Extra blocked tool names (merged with `DELEGATE_BLOCKED_TOOLS`).
     pub extra_blocked: Vec<String>,
+    /// The permission policy of the children: the parent's. `None` gives
+    /// them read-only access, never more.
+    pub permissions: Option<Arc<dyn PermissionPolicy>>,
+    /// The parent run's cancellation: children are cancelled with it, and
+    /// no child starts once it is cancelled.
+    pub cancel: Option<CancellationToken>,
 }
 
 impl DelegateConfig {
@@ -138,20 +157,57 @@ impl DelegateConfig {
             max_concurrent: DEFAULT_MAX_CONCURRENT,
             depth: 1,
             extra_blocked: Vec::new(),
+            permissions: None,
+            cancel: None,
         }
     }
 }
 
-/// Run a batch of delegations. Blocks until every child completes (success
-/// or failure). On depth exhaustion, returns an error immediately without
-/// spawning anything.
-pub async fn run_batch(cfg: DelegateConfig) -> Result<Vec<DelegateResult>> {
+/// Refuse a batch that cannot run as asked, before anything is built.
+fn validate(cfg: &DelegateConfig) -> Result<()> {
     if cfg.depth >= MAX_DEPTH {
-        return Err(cersei_types::CerseiError::Config(format!(
-            "delegation depth {} exceeds MAX_DEPTH={}",
+        return Err(CerseiError::InvalidInput(format!(
+            "delegation depth {} exceeds MAX_DEPTH={}: a sub-agent cannot delegate",
             cfg.depth, MAX_DEPTH
         )));
     }
+    if cfg.max_turns == 0 {
+        return Err(CerseiError::InvalidInput(
+            "max_turns must be at least 1".into(),
+        ));
+    }
+    if cfg.max_concurrent == 0 {
+        return Err(CerseiError::InvalidInput(
+            "max_concurrent must be at least 1".into(),
+        ));
+    }
+    let blank: Vec<String> = cfg
+        .tasks
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| subagent::is_blank(&t.goal))
+        .map(|(i, _)| (i + 1).to_string())
+        .collect();
+    if !blank.is_empty() {
+        return Err(CerseiError::InvalidInput(format!(
+            "task(s) {} of {} have an empty goal; no task was started",
+            blank.join(", "),
+            cfg.tasks.len()
+        )));
+    }
+    if cfg.cancel.as_ref().is_some_and(|t| t.is_cancelled()) {
+        return Err(CerseiError::Cancelled);
+    }
+    Ok(())
+}
+
+/// Run a batch of delegations. Blocks until every child completes (success
+/// or failure). An invalid batch (empty goal, impossible limit, depth
+/// exhausted) is refused before anything is built; an empty batch is a
+/// no-op. Once `cfg.cancel` is cancelled, running children stop and no
+/// other starts: they are reported as cancelled.
+pub async fn run_batch(cfg: DelegateConfig) -> Result<Vec<DelegateResult>> {
+    validate(&cfg)?;
     if cfg.tasks.is_empty() {
         return Ok(Vec::new());
     }
@@ -169,48 +225,74 @@ pub async fn run_batch(cfg: DelegateConfig) -> Result<Vec<DelegateResult>> {
     let model = cfg.model.clone();
     let provider_factory = cfg.provider_factory.clone();
     let toolset_factory = cfg.toolset_factory.clone();
+    let permissions: Arc<dyn PermissionPolicy> = cfg
+        .permissions
+        .clone()
+        .unwrap_or_else(|| Arc::new(AllowReadOnly));
+    let cancel = cfg.cancel.clone().unwrap_or_default();
+    let depth = cfg.depth;
+    let mut not_started: Vec<(usize, DelegateTask)> = Vec::new();
 
     for (i, task) in cfg.tasks.into_iter().enumerate() {
-        let permit = sem.clone().acquire_owned().await.unwrap();
+        let permit = tokio::select! {
+            p = sem.clone().acquire_owned() => p.expect("the semaphore is never closed"),
+            _ = cancel.cancelled() => {
+                not_started.push((i, task));
+                continue;
+            }
+        };
+        if cancel.is_cancelled() {
+            not_started.push((i, task));
+            continue;
+        }
         let provider = (provider_factory)();
-        let tools_raw = (toolset_factory)();
-        let blocked = blocked.clone();
+        // The blocklist and the delegation tools are removed from whatever
+        // the factory returns.
+        let tools = subagent::child_tools((toolset_factory)(), &blocked);
         let model = model.clone();
+        let child = Child {
+            permissions: Arc::clone(&permissions),
+            cancel: cancel.child_token(),
+            depth,
+        };
 
         set.spawn(async move {
             let _permit = permit;
-            // Filter the child's toolset. Default blocklist plus caller
-            // additions. Built inside the task so parent toolset references
-            // aren't held across await points.
-            let tools: Vec<Box<dyn Tool>> = tools_raw
-                .into_iter()
-                .filter(|t| !blocked.iter().any(|b| b == t.name()))
-                .collect();
-            let res = run_single(&task, provider, model, tools, max_turns).await;
-            (i, task.goal, res)
+            let res = run_single(&task, provider, model, tools, max_turns, child).await;
+            (i, res)
         });
     }
 
-    let mut collected: Vec<(usize, DelegateResult)> = Vec::new();
-    while let Some(joined) = set.join_next().await {
-        let (i, goal, res) =
-            joined.map_err(|e| cersei_types::CerseiError::Config(format!("delegate join: {e}")))?;
-        match res {
-            Ok(r) => collected.push((i, r)),
-            Err(e) => collected.push((
+    let mut collected: Vec<(usize, DelegateResult)> = not_started
+        .into_iter()
+        .map(|(i, task)| {
+            (
                 i,
                 DelegateResult {
-                    goal,
+                    goal: task.goal,
                     summary: String::new(),
-                    error: Some(e.to_string()),
+                    error: Some("cancelled before it started".into()),
                     turns: 0,
+                    status: ChildStatus::Cancelled,
                 },
-            )),
-        }
+            )
+        })
+        .collect();
+    while let Some(joined) = set.join_next().await {
+        let (i, r) = joined.map_err(|e| CerseiError::Config(format!("delegate join: {e}")))?;
+        collected.push((i, r));
     }
 
     collected.sort_by_key(|(i, _)| *i);
     Ok(collected.into_iter().map(|(_, r)| r).collect())
+}
+
+/// What a child inherits from its parent.
+struct Child {
+    permissions: Arc<dyn PermissionPolicy>,
+    cancel: CancellationToken,
+    /// The depth the children are at.
+    depth: u32,
 }
 
 async fn run_single(
@@ -219,7 +301,8 @@ async fn run_single(
     model: Option<String>,
     tools: Vec<Box<dyn Tool>>,
     max_turns: u32,
-) -> Result<DelegateResult> {
+    child: Child,
+) -> DelegateResult {
     let system = build_child_system_prompt(task);
 
     // Cast `Box<dyn Provider + Send + Sync>` to the plain `Box<dyn Provider>`
@@ -230,25 +313,55 @@ async fn run_single(
         .provider_boxed(provider_boxed)
         .system_prompt(system)
         .max_turns(max_turns)
-        .tools(tools);
+        .tools(tools)
+        .permission_policy_arc(child.permissions)
+        .extensions(subagent::child_extensions(child.depth.saturating_sub(1)))
+        .cancel_token(child.cancel);
+    if let Some(w) = &task.workspace {
+        builder = builder.working_dir(w);
+    }
     if let Some(m) = model {
         builder = builder.model(m);
     }
 
-    let child = builder.build()?;
-    let output = child.run(&task.goal).await?;
-
-    Ok(DelegateResult {
+    let agent = match builder.build() {
+        Ok(a) => a,
+        Err(e) => {
+            return DelegateResult {
+                goal: task.goal.clone(),
+                summary: String::new(),
+                error: Some(e.to_string()),
+                turns: 0,
+                status: ChildStatus::Failed(e.to_string()),
+            }
+        }
+    };
+    let result = agent.run(&task.goal).await;
+    let partial = subagent::partial_text(&agent);
+    agent.close().await;
+    let status = subagent::status_of(&result);
+    let (summary, turns) = match &result {
+        Ok(out) => (out.text().to_string(), out.turns),
+        Err(_) => (partial, 0),
+    };
+    let error = match &status {
+        ChildStatus::Completed => None,
+        ChildStatus::Incomplete(t) => Some(format!("incomplete: {}", t.describe())),
+        ChildStatus::Cancelled => Some("cancelled".into()),
+        ChildStatus::Failed(e) => Some(e.clone()),
+    };
+    DelegateResult {
         goal: task.goal.clone(),
-        summary: output.text().to_string(),
-        error: None,
-        turns: output.turns,
-    })
+        summary,
+        error,
+        turns,
+        status,
+    }
 }
 
-/// Build the child system prompt. Verbatim port of
-/// `_inspirations/hermes-agent/tools/delegate_tool.py::_build_child_system_prompt`
-/// — paraphrasing costs us the bench parity guarantee.
+/// Build the child system prompt. Port of
+/// `_inspirations/hermes-agent/tools/delegate_tool.py::_build_child_system_prompt`,
+/// with an explicit scope-and-stop rule in place of "be thorough".
 pub fn build_child_system_prompt(task: &DelegateTask) -> String {
     let mut parts: Vec<String> = Vec::with_capacity(6);
     parts.push("You are a focused subagent working on a specific delegated task.".into());
@@ -271,7 +384,7 @@ pub fn build_child_system_prompt(task: &DelegateTask) -> String {
     }
 
     parts.push(
-        "\nComplete this task using the tools available to you. When finished, provide a clear, concise summary of:\n- What you did\n- What you found or accomplished\n- Any files you created or modified\n- Any issues encountered\n\nImportant workspace rule: Never assume a repository lives at /workspace/... or any other container-style path unless the task/context explicitly gives that path. If no exact local path is provided, discover it first before issuing git/workdir-specific commands.\n\nBe thorough but concise — your response is returned to the parent agent as a summary.".into()
+        "\nComplete this task using the tools available to you. When finished, provide a clear, concise summary of:\n- What you did\n- What you found or accomplished\n- Any files you created or modified\n- Any issues encountered\n\nImportant workspace rule: Never assume a repository lives at /workspace/... or any other container-style path unless the task/context explicitly gives that path. If no exact local path is provided, discover it first before issuing git/workdir-specific commands.\n\nStay within this task: do it, verify what needs verifying, then stop. Be concise — your response is returned to the parent agent as a summary.".into()
     );
 
     parts.join("\n")

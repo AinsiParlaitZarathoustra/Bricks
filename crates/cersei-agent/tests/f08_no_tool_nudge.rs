@@ -1,11 +1,12 @@
-//! F-08 wiring: a prose-only first turn with tools available must trigger the
-//! no-tool-call nudge — once, ungated by benchmark_mode — and the retry turn
-//! must carry the forced tool choice on the wire.
+//! F-08, revised: a final answer ends the run.
 //!
-//! These drive the real runner (`Agent::run` against a scripted SSE socket,
-//! the `p0_wiring.rs` harness pattern) and assert on the literal request
-//! bodies, because F-08's original defect was exactly a wiring gate: the
-//! nudge existed but only fired when `had_tool_use || benchmark_mode`.
+//! The runner used to answer a prose-only first turn with a synthetic
+//! "[system] You answered without using any tools" message and force
+//! `tool_choice: required` on the retry, for every session. Tools being
+//! available is not an obligation to use them: a conversational answer is a
+//! legitimate final answer. These drive the real runner against a scripted
+//! SSE socket (the `p0_wiring.rs` harness pattern) and assert on the literal
+//! request bodies: the number of requests, and what each one carries.
 
 use async_trait::async_trait;
 use cersei_agent::Agent;
@@ -136,58 +137,38 @@ impl Tool for PingTool {
 
 // ─── Cases ───────────────────────────────────────────────────────────────────
 
-/// The load-bearing case: turn 1 is prose, tools exist. The runner must nudge
-/// exactly once — the second request carries the nudge message AND the forced
-/// tool choice — and a second prose answer ends the session (no third call).
-#[tokio::test]
-async fn prose_only_turn_is_nudged_once_with_forced_tool_choice() {
-    let (url, bodies) = serve_recording(vec![
-        Canned::sse_text("The auth logic is in src/auth.rs and uses JWT."),
-        Canned::sse_text("Still the same answer."),
-    ]);
-
-    let agent = Agent::builder()
-        .provider(provider_against(&url, "gpt-4o"))
+fn agent_with_ping(url: &str) -> Agent {
+    Agent::builder()
+        .provider(provider_against(url, "gpt-4o"))
         .tool(PingTool)
         .model("gpt-4o")
         .max_turns(6)
         .max_tokens(64)
         .build()
-        .expect("build agent");
-
-    agent
-        .run("Where is the authentication logic?")
-        .await
-        .expect("run must complete");
-
-    let bodies = bodies.lock().unwrap();
-    assert_eq!(
-        bodies.len(),
-        2,
-        "exactly one nudge retry: a third request would mean the once-per-\
-         session gate failed, one request that it never fired"
-    );
-    assert!(
-        !bodies[0].contains("tool_choice"),
-        "the first request must run with the provider default: {}",
-        bodies[0]
-    );
-    assert!(
-        bodies[1].contains("answered without using any tools"),
-        "the retry must carry the nudge message: {}",
-        bodies[1]
-    );
-    assert!(
-        bodies[1].contains("\"tool_choice\":\"required\""),
-        "the retry must force a tool call where the provider supports it: {}",
-        bodies[1]
-    );
+        .expect("build agent")
 }
 
-/// Without tools, a prose answer is the only possible answer — nudging would
-/// loop for nothing. One request, no retry.
+/// Turn 1 is prose and tools exist: that answer is final. One request, no
+/// nudge, no forced tool choice.
 #[tokio::test]
-async fn prose_answer_without_tools_is_not_nudged() {
+async fn prose_answer_with_tools_available_is_final() {
+    let (url, bodies) = serve_recording(vec![Canned::sse_text(
+        "Bonjour ! Comment puis-je t'aider ?",
+    )]);
+    let out = agent_with_ping(&url)
+        .run("Salut")
+        .await
+        .expect("run must complete");
+    assert!(out.is_complete(), "{:?}", out.termination);
+    assert_eq!(out.turns, 1);
+    let bodies = bodies.lock().unwrap();
+    assert_eq!(bodies.len(), 1, "a final answer is not relaunched");
+    assert!(!bodies[0].contains("tool_choice"), "{}", bodies[0]);
+}
+
+/// Without tools, a prose answer is the only possible answer. One request.
+#[tokio::test]
+async fn prose_answer_without_tools_is_final() {
     let (url, bodies) = serve_recording(vec![Canned::sse_text("Hello!")]);
 
     let agent = Agent::builder()
@@ -200,9 +181,74 @@ async fn prose_answer_without_tools_is_not_nudged() {
 
     agent.run("hi").await.expect("run must complete");
 
-    assert_eq!(
-        bodies.lock().unwrap().len(),
-        1,
-        "an agent with no tools must not be nudged to use them"
+    assert_eq!(bodies.lock().unwrap().len(), 1);
+}
+
+/// Two runs in a row on one agent: each is one request, and nothing from
+/// the first (a nudge, a forced choice) is carried into the second.
+#[tokio::test]
+async fn successive_runs_carry_no_stale_nudge() {
+    let (url, bodies) = serve_recording(vec![
+        Canned::sse_text("Premier."),
+        Canned::sse_text("Second."),
+    ]);
+    let agent = agent_with_ping(&url);
+    agent.run("un").await.unwrap();
+    let out = agent.reply("deux").await.unwrap();
+    assert_eq!(out.text(), "Second.");
+    let bodies = bodies.lock().unwrap();
+    assert_eq!(bodies.len(), 2);
+    for b in bodies.iter() {
+        assert!(!b.contains("tool_choice"), "{b}");
+        assert!(!b.contains("[system]"), "{b}");
+    }
+}
+
+/// `finish_reason: "tool_calls"` with no call in the response: the text is
+/// the answer. Never an empty round that would relaunch the model.
+#[tokio::test]
+async fn tool_calls_reason_without_a_call_is_an_answer() {
+    let first = json!({
+        "choices": [{ "index": 0, "delta": { "role": "assistant", "content": "Fait." } }]
+    });
+    let last = json!({
+        "choices": [{ "index": 0, "delta": {}, "finish_reason": "tool_calls" }],
+        "usage": { "prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15 }
+    });
+    let (url, bodies) = serve_recording(vec![Canned {
+        body: format!("data: {first}\n\ndata: {last}\n\ndata: [DONE]\n\n"),
+    }]);
+    let out = agent_with_ping(&url).run("go").await.unwrap();
+    assert!(out.is_complete());
+    assert_eq!(out.text(), "Fait.");
+    assert_eq!(bodies.lock().unwrap().len(), 1);
+}
+
+/// An answer cut by the output limit is continued, visibly, a bounded
+/// number of times; the continuation names its cause.
+#[tokio::test]
+async fn a_cut_answer_is_continued_then_ends() {
+    let cut = |text: &str| {
+        let first = json!({
+            "choices": [{ "index": 0, "delta": { "role": "assistant", "content": text } }]
+        });
+        let last = json!({
+            "choices": [{ "index": 0, "delta": {}, "finish_reason": "length" }],
+            "usage": { "prompt_tokens": 10, "completion_tokens": 64, "total_tokens": 74 }
+        });
+        Canned {
+            body: format!("data: {first}\n\ndata: {last}\n\ndata: [DONE]\n\n"),
+        }
+    };
+    let (url, bodies) = serve_recording(vec![cut("Début"), Canned::sse_text(" et fin.")]);
+    let out = agent_with_ping(&url).run("écris").await.unwrap();
+    assert!(out.is_complete());
+    assert_eq!(out.turns, 2);
+    let bodies = bodies.lock().unwrap();
+    assert_eq!(bodies.len(), 2);
+    assert!(
+        bodies[1].contains("cut by the output-token limit"),
+        "{}",
+        bodies[1]
     );
 }

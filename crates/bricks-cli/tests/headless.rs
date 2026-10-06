@@ -32,7 +32,7 @@ fn json_output_is_complete_versioned_and_alone_on_stdout() {
         "{k:?}"
     );
     for (i, e) in evs.iter().enumerate() {
-        assert_eq!(e["schema"], 1);
+        assert_eq!(e["schema"], 2);
         assert_eq!(e["seq"], i as u64 + 1, "contiguous");
         assert!(e["session_id"].is_string());
     }
@@ -55,6 +55,31 @@ fn json_output_is_complete_versioned_and_alone_on_stdout() {
     assert_eq!(sessions.len(), 1);
     assert_eq!(sessions[0]["id"], evs[0]["session_id"]);
     assert_eq!(sessions[0]["title"], "Dis bonjour");
+}
+
+/// A run stopped at its turn limit is reported as incomplete, with its own
+/// exit code: never as a success.
+#[test]
+fn a_run_at_its_turn_limit_is_incomplete() {
+    let m = model(vec![
+        tool("c1", "Glob", json!({"pattern": "*.md"})),
+        text("jamais demandé"),
+    ]);
+    let p = Project::new(&m.url, "max_turns = 1\n");
+    let out = p.run(&["run", "--json", "--non-interactive", "Liste"], None);
+    assert_eq!(
+        out.status.code(),
+        Some(5),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let evs = envelopes(&out.stdout);
+    let fin: Vec<_> = evs.iter().filter(|e| e["type"] == "run_finished").collect();
+    assert_eq!(fin.len(), 1);
+    assert_eq!(fin[0]["outcome"], "incomplete");
+    assert_eq!(fin[0]["termination"]["kind"], "max_turns");
+    assert_eq!(fin[0]["turns"], 1);
+    assert_eq!(m.seen.lock().unwrap().len(), 1, "one request, no relaunch");
 }
 
 #[test]
