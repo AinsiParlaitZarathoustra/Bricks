@@ -3,9 +3,9 @@
 //! Supports: Rust, TypeScript/JavaScript, Python, Go.
 //! Used to intelligently select which files to read for codebase analysis.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use tree_sitter::{Parser, Query, QueryCursor};
+use tree_sitter::Parser;
 
 /// A file's extracted metadata.
 #[derive(Debug, Clone, Default)]
@@ -481,7 +481,7 @@ pub fn scan_project(root: &Path, max_files: usize) -> Vec<FileIntel> {
         .map(|(i, score)| (score, &intels[i]))
         .collect();
 
-    scored.sort_by(|a, b| b.0.cmp(&a.0));
+    scored.sort_by_key(|s| std::cmp::Reverse(s.0));
 
     scored
         .into_iter()
@@ -580,12 +580,6 @@ pub fn format_project_intel(intels: &[FileIntel]) -> String {
     let mut out = String::new();
 
     for intel in intels {
-        let rel_path = intel
-            .path
-            .file_name()
-            .and_then(|f| f.to_str())
-            .unwrap_or("?");
-
         // Format: path (lang) — symbols: fn foo, struct Bar; imports: ...
         let symbols_str: Vec<String> = intel
             .symbols

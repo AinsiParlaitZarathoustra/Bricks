@@ -1,0 +1,128 @@
+schema_version = 1
+
+[filters.docker-compose]
+description = "docker compose (plugin and docker-compose): progress spinners removed, status lines summarised; container errors and non-zero exits kept."
+match = [{ program = "docker", subcommands = ["compose"] }, { program = "docker-compose" }]
+options_with_value = ["-f", "--file", "-p", "--project-name", "--profile", "--env-file", "--project-directory", "-H", "--host", "--context", "-c", "--log-level", "--ansi", "--progress"]
+strip_lines_matching = [
+    '^\s*\[\+\] (Running|Building|Pulling|Stopping|Removing|Creating|Starting|Restarting) \d+/\d+',
+    '^\s*[⠿⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s',
+    '^#\d+ (sha256:|extracting|exporting|writing image|naming to|transferring)',
+    '^#\d+ \[internal\]',
+    '^\s*$',
+]
+summarize_lines = [
+    { pattern = '^\s*✔ (Container|Network|Volume|Image|Service) \S+\s+(Started|Created|Running|Healthy|Pulled|Built|Stopped|Removed|Recreated|Exited)', label = "resource status lines" },
+    { pattern = '^#\d+ (CACHED|DONE \d)', label = "cached or finished build steps" },
+]
+max_lines = 300
+
+[filters.docker-build]
+description = "`docker build`: BuildKit layer progress removed; failing steps kept."
+match = [{ program = "docker", subcommands = ["build", "buildx build", "image build"] }]
+options_with_value = ["-f", "--file", "-t", "--tag", "--build-arg", "--target", "--platform", "-H", "--host", "--context", "--progress"]
+strip_lines_matching = [
+    '^#\d+ (sha256:|extracting|exporting|writing image|naming to|transferring|resolve )',
+    '^#\d+ \[internal\]',
+    '^\s*$',
+]
+summarize_lines = [{ pattern = '^#\d+ (CACHED|DONE \d)', label = "cached or finished build steps" }]
+max_lines = 250
+
+[filters.docker]
+description = "Other docker commands: blank lines removed."
+match = [{ program = "docker" }]
+options_with_value = ["-H", "--host", "--context", "-c", "--config", "-l", "--log-level"]
+strip_lines_matching = ['^\s*$']
+max_lines = 250
+
+[filters.kubectl-read]
+description = "`kubectl get/describe/top/explain`: tables and descriptions are values, only capped."
+mode = "exact"
+match = [{ program = "kubectl", subcommands = ["get", "describe", "top", "explain", "api-resources", "version", "config view"] }]
+options_with_value = ["-n", "--namespace", "--context", "--cluster", "--kubeconfig", "-s", "--server", "--user", "-l", "--selector", "-o", "--output"]
+
+[filters.kubectl-change]
+description = "`kubectl apply/delete/rollout/…`: unchanged resources summarised; errors kept."
+match = [{ program = "kubectl", subcommands = ["apply", "create", "delete", "replace", "patch", "rollout", "scale", "set", "label", "annotate", "wait"] }]
+options_with_value = ["-n", "--namespace", "--context", "--cluster", "--kubeconfig", "-s", "--server", "--user", "-f", "--filename", "-l", "--selector", "-o", "--output"]
+summarize_lines = [{ pattern = '^\S+ unchanged$', label = "unchanged resources" }]
+protect_lines = ['\b(configured|created|deleted|patched|replaced)$', 'successfully rolled out']
+max_lines = 250
+
+[filters.kubectl]
+description = "Other kubectl commands (`kubectl logs`, `exec`, …): handled as a log, tail first."
+match = [{ program = "kubectl" }]
+options_with_value = ["-n", "--namespace", "--context", "--cluster", "--kubeconfig", "-s", "--server", "--user", "-c", "--container"]
+head_lines = 40
+tail_lines = 220
+max_lines = 300
+
+[filters.terraform-plan]
+description = "`terraform plan/apply/destroy`: refresh and polling noise removed; the planned changes, diagnostics and summary kept."
+match = [{ program = "terraform", subcommands = ["plan", "apply", "destroy", "refresh"] }, { program = "tofu", subcommands = ["plan", "apply", "destroy", "refresh"] }]
+strip_lines_matching = [
+    ': Refreshing state\.\.\.',
+    ': Reading\.\.\.$',
+    ': Read complete after ',
+    ': Still (creating|modifying|destroying|reading)\.\.\. \[',
+    '^\s*$',
+]
+protect_lines = [
+    '^(Plan|Changes to Outputs):',
+    '^(Apply|Destroy) complete!',
+    '^No changes\.',
+    '^\s*# \S+ (will|must) be ',
+]
+head_lines = 60
+tail_lines = 200
+max_lines = 400
+
+[filters.terraform-init]
+description = "`terraform init`: provider installation steps removed."
+match = [{ program = "terraform", subcommands = ["init"] }, { program = "tofu", subcommands = ["init"] }]
+strip_lines_matching = [
+    '^- (Finding|Installing|Installed|Using previously-installed|Reusing previous version|Downloading)\b',
+    '^Initializing (the backend|provider plugins|modules)\.\.\.',
+    '^\s*$',
+]
+max_lines = 150
+
+[filters.terraform-exact]
+description = "`terraform output/show/state`: values, only capped."
+mode = "exact"
+match = [{ program = "terraform", subcommands = ["output", "show", "state", "version", "providers"] }, { program = "tofu", subcommands = ["output", "show", "state", "version", "providers"] }]
+
+[filters.terraform]
+description = "Other terraform commands (`validate`, `fmt`): diagnostics kept."
+match = [{ program = "terraform" }, { program = "tofu" }]
+max_lines = 250
+
+[filters.gh-run-log]
+description = "`gh run view/watch`: refresh lines removed; job logs handled as a log, diagnostics kept."
+match = [{ program = "gh", subcommands = ["run view", "run watch"] }]
+options_with_value = ["-R", "--repo", "-j", "--job"]
+strip_lines_matching = ['^Refreshing run status every ', '^\s*[⣾⣽⣻⢿⡿⣟⣯⣷]\s']
+head_lines = 40
+tail_lines = 220
+max_lines = 300
+
+[filters.gh-pr-checks]
+description = "`gh pr checks`: passing checks summarised; failing and pending checks kept."
+match = [{ program = "gh", subcommands = ["pr checks"] }]
+options_with_value = ["-R", "--repo"]
+summarize_lines = [{ pattern = '\tpass\t', label = "passing checks" }, { pattern = '\tskipping\t', label = "skipped checks" }]
+diagnostic_blocks = [{ start = '\tfail\t', severity = "error", kind = "failing check" }]
+max_lines = 200
+
+[filters.gh-exact]
+description = "`gh pr view/list/diff`, `gh issue …`, `gh api`: values, only capped."
+mode = "exact"
+match = [{ program = "gh", subcommands = ["pr view", "pr list", "pr diff", "issue view", "issue list", "api", "repo view", "release view", "release list", "run list"] }]
+options_with_value = ["-R", "--repo"]
+
+[filters.gh]
+description = "Other gh commands: handled generically."
+match = [{ program = "gh" }]
+options_with_value = ["-R", "--repo"]
+max_lines = 250

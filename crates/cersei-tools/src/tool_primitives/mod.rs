@@ -18,8 +18,8 @@
 //! // Search files
 //! let matches = search::grep("TODO", path, Default::default()).await?;
 //!
-//! // Fetch a URL
-//! let html = http::fetch_html("https://example.com", 50_000, Default::default()).await?;
+//! // HTTP GET (web pages: use the `cersei-web` pipeline instead)
+//! let resp = http::get("https://example.com/api", Default::default()).await?;
 //!
 //! // Check git status
 //! let status = git::status(path).await?;

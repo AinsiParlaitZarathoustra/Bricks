@@ -10,7 +10,7 @@
 
 use cersei::events::AgentEvent;
 use cersei::prelude::*;
-use cersei::provider::{CompletionStream, ProviderOptions};
+use cersei::provider::CompletionStream;
 use cersei::reporters::Reporter;
 use std::io::Write as IoWrite;
 use std::sync::Arc;
@@ -19,21 +19,15 @@ use tokio::sync::mpsc;
 
 // ─── Auth helper ─────────────────────────────────────────────────────────────
 
-fn resolve_provider() -> cersei_types::Result<cersei::provider::anthropic::Anthropic> {
-    // Try ANTHROPIC_API_KEY first, then ANTHROPIC_KEY
-    if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
-        if !key.is_empty() {
-            return Ok(cersei::Anthropic::new(Auth::ApiKey(key)));
-        }
-    }
-    if let Ok(key) = std::env::var("ANTHROPIC_KEY") {
-        if !key.is_empty() {
-            return Ok(cersei::Anthropic::new(Auth::ApiKey(key)));
-        }
-    }
-    Err(CerseiError::Auth(
-        "No API key found. Set ANTHROPIC_API_KEY or ANTHROPIC_KEY".into(),
-    ))
+fn resolve_provider() -> cersei_types::Result<cersei::ConfiguredProvider> {
+    // The model comes from ~/.bricks/providers.toml, selected on the command
+    // line as `provider_id/model_id`; its key from the `api_key_env` it names.
+    let selection = std::env::args().nth(1).ok_or_else(|| {
+        CerseiError::Config(
+            "usage: coding_agent provider_id/model_id (see docs/providers.md)".into(),
+        )
+    })?;
+    cersei::provider_from_config(None, &selection)
 }
 
 // ─── Event monitor ───────────────────────────────────────────────────────────
@@ -320,7 +314,7 @@ impl Provider for MockCodingProvider {
     fn context_window(&self, _: &str) -> u64 {
         200_000
     }
-    
+
     async fn complete(&self, request: CompletionRequest) -> cersei_types::Result<CompletionStream> {
         let turn = self.turn.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let ws = self.workspace.clone();
@@ -580,10 +574,7 @@ async fn main() -> anyhow::Result<()> {
 
     let use_mock = std::env::args().any(|a| a == "--mock") || {
         // Try real provider; if billing fails, use mock
-        match resolve_provider() {
-            Ok(_) => false,
-            Err(_) => true,
-        }
+        resolve_provider().is_err()
     };
 
     let provider_label = if use_mock {
@@ -596,7 +587,7 @@ async fn main() -> anyhow::Result<()> {
     eprintln!("║  Cersei Coding Agent — Build a Python Todo CLI              ║");
     eprintln!("╠══════════════════════════════════════════════════════════════╣");
     eprintln!("║  Provider: {:<49}║", provider_label);
-    eprintln!("║  Workspace: {}║", format!("{:<48}", ws_path.display()));
+    eprintln!("║  Workspace: {:<48}║", ws_path.display().to_string());
     eprintln!("╚══════════════════════════════════════════════════════════════╝");
 
     let monitor = EventMonitor::new();
@@ -620,13 +611,12 @@ After creating the file, also create a brief `README.md` explaining how to use i
 Then verify the Python file is valid by running `python3 -c "import ast; ast.parse(open('todo.py').read()); print('Syntax OK')"`.
 "#;
 
-    let mut builder = Agent::builder()
+    let builder = Agent::builder()
         .tools(cersei::tools::coding())
         .system_prompt(
             "You are an expert Python developer. Write clean, well-structured code. \
              Be concise in your explanations. Always verify your work.",
         )
-        .model("claude-sonnet-4-6")
         .max_turns(10)
         .max_tokens(16384)
         .permission_policy(AllowAll)
@@ -764,7 +754,7 @@ Then verify the Python file is valid by running `python3 -c "import ast; ast.par
         }
         eprintln!("  Tool Histogram:");
         let mut sorted: Vec<_> = hist.into_iter().collect();
-        sorted.sort_by(|a, b| b.1.cmp(&a.1));
+        sorted.sort_by_key(|e| std::cmp::Reverse(e.1));
         for (name, count) in &sorted {
             let bar = "█".repeat(*count as usize);
             eprintln!("    {:<10} {:>2}x {}", name, count, bar);

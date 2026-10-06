@@ -60,6 +60,8 @@ pub mod parser;
 pub mod registry;
 pub mod security;
 
-pub use parser::{parse_skill, Skill, SkillFrontmatter, SkillMeta, SkillParseError, SkillPrerequisites};
+pub use parser::{
+    parse_skill, Skill, SkillFrontmatter, SkillMeta, SkillParseError, SkillPrerequisites,
+};
 pub use registry::{RegistrySource, SkillRegistry};
 pub use security::{SecurityScan, SkillSecurityIssue};

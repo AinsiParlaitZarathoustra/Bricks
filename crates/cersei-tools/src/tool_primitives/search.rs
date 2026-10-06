@@ -193,8 +193,8 @@ pub async fn glob(pattern: &str, base_dir: &Path) -> Result<Vec<PathBuf>, Search
     // glob::glob is synchronous — run on blocking thread
     let paths = tokio::task::spawn_blocking(move || -> Result<Vec<PathBuf>, SearchError> {
         let mut results = Vec::new();
-        for path in
-            ::glob::glob(&full_pattern).map_err(|e| SearchError::InvalidPattern(e.to_string()))?
+        for path in ::glob::glob(&full_pattern)
+            .map_err(|e| SearchError::InvalidPattern(e.to_string()))?
             .flatten()
         {
             results.push(path);
@@ -323,9 +323,7 @@ mod tests {
         fs::write(tmp.path().join("z.txt"), "X\n").unwrap();
         fs::write(tmp.path().join("a.txt"), "X\nX\n").unwrap();
 
-        let m = grep("X", tmp.path(), GrepOptions::default())
-            .await
-            .unwrap();
+        let m = grep("X", tmp.path(), GrepOptions::default()).await.unwrap();
         // Sorted by (file, line): a.txt:1, a.txt:2, z.txt:1
         assert_eq!(m.len(), 3);
         assert!(m[0].file.ends_with("a.txt") && m[0].line_number == 1);
@@ -340,9 +338,7 @@ mod tests {
         fs::write(&target, "FOO\n").unwrap();
         fs::write(tmp.path().join("other.txt"), "FOO\n").unwrap();
 
-        let m = grep("FOO", &target, GrepOptions::default())
-            .await
-            .unwrap();
+        let m = grep("FOO", &target, GrepOptions::default()).await.unwrap();
         assert_eq!(m.len(), 1);
         assert!(m[0].file.ends_with("only.txt"));
     }
@@ -363,16 +359,23 @@ mod tests {
 
         // Our native grep() implementation contains this call.
         assert!(
-            matches.iter().any(|m| m.file.ends_with("tool_primitives/search.rs")),
+            matches
+                .iter()
+                .any(|m| m.file.ends_with("tool_primitives/search.rs")),
             "expected to find our own source; got {} matches",
             matches.len()
         );
         // The gitignored build directory must be excluded.
         assert!(
-            !matches.iter().any(|m| m.file.components().any(|c| c.as_os_str() == "target")),
+            !matches
+                .iter()
+                .any(|m| m.file.components().any(|c| c.as_os_str() == "target")),
             "target/ should be gitignored and skipped"
         );
-        eprintln!("real_repo_smoke: {} matches across the workspace", matches.len());
+        eprintln!(
+            "real_repo_smoke: {} matches across the workspace",
+            matches.len()
+        );
     }
 
     #[tokio::test]

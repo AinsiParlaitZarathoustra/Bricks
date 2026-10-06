@@ -120,6 +120,48 @@ impl VectorIndex {
         Ok(hits)
     }
 
+    /// k-NN search among the keys `filter` accepts, applied during the
+    /// graph search (not after it).
+    pub fn search_filtered(
+        &self,
+        query: &[f32],
+        k: usize,
+        filter: impl Fn(u64) -> bool,
+    ) -> Result<Vec<SearchHit>, EmbeddingError> {
+        let matches = self
+            .inner
+            .filtered_search(query, k, filter)
+            .map_err(|e| EmbeddingError::Index(format!("usearch filtered search: {e}")))?;
+        Ok(matches
+            .keys
+            .iter()
+            .zip(matches.distances.iter())
+            .map(|(&key, &distance)| SearchHit {
+                key,
+                distance,
+                similarity: self.metric.similarity_from_distance(distance),
+            })
+            .collect())
+    }
+
+    /// Remove a key; returns whether it was present.
+    pub fn remove(&self, key: u64) -> Result<bool, EmbeddingError> {
+        self.inner
+            .remove(key)
+            .map(|n| n > 0)
+            .map_err(|e| EmbeddingError::Index(format!("usearch remove: {e}")))
+    }
+
+    /// Whether a key is present.
+    pub fn contains(&self, key: u64) -> bool {
+        self.inner.contains(key)
+    }
+
+    /// Capacity reserved.
+    pub fn capacity(&self) -> usize {
+        self.inner.capacity()
+    }
+
     /// Number of vectors in the index.
     pub fn len(&self) -> usize {
         self.inner.size()

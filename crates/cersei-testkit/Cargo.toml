@@ -1,0 +1,13 @@
+[package]
+name = "cersei-testkit"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Test helpers for the Cersei workspace (local scripted HTTP server). Not published."
+publish = false
+
+[dependencies]
+tokio = { workspace = true }
+futures = { workspace = true }

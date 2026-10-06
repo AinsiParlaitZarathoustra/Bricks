@@ -71,9 +71,7 @@ async fn snapshot_and_restore_preserves_fs() {
         .write("/work/state.txt", b"keep me")
         .await
         .unwrap();
-    rt.kv()
-        .set("progress", b"42".to_vec())
-        .unwrap();
+    rt.kv().set("progress", b"42".to_vec()).unwrap();
     let snap = sb.snapshot().await.unwrap();
     sb.kill().await.unwrap();
 

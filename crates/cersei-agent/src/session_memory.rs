@@ -36,7 +36,7 @@ impl MemoryCategory {
         }
     }
 
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse_name(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "preference" | "userpreference" | "user_preference" => Some(Self::UserPreference),
             "project" | "projectfact" | "project_fact" => Some(Self::ProjectFact),
@@ -126,7 +126,7 @@ pub fn parse_extraction_output(output: &str) -> Vec<ExtractedMemory> {
                 return None;
             }
 
-            let category = MemoryCategory::from_str(parts[0].trim())?;
+            let category = MemoryCategory::parse_name(parts[0].trim())?;
             let confidence = parts[1].trim().parse::<f32>().ok()? / 10.0;
             let content = parts[2].trim().to_string();
 

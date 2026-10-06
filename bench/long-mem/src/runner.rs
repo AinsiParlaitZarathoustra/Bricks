@@ -6,11 +6,12 @@ use crate::judge;
 use crate::report::PerQuestion;
 use anyhow::{Context, Result};
 use cersei_provider::{CompletionRequest, Provider};
-use cersei_types::{Message, Role};
+use cersei_types::Message;
 use std::sync::Arc;
 use std::time::Instant;
 
-const ANSWERER_BASE_SYSTEM: &str = "You are a helpful assistant. Answer the user's question using ONLY the information provided. \
+const ANSWERER_BASE_SYSTEM: &str =
+    "You are a helpful assistant. Answer the user's question using ONLY the information provided. \
 If the information does not contain the answer, say so plainly — do NOT guess. \
 Be concise: one or two short sentences is ideal. Do NOT quote or restate the context.";
 
@@ -39,8 +40,7 @@ pub async fn answer<P: Provider + ?Sized>(
     );
 
     let template = crate::omega_prompts::prompt_for(q.question_type);
-    let user_prompt =
-        crate::omega_prompts::fill(template, context, &q.question_date, &q.question);
+    let user_prompt = crate::omega_prompts::fill(template, context, &q.question_date, &q.question);
 
     let mut req = CompletionRequest::new(model);
     req.system = Some(system);

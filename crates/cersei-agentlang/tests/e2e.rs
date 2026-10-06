@@ -68,8 +68,7 @@ async fn agent_send_publishes_to_mailbox() {
 
 #[tokio::test]
 async fn run_agent_template_tool_surface() {
-    let dispatch: Arc<dyn cersei_agentlang::ToolDispatch> =
-        Arc::new(VecToolDispatch::new(vec![]));
+    let dispatch: Arc<dyn cersei_agentlang::ToolDispatch> = Arc::new(VecToolDispatch::new(vec![]));
     let ctx = base_ctx();
     ctx.extensions.insert(DispatchHandle(dispatch));
 

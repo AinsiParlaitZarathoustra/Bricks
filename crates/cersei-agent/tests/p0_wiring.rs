@@ -10,7 +10,7 @@
 
 use async_trait::async_trait;
 use cersei_agent::Agent;
-use cersei_provider::OpenAi;
+mod common;
 use cersei_tools::{PermissionLevel, Tool, ToolCategory, ToolContext, ToolResult};
 use cersei_types::{ContentBlock, Message, MessageContent, ToolResultContent};
 use serde_json::{json, Value};
@@ -134,13 +134,11 @@ fn serve_recording(responses: Vec<Canned>) -> (String, Arc<Mutex<Vec<String>>>) 
     (format!("http://127.0.0.1:{port}/v1"), bodies)
 }
 
-fn provider_against(base_url: &str, model: &str) -> OpenAi {
-    OpenAi::builder()
-        .api_key("test-key")
-        .base_url(base_url)
-        .model(model)
-        .build()
-        .expect("build provider")
+fn provider_against(base_url: &str, model: &str) -> cersei_provider::ConfiguredProvider {
+    // "gpt-4" used to resolve to a small 8_192-token window through a model-name
+    // table; the window is now configuration, so the test states it.
+    let window = if model == "gpt-4" { 8_192 } else { 128_000 };
+    common::provider(base_url, "chat_completions", window)
 }
 
 // ─── F-11: the read-before-edit guard must run BEFORE the write lands ────────
@@ -333,10 +331,10 @@ impl Tool for PingTool {
 ///   1,3,..,15    assistant tool_use  seed_t1..seed_t8
 ///   2,4,..,16    user      tool_result seed_t1..seed_t8
 ///
-/// After `run()` adds the prompt and turn 1 adds assistant + results, the
-/// history is 20 messages. The naive split is index 10 — `tool_result seed_t5`
-/// — whose `tool_use` at index 9 would be discarded. `pair_aware_split` must
-/// back off to index 9 instead.
+/// After `run()` adds the prompt the history is 18 messages and does not fit
+/// the budget, so it is compacted before the first request. The naive split
+/// lands on a `tool_result` whose `tool_use` would be discarded;
+/// `pair_aware_split` must back off one message instead.
 fn history_with_split_landing_mid_pair() -> Vec<Message> {
     let mut msgs = vec![Message::user("PAD ".repeat(10_000))];
     for i in 1..=8 {
@@ -395,13 +393,13 @@ fn assert_tool_pairs_intact(body: &str, label: &str) -> usize {
 #[tokio::test]
 async fn compaction_through_the_runner_never_orphans_tool_results() {
     let (url, bodies) = serve_recording(vec![
-        // Turn 1: one Ping call, so compaction runs at the end of the turn.
-        Canned::sse_tool_call("call_live", "Ping", &json!({})),
-        // The compaction summarization request itself.
+        // The seeded history does not fit the 8_192-token budget, so the
+        // runner compacts *before* sending turn 1: this is the summary call.
         Canned::sse_text("COMPACT-SUMMARY-MARKER: earlier padding and pings."),
-        // Turn 2, built from the compacted history — the request under test.
+        // Turn 1, built from the compacted history — the request under test.
+        Canned::sse_tool_call("call_live", "Ping", &json!({})),
+        // Turn 2, and turn 3 after the depth nudge.
         Canned::sse_text("done"),
-        // Turn 3 after the depth nudge.
         Canned::sse_text("done"),
     ]);
 
@@ -423,16 +421,22 @@ async fn compaction_through_the_runner_never_orphans_tool_results() {
     let bodies = bodies.lock().unwrap();
     assert!(
         bodies.len() >= 3,
-        "expected turn-1, compaction, and turn-2 requests, saw {}",
+        "expected compaction, turn-1 and turn-2 requests, saw {}",
         bodies.len()
     );
 
-    // The request after compaction must carry the summary, proving compaction
+    // The summary call carries the old history, not the tools.
+    assert!(
+        !bodies[0].contains("\"tools\""),
+        "the compaction request must not offer tools"
+    );
+
+    // The first real request must carry the summary, proving compaction
     // actually fired — otherwise the pairing assertion below is vacuous.
-    let post_compact = &bodies[2];
+    let post_compact = &bodies[1];
     assert!(
         post_compact.contains("COMPACT-SUMMARY-MARKER"),
-        "turn-2 request does not contain the compaction summary — compaction \
+        "turn-1 request does not contain the compaction summary — compaction \
          never fired and this test measured nothing"
     );
 
@@ -442,7 +446,15 @@ async fn compaction_through_the_runner_never_orphans_tool_results() {
         "the kept slice should retain recent tool_result messages; none were \
          sent, so the pairing check proved nothing"
     );
+    assert_tool_pairs_intact(&bodies[2], "turn-2 request");
 
-    // The pre-compaction request must also be clean (seeded history sanity).
-    assert_tool_pairs_intact(&bodies[0], "turn-1 request");
+    // The raw history still has every seeded message, and the snapshot holds
+    // the history as it was before compaction.
+    assert!(
+        agent.raw_history().len() > 17,
+        "seeded history plus this run"
+    );
+    let snaps = agent.compaction_snapshots();
+    assert_eq!(snaps.len(), 1);
+    assert!(snaps[0].messages[0].get_all_text().starts_with("PAD PAD"));
 }

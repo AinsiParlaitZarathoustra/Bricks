@@ -222,20 +222,53 @@ mod tests {
 
     #[async_trait]
     impl Provider for EchoProvider {
-        fn name(&self) -> &str { "echo" }
-        fn context_window(&self, _: &str) -> u64 { 4096 }
+        fn name(&self) -> &str {
+            "echo"
+        }
+        fn context_window(&self, _: &str) -> u64 {
+            4096
+        }
         async fn complete(&self, req: CompletionRequest) -> cersei_types::Result<CompletionStream> {
-            let prompt = req.messages.last().and_then(|m| m.get_text()).unwrap_or("").to_string();
+            let prompt = req
+                .messages
+                .last()
+                .and_then(|m| m.get_text())
+                .unwrap_or("")
+                .to_string();
             let (tx, rx) = mpsc::channel(16);
             tokio::spawn(async move {
-                let _ = tx.send(StreamEvent::MessageStart { id: "1".into(), model: "echo".into(), usage: None }).await;
-                let _ = tx.send(StreamEvent::ContentBlockStart { index: 0, block_type: "text".into(), id: None, name: None }).await;
-                let _ = tx.send(StreamEvent::TextDelta { index: 0, text: format!("done: {prompt}") }).await;
+                let _ = tx
+                    .send(StreamEvent::MessageStart {
+                        id: "1".into(),
+                        model: "echo".into(),
+                        usage: None,
+                    })
+                    .await;
+                let _ = tx
+                    .send(StreamEvent::ContentBlockStart {
+                        index: 0,
+                        block_type: "text".into(),
+                        id: None,
+                        name: None,
+                    })
+                    .await;
+                let _ = tx
+                    .send(StreamEvent::TextDelta {
+                        index: 0,
+                        text: format!("done: {prompt}"),
+                    })
+                    .await;
                 let _ = tx.send(StreamEvent::ContentBlockStop { index: 0 }).await;
-                let _ = tx.send(StreamEvent::MessageDelta {
-                    stop_reason: Some(StopReason::EndTurn),
-                    usage: Some(Usage { input_tokens: 10, output_tokens: 5, ..Default::default() }),
-                }).await;
+                let _ = tx
+                    .send(StreamEvent::MessageDelta {
+                        stop_reason: Some(StopReason::EndTurn),
+                        usage: Some(Usage {
+                            input_tokens: 10,
+                            output_tokens: 5,
+                            ..Default::default()
+                        }),
+                    })
+                    .await;
                 let _ = tx.send(StreamEvent::MessageStop).await;
             });
             Ok(CompletionStream::new(rx))
@@ -255,7 +288,7 @@ mod tests {
 
     fn factories() -> (ProviderFactory, ToolsetFactory) {
         let pf: ProviderFactory = Arc::new(|| Box::new(EchoProvider));
-        let tf: ToolsetFactory = Arc::new(|| Vec::new());
+        let tf: ToolsetFactory = Arc::new(Vec::new);
         (pf, tf)
     }
 
@@ -272,11 +305,15 @@ mod tests {
     #[tokio::test]
     async fn batch_mode_runs_all_tasks() {
         let (pf, tf) = factories();
-        let tool = DelegateTool::new(pf, tf).with_max_turns(2).with_max_concurrent(2);
-        let r = tool.execute(
-            json!({ "tasks": [{"goal": "a"}, {"goal": "b"}, {"goal": "c"}] }),
-            &ctx(),
-        ).await;
+        let tool = DelegateTool::new(pf, tf)
+            .with_max_turns(2)
+            .with_max_concurrent(2);
+        let r = tool
+            .execute(
+                json!({ "tasks": [{"goal": "a"}, {"goal": "b"}, {"goal": "c"}] }),
+                &ctx(),
+            )
+            .await;
         assert!(!r.is_error, "{}", r.content);
         assert!(r.content.contains("Task 1/3"));
         assert!(r.content.contains("Task 3/3"));

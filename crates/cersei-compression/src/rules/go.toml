@@ -1,0 +1,24 @@
+schema_version = 1
+
+[filters.go-test]
+description = "`go test`: run markers and passing tests summarised; failures, panics and build errors kept."
+match = [{ program = "go", subcommands = ["test"] }]
+options_with_value = ["-C"]
+structured = "go-test-json"
+strip_lines_matching = ['^\?\s+\S+\s+\[no test files\]$', '^PASS$', '^go: downloading ']
+summarize_lines = [
+    { pattern = '^=== (RUN|PAUSE|CONT|NAME)\s', label = "test start markers" },
+    { pattern = '^\s*--- PASS: ', label = "passing tests" },
+    { pattern = '^\s*--- SKIP: ', label = "skipped tests" },
+    { pattern = '^ok\s+\S+', label = "passing packages" },
+]
+head_lines = 20
+tail_lines = 60
+max_lines = 250
+
+[filters.go-build]
+description = "`go build/vet/run/mod`: module download noise removed."
+match = [{ program = "go", subcommands = ["build", "vet", "run", "install", "mod", "generate", "get"] }]
+options_with_value = ["-C"]
+strip_lines_matching = ['^go: (downloading|finding|extracting) ']
+max_lines = 250

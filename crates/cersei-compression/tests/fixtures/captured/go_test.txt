@@ -1,0 +1,23 @@
+--- FAIL: TestAddWrong (0.00s)
+    calc_test.go:16: Add(2, 2) = 4; want 5 — résultat inattendu
+--- FAIL: TestDivPanics (0.00s)
+panic: runtime error: integer divide by zero [recovered, repanicked]
+
+goroutine 43 [running]:
+testing.tRunner.func1.2({0x103152c00, 0x10319cc80})
+	/opt/homebrew/Cellar/go/1.26.4/libexec/src/testing/testing.go:1974 +0x1a0
+testing.tRunner.func1()
+	/opt/homebrew/Cellar/go/1.26.4/libexec/src/testing/testing.go:1977 +0x318
+panic({0x103152c00?, 0x10319cc80?})
+	/opt/homebrew/Cellar/go/1.26.4/libexec/src/runtime/panic.go:860 +0x12c
+example.com/gomod/calc.Div(...)
+	/work/gomod/calc/calc.go:4
+example.com/gomod/calc.TestDivPanics(0xaa45db71448?)
+	/work/gomod/calc/calc_test.go:19 +0x20
+testing.tRunner(0xaa45db71448, 0x10317bfa8)
+	/opt/homebrew/Cellar/go/1.26.4/libexec/src/testing/testing.go:2036 +0xc4
+created by testing.(*T).Run in goroutine 1
+	/opt/homebrew/Cellar/go/1.26.4/libexec/src/testing/testing.go:2101 +0x3a8
+FAIL	example.com/gomod/calc	0.111s
+ok  	example.com/gomod/util	0.108s
+FAIL

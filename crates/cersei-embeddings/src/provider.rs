@@ -17,6 +17,12 @@ pub trait EmbeddingProvider: Send + Sync {
     /// [`VectorIndex`](crate::VectorIndex) to size the HNSW graph.
     fn dimensions(&self) -> usize;
 
+    /// Identifies the vector space: vectors from two different ids must not
+    /// be compared (stored indexes record it and refuse a mismatch).
+    fn model_id(&self) -> String {
+        format!("{}:{}", self.name(), self.dimensions())
+    }
+
     /// Embed a single string. Default implementation delegates to
     /// [`embed_batch`](Self::embed_batch).
     async fn embed(&self, text: &str) -> Result<Vec<f32>, EmbeddingError> {

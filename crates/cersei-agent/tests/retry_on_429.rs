@@ -12,7 +12,7 @@
 //! observable outcome — the turn completes, and the provider was called twice.
 
 use cersei_agent::Agent;
-use cersei_provider::OpenAi;
+mod common;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -143,14 +143,7 @@ fn serve_sequence(responses: Vec<Canned>) -> (String, Arc<AtomicUsize>) {
 
 fn agent_against(base_url: &str) -> Agent {
     Agent::builder()
-        .provider(
-            OpenAi::builder()
-                .api_key("test-key")
-                .base_url(base_url)
-                .model("gpt-4o")
-                .build()
-                .expect("build provider"),
-        )
+        .provider(common::provider(base_url, "chat_completions", 128_000))
         .model("gpt-4o")
         .max_turns(2)
         .max_tokens(64)
@@ -214,14 +207,7 @@ async fn cancel_is_honoured_while_waiting_on_response_headers() {
     let url = serve_nothing();
     let token = tokio_util::sync::CancellationToken::new();
     let agent = Agent::builder()
-        .provider(
-            OpenAi::builder()
-                .api_key("test-key")
-                .base_url(&url)
-                .model("gpt-4o")
-                .build()
-                .expect("build provider"),
-        )
+        .provider(common::provider(&url, "chat_completions", 128_000))
         .model("gpt-4o")
         .max_turns(2)
         .max_tokens(64)
@@ -264,14 +250,7 @@ async fn cancel_is_honoured_during_retry_backoff() {
     ]);
     let token = tokio_util::sync::CancellationToken::new();
     let agent = Agent::builder()
-        .provider(
-            OpenAi::builder()
-                .api_key("test-key")
-                .base_url(&url)
-                .model("gpt-4o")
-                .build()
-                .expect("build provider"),
-        )
+        .provider(common::provider(&url, "chat_completions", 128_000))
         .model("gpt-4o")
         .max_turns(2)
         .max_tokens(64)

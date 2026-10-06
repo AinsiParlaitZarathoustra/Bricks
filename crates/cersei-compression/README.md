@@ -1,42 +1,35 @@
 # cersei-compression
 
-Structural and command-aware compression for tool outputs in the Cersei SDK.
+Reduction of tool outputs for the Cersei SDK, without losing access to the
+originals. Used by `cersei-agent` on every tool result.
 
-Sits between a tool's raw `execute()` result and the agent's `cap_tool_result()`
-truncation, trimming the 60–90% of tokens in typical tool output that is
-comments, ANSI, blank lines, noisy progress messages, or unchanged boilerplate.
+| Output | What happens |
+| --- | --- |
+| Command logs (`Bash`) | ANSI and progress cleaned, structured records rendered (`cargo --message-format=json`, `go test -json`), **diagnostic blocks found first and kept**, then the rule for the command that actually ran removes noise and summarises repetitive success lines, then a budget keeps diagnostics in priority and shows every omission in place. |
+| Values (`cat`, `git diff`, `grep`, `kubectl get`, `Read` with `offset`/`limit`, …) | Never filtered; only cut beyond the hard cap, with paging instructions or a reference to the full text. |
+| Large JSON | A summary envelope: shape, verbatim sample (3 items per array by default), and a separate list of omissions by JSON Pointer. |
+| Source files read at `aggressive` | A Tree-sitter skeleton (Rust, Python, TypeScript, JavaScript/TSX, Go): signatures, types, docs and attributes kept, bodies replaced by markers with their original line ranges. Not counted as having read the file. |
 
-## Levels
+Every reduced output starts with a `[bricks: …]` header saying what was done
+and where the original is (a file saved by the `RawStore`, or the source file
+itself), readable with the `Read` tool.
 
-- `Off`        — passthrough (default). Zero behavior change.
-- `Minimal`    — strip ANSI, collapse whitespace, drop comments (code files only).
-- `Aggressive` — Minimal plus language-aware stubbing of function bodies, and
-                 command-specific TOML rules for common CLIs.
+Levels: `off` (only the hard cap), `minimal` (logs, JSON ≥ 16 KiB),
+`aggressive` (plus skeletons, JSON ≥ 4 KiB).
 
-## Dispatch
+Rules: built-in (`src/rules/*.toml`), then `~/.bricks/rules/*.toml` in file-name
+order, then `[compression.filters.<id>]` in `bricks.toml`; same id replaces,
+`disabled = true` removes, invalid rules are reported and skipped. See
+`docs/compression.md` at the repository root.
+
+Measure on the fixture corpus and on your own files:
 
 ```
-tool_name       path / input hint           filter
-─────────────   ─────────────────────────   ──────────────────────
-"Bash", "Exec"  first word of .command      toml_rules::apply
-"Read", …       file extension of .path     code::filter
-"Grep", "Glob"  —                           passthrough
-other           —                           passthrough
+cargo run --release -p cersei-compression --example measure -- --read src/lib.rs --json data.json
 ```
-
-All stages are infallible: on any internal error the raw input is returned
-unchanged, so the agent loop never breaks.
 
 ## Credits
 
-This crate is a port / adaptation of [**rtk** (Rust Token Killer)](https://github.com/rtk-ai/rtk)
-by **Patrick Szymkowiak**, MIT licensed. See [`LICENSE`](LICENSE) for full
-attribution.
-
-| cersei-compression module | rtk source                       |
-| ------------------------- | -------------------------------- |
-| `src/ansi.rs`             | `rtk/src/core/utils.rs`          |
-| `src/code.rs`             | `rtk/src/core/filter.rs`         |
-| `src/truncate.rs`         | `rtk/src/core/filter.rs`         |
-| `src/toml_rules.rs`       | `rtk/src/core/toml_filter.rs`    |
-| `src/rules/*.toml`        | `rtk/src/filters/*.toml`         |
+The rule pipeline and ANSI handling started as a port of
+[**rtk** (Rust Token Killer)](https://github.com/rtk-ai/rtk) by **Patrick
+Szymkowiak**, MIT licensed. See [`LICENSE`](LICENSE) for the attribution.

@@ -15,6 +15,40 @@ pub fn strip_ansi(text: &str) -> String {
     ANSI_RE.replace_all(text, "").into_owned()
 }
 
+/// Clean one log line the way a terminal would display it: a carriage return
+/// rewinds the line (progress bars), so only the text after the last `\r`
+/// remains (or the last non-empty segment); ANSI escapes and other control
+/// characters except tabs are removed.
+pub fn clean_line(line: &str) -> String {
+    let visible = if line.contains('\r') {
+        line.rsplit('\r')
+            .find(|seg| !strip_ansi(seg).trim().is_empty())
+            .unwrap_or("")
+    } else {
+        line
+    };
+    let stripped = strip_ansi(visible);
+    if stripped.chars().any(|c| c.is_control() && c != '\t') {
+        stripped
+            .chars()
+            .filter(|c| !c.is_control() || *c == '\t')
+            .collect()
+    } else {
+        stripped
+    }
+}
+
+/// Cut `s` to at most `max_chars` characters, never inside a UTF-8 sequence,
+/// saying how much was removed.
+pub fn cut_chars(s: &str, max_chars: usize) -> String {
+    let count = s.chars().count();
+    if count <= max_chars {
+        return s.to_string();
+    }
+    let kept: String = s.chars().take(max_chars).collect();
+    format!("{kept}… [+{} chars]", count - max_chars)
+}
+
 /// Unicode-safe char truncation — keeps at most `max_len` chars, appends `...`
 /// when the input is longer.
 pub fn truncate(s: &str, max_len: usize) -> String {
@@ -37,6 +71,22 @@ mod tests {
         assert_eq!(strip_ansi("\x1b[31mError\x1b[0m"), "Error");
         assert_eq!(strip_ansi("plain"), "plain");
         assert_eq!(strip_ansi("\x1b[1m\x1b[32mOK\x1b[0m\x1b[0m"), "OK");
+    }
+
+    #[test]
+    fn progress_rewrites_keep_the_final_state() {
+        assert_eq!(
+            clean_line("Downloading 10%\rDownloading 55%\rDone ✓"),
+            "Done ✓"
+        );
+        assert_eq!(clean_line("50%\r100%\r"), "100%");
+        assert_eq!(clean_line("\x1b[32mok\x1b[0m\tnext\x07"), "ok\tnext");
+    }
+
+    #[test]
+    fn cut_chars_respects_utf8() {
+        assert_eq!(cut_chars("données", 3), "don… [+4 chars]");
+        assert_eq!(cut_chars("abc", 5), "abc");
     }
 
     #[test]

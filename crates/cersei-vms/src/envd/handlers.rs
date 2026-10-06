@@ -58,7 +58,10 @@ fn uname_string() -> String {
 async fn process_run(params: Option<Value>) -> Result<Value, String> {
     let req: RunRequest = parse_params(params)?;
     let timeout = req.timeout.unwrap_or(Duration::from_secs(120));
-    let cwd = req.workdir.clone().unwrap_or_else(|| PathBuf::from("/work"));
+    let cwd = req
+        .workdir
+        .clone()
+        .unwrap_or_else(|| PathBuf::from("/work"));
     let mut cmd = Command::new("/bin/sh");
     cmd.arg("-c").arg(&req.command).current_dir(&cwd);
     for (k, v) in &req.env {
@@ -127,7 +130,9 @@ fn parse_params<T: serde::de::DeserializeOwned>(p: Option<Value>) -> Result<T, S
 async fn fs_read(params: Option<Value>) -> Result<Value, String> {
     use base64::Engine;
     let p: PathParams = parse_params(params)?;
-    let mut f = tokio::fs::File::open(&p.path).await.map_err(|e| e.to_string())?;
+    let mut f = tokio::fs::File::open(&p.path)
+        .await
+        .map_err(|e| e.to_string())?;
     let mut buf = Vec::new();
     f.read_to_end(&mut buf).await.map_err(|e| e.to_string())?;
     let b64 = base64::engine::general_purpose::STANDARD.encode(&buf);
@@ -141,9 +146,13 @@ async fn fs_write(params: Option<Value>) -> Result<Value, String> {
         .decode(&p.data_b64)
         .map_err(|e| e.to_string())?;
     if let Some(parent) = Path::new(&p.path).parent() {
-        tokio::fs::create_dir_all(parent).await.map_err(|e| e.to_string())?;
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| e.to_string())?;
     }
-    tokio::fs::write(&p.path, &bytes).await.map_err(|e| e.to_string())?;
+    tokio::fs::write(&p.path, &bytes)
+        .await
+        .map_err(|e| e.to_string())?;
     Ok(json!({ "ok": true, "bytes_written": bytes.len() }))
 }
 
@@ -151,14 +160,15 @@ async fn fs_list(params: Option<Value>) -> Result<Value, String> {
     let p: ListParams = parse_params(params)?;
     let depth = p.depth.unwrap_or(1);
     let mut out = Vec::new();
-    walk(Path::new(&p.path), Path::new(&p.path), depth, &mut out)
-        .map_err(|e| e.to_string())?;
+    walk(Path::new(&p.path), Path::new(&p.path), depth, &mut out).map_err(|e| e.to_string())?;
     serde_json::to_value(out).map_err(|e| e.to_string())
 }
 
 async fn fs_stat(params: Option<Value>) -> Result<Value, String> {
     let p: PathParams = parse_params(params)?;
-    let meta = tokio::fs::metadata(&p.path).await.map_err(|e| e.to_string())?;
+    let meta = tokio::fs::metadata(&p.path)
+        .await
+        .map_err(|e| e.to_string())?;
     let entry = to_entry(Path::new(&p.path), &meta);
     serde_json::to_value(entry).map_err(|e| e.to_string())
 }
@@ -166,9 +176,13 @@ async fn fs_stat(params: Option<Value>) -> Result<Value, String> {
 async fn fs_mkdir(params: Option<Value>) -> Result<Value, String> {
     let p: MkdirParams = parse_params(params)?;
     if p.recursive.unwrap_or(true) {
-        tokio::fs::create_dir_all(&p.path).await.map_err(|e| e.to_string())?;
+        tokio::fs::create_dir_all(&p.path)
+            .await
+            .map_err(|e| e.to_string())?;
     } else {
-        tokio::fs::create_dir(&p.path).await.map_err(|e| e.to_string())?;
+        tokio::fs::create_dir(&p.path)
+            .await
+            .map_err(|e| e.to_string())?;
     }
     Ok(json!({ "ok": true }))
 }
@@ -176,15 +190,23 @@ async fn fs_mkdir(params: Option<Value>) -> Result<Value, String> {
 async fn fs_remove(params: Option<Value>) -> Result<Value, String> {
     let p: RemoveParams = parse_params(params)?;
     let path = PathBuf::from(&p.path);
-    let meta = tokio::fs::metadata(&path).await.map_err(|e| e.to_string())?;
+    let meta = tokio::fs::metadata(&path)
+        .await
+        .map_err(|e| e.to_string())?;
     if meta.is_dir() {
         if p.recursive.unwrap_or(false) {
-            tokio::fs::remove_dir_all(&path).await.map_err(|e| e.to_string())?;
+            tokio::fs::remove_dir_all(&path)
+                .await
+                .map_err(|e| e.to_string())?;
         } else {
-            tokio::fs::remove_dir(&path).await.map_err(|e| e.to_string())?;
+            tokio::fs::remove_dir(&path)
+                .await
+                .map_err(|e| e.to_string())?;
         }
     } else {
-        tokio::fs::remove_file(&path).await.map_err(|e| e.to_string())?;
+        tokio::fs::remove_file(&path)
+            .await
+            .map_err(|e| e.to_string())?;
     }
     Ok(json!({ "ok": true }))
 }

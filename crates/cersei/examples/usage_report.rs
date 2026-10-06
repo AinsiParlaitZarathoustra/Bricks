@@ -13,8 +13,8 @@
 
 use cersei::events::AgentEvent;
 use cersei::prelude::*;
-use cersei::provider::{CompletionStream, ProviderOptions};
-use cersei::reporters::{AgentMetrics, MetricsReporter, Reporter};
+use cersei::provider::CompletionStream;
+use cersei::reporters::Reporter;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -25,8 +25,6 @@ use tokio::sync::mpsc;
 // Claude Sonnet 4.6 pricing
 const SONNET_INPUT_PER_MTOK: f64 = 3.00; // $3/M input tokens
 const SONNET_OUTPUT_PER_MTOK: f64 = 15.00; // $15/M output tokens
-const SONNET_CACHE_WRITE_PER_MTOK: f64 = 3.75;
-const SONNET_CACHE_READ_PER_MTOK: f64 = 0.30;
 
 // Claude Opus 4.6 pricing
 const OPUS_INPUT_PER_MTOK: f64 = 15.00;
@@ -75,7 +73,7 @@ impl Provider for SimulatedClaude {
     fn context_window(&self, _model: &str) -> u64 {
         200_000
     }
-    
+
     async fn complete(&self, request: CompletionRequest) -> cersei_types::Result<CompletionStream> {
         let turn = self.turn.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let model = self.model.clone();

@@ -153,7 +153,7 @@ pub fn parse_skill(content: &str, source: &Path) -> Result<Skill, SkillParseErro
         .ok_or(SkillParseError::UnterminatedFrontmatter)?;
     let yaml_slice = &after_open[..close_idx];
     let after_close = &after_open[close_idx + 4..];
-    let body = after_close.trim_start_matches(|c: char| c == '\n' || c == '\r');
+    let body = after_close.trim_start_matches(['\n', '\r']);
 
     let fm: SkillFrontmatter = serde_yaml::from_str(yaml_slice)?;
     validate(&fm)?;
@@ -174,7 +174,11 @@ fn validate(fm: &SkillFrontmatter) -> Result<(), SkillParseError> {
             "name exceeds {MAX_NAME_LEN} chars"
         )));
     }
-    if !fm.name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+    if !fm
+        .name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
         return Err(SkillParseError::Invalid(
             "name must be ASCII alphanumerics / `-` / `_` only".into(),
         ));
@@ -275,7 +279,8 @@ Steps:
 
     #[test]
     fn rejects_non_kebab_name() {
-        let bad = "---\nname: 'has spaces'\ndescription: d\nversion: 1.0.0\nlicense: MIT\n---\nbody";
+        let bad =
+            "---\nname: 'has spaces'\ndescription: d\nversion: 1.0.0\nlicense: MIT\n---\nbody";
         let err = parse_skill(bad, &PathBuf::from("x.md")).unwrap_err();
         assert!(matches!(err, SkillParseError::Invalid(_)));
     }

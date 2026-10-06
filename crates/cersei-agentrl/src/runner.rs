@@ -36,7 +36,8 @@ const PLANNER_SYS: &str = "You are a planning agent. A previous coding attempt f
 trace, propose a few DISTINCT recovery strategies that fix the specific failures. Respond with ONLY a \
 JSON array (no prose, no code fences) of objects: [{\"angle\": \"...\", \"goal\": \"...\"}].";
 
-const PROPOSAL_SYS: &str = "You are a focused coding agent fixing a specific failure. Work only in the \
+const PROPOSAL_SYS: &str =
+    "You are a focused coding agent fixing a specific failure. Work only in the \
 given working directory. Make the task pass.";
 
 /// Builds a fresh toolset for the GeneralAgent (lets callers restrict it — e.g.
@@ -54,7 +55,10 @@ pub struct CerseiRunner {
     general_max_turns: Option<u32>,
     general_tools_factory: Option<ToolsFactory>,
     general_system_prompt: Option<String>,
-    compression: cersei_compression::CompressionLevel,
+    /// Explicit level; when `None`, the `bricks.toml` level, else `off`.
+    compression: Option<cersei_compression::CompressionLevel>,
+    /// `bricks.toml` and user rules, applied to every agent this runner builds.
+    bricks: Option<cersei_agent::BricksConfig>,
 }
 
 impl CerseiRunner {
@@ -75,7 +79,8 @@ impl CerseiRunner {
             general_max_turns: None,
             general_tools_factory: None,
             general_system_prompt: None,
-            compression: cersei_compression::CompressionLevel::Off,
+            compression: None,
+            bricks: None,
         }
     }
 
@@ -112,7 +117,7 @@ impl CerseiRunner {
     /// model — a token-efficiency lever inspired by existing agents (vix/codex).
     /// Applies to all agents this runner builds (general + proposals).
     pub fn with_compression(mut self, level: cersei_compression::CompressionLevel) -> Self {
-        self.compression = level;
+        self.compression = Some(level);
         self
     }
 
@@ -126,11 +131,24 @@ impl CerseiRunner {
         self
     }
 
+    /// Context and compression settings plus output rules (normally
+    /// `BricksConfig::load(workdir)`), for every agent this runner builds.
+    /// An explicit [`Self::with_compression`] wins over its `level`.
+    pub fn with_bricks_config(mut self, config: cersei_agent::BricksConfig) -> Self {
+        self.bricks = Some(config);
+        self
+    }
+
+    pub fn bricks_config(&self) -> Option<&cersei_agent::BricksConfig> {
+        self.bricks.as_ref()
+    }
+
     fn replayer(&self) -> Arc<dyn SolutionReplayer> {
         Arc::new(SubAgentReplayer {
             provider_factory: self.provider_factory.clone(),
             model: self.model.clone(),
             max_turns: self.max_turns,
+            bricks: self.bricks.clone(),
         })
     }
 
@@ -161,8 +179,13 @@ impl CerseiRunner {
             .working_dir(workdir.to_path_buf())
             .permission_policy(AllowAll)
             .max_turns(max_turns)
-            .compression_level(self.compression)
             .system_prompt(system_prompt);
+        if let Some(cfg) = &self.bricks {
+            b = b.bricks_config(cfg.clone());
+        }
+        if let Some(level) = self.compression {
+            b = b.compression_level(level);
+        }
         if let Some(m) = &self.model {
             b = b.model(m);
         }
@@ -262,7 +285,13 @@ impl AgentRlRunner for CerseiRunner {
             };
         }
 
-        let agent = match self.build_agent(cersei_tools::coding(), &dir, PROPOSAL_SYS, None, self.max_turns) {
+        let agent = match self.build_agent(
+            cersei_tools::coding(),
+            &dir,
+            PROPOSAL_SYS,
+            None,
+            self.max_turns,
+        ) {
             Ok(a) => a,
             Err(e) => {
                 return ProposalOutcome {
@@ -324,6 +353,7 @@ struct SubAgentReplayer {
     provider_factory: ProviderFactory,
     model: Option<String>,
     max_turns: u32,
+    bricks: Option<cersei_agent::BricksConfig>,
 }
 
 #[async_trait]
@@ -336,6 +366,9 @@ impl SolutionReplayer for SubAgentReplayer {
             .permission_policy(AllowAll)
             .max_turns(self.max_turns)
             .system_prompt(&entry.solution.system_prompt);
+        if let Some(cfg) = &self.bricks {
+            b = b.bricks_config(cfg.clone());
+        }
         if let Some(m) = &self.model {
             b = b.model(m);
         }
@@ -441,5 +474,169 @@ fn extract_json_array(text: &str) -> Option<String> {
         Some(text[start..=end].to_string())
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod bricks_config_tests {
+    use super::*;
+    use cersei_provider::{CompletionRequest, CompletionStream};
+    use cersei_types::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// First call: one `Bash` tool call; then plain text.
+    struct OneToolCall(Arc<AtomicUsize>);
+
+    #[async_trait]
+    impl Provider for OneToolCall {
+        fn name(&self) -> &str {
+            "scripted"
+        }
+        fn context_window(&self, _: &str) -> u64 {
+            128_000
+        }
+        async fn complete(&self, _req: CompletionRequest) -> Result<CompletionStream> {
+            let first = self.0.fetch_add(1, Ordering::SeqCst) == 0;
+            let (tx, rx) = tokio::sync::mpsc::channel(16);
+            tokio::spawn(async move {
+                let _ = tx
+                    .send(StreamEvent::MessageStart {
+                        id: "m".into(),
+                        model: "x".into(),
+                        usage: None,
+                    })
+                    .await;
+                let stop = if first {
+                    let _ = tx
+                        .send(StreamEvent::ContentBlockStart {
+                            index: 0,
+                            block_type: "tool_use".into(),
+                            id: Some("t1".into()),
+                            name: Some("Bash".into()),
+                        })
+                        .await;
+                    let _ = tx
+                        .send(StreamEvent::InputJsonDelta {
+                            index: 0,
+                            partial_json: r#"{"command":"mytool run"}"#.into(),
+                        })
+                        .await;
+                    StopReason::ToolUse
+                } else {
+                    let _ = tx
+                        .send(StreamEvent::ContentBlockStart {
+                            index: 0,
+                            block_type: "text".into(),
+                            id: None,
+                            name: None,
+                        })
+                        .await;
+                    let _ = tx
+                        .send(StreamEvent::TextDelta {
+                            index: 0,
+                            text: "done".into(),
+                        })
+                        .await;
+                    StopReason::EndTurn
+                };
+                let _ = tx.send(StreamEvent::ContentBlockStop { index: 0 }).await;
+                let _ = tx
+                    .send(StreamEvent::MessageDelta {
+                        stop_reason: Some(stop),
+                        usage: None,
+                    })
+                    .await;
+                let _ = tx.send(StreamEvent::MessageStop).await;
+            });
+            Ok(CompletionStream::new(rx))
+        }
+    }
+
+    struct NoisyTool;
+
+    #[async_trait]
+    impl Tool for NoisyTool {
+        fn name(&self) -> &str {
+            "Bash"
+        }
+        fn description(&self) -> &str {
+            "fake shell"
+        }
+        fn permission_level(&self) -> cersei_tools::PermissionLevel {
+            cersei_tools::PermissionLevel::None
+        }
+        fn category(&self) -> cersei_tools::ToolCategory {
+            cersei_tools::ToolCategory::Shell
+        }
+        fn input_schema(&self) -> serde_json::Value {
+            serde_json::json!({ "type": "object" })
+        }
+        async fn execute(&self, _: serde_json::Value, _: &ToolContext) -> ToolResult {
+            let mut out: String = (0..300).map(|i| format!("noise line {i}\n")).collect();
+            out.push_str("result: keep me\n");
+            ToolResult::success(out)
+        }
+    }
+
+    async fn tool_result(runner: &CerseiRunner, work: &Path) -> String {
+        let agent = runner
+            .build_agent(vec![Box::new(NoisyTool)], work, "test", None, 3)
+            .unwrap();
+        agent.run("go").await.unwrap();
+        agent
+            .messages()
+            .iter()
+            .flat_map(|m| m.content_blocks())
+            .find_map(|b| match b {
+                ContentBlock::ToolResult {
+                    content: ToolResultContent::Text(t),
+                    ..
+                } => Some(t),
+                _ => None,
+            })
+            .unwrap()
+    }
+
+    fn runner(work: &Path) -> CerseiRunner {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let factory: ProviderFactory = Arc::new(move || Box::new(OneToolCall(calls.clone())));
+        CerseiRunner::new(
+            factory,
+            work,
+            ToolRegistry::in_memory(),
+            Arc::new(crate::verify::AcceptVerifier),
+        )
+    }
+
+    #[tokio::test]
+    async fn a_custom_rule_from_bricks_toml_is_applied() {
+        let work = tempfile::tempdir().unwrap();
+        std::fs::write(
+            work.path().join("bricks.toml"),
+            "[compression]\nlevel = \"minimal\"\n\n[compression.filters.mytool]\n\
+             match = [{ program = \"mytool\" }]\nstrip_lines_matching = ['^noise line ']\n",
+        )
+        .unwrap();
+        let config = cersei_agent::BricksConfig::from_sources(&cersei_compression::RuleSources {
+            user_rules_dir: None,
+            bricks_toml: Some(work.path().join("bricks.toml")),
+        });
+        assert!(config.diagnostics.is_empty(), "{:?}", config.diagnostics);
+        let r = runner(work.path()).with_bricks_config(config);
+        let out = tool_result(&r, work.path()).await;
+        assert!(out.contains("rule `mytool`"), "{out}");
+        assert!(out.contains("result: keep me"));
+        assert!(!out.contains("noise line 150"));
+    }
+
+    #[tokio::test]
+    async fn without_configuration_the_builtin_behaviour_is_kept() {
+        let work = tempfile::tempdir().unwrap();
+        let r = runner(work.path());
+        assert!(r.bricks_config().is_none());
+        // Level `off` and no rule: the output is passed through.
+        let out = tool_result(&r, work.path()).await;
+        assert!(out.contains("noise line 150"));
+        assert!(!out.starts_with("[bricks:"));
     }
 }

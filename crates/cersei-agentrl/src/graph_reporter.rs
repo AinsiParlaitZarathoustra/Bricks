@@ -2,7 +2,9 @@
 //! [`ExecutionGraph`]. This is the passive-observation seam: Hooks alter control
 //! flow, Reporters record what happened.
 
-use crate::graph::{summarize_input, EdgeRel, ExecutionGraph, NodeDetail, NodeId, NodeKind, NodeStatus};
+use crate::graph::{
+    summarize_input, EdgeRel, ExecutionGraph, NodeDetail, NodeId, NodeKind, NodeStatus,
+};
 use async_trait::async_trait;
 use cersei_agent::events::AgentEvent;
 use cersei_agent::{AgentOutput, Reporter};
@@ -53,7 +55,12 @@ impl Reporter for GraphReporter {
         match event {
             AgentEvent::TurnStart { turn } => {
                 let root = g.root;
-                let node = g.add_node(NodeKind::Turn, format!("turn {turn}"), *turn, NodeDetail::Empty);
+                let node = g.add_node(
+                    NodeKind::Turn,
+                    format!("turn {turn}"),
+                    *turn,
+                    NodeDetail::Empty,
+                );
                 g.add_edge(root, node, EdgeRel::Contains);
                 st.current_turn_node = node;
                 st.current_turn = *turn;

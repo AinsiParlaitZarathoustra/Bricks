@@ -35,6 +35,48 @@ impl Tool for FileEditTool {
         })
     }
 
+    async fn preview(
+        &self,
+        input: &Value,
+        _ctx: &ToolContext,
+    ) -> Option<crate::preview::ChangePreview> {
+        let input = match coerce_input(input) {
+            Ok(i) => i,
+            Err(e) => return Some(crate::preview::ChangePreview::refused(e)),
+        };
+        let path = std::path::Path::new(&input.file_path);
+        let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+        let before = match std::fs::read_to_string(&absolute) {
+            Ok(c) => c,
+            Err(e) => {
+                return Some(crate::preview::ChangePreview::refused(format!(
+                    "Failed to read {}: {e}",
+                    input.file_path
+                )))
+            }
+        };
+        match crate::tool_primitives::replace::plan_edit(
+            &before,
+            &input.old_string,
+            &input.new_string,
+            input.replace_all,
+            Some(&input.file_path),
+        ) {
+            Ok(plan) => Some(crate::preview::ChangePreview {
+                files: vec![crate::preview::file_change(
+                    &input.file_path,
+                    &absolute,
+                    Some(&before),
+                    Some(&plan.content),
+                )],
+                refusal: None,
+            }),
+            Err(e) => Some(crate::preview::ChangePreview::refused(
+                crate::tool_primitives::replace::describe_failure(&e, &input.file_path),
+            )),
+        }
+    }
+
     async fn execute(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
         let input = match coerce_input(&input) {
             Ok(i) => i,
@@ -46,52 +88,66 @@ impl Tool for FileEditTool {
         };
 
         let path = std::path::Path::new(&input.file_path);
+        let before_content = match tokio::fs::read_to_string(path).await {
+            Ok(c) => c,
+            Err(e) => return ToolResult::error(format!("Failed to read {}: {e}", input.file_path)),
+        };
 
-        // Capture content before edit for diff
-        let before_content = tokio::fs::read_to_string(path).await.unwrap_or_default();
-
-        match pfs::edit_file(path, &input.old_string, &input.new_string, input.replace_all).await {
+        match pfs::edit_file(
+            path,
+            &input.old_string,
+            &input.new_string,
+            input.replace_all,
+        )
+        .await
+        {
             Ok(result) => {
-                // Generate a compact inline diff
                 let after_content = tokio::fs::read_to_string(path).await.unwrap_or_default();
-                let diff = crate::tool_primitives::diff::unified_diff(
-                    &before_content, &after_content, 2,
-                );
-
-                // Include diff in result (truncated for large changes)
+                let diff =
+                    crate::tool_primitives::diff::unified_diff(&before_content, &after_content, 2);
                 let diff_preview = if diff.lines().count() > 30 {
                     let truncated: String = diff.lines().take(25).collect::<Vec<_>>().join("\n");
-                    format!("{}\n... ({} more lines)", truncated, diff.lines().count() - 25)
+                    format!(
+                        "{}\n... ({} more lines)",
+                        truncated,
+                        diff.lines().count() - 25
+                    )
                 } else {
                     diff
                 };
-
+                let ranges = result
+                    .ranges
+                    .iter()
+                    .map(|(a, b)| {
+                        if a == b {
+                            format!("{a}")
+                        } else {
+                            format!("{a}–{b}")
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 ToolResult::success(format!(
-                    "The file {} has been updated. {} replacement(s) made.\n{}",
-                    input.file_path, result.replacements_made, diff_preview
+                    "The file {} has been updated: {} replacement(s) at line(s) {} ({}).\n{}",
+                    input.file_path,
+                    result.replacements_made,
+                    ranges,
+                    result.stage.describe(),
+                    diff_preview
                 ))
             }
-            Err(pfs::EditError::NotFound) => ToolResult::error(format!(
-                "old_string not found in {}. The editor already tolerates leading/trailing \
-                 whitespace and indentation differences, so a mismatch here means the text \
-                 itself differs. Re-read the file with the Read tool and copy old_string \
-                 verbatim from the current contents (watch for typos, hidden characters, or \
-                 stale content from an earlier edit).",
+            Err(pfs::EditError::Refused(e)) => ToolResult::error(format!(
+                "{}\nNothing was written.",
+                crate::tool_primitives::replace::describe_failure(&e, &input.file_path)
+            )),
+            Err(pfs::EditError::Changed) => ToolResult::error(format!(
+                "{} changed on disk while the edit was being prepared, so nothing was written. \
+                 Read it again, then retry the edit against its current text.",
                 input.file_path
             )),
-            Err(pfs::EditError::AmbiguousMatch { count }) => ToolResult::error(format!(
-                "old_string is not unique ({} occurrences) in {}. Either add surrounding lines \
-                 to old_string so it identifies exactly one location, or set replace_all=true \
-                 to change every occurrence.",
-                count, input.file_path
-            )),
-            Err(pfs::EditError::NoChange) => ToolResult::error(
-                "old_string and new_string are identical, so the edit would do nothing. \
-                 Make new_string the intended replacement.".to_string(),
-            ),
-            Err(pfs::EditError::Io(e)) => ToolResult::error(format!(
-                "Failed to edit file {}: {}", input.file_path, e
-            )),
+            Err(pfs::EditError::Io(e)) => {
+                ToolResult::error(format!("Failed to edit file {}: {}", input.file_path, e))
+            }
         }
     }
 }
@@ -150,7 +206,9 @@ fn coerce_input(input: &Value) -> std::result::Result<EditInput, String> {
 
     let replace_all = match obj.get("replace_all") {
         Some(Value::Bool(b)) => *b,
-        Some(Value::String(s)) => matches!(s.trim().to_ascii_lowercase().as_str(), "true" | "1" | "yes"),
+        Some(Value::String(s)) => {
+            matches!(s.trim().to_ascii_lowercase().as_str(), "true" | "1" | "yes")
+        }
         Some(Value::Number(n)) => n.as_i64().map(|v| v != 0).unwrap_or(false),
         _ => false,
     };
@@ -287,7 +345,64 @@ mod tests {
 
         assert!(res.is_error);
         let msg = res.content;
-        assert!(msg.contains("not unique"));
+        assert!(msg.contains("ambiguous"), "{msg}");
+        assert!(msg.contains("matches 3 regions"), "{msg}");
         assert!(msg.contains("replace_all"));
+        assert!(msg.contains("Nothing was written"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "a a a");
+    }
+
+    #[tokio::test]
+    async fn a_near_miss_is_refused_with_candidates_and_writes_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("calc.rs");
+        let original = "fn calc() {\n    let a = 1;\n    let b = 2;\n    a + b\n}\n";
+        std::fs::write(&path, original).unwrap();
+        let res = FileEditTool
+            .execute(
+                serde_json::json!({
+                    "file_path": path.to_str().unwrap(),
+                    "old_string": "    let a = 1;\n    let b = 3;\n",
+                    "new_string": "    let a = 10;\n",
+                }),
+                &test_ctx(),
+            )
+            .await;
+        assert!(res.is_error);
+        assert!(res.content.contains("lines 2–3"), "{}", res.content);
+        assert!(
+            res.content.contains("code itself differs"),
+            "{}",
+            res.content
+        );
+        assert!(res.content.contains("let b = 2;"), "{}", res.content);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+    }
+
+    #[tokio::test]
+    async fn crlf_python_edit_keeps_style() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("m.py");
+        std::fs::write(
+            &path,
+            "class A:\r\n    def f(self):\r\n        return 1\r\n",
+        )
+        .unwrap();
+        let res = FileEditTool
+            .execute(
+                serde_json::json!({
+                    "file_path": path.to_str().unwrap(),
+                    "old_string": "def f(self):\n    return 1\n",
+                    "new_string": "def f(self):\n    if x:\n        return 2\n    return 1\n",
+                }),
+                &test_ctx(),
+            )
+            .await;
+        assert!(!res.is_error, "{}", res.content);
+        assert!(res.content.contains("normalised match"), "{}", res.content);
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "class A:\r\n    def f(self):\r\n        if x:\r\n            return 2\r\n        return 1\r\n"
+        );
     }
 }

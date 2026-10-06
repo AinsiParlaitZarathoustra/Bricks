@@ -25,13 +25,49 @@ tempfile = { workspace = true }
 default = []
 graph = ["grafeo"]
 embed = ["dep:cersei-embeddings"]
+# Long-term structured memory: episodes, entities, temporal facts, hybrid
+# recall (Grafeo store + vector projection + LLM extraction via providers).
+structured = ["graph", "embed", "dep:cersei-provider", "dep:sha2", "dep:toml", "dep:thiserror", "dep:grafeo-core"]
+
+[dependencies.cersei-provider]
+workspace = true
+optional = true
+
+[dependencies.tokio-util]
+workspace = true
+
+[dependencies.thiserror]
+workspace = true
+optional = true
+
+[dependencies.sha2]
+workspace = true
+optional = true
+
+[dependencies.toml]
+workspace = true
+optional = true
 
 [dependencies.grafeo]
 version = "0.5"
 optional = true
 default-features = false
-features = ["gql", "grafeo-file", "wal"]
+features = ["lpg", "gql", "grafeo-file", "wal", "text-index"]
+
+# Same version as `grafeo` uses: native adjacency reads (`Direction`).
+[dependencies.grafeo-core]
+version = "0.5"
+optional = true
+default-features = false
+features = ["lpg"]
 
 [dependencies.cersei-embeddings]
 workspace = true
 optional = true
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[[example]]
+name = "measure_memory"
+required-features = ["structured"]

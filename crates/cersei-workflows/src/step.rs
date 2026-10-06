@@ -25,7 +25,10 @@ pub enum StepOutcome {
     /// The step is awaiting external input; the run suspends here. `resume_schema`
     /// describes the data `Workflow::resume` must supply; `payload` is surfaced to
     /// the caller (e.g. a form spec for a human-in-the-loop pause).
-    Suspended { resume_schema: Value, payload: Value },
+    Suspended {
+        resume_schema: Value,
+        payload: Value,
+    },
 }
 
 impl StepOutcome {
@@ -59,7 +62,9 @@ impl StepContext {
     /// Replace the shared state and emit a `StateUpdated` event.
     pub fn set_state(&self, value: Value) {
         *self.state.lock() = value.clone();
-        let _ = self.events.try_send(WorkflowEvent::StateUpdated { state: value });
+        let _ = self
+            .events
+            .try_send(WorkflowEvent::StateUpdated { state: value });
     }
 }
 

@@ -37,10 +37,6 @@ pub struct QueryVariants {
 }
 
 impl QueryVariants {
-    pub fn is_empty(&self) -> bool {
-        self.lex.is_empty() && self.vec.is_empty() && self.hyde.trim().is_empty()
-    }
-
     /// All free-text semantic rephrasings — union of `vec` variants and the
     /// HyDE passage. Useful for embedding-based multi-query retrieval.
     pub fn semantic_variants(&self) -> Vec<String> {
@@ -59,9 +55,16 @@ pub fn looks_vague(query: &str) -> bool {
     let q = query.trim();
     // ≥ 80 chars OR a question word that implies synthesis (Omega's rule).
     q.len() >= 80
-        || ["which", "what kinds", "how many", "how did", "recommend", "suggest"]
-            .iter()
-            .any(|w| q.to_ascii_lowercase().contains(w))
+        || [
+            "which",
+            "what kinds",
+            "how many",
+            "how did",
+            "recommend",
+            "suggest",
+        ]
+        .iter()
+        .any(|w| q.to_ascii_lowercase().contains(w))
 }
 
 /// Run a single LLM call to produce `QueryVariants`. On parse / transport
@@ -164,7 +167,8 @@ mod tests {
 
     #[test]
     fn extracts_from_chatty_model() {
-        let raw = "Sure! Here are the variants:\n{\"lex\":[\"x y\"],\"vec\":[],\"hyde\":\"\"}\nDone.";
+        let raw =
+            "Sure! Here are the variants:\n{\"lex\":[\"x y\"],\"vec\":[],\"hyde\":\"\"}\nDone.";
         let v = parse_variants_json(raw).unwrap();
         assert_eq!(v.lex, vec!["x y"]);
     }

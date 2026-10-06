@@ -1,0 +1,1 @@
+{"service":"billing","version":"2.4.1","limits":{"max_retries":3,"timeout_seconds":30},"regions":["eu-west","us-east"],"deprecated":false}

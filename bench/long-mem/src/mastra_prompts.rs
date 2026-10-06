@@ -326,10 +326,6 @@ pub const OBSERVER_GUIDELINES: &str = r#"- Be specific enough for the assistant 
 - If the user provides detailed messages or code snippets, observe all important details"#;
 
 // ─── Observation context injection (for the answerer) ────────────────────────
-// From: constants.ts :: OBSERVATION_CONTEXT_PROMPT
-pub const OBSERVATION_CONTEXT_PROMPT: &str =
-    "The following observations block contains your memory of past conversations with this user.";
-
 // From: constants.ts :: OBSERVATION_CONTEXT_INSTRUCTIONS
 // THIS is the gold nugget for LongMemEval — the "KNOWLEDGE UPDATES" and
 // "PLANNED ACTIONS" clauses directly address knowledge-update and
@@ -380,18 +376,6 @@ User messages are extremely important. If the user asks a question or gives a ne
     )
 }
 
-/// Wrap retrieved observation text with Mastra's context preamble + the
-/// retrieval instructions. Follows the exact pattern from Mastra's
-/// `constants.ts` docstring: `${OBSERVATION_CONTEXT_PROMPT}\n\n<observations>\n${obs}\n</observations>\n\n${OBSERVATION_CONTEXT_INSTRUCTIONS}`.
-pub fn wrap_observations_for_answerer(observations: &str) -> String {
-    format!(
-        "{preamble}\n\n<observations>\n{obs}\n</observations>\n\n{instructions}",
-        preamble = OBSERVATION_CONTEXT_PROMPT,
-        obs = observations,
-        instructions = OBSERVATION_CONTEXT_INSTRUCTIONS,
-    )
-}
-
 /// Extract text between `<observations>` and `</observations>` tags from an
 /// Observer LLM response. If the tag is missing, fall back to the raw text.
 pub fn parse_observations_block(raw: &str) -> String {
@@ -418,15 +402,6 @@ mod tests {
         assert!(s.contains("COMPLETION TRACKING"));
         assert!(s.contains("=== OUTPUT FORMAT ==="));
         assert!(s.contains("=== GUIDELINES ==="));
-    }
-
-    #[test]
-    fn context_wrap_roundtrip() {
-        let wrapped = wrap_observations_for_answerer("* 🔴 User likes dark mode");
-        assert!(wrapped.contains("The following observations block"));
-        assert!(wrapped.contains("<observations>\n* 🔴 User likes dark mode\n</observations>"));
-        assert!(wrapped.contains("KNOWLEDGE UPDATES"));
-        assert!(wrapped.contains("PLANNED ACTIONS"));
     }
 
     #[test]

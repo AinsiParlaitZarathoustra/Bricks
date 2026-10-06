@@ -1,0 +1,354 @@
+# Bricks providers configuration — annotated example.
+#
+# Copy to ~/.bricks/providers.toml (or pass any .toml/.json path explicitly) and
+# edit. This file is the ONLY catalogue of providers and models: nothing is
+# built in and nothing is guessed from a model name. Select a model as
+# `provider_id/model_id`, for example `acme/fast`.
+#
+# Every endpoint, limit, price and parameter below is ILLUSTRATIVE. Check your
+# provider's current documentation before relying on any of them. Limits are
+# declarative: they never change what the server enforces. A price you leave out
+# is "unknown", never "free".
+#
+# Keys: always reference an environment variable with `api_key_env`. An inline
+# `api_key = "..."` works for a purely local setup but must never be committed or
+# copied into a fixture. This file contains no secret.
+#
+# Reasoning profiles are yours to define. The names (`low`, `deep`, `ultra`, …)
+# are only local labels; what reaches the server is exactly the profile's
+# `parameters`. Nothing here validates the values: the server is the authority.
+
+schema_version = 1
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. The contract example: two models in one provider, one of them overriding
+#    the protocol. Fictional endpoint, limits and prices.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[providers]]
+id = "custom"
+name = "Mon fournisseur"
+endpoint = "https://api.example.com/v1"       # base: may already carry /v1 or a gateway prefix
+protocol = "chat_completions"                 # default protocol of this provider's models
+auth = "bearer"                               # bearer | api_key_header | none
+api_key_env = "BRICKS_CUSTOM_API_KEY"
+
+[[providers.models]]
+id = "flash"                                  # local id, unique within the provider
+name = "Mon modèle Flash"
+api_model = "vendor-flash"                    # sent to the server exactly as written
+input_modalities = ["text", "image"]
+output_modalities = ["text"]
+streaming = true
+tool_calls = true
+
+[providers.models.limits]
+max_input_tokens = 96000
+max_output_tokens = 32000
+context_window_tokens = 128000                # optional: window shared by input and output
+
+[providers.models.pricing]                    # USD per million tokens, as exact decimals
+currency = "USD"
+per_tokens = 1000000
+input = "0.30"
+output = "1.20"
+cache_read = "0.03"
+cache_write = "0.40"
+
+[providers.models.reasoning]
+default = "approfondi"
+
+[[providers.models.reasoning.profiles]]
+id = "rapide"
+label = "Rapide"
+parameters = { reasoning_effort = "low" }
+
+[[providers.models.reasoning.profiles]]
+id = "approfondi"
+label = "Approfondi"
+parameters = { reasoning_effort = "high" }
+
+[[providers.models]]
+id = "expert"
+name = "Mon modèle Expert"
+api_model = "vendor-expert"
+protocol = "responses"                        # overrides the provider's protocol for this model
+input_modalities = ["text"]
+output_modalities = ["text"]
+streaming = true
+tool_calls = true
+
+[providers.models.limits]
+max_input_tokens = 64000
+max_output_tokens = 16000
+
+[providers.models.reasoning]
+profiles = []                                 # no profile is exposed for this model
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. protocol = "chat_completions"  (POST <endpoint>/chat/completions)
+#    Includes the knobs some servers need under `compat`.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[providers]]
+id = "chat-example"
+name = "Chat Completions server"
+endpoint = "https://chat.example.com/v1"
+protocol = "chat_completions"
+auth = "bearer"
+api_key_env = "BRICKS_CHAT_EXAMPLE_KEY"
+
+[providers.compat]
+max_tokens_field = "max_completion_tokens"    # default "max_tokens"
+# reasoning_field = "reasoning_content"       # also echo reasoning back on tool-call turns
+# stream_usage = false                        # drop stream_options for servers that reject it
+
+[[providers.models]]
+id = "reasoner"
+name = "Reasoning model"
+api_model = "vendor-reasoner"
+input_modalities = ["text", "image", "audio", "document"]
+document_mime_types = ["application/pdf"]     # required when `document` is an input modality
+output_modalities = ["text"]
+streaming = true
+tool_calls = true
+remove_parameters = ["/temperature"]          # the engine sets one; this server rejects it
+
+[providers.models.limits]
+max_input_tokens = 200000
+max_output_tokens = 64000
+
+[providers.models.reasoning]
+default = "medium"
+
+[[providers.models.reasoning.profiles]]
+id = "off"
+label = "No reasoning"
+parameters = { reasoning_effort = "none" }    # defines the *real* way this server disables it
+
+[[providers.models.reasoning.profiles]]
+id = "medium"
+parameters = { reasoning_effort = "medium" }
+
+[[providers.models.reasoning.profiles]]
+id = "ultra"                                  # a local alias; the server never sees "ultra"
+parameters = { reasoning_effort = "high", max_completion_tokens = 60000 }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. protocol = "responses"  (POST <endpoint>/responses)
+#    Reasoning items are echoed back automatically for stateless multi-turn use;
+#    ask the server for them with `include`.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[providers]]
+id = "responses-example"
+name = "Responses server"
+endpoint = "https://responses.example.com/v1"
+protocol = "responses"
+auth = "bearer"
+api_key_env = "BRICKS_RESPONSES_EXAMPLE_KEY"
+
+[[providers.models]]
+id = "agent"
+name = "Agentic model"
+api_model = "vendor-agent"
+input_modalities = ["text", "image", "document"]
+document_mime_types = ["application/pdf", "text/*"]
+output_modalities = ["text"]
+streaming = true
+tool_calls = true
+
+[providers.models.limits]
+max_input_tokens = 400000
+max_output_tokens = 128000
+
+[providers.models.parameters]                 # sent with every request for this model
+store = false
+include = ["reasoning.encrypted_content"]
+reasoning = { summary = "auto" }              # merged with the profile's `reasoning` below
+
+[providers.models.reasoning]
+default = "standard"
+
+[[providers.models.reasoning.profiles]]
+id = "standard"
+parameters = { reasoning = { effort = "medium" } }
+
+[[providers.models.reasoning.profiles]]
+id = "deep"
+parameters = { reasoning = { effort = "high" } }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. protocol = "anthropic_messages"  (POST <endpoint>/messages)
+#    The adapter never decides on thinking: profiles do. Thinking blocks and
+#    their signatures are preserved and re-sent as the protocol requires.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[providers]]
+id = "messages-example"
+name = "Messages server"
+endpoint = "https://messages.example.com/v1"
+protocol = "anthropic_messages"
+auth = "api_key_header"                       # sends `x-api-key` (override with auth_header)
+api_key_env = "BRICKS_MESSAGES_EXAMPLE_KEY"
+# headers = { "anthropic-version" = "2023-06-01" }   # this required header is added for you
+
+[[providers.models]]
+id = "thinker"
+name = "Thinking model"
+api_model = "vendor-thinker"
+input_modalities = ["text", "image", "document"]
+document_mime_types = ["application/pdf", "text/plain"]
+output_modalities = ["text"]
+streaming = true
+tool_calls = true
+
+[providers.models.limits]
+max_input_tokens = 200000
+max_output_tokens = 64000
+
+[providers.models.pricing]
+currency = "USD"
+per_tokens = 1000000
+input = "3.00"
+output = "15.00"
+cache_read = "0.30"
+cache_write = "3.75"                          # generic cache-write price
+[providers.models.pricing.cache_write_variants]
+"1h" = "6.00"                                 # priced separately when the API reports it
+
+[providers.models.token_counting]             # opt-in pre-flight counting (POST <endpoint>/messages/count_tokens)
+# path = "messages/count_tokens"              # default: the protocol's documented route
+
+[providers.models.reasoning]
+default = "adaptive"
+
+[[providers.models.reasoning.profiles]]
+id = "off"
+label = "Thinking off"
+parameters = { thinking = { type = "disabled" } }
+
+[[providers.models.reasoning.profiles]]
+id = "adaptive"
+label = "Adaptive"
+parameters = { thinking = { type = "adaptive" }, output_config = { effort = "high" } }
+
+[[providers.models.reasoning.profiles]]
+id = "budgeted"
+label = "Fixed budget"
+parameters = { thinking = { type = "enabled", budget_tokens = 8000 } }
+remove = ["/temperature"]                     # this mode rejects sampling parameters
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. A local server: no credentials. Free-form `parameters` carry server options.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[providers]]
+id = "local"
+name = "Local server"
+endpoint = "http://localhost:11434/v1"
+protocol = "chat_completions"
+auth = "none"
+
+[[providers.models]]
+id = "coder"
+name = "Local coder"
+api_model = "your-local-model:7b"
+streaming = true
+tool_calls = true
+
+[providers.models.limits]
+max_input_tokens = 32000
+max_output_tokens = 8000
+
+[providers.models.parameters]
+options = { num_ctx = 32768 }                 # a server option, passed through untouched
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. One provider, three protocols: some servers expose several formats. A model
+#    that overrides the protocol gets that protocol's path and conventions
+#    (here: /messages with `x-api-key` and the anthropic-version header), never
+#    the provider's. Named price variants model peak/off-peak tariffs.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[providers]]
+id = "multi"
+name = "Multi-format server"
+endpoint = "https://api.multi.example.com"
+protocol = "chat_completions"
+auth = "bearer"
+api_key_env = "BRICKS_MULTI_KEY"
+
+[[providers.models]]
+id = "flash-chat"
+name = "Flash (chat completions)"
+api_model = "multi-flash"
+streaming = true
+tool_calls = true
+
+[providers.models.limits]
+max_input_tokens = 128000
+max_output_tokens = 32000
+
+[providers.models.pricing]
+currency = "USD"
+per_tokens = 1000000
+input = "0.14"
+output = "0.28"
+cache_read = "0.014"
+[providers.models.pricing.variants.offpeak]   # a complete alternative tariff (nothing inherited)
+input = "0.07"
+output = "0.14"
+cache_read = "0.007"
+
+[[providers.models]]
+id = "flash-responses"
+name = "Flash (responses)"
+api_model = "multi-flash"
+protocol = "responses"
+streaming = true
+tool_calls = true
+
+[providers.models.limits]
+max_input_tokens = 128000
+max_output_tokens = 32000
+
+[[providers.models]]
+id = "flash-messages"
+name = "Flash (messages)"
+api_model = "multi-flash"
+protocol = "anthropic_messages"
+streaming = true
+tool_calls = true
+
+[providers.models.limits]
+max_input_tokens = 128000
+max_output_tokens = 32000
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7. A gateway: prefix and query string are preserved; `path` replaces the
+#    protocol's relative path (a leading `v1/` is not doubled when the endpoint
+#    already ends in /v1).
+# ─────────────────────────────────────────────────────────────────────────────
+
+[[providers]]
+id = "gateway"
+name = "Corporate gateway"
+endpoint = "https://gw.example.com/team-a/openai?api-version=2025-01-01"
+protocol = "chat_completions"
+auth = "api_key_header"
+auth_header = "api-key"
+api_key_env = "BRICKS_GATEWAY_KEY"
+path = "deployments/my-deployment/chat/completions"
+headers = { "x-team" = "team-a" }             # static, non-secret request headers
+
+[[providers.models]]
+id = "deployed"
+name = "Deployed model"
+api_model = "my-deployment"
+streaming = true
+tool_calls = true
+
+[providers.models.limits]
+max_input_tokens = 128000
+max_output_tokens = 16000

@@ -1,0 +1,28 @@
+• Packages in scope: web, docs, ui, config
+• Running build in 4 packages
+• Remote caching disabled
+ui:build: cache hit, replaying logs 3f2a1bui
+ui:build: 
+ui:build: > ui@0.0.0 build /work/packages/ui
+ui:build: > tsc
+config:build: cache hit, replaying logs 3f2a1bconfig
+config:build: 
+config:build: > config@0.0.0 build /work/packages/config
+config:build: > tsc
+docs:build: cache hit, replaying logs 3f2a1bdocs
+docs:build: 
+docs:build: > docs@0.0.0 build /work/packages/docs
+docs:build: > tsc
+web:build: cache miss, executing 9c8d7e6f
+web:build: > web@0.1.0 build /work/apps/web
+web:build: > tsc
+web:build: src/app.ts(14,3): error TS2322: Type 'number' is not assignable to type 'string'.
+web:build: ERROR: command finished with error: command (/work/apps/web) pnpm run build exited (2)
+web#build: command (/work/apps/web) pnpm run build exited (2)
+
+ Tasks:    3 successful, 4 total
+Cached:    3 cached, 4 total
+  Time:    2.811s
+Failed:    web#build
+
+ ERROR  run failed: command  exited (2)

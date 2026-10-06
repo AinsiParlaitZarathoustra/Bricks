@@ -1,0 +1,9 @@
+vite v5.2.11 building for production...
+transforming...
+✓ 12 modules transformed.
+x Build failed in 312ms
+error during build:
+[vite]: Rollup failed to resolve import "@/missing/module" from "/work/app/src/main.ts".
+This is most likely unintended because it can break your application at runtime.
+    at viteWarn (file:///work/app/node_modules/vite/dist/node/chunks/dep.js:67012:27)
+    at onwarn (file:///work/app/node_modules/vite/dist/node/chunks/dep.js:66810:13)

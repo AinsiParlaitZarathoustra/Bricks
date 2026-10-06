@@ -62,10 +62,6 @@ impl AuditLogger {
             call_count: Arc::new(AtomicU32::new(0)),
         }
     }
-
-    fn total_calls(&self) -> u32 {
-        self.call_count.load(Ordering::Relaxed)
-    }
 }
 
 #[async_trait]
@@ -142,10 +138,15 @@ impl Hook for ToolBlocker {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let audit = Arc::new(AuditLogger::new());
-    let audit_clone = Arc::clone(&audit);
+    let _audit_clone = Arc::clone(&audit);
 
     let agent = Agent::builder()
-        .provider(Anthropic::from_env()?)
+        .provider(cersei::provider_from_config(
+            None,
+            &std::env::args()
+                .nth(1)
+                .expect("usage: <example> provider_id/model_id  (see docs/providers.md)"),
+        )?)
         .tools(cersei::tools::coding())
         .system_prompt("You are a helpful coding assistant. Be concise.")
         .max_turns(5)

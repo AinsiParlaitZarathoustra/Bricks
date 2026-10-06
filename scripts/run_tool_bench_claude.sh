@@ -9,7 +9,7 @@
 #   4. Subcommand latency
 #   5. Tool I/O dispatch (SDK-level)
 #
-# Requires: abstract (cargo install --path crates/abstract-cli)
+# Requires: abstract (binary in PATH)
 #           claude   (optional — skipped if not in PATH)
 
 set -e
@@ -50,7 +50,7 @@ echo ""
 
 if ! $HAS_ABSTRACT; then
     echo -e "${RED}abstract not found in PATH.${RESET}"
-    echo "Install with: cargo install --path crates/abstract-cli"
+    echo "Install the abstract binary and make sure it is in PATH."
     exit 1
 fi
 
@@ -199,15 +199,10 @@ fi
 if $FULL; then
     echo ""
     echo -e "${CYAN}[6] Memory Architecture${RESET}"
-    echo -e "${DIM}    Abstract internal (Cersei SDK) vs Claude Code (external measurement)${RESET}"
+    echo -e "${DIM}    Claude Code (external measurement)${RESET}"
     echo ""
 
-    # 6a. Abstract internal memory benchmark
-    echo -e "  ${DIM}--- Abstract (Cersei SDK, in-process) ---${RESET}"
-    cargo run --release -p abstract-cli --example memory_bench 2>&1 | grep -E "^\s+(Scan|Recall|Build|Load|Session|Graph|should)" | head -25
-    echo ""
-
-    # 6b. Claude Code memory measurements (real, external)
+    # Claude Code memory measurements (real, external)
     if $HAS_CLAUDE; then
         echo -e "  ${DIM}--- Claude Code (external measurement) ---${RESET}"
 
@@ -434,4 +429,3 @@ fi
 
 echo ""
 echo -e "${GREEN}Benchmark complete.${RESET}"
-echo -e "${DIM}Full report: crates/abstract-cli/benchmarks/REPORT.md${RESET}"

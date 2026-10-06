@@ -32,14 +32,33 @@ impl Tool for FileWriteTool {
         })
     }
 
-    async fn execute(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Input {
-            file_path: String,
-            content: String,
-        }
+    async fn preview(
+        &self,
+        input: &Value,
+        _ctx: &ToolContext,
+    ) -> Option<crate::preview::ChangePreview> {
+        let input: Input = match crate::tool_feedback::parse_input(self, input) {
+            Ok(i) => i,
+            Err(e) => return Some(crate::preview::ChangePreview::refused(e.content)),
+        };
+        let path = std::path::Path::new(&input.file_path);
+        let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+        let before = match std::fs::read(&absolute) {
+            Ok(bytes) => Some(String::from_utf8_lossy(&bytes).into_owned()),
+            Err(_) => None,
+        };
+        Some(crate::preview::ChangePreview {
+            files: vec![crate::preview::file_change(
+                &input.file_path,
+                &absolute,
+                before.as_deref(),
+                Some(&input.content),
+            )],
+            refusal: None,
+        })
+    }
 
+    async fn execute(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
         let input: Input = match crate::tool_feedback::parse_input(self, &input) {
             Ok(i) => i,
             Err(e) => return e,
@@ -53,4 +72,11 @@ impl Tool for FileWriteTool {
             Err(e) => ToolResult::error(format!("Failed to write file: {}", e)),
         }
     }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Input {
+    file_path: String,
+    content: String,
 }

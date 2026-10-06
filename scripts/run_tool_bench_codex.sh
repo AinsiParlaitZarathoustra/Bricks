@@ -11,7 +11,7 @@
 #   6. Memory architecture
 #   7. Agentic benchmark
 #
-# Requires: abstract (cargo install --path crates/abstract-cli)
+# Requires: abstract (binary in PATH)
 #           codex   (npm i -g @openai/codex)
 
 set -e
@@ -63,7 +63,7 @@ echo ""
 
 if ! $HAS_ABSTRACT; then
     echo -e "${RED}abstract not found in PATH.${RESET}"
-    echo "Install with: cargo install --path crates/abstract-cli"
+    echo "Install the abstract binary and make sure it is in PATH."
     exit 1
 fi
 
@@ -227,11 +227,7 @@ fi
 if $FULL; then
     echo ""
     echo -e "${CYAN}[6] Memory Architecture${RESET}"
-    echo -e "${DIM}    Abstract internal (Cersei SDK) vs Codex (external measurement)${RESET}"
-    echo ""
-
-    echo -e "  ${DIM}--- Abstract (Cersei SDK, in-process) ---${RESET}"
-    cd "$SCRIPT_DIR" && cargo run --release -p abstract-cli --example memory_bench 2>&1 | grep -E "^\s+(Scan|Recall|Build|Load|Session|Graph|should)" | head -25
+    echo -e "${DIM}    Codex (external measurement)${RESET}"
     echo ""
 
     if $HAS_CODEX; then
@@ -367,4 +363,3 @@ fi
 
 echo ""
 echo -e "${GREEN}Benchmark complete.${RESET}"
-echo -e "${DIM}Full report: crates/abstract-cli/benchmarks/REPORT.md${RESET}"

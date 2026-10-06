@@ -14,7 +14,11 @@ pub struct Program {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
     /// `$name = value`
-    Assign { name: String, value: Expr, span: Span },
+    Assign {
+        name: String,
+        value: Expr,
+        span: Span,
+    },
     /// A bare expression evaluated for its side effects / final value.
     Expr(Expr),
 }
@@ -23,7 +27,10 @@ pub enum Stmt {
 pub enum Expr {
     Literal(Literal),
     /// `$name`
-    Var { name: String, span: Span },
+    Var {
+        name: String,
+        span: Span,
+    },
     /// A call, optionally followed by chained `.method(...)` tails.
     Chain(Chain),
 }
@@ -49,7 +56,11 @@ pub struct Call {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Arg {
     Positional(Expr),
-    Named { name: String, value: Expr, span: Span },
+    Named {
+        name: String,
+        value: Expr,
+        span: Span,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]

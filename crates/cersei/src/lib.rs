@@ -12,7 +12,8 @@
 //! use cersei::prelude::*;
 //!
 //! let output = Agent::builder()
-//!     .provider(Anthropic::from_env()?)
+//!     // Models come from ~/.bricks/providers.toml, selected as `provider_id/model_id`.
+//!     .provider(cersei::provider_from_config(None, "my-provider/my-model")?)
 //!     .tools(cersei::tools::coding())
 //!     .run_with("Fix the failing tests")
 //!     .await?;
@@ -26,6 +27,10 @@ pub use cersei_agent::events::{
 };
 pub use cersei_agent::reporters;
 pub use cersei_agent::{Agent, AgentBuilder, AgentOutput, Reporter};
+#[cfg(feature = "agentlang")]
+pub use cersei_agentlang as agentlang;
+#[cfg(feature = "agentrl")]
+pub use cersei_agentrl as agentrl;
 pub use cersei_hooks as hooks;
 pub use cersei_mcp as mcp;
 pub use cersei_memory as memory;
@@ -34,17 +39,14 @@ pub use cersei_tools as tools;
 pub use cersei_types as types;
 #[cfg(feature = "vms")]
 pub use cersei_vms as vms;
-#[cfg(feature = "agentlang")]
-pub use cersei_agentlang as agentlang;
-#[cfg(feature = "agentrl")]
-pub use cersei_agentrl as agentrl;
 #[cfg(feature = "workflows")]
 pub use cersei_workflows as workflows;
 
-// Convenience re-exports for common providers
-pub use cersei_provider::anthropic::Anthropic;
-pub use cersei_provider::gemini::Gemini;
-pub use cersei_provider::openai::OpenAi;
+// Providers are configuration, not types: load a registry and resolve
+// `provider_id/model_id` (see `docs/providers.md`).
+pub use cersei_provider::{
+    provider_from_config, ConfiguredProvider, ProviderRegistry, ResolvedModel,
+};
 
 /// The prelude — import this for the most common types.
 pub mod prelude {
@@ -53,8 +55,8 @@ pub mod prelude {
     pub use crate::{AgentEvent, AgentStream, Reporter};
 
     // Providers
-    pub use crate::provider::{Auth, CompletionRequest, Provider, ProviderOptions};
-    pub use crate::{Anthropic, Gemini, OpenAi};
+    pub use crate::provider::{CompletionRequest, Provider, ProviderOptions};
+    pub use crate::{provider_from_config, ConfiguredProvider, ProviderRegistry};
 
     // Types
     pub use cersei_types::{

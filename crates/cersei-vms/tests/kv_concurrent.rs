@@ -10,7 +10,8 @@ async fn concurrent_writes_serialize_versions() {
     for i in 0..32 {
         let kv = kv.clone();
         handles.push(tokio::spawn(async move {
-            kv.set(format!("k{i}"), format!("v{i}").into_bytes()).unwrap();
+            kv.set(format!("k{i}"), format!("v{i}").into_bytes())
+                .unwrap();
         }));
     }
     for h in handles {

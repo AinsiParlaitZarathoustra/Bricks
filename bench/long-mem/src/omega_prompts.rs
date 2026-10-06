@@ -192,7 +192,8 @@ mod tests {
     fn enhanced_has_step_scaffolding() {
         assert!(RAG_PROMPT_ENHANCED.contains("STEP 1 — Scan ALL notes"));
         assert!(RAG_PROMPT_ENHANCED.contains("STEP 2 — If the topic appears in multiple notes"));
-        assert!(RAG_PROMPT_ENHANCED.contains("STEP 3 — Answer using ONLY the value from the latest note"));
+        assert!(RAG_PROMPT_ENHANCED
+            .contains("STEP 3 — Answer using ONLY the value from the latest note"));
         assert!(RAG_PROMPT_ENHANCED.contains("SUPERSEDED and WRONG"));
     }
 
@@ -205,7 +206,9 @@ mod tests {
 
     #[test]
     fn preference_forbids_generic_advice() {
-        assert!(RAG_PROMPT_PREFERENCE.contains("Generic advice that could apply to anyone is WRONG"));
+        assert!(
+            RAG_PROMPT_PREFERENCE.contains("Generic advice that could apply to anyone is WRONG")
+        );
         assert!(RAG_PROMPT_PREFERENCE.contains("reference at least one specific detail"));
     }
 

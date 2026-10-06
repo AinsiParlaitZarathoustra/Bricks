@@ -1,0 +1,11 @@
+Traceback (most recent call last):
+  File "<string>", line 4, in <module>
+    a('missing')
+    ~^^^^^^^^^^^
+  File "<string>", line 2, in a
+    def a(x): return b(x)
+                     ~^^^
+  File "<string>", line 3, in b
+    def b(x): return {'k': 1}[x]
+                     ~~~~~~~~^^^
+KeyError: 'missing'

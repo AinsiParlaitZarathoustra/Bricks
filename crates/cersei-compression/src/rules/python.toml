@@ -1,0 +1,58 @@
+schema_version = 1
+
+[filters.pytest]
+description = "pytest: session header removed, passing tests summarised; FAILURES sections, tracebacks and the short summary kept."
+match = [{ program = "pytest" }, { program = "py.test" }]
+options_with_value = ["-k", "-m", "-p", "-c", "--rootdir", "--maxfail", "-n", "--tb", "-o"]
+strip_lines_matching = ['^platform \S+ -- Python', '^(rootdir|plugins|cachedir|configfile|testpaths):', '^collecting \.\.\.', '^\s*$']
+summarize_lines = [{ pattern = '::\S+ PASSED(\s+\[\s*\d+%\])?$', label = "passing tests" }]
+protect_lines = ['^=+ .*(passed|failed|error|skipped).* =+$', '^=+ short test summary info =+$']
+head_lines = 20
+tail_lines = 80
+max_lines = 300
+
+[filters.uv]
+description = "uv package commands: resolution timing lines removed, package changes summarised; resolver errors kept."
+match = [{ program = "uv", subcommands = ["pip", "sync", "add", "remove", "lock", "venv", "tool", "python", "build", "publish", "export"] }]
+options_with_value = ["-p", "--python", "--directory", "--project", "--index", "--index-url", "--extra-index-url", "-r", "--requirements"]
+strip_lines_matching = [
+    '^(Resolved|Prepared|Audited|Checked|Downloaded|Built|Bytecode compiled|Uninstalled) \d+ packages? in ',
+    '^Using (CPython|Python|PyPy) ',
+    '^Creating virtual environment at:',
+    '^Activate with: ',
+    '^\s*(Downloading|Building|Built) \S+',
+    '^\s*$',
+]
+summarize_lines = [{ pattern = '^ [+-~] \S+==\S+', label = "package changes" }]
+protect_lines = ['^Installed \d+ packages? in ']
+max_lines = 150
+
+[filters.pip-install]
+description = "`pip install`: download progress and already-satisfied lines removed."
+match = [{ program = "pip", subcommands = ["install", "uninstall"] }, { program = "pip3", subcommands = ["install", "uninstall"] }]
+strip_lines_matching = [
+    '^Requirement already satisfied: ',
+    '^\s*(Downloading|Collecting|Using cached|Obtaining|Preparing metadata|Getting requirements|Building wheel|Created wheel|Stored in directory)\b',
+    '^\s*━+',
+    '^\s*$',
+]
+max_lines = 150
+
+[filters.ruff]
+description = "ruff check/format: every diagnostic kept with its code frame; summaries kept."
+match = [{ program = "ruff" }]
+options_with_value = ["--config", "--select", "--ignore", "--extend-select", "--output-format", "--target-version", "--line-length"]
+diagnostic_blocks = [
+    { start = '^\S+:\d+:\d+: [A-Z]+\d+ ', end = "blank", severity = "error", kind = "ruff diagnostic", max_lines = 40 },
+    { start = '^Would reformat: ', severity = "warning", kind = "unformatted file" },
+]
+protect_lines = ['^Found \d+ errors?', 'fixable with the `--fix` option', '^All checks passed!', '\d+ files? (would be )?(reformatted|left unchanged)']
+max_lines = 400
+
+[filters.mypy]
+description = "mypy: every error and its notes kept; the summary kept."
+match = [{ program = "mypy" }, { program = "dmypy" }]
+options_with_value = ["--config-file", "-p", "--package", "-m", "--module", "--python-version"]
+diagnostic_blocks = [{ start = '^\S+:\d+(:\d+)?: error: ', severity = "error", kind = "mypy error" }]
+protect_lines = ['^\S+:\d+(:\d+)?: note: ', '^Found \d+ errors? in ', '^Success: no issues found']
+max_lines = 400

@@ -18,6 +18,8 @@ pub struct PermissionRequest {
     pub permission_level: PermissionLevel,
     pub description: String,
     pub id: String,
+    /// The file changes the call would make, when the tool can preview them.
+    pub preview: Option<crate::preview::ChangePreview>,
 }
 
 #[derive(Debug, Clone)]

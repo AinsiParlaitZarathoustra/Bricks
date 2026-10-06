@@ -1,0 +1,24 @@
+# Providers file for the demo server (scripts/demo_model.py). No key: the
+# server is local and `auth = "none"`.
+schema_version = 1
+
+[[providers]]
+id = "demo"
+name = "Local demo server"
+endpoint = "http://127.0.0.1:8765/v1"
+protocol = "chat_completions"
+auth = "none"
+
+[[providers.models]]
+id = "scripted"
+name = "Scripted demo model"
+api_model = "demo"
+streaming = true
+tool_calls = true
+
+[providers.models.limits]
+max_input_tokens = 100000
+max_output_tokens = 4096
+
+[providers.models.reasoning]
+profiles = [{ id = "fast" }, { id = "deep" }]

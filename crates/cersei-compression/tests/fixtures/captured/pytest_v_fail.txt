@@ -1,0 +1,72 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.5, pytest-9.0.3, pluggy-1.6.0 -- /Library/Frameworks/Python.framework/Versions/3.14/bin/python3
+cachedir: .pytest_cache
+rootdir: /work/py
+plugins: cov-7.1.0, xdist-3.8.0
+collecting ... collected 33 items
+
+test_calc.py::test_add[0] PASSED                                         [  3%]
+test_calc.py::test_add[1] PASSED                                         [  6%]
+test_calc.py::test_add[2] PASSED                                         [  9%]
+test_calc.py::test_add[3] PASSED                                         [ 12%]
+test_calc.py::test_add[4] PASSED                                         [ 15%]
+test_calc.py::test_add[5] PASSED                                         [ 18%]
+test_calc.py::test_add[6] PASSED                                         [ 21%]
+test_calc.py::test_add[7] PASSED                                         [ 24%]
+test_calc.py::test_add[8] PASSED                                         [ 27%]
+test_calc.py::test_add[9] PASSED                                         [ 30%]
+test_calc.py::test_add[10] PASSED                                        [ 33%]
+test_calc.py::test_add[11] PASSED                                        [ 36%]
+test_calc.py::test_add[12] PASSED                                        [ 39%]
+test_calc.py::test_add[13] PASSED                                        [ 42%]
+test_calc.py::test_add[14] PASSED                                        [ 45%]
+test_calc.py::test_add[15] PASSED                                        [ 48%]
+test_calc.py::test_add[16] PASSED                                        [ 51%]
+test_calc.py::test_add[17] PASSED                                        [ 54%]
+test_calc.py::test_add[18] PASSED                                        [ 57%]
+test_calc.py::test_add[19] PASSED                                        [ 60%]
+test_calc.py::test_add[20] PASSED                                        [ 63%]
+test_calc.py::test_add[21] PASSED                                        [ 66%]
+test_calc.py::test_add[22] PASSED                                        [ 69%]
+test_calc.py::test_add[23] PASSED                                        [ 72%]
+test_calc.py::test_add[24] PASSED                                        [ 75%]
+test_calc.py::test_add[25] PASSED                                        [ 78%]
+test_calc.py::test_add[26] PASSED                                        [ 81%]
+test_calc.py::test_add[27] PASSED                                        [ 84%]
+test_calc.py::test_add[28] PASSED                                        [ 87%]
+test_calc.py::test_add[29] PASSED                                        [ 90%]
+test_calc.py::test_keyerror FAILED                                       [ 93%]
+test_calc.py::test_assert_msg FAILED                                     [ 96%]
+test_calc.py::test_skip SKIPPED (pas encore)                             [100%]
+
+=================================== FAILURES ===================================
+________________________________ test_keyerror _________________________________
+
+    def test_keyerror():
+>       helper({"autre": 1})
+
+test_calc.py:14: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+d = {'autre': 1}
+
+    def helper(d):
+>       return d["clé"]
+               ^^^^^^^^
+E       KeyError: 'clé'
+
+test_calc.py:11: KeyError
+_______________________________ test_assert_msg ________________________________
+
+    def test_assert_msg():
+        values = [1, 2, 3]
+>       assert sum(values) == 7, "somme inattendue"
+E       AssertionError: somme inattendue
+E       assert 6 == 7
+E        +  where 6 = sum([1, 2, 3])
+
+test_calc.py:18: AssertionError
+=========================== short test summary info ============================
+FAILED test_calc.py::test_keyerror - KeyError: 'clé'
+FAILED test_calc.py::test_assert_msg - AssertionError: somme inattendue
+=================== 2 failed, 30 passed, 1 skipped in 0.02s ====================

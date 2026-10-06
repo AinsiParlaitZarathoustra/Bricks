@@ -1,11 +1,13 @@
 //! Stream accumulator: collects SSE stream events into a complete response.
 
 use cersei_types::*;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 /// Accumulates streaming events into content blocks.
 pub struct StreamAccumulator {
-    content_blocks: Vec<ContentBlock>,
+    /// Finished blocks keyed by stream index, so output order follows the
+    /// provider's indexes and unused indexes leave no placeholder block.
+    content_blocks: BTreeMap<usize, ContentBlock>,
     partial_text: HashMap<usize, String>,
     partial_json: HashMap<usize, String>,
     partial_thinking: HashMap<usize, String>,
@@ -29,7 +31,7 @@ pub struct StreamAccumulator {
 impl StreamAccumulator {
     pub fn new() -> Self {
         Self {
-            content_blocks: Vec::new(),
+            content_blocks: BTreeMap::new(),
             partial_text: HashMap::new(),
             partial_json: HashMap::new(),
             partial_thinking: HashMap::new(),
@@ -131,6 +133,10 @@ impl StreamAccumulator {
                             input,
                         }
                     }
+                    "redacted_thinking" => ContentBlock::RedactedThinking {
+                        // The opaque payload arrives on the start event (id slot).
+                        data: self.tool_use_ids.remove(&index).unwrap_or_default(),
+                    },
                     "thinking" => ContentBlock::Thinking {
                         thinking: self.partial_thinking.remove(&index).unwrap_or_default(),
                         // Captured from `signature_delta` events. When the
@@ -143,13 +149,15 @@ impl StreamAccumulator {
                         text: self.partial_text.remove(&index).unwrap_or_default(),
                     },
                 };
-                // Ensure we have enough slots
-                while self.content_blocks.len() <= index {
-                    self.content_blocks.push(ContentBlock::Text {
-                        text: String::new(),
-                    });
-                }
-                self.content_blocks[index] = block;
+                self.content_blocks.insert(index, block);
+            }
+            StreamEvent::ProtocolItem {
+                index,
+                protocol,
+                item,
+            } => {
+                self.content_blocks
+                    .insert(index, ContentBlock::ProtocolItem { protocol, item });
             }
             StreamEvent::MessageDelta { stop_reason, usage } => {
                 if let Some(sr) = stop_reason {
@@ -204,7 +212,7 @@ impl StreamAccumulator {
             content: if self.content_blocks.is_empty() {
                 MessageContent::Text(String::new())
             } else {
-                MessageContent::Blocks(self.content_blocks)
+                MessageContent::Blocks(self.content_blocks.into_values().collect())
             },
             id: self.message_id,
             metadata: Some(MessageMetadata {
@@ -505,7 +513,9 @@ mod tests {
             "the model's exact bytes must survive so dispatch can echo them"
         );
         assert!(
-            input["__parse_error"].as_str().is_some_and(|e| !e.is_empty()),
+            input["__parse_error"]
+                .as_str()
+                .is_some_and(|e| !e.is_empty()),
             "the parse error must survive alongside the raw text: {input}"
         );
     }
@@ -551,5 +561,55 @@ mod tests {
             response.usage.output_tokens, 727,
             "output must be the cumulative snapshot, not start+delta (729)"
         );
+    }
+
+    /// Protocol items and redacted thinking occupy their own index; blocks are
+    /// ordered by index and unused indexes leave no placeholder behind.
+    #[test]
+    fn protocol_items_and_redacted_thinking_keep_order_without_placeholders() {
+        let mut acc = StreamAccumulator::new();
+        for ev in [
+            StreamEvent::MessageStart {
+                id: "m".into(),
+                model: "x".into(),
+                usage: None,
+            },
+            StreamEvent::ContentBlockStart {
+                index: 4,
+                block_type: "redacted_thinking".into(),
+                id: Some("OPAQUE".into()),
+                name: None,
+            },
+            StreamEvent::ContentBlockStop { index: 4 },
+            StreamEvent::ProtocolItem {
+                index: 1,
+                protocol: "responses".into(),
+                item: serde_json::json!({"type": "reasoning"}),
+            },
+            StreamEvent::ContentBlockStart {
+                index: 7,
+                block_type: "text".into(),
+                id: None,
+                name: None,
+            },
+            StreamEvent::TextDelta {
+                index: 7,
+                text: "hi".into(),
+            },
+            StreamEvent::ContentBlockStop { index: 7 },
+            StreamEvent::MessageStop,
+        ] {
+            acc.process_event(ev);
+        }
+        let r = acc.into_response().unwrap();
+        let MessageContent::Blocks(b) = &r.message.content else {
+            panic!()
+        };
+        assert_eq!(b.len(), 3, "{b:?}");
+        assert!(
+            matches!(&b[0], ContentBlock::ProtocolItem { protocol, .. } if protocol == "responses")
+        );
+        assert!(matches!(&b[1], ContentBlock::RedactedThinking { data } if data == "OPAQUE"));
+        assert!(matches!(&b[2], ContentBlock::Text { text } if text == "hi"));
     }
 }

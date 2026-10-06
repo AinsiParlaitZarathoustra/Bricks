@@ -44,10 +44,6 @@ impl GraphConfig {
 
 #[async_trait]
 impl Config for GraphConfig {
-    fn name(&self) -> &'static str {
-        "graph-substring"
-    }
-
     async fn ingest(&mut self, q: &Question) -> Result<()> {
         // Fresh in-memory graph per question — no cross-question bleed.
         let mem =

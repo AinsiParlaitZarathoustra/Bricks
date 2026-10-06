@@ -20,7 +20,11 @@ pub struct AgentStep {
 }
 
 impl AgentStep {
-    pub fn new(id: impl Into<String>, agent: Arc<Agent>, prompt_template: impl Into<String>) -> Self {
+    pub fn new(
+        id: impl Into<String>,
+        agent: Arc<Agent>,
+        prompt_template: impl Into<String>,
+    ) -> Self {
         Self {
             id: id.into(),
             agent,

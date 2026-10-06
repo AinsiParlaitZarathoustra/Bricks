@@ -214,7 +214,10 @@ impl Lexer {
             if c.is_ascii_digit() {
                 raw.push(c);
                 self.bump();
-            } else if c == '.' && !seen_dot && self.peek2().map(|d| d.is_ascii_digit()).unwrap_or(false) {
+            } else if c == '.'
+                && !seen_dot
+                && self.peek2().map(|d| d.is_ascii_digit()).unwrap_or(false)
+            {
                 seen_dot = true;
                 raw.push(c);
                 self.bump();

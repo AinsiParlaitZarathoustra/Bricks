@@ -116,10 +116,16 @@ impl WorkflowBuilder {
                     config: Value::Null,
                 },
             );
-            self.edges
-                .push(WorkflowEdge::new(par_id.clone(), step_node.clone(), EdgeKind::Fork));
-            self.edges
-                .push(WorkflowEdge::new(step_node, join_id.clone(), EdgeKind::Merge));
+            self.edges.push(WorkflowEdge::new(
+                par_id.clone(),
+                step_node.clone(),
+                EdgeKind::Fork,
+            ));
+            self.edges.push(WorkflowEdge::new(
+                step_node,
+                join_id.clone(),
+                EdgeKind::Merge,
+            ));
         }
         self.cursor = Some(join_id);
         self
@@ -154,8 +160,11 @@ impl WorkflowBuilder {
                 EdgeKind::When { condition: cond },
             ));
             // Each arm continues to the convergence node.
-            self.edges
-                .push(WorkflowEdge::new(step_node, join_id.clone(), EdgeKind::Then));
+            self.edges.push(WorkflowEdge::new(
+                step_node,
+                join_id.clone(),
+                EdgeKind::Then,
+            ));
         }
         self.cursor = Some(join_id);
         self
@@ -181,8 +190,11 @@ impl WorkflowBuilder {
             },
         );
         // The body's tail loops back to the loop node.
-        self.edges
-            .push(WorkflowEdge::new(body_id, loop_id.clone(), EdgeKind::LoopBack));
+        self.edges.push(WorkflowEdge::new(
+            body_id,
+            loop_id.clone(),
+            EdgeKind::LoopBack,
+        ));
         self.cursor = Some(loop_id);
         self
     }

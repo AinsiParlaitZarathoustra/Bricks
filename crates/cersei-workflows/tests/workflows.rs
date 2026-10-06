@@ -12,14 +12,20 @@ use serde_json::{json, Value};
 
 fn registry_with_text_steps() -> Arc<StepRegistry> {
     let reg = StepRegistry::new();
-    reg.register(Arc::new(FnStep::new("upper", |input: Value, _ctx| async move {
-        let s = input.get("message").and_then(|v| v.as_str()).unwrap_or("");
-        Ok(json!({ "message": s.to_uppercase() }))
-    })));
-    reg.register(Arc::new(FnStep::new("emphasize", |input: Value, _ctx| async move {
-        let s = input.get("message").and_then(|v| v.as_str()).unwrap_or("");
-        Ok(json!({ "message": format!("{}!!!", s) }))
-    })));
+    reg.register(Arc::new(FnStep::new(
+        "upper",
+        |input: Value, _ctx| async move {
+            let s = input.get("message").and_then(|v| v.as_str()).unwrap_or("");
+            Ok(json!({ "message": s.to_uppercase() }))
+        },
+    )));
+    reg.register(Arc::new(FnStep::new(
+        "emphasize",
+        |input: Value, _ctx| async move {
+            let s = input.get("message").and_then(|v| v.as_str()).unwrap_or("");
+            Ok(json!({ "message": format!("{}!!!", s) }))
+        },
+    )));
     reg
 }
 
@@ -33,7 +39,10 @@ fn ir_round_trips_through_json() {
         .commit();
     let json = serde_json::to_string(&def).unwrap();
     let back: WorkflowDef = serde_json::from_str(&json).unwrap();
-    assert_eq!(def, back, "WorkflowDef must survive a JSON round-trip losslessly");
+    assert_eq!(
+        def, back,
+        "WorkflowDef must survive a JSON round-trip losslessly"
+    );
 }
 
 // ─── 2. Sequential execution (Mastra docs example shape) ──────────────────────
@@ -55,7 +64,10 @@ async fn sequential_pipeline_runs_in_order() {
     );
     // Both steps recorded.
     assert_eq!(result.steps.len(), 2);
-    assert!(result.steps.values().all(|s| s.status == RunStatus::Success));
+    assert!(result
+        .steps
+        .values()
+        .all(|s| s.status == RunStatus::Success));
 }
 
 // ─── 3. Parallel + join ───────────────────────────────────────────────────────
@@ -205,9 +217,10 @@ async fn suspend_then_resume_completes() {
             }
         },
     )));
-    reg.register(Arc::new(FnStep::new("finish", |input: Value, _ctx| async move {
-        Ok(json!({ "final": input }))
-    })));
+    reg.register(Arc::new(FnStep::new(
+        "finish",
+        |input: Value, _ctx| async move { Ok(json!({ "final": input })) },
+    )));
 
     let def = WorkflowBuilder::new("gate_flow")
         .then("gate")

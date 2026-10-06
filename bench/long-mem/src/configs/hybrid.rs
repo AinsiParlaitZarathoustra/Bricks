@@ -22,7 +22,7 @@ use cersei_memory::graph::GraphMemory;
 use cersei_memory::memdir::MemoryType;
 use cersei_memory::Memory;
 use cersei_provider::{CompletionRequest, Provider};
-use cersei_types::{Message, Role};
+use cersei_types::Message;
 use std::collections::HashMap;
 
 /// RRF constant. 60 is the Elasticsearch/pyserini default; robust across a
@@ -131,15 +131,6 @@ impl<
         self
     }
 
-    pub fn with_query_expansion(mut self, on: bool) -> Self {
-        self.use_query_expansion = on;
-        self
-    }
-
-    pub fn fact_count(&self) -> usize {
-        self.extracted_fact_count
-    }
-
     /// Ask the Observer LLM to turn a session into a structured observation
     /// list using **Mastra's verbatim Observer prompt**. Returns a list of
     /// observation lines (each is one `🔴/🟡/🟢/✅` bullet, possibly indented).
@@ -187,10 +178,10 @@ impl<
         req.system = Some(crate::mastra_prompts::observer_system_prompt());
         req.messages.push(Message::user(user_prompt));
         req.temperature = Some(0.3); // matches Mastra's observation.modelSettings.temperature
-        // Generous ceiling — Gemini 2.5 Flash burns thinking tokens before
-        // output, and the Observer prompt asks for multi-observation dense
-        // output. 8k is what Mastra budgets (`maxOutputTokens: 100_000` in
-        // their config, scaled down to our per-session batches).
+                                     // Generous ceiling — Gemini 2.5 Flash burns thinking tokens before
+                                     // output, and the Observer prompt asks for multi-observation dense
+                                     // output. 8k is what Mastra budgets (`maxOutputTokens: 100_000` in
+                                     // their config, scaled down to our per-session batches).
         req.max_tokens = 8192;
 
         let resp = extractor
@@ -231,10 +222,6 @@ impl<
         E: Provider + Send + Sync + ?Sized + 'static,
     > Config for HybridConfig<P, E>
 {
-    fn name(&self) -> &'static str {
-        "hybrid-embed-graph"
-    }
-
     async fn ingest(&mut self, q: &Question) -> Result<()> {
         let provider = (self.provider_factory)();
         let embed = EmbeddingMemory::new(provider, Metric::Cosine)?;
@@ -353,13 +340,12 @@ impl<
         let mut fused: HashMap<String, f32> = HashMap::new();
 
         // Helper: apply Omega's RRF to a ranked list with a channel weight.
-        let apply_rrf =
-            |fused: &mut HashMap<String, f32>, list: &[String], weight: f32| {
-                for (rank, content) in list.iter().enumerate() {
-                    let score = weight / (RRF_K + (rank as f32 + 1.0));
-                    *fused.entry(content.clone()).or_insert(0.0) += score;
-                }
-            };
+        let apply_rrf = |fused: &mut HashMap<String, f32>, list: &[String], weight: f32| {
+            for (rank, content) in list.iter().enumerate() {
+                let score = weight / (RRF_K + (rank as f32 + 1.0));
+                *fused.entry(content.clone()).or_insert(0.0) += score;
+            }
+        };
 
         // --- Primary query (embed + graph) ---
         if let Some(m) = &self.embed_mem {

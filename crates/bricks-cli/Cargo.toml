@@ -1,0 +1,30 @@
+[package]
+name = "bricks-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The `bricks` command: a thin layer that loads the configuration, starts the engine and presents its events (headless JSONL or the terminal interface)."
+
+[[bin]]
+name = "bricks"
+path = "src/main.rs"
+
+[dependencies]
+cersei-agent = { workspace = true }
+bricks-tui = { workspace = true }
+cersei-provider = { workspace = true }
+cersei-tools = { workspace = true }
+cersei-memory = { workspace = true, features = ["structured"] }
+cersei-embeddings = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+dirs = { workspace = true }
+chrono = { workspace = true }
+toml = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+portable-pty = "0.8"

@@ -1,6 +1,6 @@
 //! # Simple Agent
 //!
-//! The most basic Cersei usage: create an agent with Anthropic, give it
+//! The most basic Cersei usage: create an agent with a configured provider, give it
 //! filesystem + shell tools, run a prompt, and print the result.
 //!
 //! ```bash
@@ -14,7 +14,12 @@ async fn main() -> anyhow::Result<()> {
     // ── Minimal: 3 lines to run a coding agent ──────────────────────────
 
     let output = Agent::builder()
-        .provider(Anthropic::from_env()?)
+        .provider(cersei::provider_from_config(
+            None,
+            &std::env::args()
+                .nth(1)
+                .expect("usage: <example> provider_id/model_id  (see docs/providers.md)"),
+        )?)
         .tools(cersei::tools::coding()) // filesystem + shell tools
         .system_prompt("You are a helpful coding assistant. Be concise.")
         .max_turns(5)

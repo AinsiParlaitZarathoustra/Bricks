@@ -1,0 +1,12 @@
+
+/work/app/src/api/client.ts
+   3:10  error    'unusedHelper' is defined but never used  @typescript-eslint/no-unused-vars
+  12:5   warning  Unexpected console statement             no-console
+
+/work/app/src/components/Button.tsx
+  1:1   warning  Missing return type on function  @typescript-eslint/explicit-function-return-type
+  8:14  error    'props' is missing in props validation  react/prop-types
+
+✖ 4 problems (2 errors, 2 warnings)
+  0 errors and 1 warning potentially fixable with the `--fix` option.
+

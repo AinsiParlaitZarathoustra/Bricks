@@ -112,7 +112,7 @@ impl Tool for AgentTool {
             .available_tools
             .iter()
             .filter(|t| t.name() != "Agent")
-            .map(|t| {
+            .filter_map(|t| {
                 // We can't clone Box<dyn Tool>, so we rebuild tool sets
                 // This is a limitation — in practice, sub-agents get the
                 // standard tool sets minus Agent
@@ -120,7 +120,6 @@ impl Tool for AgentTool {
                     .into_iter()
                     .find(|st| st.name() == t.name())
             })
-            .flatten()
             .collect();
 
         // Use standard tools if filtering resulted in empty set
@@ -190,8 +189,10 @@ mod tests {
         fn name(&self) -> &str {
             "echo"
         }
+        // Large enough for every built-in tool definition: the runner now
+        // refuses to send a request that manifestly exceeds the window.
         fn context_window(&self, _: &str) -> u64 {
-            4096
+            128_000
         }
         async fn complete(&self, req: CompletionRequest) -> cersei_types::Result<CompletionStream> {
             let prompt = req

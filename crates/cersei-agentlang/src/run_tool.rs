@@ -87,7 +87,12 @@ impl Tool for RunAgentTemplateTool {
 
         match run_program(&program, &mut ev).await {
             Ok(value) => {
-                let vars = Value::Object(ev.vars.iter().map(|(k, v)| (k.clone(), v.clone())).collect());
+                let vars = Value::Object(
+                    ev.vars
+                        .iter()
+                        .map(|(k, v)| (k.clone(), v.clone()))
+                        .collect(),
+                );
                 let summary = match &value {
                     Value::Null => "program completed".to_string(),
                     other => format!("program result: {other}"),

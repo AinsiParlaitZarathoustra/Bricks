@@ -142,7 +142,9 @@ impl<'a> EvalCtx<'a> {
             path.extend(tail.path.iter().cloned());
             // thread the previous result as $_ and as the pipe-target
             self.vars.insert("_".to_string(), value.clone());
-            value = self.eval_call(&path, &tail.args, tail.span, Some(value)).await?;
+            value = self
+                .eval_call(&path, &tail.args, tail.span, Some(value))
+                .await?;
         }
         Ok(value)
     }
@@ -245,6 +247,7 @@ impl<'a> EvalCtx<'a> {
             permission_level: perm,
             description: format!("agentlang: {tool_name}"),
             id: uuid_like(span),
+            preview: None,
         };
         match self.tools.permissions.check(&req).await {
             PermissionDecision::Allow
@@ -350,6 +353,7 @@ impl<'a> EvalCtx<'a> {
             permission_level: perm,
             description: format!("agentlang: permission.ask('{mode}')"),
             id: uuid_like(span),
+            preview: None,
         };
         let granted = matches!(
             self.tools.permissions.check(&req).await,
@@ -454,13 +458,9 @@ fn first_string(pos: &[Value], prev: Option<&Value>) -> Option<String> {
 }
 
 fn value_as_string(v: &Value, span: Span) -> Result<String, RuntimeError> {
-    v.as_str().map(|s| s.to_string()).ok_or_else(|| {
-        RuntimeError::new(
-            RuntimeErrorKind::TypeMismatch,
-            "expected a string",
-            span,
-        )
-    })
+    v.as_str()
+        .map(|s| s.to_string())
+        .ok_or_else(|| RuntimeError::new(RuntimeErrorKind::TypeMismatch, "expected a string", span))
 }
 
 fn bytes_to_value(bytes: &[u8]) -> Value {

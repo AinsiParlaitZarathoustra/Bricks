@@ -302,10 +302,8 @@ fn parse_transcript_content(content: &str) -> Result<Vec<TranscriptEntry>> {
         if line.trim().is_empty() {
             continue;
         }
-        if let Ok(entry) = serde_json::from_str::<TranscriptEntry>(line) {
-            if let TranscriptEntry::Tombstone(t) = &entry {
-                tombstones.insert(t.deleted_uuid.clone());
-            }
+        if let Ok(TranscriptEntry::Tombstone(t)) = serde_json::from_str::<TranscriptEntry>(line) {
+            tombstones.insert(t.deleted_uuid.clone());
         }
     }
 

@@ -66,7 +66,6 @@ pub fn analyze_command(source: &str) -> BashAnalysis {
     }
 
     // Walk the AST
-    let mut cursor = root.walk();
     let mut stack = vec![root];
     let bytes = source.as_bytes();
 

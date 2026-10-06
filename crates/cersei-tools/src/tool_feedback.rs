@@ -17,10 +17,9 @@
 //! 3. **Say what to send instead**, concretely — the parameter list, and where
 //!    possible a corrected copy of the call itself.
 //!
-//! Size discipline is a correctness constraint here, not taste:
-//! `runner.rs` skips `cap_tool_result` on the `is_error` branch, so nothing
-//! downstream trims this text and it lands in history on every retry. This
-//! module is the only limiter; see [`MAX_MESSAGE_CHARS`].
+//! Size discipline is a correctness constraint here, not taste: this text
+//! lands in history on every retry, and the runner's output compressor only
+//! cuts outputs far larger than these messages. See [`MAX_MESSAGE_CHARS`].
 
 use crate::{Tool, ToolResult};
 use serde_json::Value;
@@ -28,8 +27,8 @@ use std::fmt::Display;
 
 // ─── Budgets ─────────────────────────────────────────────────────────────────
 
-/// Hard ceiling on any message this module produces. Error results bypass
-/// `cap_tool_result` in the runner, so this is the only cap that applies.
+/// Hard ceiling on any message this module produces (well below the
+/// runner's output cap, which would otherwise be the only limit).
 pub const MAX_MESSAGE_CHARS: usize = 1200;
 /// Cap on the echoed raw text from a wire-level JSON failure.
 const MAX_RAW_ECHO_CHARS: usize = 400;
@@ -396,7 +395,10 @@ fn assemble(head: String, schema_section: String, tail: String) -> String {
 /// Split a flat JSON-Schema object into (required, optional) `(name, type)`
 /// pairs. Every shipped schema is a hand-written flat `json!` object, so no
 /// `$ref` resolution is needed.
-fn schema_params(schema: &Value) -> (Vec<(String, String)>, Vec<(String, String)>) {
+/// `(name, type)` pairs of schema parameters.
+type Params = Vec<(String, String)>;
+
+fn schema_params(schema: &Value) -> (Params, Params) {
     let required: Vec<&str> = schema
         .get("required")
         .and_then(Value::as_array)
@@ -416,7 +418,10 @@ fn schema_params(schema: &Value) -> (Vec<(String, String)>, Vec<(String, String)
     // Required first, in the schema's own `required` order.
     let mut req = Vec::new();
     for name in &required {
-        let ty = props.get(*name).map(type_of).unwrap_or_else(|| "any".into());
+        let ty = props
+            .get(*name)
+            .map(type_of)
+            .unwrap_or_else(|| "any".into());
         req.push(((*name).to_string(), ty));
     }
     let mut opt = Vec::new();
@@ -692,12 +697,7 @@ mod tests {
     #[test]
     fn wrong_param_name_names_the_real_param() {
         let sent = json!({ "path": "/x.rs" });
-        let msg = invalid_input_message(
-            "Read",
-            &read_schema(),
-            &sent,
-            "missing field `file_path`",
-        );
+        let msg = invalid_input_message("Read", &read_schema(), &sent, "missing field `file_path`");
         assert!(msg.contains("'Read'"), "must name the tool: {msg}");
         assert!(msg.contains("file_path"), "must name the real param: {msg}");
         assert!(msg.contains("/x.rs"), "must echo what was sent: {msg}");
@@ -709,7 +709,10 @@ mod tests {
             msg.contains(r#"{"file_path":"/x.rs"}"#),
             "must show the corrected call: {msg}"
         );
-        assert!(msg.chars().count() <= MAX_MESSAGE_CHARS, "over budget: {msg}");
+        assert!(
+            msg.chars().count() <= MAX_MESSAGE_CHARS,
+            "over budget: {msg}"
+        );
     }
 
     #[test]
@@ -738,9 +741,11 @@ mod tests {
     #[test]
     fn no_arg_call_to_a_tool_with_required_params() {
         let sent = json!({});
-        let msg =
-            invalid_input_message("Read", &read_schema(), &sent, "missing field `file_path`");
-        assert!(msg.contains("Required parameters: file_path (string)"), "{msg}");
+        let msg = invalid_input_message("Read", &read_schema(), &sent, "missing field `file_path`");
+        assert!(
+            msg.contains("Required parameters: file_path (string)"),
+            "{msg}"
+        );
         assert!(msg.contains("Optional parameters:"), "{msg}");
         assert!(msg.contains("<your value here>"), "{msg}");
     }
@@ -780,7 +785,10 @@ mod tests {
         let schema = json!({"type":"object","properties":props,"required":["param_0"]});
         let msg = invalid_input_message("Big", &schema, &json!({}), "missing field `param_0`");
         assert!(msg.chars().count() <= MAX_MESSAGE_CHARS);
-        assert!(msg.contains("Required parameters: param_0 (string)"), "{msg}");
+        assert!(
+            msg.contains("Required parameters: param_0 (string)"),
+            "{msg}"
+        );
         assert!(msg.contains("Retry 'Big' now"), "{msg}");
     }
 

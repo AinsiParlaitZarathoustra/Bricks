@@ -437,13 +437,21 @@ impl Commands for DockerCommands {
         let stdout = child.stdout.take().unwrap();
         let stderr = child.stderr.take().unwrap();
         let (tx, rx) = tokio::sync::mpsc::channel::<StreamChunk>(64);
-        let _ = tx.send(StreamChunk::Started { pid: child.id().unwrap_or(0) }).await;
+        let _ = tx
+            .send(StreamChunk::Started {
+                pid: child.id().unwrap_or(0),
+            })
+            .await;
 
         let tx_out = tx.clone();
         let stdout_task = tokio::spawn(async move {
             let mut r = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = r.next_line().await {
-                if tx_out.send(StreamChunk::Stdout { data: line }).await.is_err() {
+                if tx_out
+                    .send(StreamChunk::Stdout { data: line })
+                    .await
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -452,7 +460,11 @@ impl Commands for DockerCommands {
         let stderr_task = tokio::spawn(async move {
             let mut r = BufReader::new(stderr).lines();
             while let Ok(Some(line)) = r.next_line().await {
-                if tx_err.send(StreamChunk::Stderr { data: line }).await.is_err() {
+                if tx_err
+                    .send(StreamChunk::Stderr { data: line })
+                    .await
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -465,7 +477,9 @@ impl Commands for DockerCommands {
                 Ok(s) => s.code().unwrap_or(-1),
                 Err(e) => {
                     let _ = tx
-                        .send(StreamChunk::Error { message: e.to_string() })
+                        .send(StreamChunk::Error {
+                            message: e.to_string(),
+                        })
                         .await;
                     return;
                 }
@@ -553,8 +567,11 @@ impl Filesystem for DockerFilesystem {
         tokio::fs::write(tmp.path(), data).await?;
         // Ensure the destination directory exists first.
         if let Some(parent) = Path::new(path).parent() {
-            self.exec_text(&format!("mkdir -p {}", shell_quote(&parent.display().to_string())))
-                .await?;
+            self.exec_text(&format!(
+                "mkdir -p {}",
+                shell_quote(&parent.display().to_string())
+            ))
+            .await?;
         }
         let out = Command::new(&self.docker_bin)
             .args([
@@ -567,10 +584,7 @@ impl Filesystem for DockerFilesystem {
         if !out.status.success() {
             return Err(VmError::Backend {
                 backend: "docker".into(),
-                message: format!(
-                    "docker cp: {}",
-                    String::from_utf8_lossy(&out.stderr).trim()
-                ),
+                message: format!("docker cp: {}", String::from_utf8_lossy(&out.stderr).trim()),
             });
         }
         Ok(())

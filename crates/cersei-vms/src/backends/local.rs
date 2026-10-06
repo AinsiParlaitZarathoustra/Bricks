@@ -170,7 +170,11 @@ impl SandboxRuntime for LocalProcessRuntime {
         let handle = self.create(opts).await?;
 
         // Local backend: fs_pointer is a directory under <root>/_snapshots/<id>.
-        let src = self.inner.root.join("_snapshots").join(&manifest.fs_pointer);
+        let src = self
+            .inner
+            .root
+            .join("_snapshots")
+            .join(&manifest.fs_pointer);
         if src.exists() {
             // Find the concrete LocalSandbox to access host_workdir.
             let id = handle.id().clone();
@@ -235,7 +239,12 @@ impl Sandbox for LocalSandbox {
     async fn snapshot(&self) -> Result<SnapshotId> {
         let id = SnapshotId::new();
         let dest_rel = format!("local-{}", id.as_str());
-        let dest = self.root.parent().unwrap_or(&self.root).join("_snapshots").join(&dest_rel);
+        let dest = self
+            .root
+            .parent()
+            .unwrap_or(&self.root)
+            .join("_snapshots")
+            .join(&dest_rel);
         if let Some(parent) = dest.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -453,7 +462,9 @@ impl Commands for LocalCommands {
         #[cfg(not(unix))]
         {
             let _ = (pid, sig);
-            Err(VmError::Lifecycle("signal not supported on this platform".into()))
+            Err(VmError::Lifecycle(
+                "signal not supported on this platform".into(),
+            ))
         }
     }
 }

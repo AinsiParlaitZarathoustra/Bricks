@@ -36,6 +36,7 @@
 mod error;
 mod factory;
 mod gemini;
+mod hashing;
 mod index;
 mod openai;
 mod provider;
@@ -44,6 +45,7 @@ mod store;
 pub use error::EmbeddingError;
 pub use factory::auto_from_model;
 pub use gemini::GeminiEmbeddings;
+pub use hashing::HashingEmbeddings;
 pub use index::{Metric, SearchHit, VectorIndex};
 pub use openai::OpenAiEmbeddings;
 pub use provider::EmbeddingProvider;

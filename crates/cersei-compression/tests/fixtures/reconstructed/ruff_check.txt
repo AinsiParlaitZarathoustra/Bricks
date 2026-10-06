@@ -1,0 +1,19 @@
+src/app/main.py:1:8: F401 [*] `os` imported but unused
+  |
+1 | import os
+  |        ^^ F401
+2 | import sys
+  |
+  = help: Remove unused import: `os`
+
+src/app/db.py:14:5: E722 Do not use bare `except`
+   |
+12 |     try:
+13 |         conn.close()
+14 |     except:
+   |     ^^^^^^ E722
+15 |         pass
+   |
+
+Found 2 errors.
+[*] 1 fixable with the `--fix` option.

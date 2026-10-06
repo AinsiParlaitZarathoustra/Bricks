@@ -19,17 +19,33 @@ pub enum Condition {
     /// Always true.
     Always,
     /// `scope[path] == value`.
-    Eq { path: String, value: Value },
+    Eq {
+        path: String,
+        value: Value,
+    },
     /// `scope[path] != value`.
-    Ne { path: String, value: Value },
+    Ne {
+        path: String,
+        value: Value,
+    },
     /// `scope[path] > value` (numeric).
-    Gt { path: String, value: f64 },
+    Gt {
+        path: String,
+        value: f64,
+    },
     /// `scope[path] < value` (numeric).
-    Lt { path: String, value: f64 },
+    Lt {
+        path: String,
+        value: f64,
+    },
     /// The path resolves to a value (not missing, not null).
-    Exists { path: String },
+    Exists {
+        path: String,
+    },
     /// The path resolves to a truthy value (`true`, non-zero, non-empty).
-    Truthy { path: String },
+    Truthy {
+        path: String,
+    },
     And(Vec<Condition>),
     Or(Vec<Condition>),
     Not(Box<Condition>),
@@ -40,14 +56,20 @@ impl Condition {
     pub fn eval(&self, scope: &Value) -> bool {
         match self {
             Condition::Always => true,
-            Condition::Eq { path, value } => lookup(scope, path).map(|v| v == value).unwrap_or(false),
-            Condition::Ne { path, value } => lookup(scope, path).map(|v| v != value).unwrap_or(true),
-            Condition::Gt { path, value } => {
-                lookup(scope, path).and_then(as_f64).map(|n| n > *value).unwrap_or(false)
+            Condition::Eq { path, value } => {
+                lookup(scope, path).map(|v| v == value).unwrap_or(false)
             }
-            Condition::Lt { path, value } => {
-                lookup(scope, path).and_then(as_f64).map(|n| n < *value).unwrap_or(false)
+            Condition::Ne { path, value } => {
+                lookup(scope, path).map(|v| v != value).unwrap_or(true)
             }
+            Condition::Gt { path, value } => lookup(scope, path)
+                .and_then(as_f64)
+                .map(|n| n > *value)
+                .unwrap_or(false),
+            Condition::Lt { path, value } => lookup(scope, path)
+                .and_then(as_f64)
+                .map(|n| n < *value)
+                .unwrap_or(false),
             Condition::Exists { path } => {
                 matches!(lookup(scope, path), Some(v) if !v.is_null())
             }

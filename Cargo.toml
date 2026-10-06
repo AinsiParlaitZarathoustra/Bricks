@@ -20,8 +20,11 @@ members = [
     "crates/cersei-agentrl",
     "crates/cersei-workflows",
     "crates/cersei-tbench",
-    "crates/abstract-cli",
+    "crates/cersei-web",
+    "crates/cersei-testkit",
     "bench/long-mem",
+    "crates/bricks-cli",
+    "crates/bricks-tui",
 ]
 
 [workspace.package]
@@ -87,9 +90,6 @@ similar = "2"
 unicode-segmentation = "1"
 unicode-width = "0.2"
 
-# HTML processing
-html2text = "0.12"
-
 # Process execution
 nix = { version = "0.29", features = ["process", "signal", "user"] }
 
@@ -119,10 +119,13 @@ cersei-vms = { path = "crates/cersei-vms", version = "0.2.6" }
 cersei-agentlang = { path = "crates/cersei-agentlang", version = "0.2.6" }
 cersei-agentrl = { path = "crates/cersei-agentrl", version = "0.2.6" }
 cersei-workflows = { path = "crates/cersei-workflows", version = "0.2.6" }
-
-# Google Cloud auth (service-account → self-refreshing OAuth tokens for Vertex).
-# rustls only — keeps the static-musl build OpenSSL-free.
-gcp_auth = { version = "0.12", features = ["webpki-roots"] }
+cersei-web = { path = "crates/cersei-web", version = "0.2.6" }
+cersei-testkit = { path = "crates/cersei-testkit" }
+bricks-tui = { path = "crates/bricks-tui", version = "0.2.6" }
+clap = { version = "4.5", features = ["derive"] }
+ratatui = "0.30"
+nucleo-matcher = "0.3"
+pulldown-cmark = { version = "0.13", default-features = false }
 
 [profile.release]
 strip = true

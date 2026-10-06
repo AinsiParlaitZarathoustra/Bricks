@@ -1,0 +1,39 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.5, pytest-9.0.3, pluggy-1.6.0
+rootdir: /work/py
+plugins: cov-7.1.0, xdist-3.8.0
+collected 33 items
+
+test_calc.py ..............................FFs                           [100%]
+
+=================================== FAILURES ===================================
+________________________________ test_keyerror _________________________________
+
+    def test_keyerror():
+>       helper({"autre": 1})
+
+test_calc.py:14: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+d = {'autre': 1}
+
+    def helper(d):
+>       return d["clé"]
+               ^^^^^^^^
+E       KeyError: 'clé'
+
+test_calc.py:11: KeyError
+_______________________________ test_assert_msg ________________________________
+
+    def test_assert_msg():
+        values = [1, 2, 3]
+>       assert sum(values) == 7, "somme inattendue"
+E       AssertionError: somme inattendue
+E       assert 6 == 7
+E        +  where 6 = sum([1, 2, 3])
+
+test_calc.py:18: AssertionError
+=========================== short test summary info ============================
+FAILED test_calc.py::test_keyerror - KeyError: 'clé'
+FAILED test_calc.py::test_assert_msg - AssertionError: somme inattendue
+=================== 2 failed, 30 passed, 1 skipped in 0.03s ====================

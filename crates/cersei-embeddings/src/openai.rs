@@ -84,6 +84,10 @@ impl EmbeddingProvider for OpenAiEmbeddings {
         self.dimensions
     }
 
+    fn model_id(&self) -> String {
+        format!("openai/{}:{}", self.model, self.dimensions())
+    }
+
     async fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, EmbeddingError> {
         if texts.is_empty() {
             return Ok(Vec::new());

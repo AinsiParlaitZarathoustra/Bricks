@@ -152,9 +152,9 @@ pub fn apply_patch(original: &str, patch: &str) -> Result<String, PatchError> {
         if line.starts_with('-') {
             // Remove line — skip it in original
             orig_idx += 1;
-        } else if line.starts_with('+') {
+        } else if let Some(added) = line.strip_prefix('+') {
             // Add line
-            result_lines.push(line[1..].to_string());
+            result_lines.push(added.to_string());
         } else if line.starts_with(' ') || line.is_empty() {
             // Context line — copy from original
             if orig_idx < original_lines.len() {

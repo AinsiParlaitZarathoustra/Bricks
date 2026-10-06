@@ -8,6 +8,7 @@
 
 mod prompt;
 
+use cersei_agent::BricksConfig;
 use cersei_agentrl::{
     CerseiRunner, ChainVerifier, Orchestrator, OrchestratorConfig, ProviderFactory, Solved,
     TestScriptVerifier, ToolRegistry, Verifier,
@@ -31,13 +32,20 @@ struct Cli {
     #[arg(short = 'p', long)]
     prompt: Option<String>,
 
-    /// Provider/model string (e.g. vertex/claude-opus-4-8, google/gemini-3.1-pro-preview).
-    #[arg(long, default_value = "vertex/claude-opus-4-8")]
+    /// Model to use, as `provider_id/model_id` from the providers configuration.
+    #[arg(long)]
     model: String,
 
+    /// Providers configuration file (`.toml` or `.json`). Default:
+    /// `~/.bricks/providers.toml`. An explicit path replaces the default; the
+    /// two are never merged.
+    #[arg(long)]
+    providers: Option<String>,
+
     /// Tool-output compression for token efficiency: off | minimal | aggressive.
-    #[arg(long, default_value = "minimal")]
-    compress: String,
+    /// Default: `[compression] level` of `bricks.toml`, else minimal.
+    #[arg(long)]
+    compress: Option<String>,
 
     /// Working directory (default: current dir).
     #[arg(short = 'C', long)]
@@ -85,20 +93,57 @@ fn resolve_task(cli: &Cli) -> anyhow::Result<String> {
     Ok(buf)
 }
 
+/// Load the Bricks configuration and report its problems on stderr (the
+/// agents also report them as `Status` events at their first run).
+fn load_bricks_config(sources: &cersei_compression::RuleSources) -> BricksConfig {
+    let config = BricksConfig::from_sources(sources);
+    for d in &config.diagnostics {
+        eprintln!("[tbench-agent] configuration: {d}");
+    }
+    config
+}
+
+/// Apply the configuration; `--compress` wins over `[compression] level`,
+/// and `minimal` stays the default when neither is set.
+fn configure_runner(
+    runner: CerseiRunner,
+    config: BricksConfig,
+    compress: Option<&str>,
+) -> CerseiRunner {
+    let level = compress
+        .map(|c| {
+            c.parse::<cersei_compression::CompressionLevel>()
+                .unwrap_or_default()
+        })
+        .or(config.compression_level)
+        .unwrap_or(cersei_compression::CompressionLevel::Minimal);
+    runner.with_bricks_config(config).with_compression(level)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let instruction = resolve_task(&cli)?;
 
-    // Validate the provider/model and resolve the bare model name.
-    let (_probe, resolved_model) = cersei_provider::from_model_string(&cli.model)
-        .map_err(|e| anyhow::anyhow!("cannot resolve provider for '{}': {e}", cli.model))?;
+    // Load the configuration and validate the selection up front, including
+    // the secret reference, so a bad setup fails before any work starts.
+    let registry =
+        cersei_provider::ProviderRegistry::load(cli.providers.as_deref().map(std::path::Path::new))
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let resolved = registry
+        .resolve(&cli.model)
+        .map_err(|e| anyhow::anyhow!("cannot resolve model '{}': {e}", cli.model))?;
+    resolved
+        .build_provider()
+        .map_err(|e| anyhow::anyhow!("cannot build provider for '{}': {e}", cli.model))?;
 
-    let model = cli.model.clone();
+    // The model label used in events and logs: the explicit selection.
+    let resolved_model = cli.model.clone();
     let provider_factory: ProviderFactory = Arc::new(move || {
-        cersei_provider::from_model_string(&model)
+        resolved
+            .build_provider()
             .expect("provider resolution already validated")
-            .0 as Box<dyn Provider>
+            .into_boxed()
     });
 
     // Connectivity probe: surface provider/network errors directly (a static
@@ -111,7 +156,9 @@ async fn main() -> anyhow::Result<()> {
         match p.complete_blocking(req).await {
             Ok(r) => eprintln!(
                 "[tbench-agent] probe OK: {:?}",
-                r.message.get_text().map(|t| t.chars().take(40).collect::<String>())
+                r.message
+                    .get_text()
+                    .map(|t| t.chars().take(40).collect::<String>())
             ),
             Err(e) => eprintln!("[tbench-agent] probe ERR: {e}"),
         }
@@ -151,18 +198,22 @@ async fn main() -> anyhow::Result<()> {
         .or_else(|| std::env::var("ABSTRACT_FAILURE_PATTERNS").ok());
     let task = prompt::build_task(&instruction, hints.as_deref());
 
-    let runner = Arc::new(
-        CerseiRunner::new(provider_factory, workdir.clone(), registry.clone(), verifier)
-            .with_proposal_verifier(proposal_verifier)
-            .with_model(&resolved_model)
-            .with_max_turns(cli.max_turns)
-            .with_compression(
-                cli.compress
-                    .parse::<cersei_compression::CompressionLevel>()
-                    .unwrap_or(cersei_compression::CompressionLevel::Off),
-            )
-            .with_system_prompt(prompt::TBENCH_SYSTEM_PROMPT),
-    );
+    // `<workdir>/bricks.toml` and `~/.bricks/rules/*.toml`, as for every agent.
+    let bricks = load_bricks_config(&cersei_compression::RuleSources::standard(&workdir));
+    let runner = Arc::new(configure_runner(
+        CerseiRunner::new(
+            provider_factory,
+            workdir.clone(),
+            registry.clone(),
+            verifier,
+        )
+        .with_proposal_verifier(proposal_verifier)
+        .with_model(&resolved_model)
+        .with_max_turns(cli.max_turns)
+        .with_system_prompt(prompt::TBENCH_SYSTEM_PROMPT),
+        bricks,
+        cli.compress.as_deref(),
+    ));
 
     let cfg = OrchestratorConfig {
         max_rl_rounds: cli.rounds,
@@ -228,4 +279,60 @@ async fn main() -> anyhow::Result<()> {
 
     // Always exit 0 — the grader scores the filesystem, not our exit code.
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cersei_agentrl::AcceptVerifier;
+
+    fn runner(dir: &std::path::Path) -> CerseiRunner {
+        let factory: ProviderFactory = Arc::new(|| panic!("no request is made by these tests"));
+        CerseiRunner::new(
+            factory,
+            dir,
+            ToolRegistry::in_memory(),
+            Arc::new(AcceptVerifier),
+        )
+    }
+
+    #[test]
+    fn user_and_project_rules_reach_the_runner() {
+        let dir = tempfile::tempdir().unwrap();
+        let rules = dir.path().join("rules");
+        std::fs::create_dir(&rules).unwrap();
+        std::fs::write(
+            rules.join("mine.toml"),
+            "schema_version = 1\n[filters.mytool]\nmatch = [{ program = \"mytool\" }]\nmax_lines = 5\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("bricks.toml"),
+            "[compression.filters.mytool]\nmatch = [{ program = \"mytool\" }]\nmax_lines = 9\n",
+        )
+        .unwrap();
+        let config = load_bricks_config(&cersei_compression::RuleSources {
+            user_rules_dir: Some(rules),
+            bricks_toml: Some(dir.path().join("bricks.toml")),
+        });
+        let r = configure_runner(runner(dir.path()), config, None);
+        let applied = r.bricks_config().unwrap();
+        assert!(applied.diagnostics.is_empty());
+        // bricks.toml wins over the user rule file, as everywhere else.
+        assert_eq!(applied.rules.get("mytool").unwrap().max_lines, Some(9));
+    }
+
+    #[test]
+    fn without_user_configuration_the_builtin_rules_apply() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = load_bricks_config(&cersei_compression::RuleSources {
+            user_rules_dir: Some(dir.path().join("absent")),
+            bricks_toml: Some(dir.path().join("bricks.toml")),
+        });
+        let r = configure_runner(runner(dir.path()), config, None);
+        let applied = r.bricks_config().unwrap();
+        assert!(applied.diagnostics.is_empty());
+        assert!(applied.rules.get("cargo-test").is_some());
+        assert!(applied.rules.get("mytool").is_none());
+    }
 }

@@ -575,7 +575,7 @@ fn hash_vec(text: &str, dim: usize) -> Vec<f32> {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         text.hash(&mut h);
         (i as u64).hash(&mut h);
-        let x = (h.finish() as u64) as f32 / u64::MAX as f32;
+        let x = h.finish() as f32 / u64::MAX as f32;
         v.push(x * 2.0 - 1.0);
     }
     // L2-normalize so cosine makes sense

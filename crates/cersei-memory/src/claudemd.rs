@@ -136,9 +136,9 @@ fn expand_includes(
             let include_path = trimmed.strip_prefix("@include ").unwrap().trim();
 
             // Expand ~ to home directory
-            let expanded_path = if include_path.starts_with("~/") {
+            let expanded_path = if let Some(rest) = include_path.strip_prefix("~/") {
                 let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-                home.join(&include_path[2..])
+                home.join(rest)
             } else {
                 base_dir.join(include_path)
             };

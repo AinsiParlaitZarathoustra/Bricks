@@ -9,7 +9,7 @@
 
 use async_trait::async_trait;
 use cersei_agent::Agent;
-use cersei_provider::OpenAi;
+mod common;
 use cersei_tools::{PermissionLevel, Tool, ToolCategory, ToolContext, ToolResult};
 use serde_json::{json, Value};
 use std::io::{Read, Write};
@@ -102,13 +102,11 @@ fn serve_recording(responses: Vec<Canned>) -> (String, Arc<Mutex<Vec<String>>>) 
     (format!("http://127.0.0.1:{port}/v1"), bodies)
 }
 
-fn provider_against(base_url: &str, model: &str) -> OpenAi {
-    OpenAi::builder()
-        .api_key("test-key")
-        .base_url(base_url)
-        .model(model)
-        .build()
-        .expect("build provider")
+fn provider_against(base_url: &str, model: &str) -> cersei_provider::ConfiguredProvider {
+    // "gpt-4" used to resolve to a small 8_192-token window through a model-name
+    // table; the window is now configuration, so the test states it.
+    let window = if model == "gpt-4" { 8_192 } else { 128_000 };
+    common::provider(base_url, "chat_completions", window)
 }
 
 /// A trivial registered tool, so `tools_available` is true.

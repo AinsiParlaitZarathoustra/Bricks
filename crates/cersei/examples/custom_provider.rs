@@ -29,7 +29,6 @@ impl Provider for EchoProvider {
         4096
     }
 
-    
     async fn complete(&self, request: CompletionRequest) -> cersei_types::Result<CompletionStream> {
         let last_msg = request
             .messages
@@ -117,14 +116,18 @@ async fn main() -> anyhow::Result<()> {
     // ── OpenAI-compatible provider (Ollama, etc.) ─────────────────────
     println!("\n\x1b[36m── OpenAI-Compatible Provider ──\x1b[0m\n");
 
-    // This would work with Ollama, LM Studio, vLLM, etc.
-    // Uncomment and set the right base URL:
+    // This works with Ollama, LM Studio, vLLM, etc. — no code needed, only a
+    // provider entry in ~/.bricks/providers.toml:
     //
-    // let provider = cersei::OpenAi::builder()
-    //     .base_url("http://localhost:11434/v1")  // Ollama
-    //     .model("llama3.1:8b")
-    //     .api_key("ollama")  // Ollama doesn't check keys
-    //     .build()?;
+    //   [[providers]]
+    //   id = "ollama"
+    //   name = "Ollama"
+    //   endpoint = "http://localhost:11434/v1"
+    //   protocol = "chat_completions"
+    //   auth = "none"
+    //   ... models ...
+    //
+    // let provider = cersei::provider_from_config(None, "ollama/llama3")?;
     //
     // let output = Agent::builder()
     //     .provider(provider)
@@ -132,7 +135,7 @@ async fn main() -> anyhow::Result<()> {
     //     .run_with("Hello from Ollama!")
     //     .await?;
 
-    println!("(Uncomment the Ollama section in the source to test with a local LLM)");
+    println!("(Add a provider entry to ~/.bricks/providers.toml and uncomment the section above to test with a local LLM)");
 
     Ok(())
 }

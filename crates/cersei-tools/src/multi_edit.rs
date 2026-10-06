@@ -11,7 +11,7 @@
 //! destructive-match guard.
 
 use super::*;
-use crate::tool_primitives::replace::{replace, ReplaceError};
+use crate::tool_primitives::replace::{describe_failure, plan_edit, ReplaceError};
 
 pub struct MultiEditTool;
 
@@ -57,6 +57,58 @@ impl Tool for MultiEditTool {
         })
     }
 
+    async fn preview(
+        &self,
+        input: &Value,
+        _ctx: &ToolContext,
+    ) -> Option<crate::preview::ChangePreview> {
+        let (file_path, edits) = match coerce_input(input) {
+            Ok(v) => v,
+            Err(CoerceError::Shape(e)) | Err(CoerceError::InsideEdits(e)) => {
+                return Some(crate::preview::ChangePreview::refused(e))
+            }
+        };
+        let path = std::path::Path::new(&file_path);
+        let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+        let before = match std::fs::read_to_string(&absolute) {
+            Ok(c) => c,
+            Err(e) => {
+                return Some(crate::preview::ChangePreview::refused(format!(
+                    "Failed to read {file_path}: {e}"
+                )))
+            }
+        };
+        let mut content = before.clone();
+        for (i, edit) in edits.iter().enumerate() {
+            match plan_edit(
+                &content,
+                &edit.old_string,
+                &edit.new_string,
+                edit.replace_all,
+                Some(&file_path),
+            ) {
+                Ok(plan) => content = plan.content,
+                Err(err) => {
+                    return Some(crate::preview::ChangePreview::refused(edit_error_message(
+                        i,
+                        edits.len(),
+                        &file_path,
+                        &err,
+                    )))
+                }
+            }
+        }
+        Some(crate::preview::ChangePreview {
+            files: vec![crate::preview::file_change(
+                &file_path,
+                &absolute,
+                Some(&before),
+                Some(&content),
+            )],
+            refusal: None,
+        })
+    }
+
     async fn execute(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
         let (file_path, edits) = match coerce_input(&input) {
             Ok(v) => v,
@@ -85,8 +137,14 @@ impl Tool for MultiEditTool {
         // Apply every edit in memory first (all-or-nothing).
         let mut content = before.clone();
         for (i, edit) in edits.iter().enumerate() {
-            match replace(&content, &edit.old_string, &edit.new_string, edit.replace_all) {
-                Ok(updated) => content = updated,
+            match plan_edit(
+                &content,
+                &edit.old_string,
+                &edit.new_string,
+                edit.replace_all,
+                Some(&file_path),
+            ) {
+                Ok(plan) => content = plan.content,
                 Err(err) => {
                     return ToolResult::error(edit_error_message(i, edits.len(), &file_path, &err));
                 }
@@ -99,14 +157,29 @@ impl Tool for MultiEditTool {
             );
         }
 
-        if let Err(e) = tokio::fs::write(path, &content).await {
+        // Re-validate: the file must still be what the edits were resolved
+        // against.
+        match tokio::fs::read_to_string(path).await {
+            Ok(now) if now == before => {}
+            _ => {
+                return ToolResult::error(format!(
+                "{file_path} changed on disk while the edits were being prepared, so nothing was \
+                     written. Read it again and retry."
+            ))
+            }
+        }
+        if let Err(e) = crate::tool_primitives::fs::write_atomic(path, content.as_bytes()).await {
             return ToolResult::error(format!("Failed to write {file_path}: {e}"));
         }
 
         let diff = crate::tool_primitives::diff::unified_diff(&before, &content, 2);
         let diff_preview = if diff.lines().count() > 30 {
             let truncated: String = diff.lines().take(25).collect::<Vec<_>>().join("\n");
-            format!("{}\n... ({} more lines)", truncated, diff.lines().count() - 25)
+            format!(
+                "{}\n... ({} more lines)",
+                truncated,
+                diff.lines().count() - 25
+            )
         } else {
             diff
         };
@@ -129,30 +202,16 @@ struct EditOp {
 
 /// Map a [`ReplaceError`] from edit `i` to a corrective, model-facing message.
 fn edit_error_message(i: usize, total: usize, file_path: &str, err: &ReplaceError) -> String {
-    let pos = format!("edit {} of {}", i + 1, total);
-    match err {
-        ReplaceError::NotFound => format!(
-            "{pos} failed: old_string not found in {file_path}. Note edits apply in order — \
-             this edit runs against the result of the earlier edits, so its old_string must \
-             match the file *after* those changes (and earlier edits may have already changed \
-             this text). The matcher tolerates whitespace/indentation, so a mismatch means the \
-             text itself differs; re-read the file and copy old_string verbatim. No changes \
-             were written."
-        ),
-        ReplaceError::Ambiguous { count } => format!(
-            "{pos} failed: old_string is not unique ({count} occurrences) in {file_path}. \
-             Add surrounding lines to identify exactly one location, or set replace_all=true \
-             for this edit. No changes were written."
-        ),
-        ReplaceError::NoChange => format!(
-            "{pos} failed: old_string and new_string are identical, so it would do nothing. \
-             No changes were written."
-        ),
-        ReplaceError::EmptyOldString => format!(
-            "{pos} failed: old_string is empty but {file_path} is not — an empty anchor is \
-             unsafe. No changes were written."
-        ),
-    }
+    let order = if i > 0 {
+        " Edits apply in order: this one runs against the file as changed by the earlier edits."
+    } else {
+        ""
+    };
+    format!(
+        "edit {} of {total} failed: {}{order} No changes were written.",
+        i + 1,
+        describe_failure(err, file_path)
+    )
 }
 
 /// The parameters `MultiEdit` declares, at the top level and per edit.
@@ -250,7 +309,9 @@ fn coerce_input(input: &Value) -> std::result::Result<(String, Vec<EditOp>), Coe
     };
 
     let file_path = get_str(obj, "file_path").ok_or_else(|| {
-        CoerceError::Shape("missing 'file_path' (the absolute path of the file to edit)".to_string())
+        CoerceError::Shape(
+            "missing 'file_path' (the absolute path of the file to edit)".to_string(),
+        )
     })?;
 
     let edits_val = obj.get("edits").ok_or_else(|| {
@@ -519,6 +580,4 @@ mod tests {
             "a refused MultiEdit must be atomic — no edit may land"
         );
     }
-
-
 }

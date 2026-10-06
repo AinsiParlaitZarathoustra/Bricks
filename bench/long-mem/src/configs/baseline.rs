@@ -29,10 +29,6 @@ impl BaselineConfig {
 
 #[async_trait]
 impl Config for BaselineConfig {
-    fn name(&self) -> &'static str {
-        "baseline-jsonl"
-    }
-
     async fn ingest(&mut self, q: &Question) -> Result<()> {
         let mut out = String::new();
         for (i, session) in q.haystack_sessions.iter().enumerate() {

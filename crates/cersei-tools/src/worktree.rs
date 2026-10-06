@@ -46,7 +46,7 @@ impl Tool for EnterWorktreeTool {
         };
 
         let worktree_path = input.path.unwrap_or_else(|| {
-            let tmp = std::env::temp_dir().join(format!("cersei-wt-{}", &input.branch));
+            let tmp = std::env::temp_dir().join(format!("cersei-wt-{}", input.branch));
             tmp.display().to_string()
         });
 

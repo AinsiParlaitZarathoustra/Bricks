@@ -45,69 +45,35 @@ pub struct GraphStats {
 }
 
 // ─── Centralized GQL queries ───────────────────────────────────────────────
+//
+// Fixed texts; every value is a typed parameter (no user content is ever
+// spliced into a query).
 
 #[cfg(feature = "graph")]
 mod gql {
-    pub fn escape(s: &str) -> String {
-        s.replace('\\', "\\\\").replace('\'', "\\'")
+    use grafeo::Value;
+    use std::collections::HashMap;
+
+    pub fn params(pairs: Vec<(&str, Value)>) -> HashMap<String, Value> {
+        pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
     }
 
-    pub fn insert_memory(
-        id: &str,
-        content: &str,
-        mem_type: &str,
-        confidence: f32,
-        now: &str,
-    ) -> String {
-        format!(
-            "INSERT (:Memory {{id: '{id}', content: '{content}', mem_type: '{mem_type}', \
-             confidence: {confidence}, created_at: '{now}', updated_at: '{now}', \
-             last_validated_at: '{now}', decay_rate: 0.01, embedding_model_version: ''}})"
-        )
-    }
-
-    pub fn link_memories(from_id: &str, to_id: &str, relationship: &str) -> String {
-        format!(
-            "MATCH (a:Memory {{id: '{from_id}'}}), (b:Memory {{id: '{to_id}'}}) \
-             INSERT (a)-[:RELATES_TO {{relationship: '{relationship}'}}]->(b)"
-        )
-    }
-
-    pub fn tag_memory(memory_id: &str, topic: &str) -> String {
-        format!(
-            "MATCH (m:Memory {{id: '{memory_id}'}}) \
-             INSERT (:Topic {{name: '{topic}'}})-[:TAGGED]->(m)"
-        )
-    }
-
-    pub fn insert_session(session_id: &str, now: &str, model: &str, turns: u32) -> String {
-        format!(
-            "INSERT (:Session {{session_id: '{session_id}', started_at: '{now}', \
-             model: '{model}', turns: {turns}}})"
-        )
-    }
-
-    pub fn recall(escaped_query: &str, limit: usize) -> String {
-        format!(
-            "MATCH (m:Memory) WHERE m.content CONTAINS '{escaped_query}' RETURN m.content LIMIT {limit}"
-        )
-    }
-
-    pub fn by_type(type_str: &str) -> String {
-        format!("MATCH (m:Memory {{mem_type: '{type_str}'}}) RETURN m.content")
-    }
-
-    pub fn by_topic(topic: &str) -> String {
-        format!("MATCH (:Topic {{name: '{topic}'}})-[:TAGGED]->(m:Memory) RETURN m.content")
-    }
-
-    pub fn revalidate(memory_id: &str, now: &str) -> String {
-        // Since Grafeo may not support SET, we use a workaround:
-        // Delete and re-insert would lose data. Instead we just track validation
-        // through the SchemaVersion system. For now this is a no-op query that
-        // verifies the node exists.
-        format!("MATCH (m:Memory {{id: '{memory_id}'}}) RETURN m.id")
-    }
+    pub const INSERT_MEMORY: &str = "INSERT (:Memory {id: $id, content: $content, \
+        mem_type: $mem_type, confidence: $confidence, created_at: $now, updated_at: $now, \
+        last_validated_at: $now, decay_rate: 0.01, embedding_model_version: ''})";
+    pub const LINK_MEMORIES: &str = "MATCH (a:Memory {id: $from}), (b:Memory {id: $to}) \
+        INSERT (a)-[:RELATES_TO {relationship: $relationship}]->(b)";
+    pub const TAG_MEMORY: &str =
+        "MATCH (m:Memory {id: $id}) INSERT (:Topic {name: $topic})-[:TAGGED]->(m)";
+    pub const INSERT_SESSION: &str = "INSERT (:Session {session_id: $session_id, \
+        started_at: $now, model: $model, turns: $turns})";
+    /// Substring match of the whole query text (the former behaviour).
+    pub const RECALL: &str =
+        "MATCH (m:Memory) WHERE m.content CONTAINS $query RETURN m.content LIMIT $limit";
+    pub const BY_TYPE: &str = "MATCH (m:Memory {mem_type: $mem_type}) RETURN m.content";
+    pub const BY_TOPIC: &str =
+        "MATCH (:Topic {name: $topic})-[:TAGGED]->(m:Memory) RETURN m.content";
+    pub const REVALIDATE: &str = "MATCH (m:Memory {id: $id}) RETURN m.id";
 
     pub const COUNT_MEMORIES: &str = "MATCH (m:Memory) RETURN count(m)";
     pub const COUNT_SESSIONS: &str = "MATCH (s:Session) RETURN count(s)";
@@ -191,11 +157,17 @@ impl GraphMemory {
         let mem_type_str = format!("{:?}", mem_type);
         let now = chrono::Utc::now().to_rfc3339();
         let id = uuid::Uuid::new_v4().to_string();
-        let escaped = gql::escape(content);
-
-        let query = gql::insert_memory(&id, &escaped, &mem_type_str, confidence, &now);
         session
-            .execute(&query)
+            .execute_with_params(
+                gql::INSERT_MEMORY,
+                gql::params(vec![
+                    ("id", id.as_str().into()),
+                    ("content", content.into()),
+                    ("mem_type", mem_type_str.as_str().into()),
+                    ("confidence", grafeo::Value::Float64(confidence as f64)),
+                    ("now", now.as_str().into()),
+                ]),
+            )
             .map_err(|e| CerseiError::Config(format!("Graph insert failed: {}", e)))?;
 
         Ok(id)
@@ -205,9 +177,15 @@ impl GraphMemory {
     #[cfg(feature = "graph")]
     pub fn link_memories(&self, from_id: &str, to_id: &str, relationship: &str) -> Result<()> {
         let session = self.db.session();
-        let query = gql::link_memories(from_id, to_id, relationship);
         session
-            .execute(&query)
+            .execute_with_params(
+                gql::LINK_MEMORIES,
+                gql::params(vec![
+                    ("from", from_id.into()),
+                    ("to", to_id.into()),
+                    ("relationship", relationship.into()),
+                ]),
+            )
             .map_err(|e| CerseiError::Config(format!("Graph link failed: {}", e)))?;
         Ok(())
     }
@@ -216,9 +194,11 @@ impl GraphMemory {
     #[cfg(feature = "graph")]
     pub fn tag_memory(&self, memory_id: &str, topic: &str) -> Result<()> {
         let session = self.db.session();
-        let query = gql::tag_memory(memory_id, topic);
         session
-            .execute(&query)
+            .execute_with_params(
+                gql::TAG_MEMORY,
+                gql::params(vec![("id", memory_id.into()), ("topic", topic.into())]),
+            )
             .map_err(|e| CerseiError::Config(format!("Graph tag failed: {}", e)))?;
         Ok(())
     }
@@ -229,9 +209,16 @@ impl GraphMemory {
         let session = self.db.session();
         let now = chrono::Utc::now().to_rfc3339();
         let model_str = model.unwrap_or("unknown");
-        let query = gql::insert_session(session_id, &now, model_str, turns);
         session
-            .execute(&query)
+            .execute_with_params(
+                gql::INSERT_SESSION,
+                gql::params(vec![
+                    ("session_id", session_id.into()),
+                    ("now", now.as_str().into()),
+                    ("model", model_str.into()),
+                    ("turns", grafeo::Value::Int64(turns as i64)),
+                ]),
+            )
             .map_err(|e| CerseiError::Config(format!("Graph session record failed: {}", e)))?;
         Ok(())
     }
@@ -241,8 +228,9 @@ impl GraphMemory {
     #[cfg(feature = "graph")]
     pub fn revalidate_memory(&self, memory_id: &str) -> Result<bool> {
         let session = self.db.session();
-        let query = gql::revalidate(memory_id, &chrono::Utc::now().to_rfc3339());
-        match session.execute(&query) {
+        match session
+            .execute_with_params(gql::REVALIDATE, gql::params(vec![("id", memory_id.into())]))
+        {
             Ok(result) => Ok(result.iter().next().is_some()),
             Err(e) => Err(CerseiError::Config(format!(
                 "Graph revalidate failed: {}",
@@ -257,9 +245,13 @@ impl GraphMemory {
     #[cfg(feature = "graph")]
     pub fn recall(&self, query_text: &str, limit: usize) -> Vec<String> {
         let session = self.db.session();
-        let escaped = gql::escape(query_text);
-        let query = gql::recall(&escaped, limit);
-        match session.execute(&query) {
+        match session.execute_with_params(
+            gql::RECALL,
+            gql::params(vec![
+                ("query", query_text.into()),
+                ("limit", grafeo::Value::Int64(limit as i64)),
+            ]),
+        ) {
             Ok(result) => result
                 .iter()
                 .filter_map(|row| row.first().map(|v| format!("{}", v)))
@@ -318,8 +310,10 @@ impl GraphMemory {
     pub fn by_type(&self, mem_type: MemoryType) -> Vec<String> {
         let session = self.db.session();
         let type_str = format!("{:?}", mem_type);
-        let query = gql::by_type(&type_str);
-        match session.execute(&query) {
+        match session.execute_with_params(
+            gql::BY_TYPE,
+            gql::params(vec![("mem_type", type_str.as_str().into())]),
+        ) {
             Ok(result) => result
                 .iter()
                 .filter_map(|row| row.first().map(|v| format!("{}", v)))
@@ -332,8 +326,8 @@ impl GraphMemory {
     #[cfg(feature = "graph")]
     pub fn by_topic(&self, topic: &str) -> Vec<String> {
         let session = self.db.session();
-        let query = gql::by_topic(topic);
-        match session.execute(&query) {
+        match session.execute_with_params(gql::BY_TOPIC, gql::params(vec![("topic", topic.into())]))
+        {
             Ok(result) => result
                 .iter()
                 .filter_map(|row| row.first().map(|v| format!("{}", v)))

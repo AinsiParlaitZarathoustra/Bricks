@@ -9,6 +9,7 @@ pub mod baseline;
 pub mod embed;
 pub mod graph;
 pub mod hybrid;
+pub mod structured;
 
 /// A memory configuration under test. One instance is built per question
 /// (haystacks are independent across questions), then:
@@ -18,19 +19,11 @@ pub mod hybrid;
 ///      retrieval-based configs it's the top-k most relevant snippets.
 #[async_trait]
 pub trait Config: Send + Sync {
-    fn name(&self) -> &'static str;
-
     /// Ingest a question's haystack. Called exactly once per question.
     async fn ingest(&mut self, q: &Question) -> Result<()>;
 
     /// Retrieve the context that will be appended to the answerer prompt.
     async fn retrieve(&self, q: &Question) -> Result<String>;
-
-    /// Approximate tokens the retrieved context occupies (rough heuristic:
-    /// bytes / 4). Useful for reporting.
-    fn approx_tokens(&self, text: &str) -> usize {
-        text.len() / 4
-    }
 }
 
 /// How many top-k snippets to pull from retrieval configs. Matches Mastra's

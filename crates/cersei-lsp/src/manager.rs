@@ -246,7 +246,7 @@ impl Drop for LspManager {
     fn drop(&mut self) {
         // Best-effort shutdown — can't await in drop, but processes will be
         // killed when Child is dropped.
-        for (name, _) in &self.clients {
+        for name in self.clients.keys() {
             tracing::debug!("Dropping LSP client '{}'", name);
         }
     }

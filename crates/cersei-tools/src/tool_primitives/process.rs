@@ -134,9 +134,6 @@ pub fn exec_streaming(
     let timeout = opts.timeout.unwrap_or(Duration::from_secs(120));
 
     let handle = tokio::spawn(async move {
-        let mut full_stdout = String::new();
-        let mut full_stderr = String::new();
-
         let tx_out = tx.clone();
         let stdout_task = tokio::spawn(async move {
             let mut collected = String::new();
@@ -167,8 +164,8 @@ pub fn exec_streaming(
 
         let result = tokio::time::timeout(timeout, child.wait()).await;
 
-        full_stdout = stdout_task.await.unwrap_or_default();
-        full_stderr = stderr_task.await.unwrap_or_default();
+        let full_stdout = stdout_task.await.unwrap_or_default();
+        let full_stderr = stderr_task.await.unwrap_or_default();
 
         match result {
             Ok(Ok(status)) => ExecOutput {

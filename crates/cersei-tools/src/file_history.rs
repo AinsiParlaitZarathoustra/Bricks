@@ -3,7 +3,7 @@
 //! Used for context injection ("files you've been working on").
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Tracks file access during a session.
@@ -26,12 +26,12 @@ impl FileHistory {
         Self::default()
     }
 
-    pub fn record_read(&mut self, path: &PathBuf) {
+    pub fn record_read(&mut self, path: &Path) {
         let entry = self
             .entries
-            .entry(path.clone())
+            .entry(path.to_path_buf())
             .or_insert_with(|| FileAccess {
-                path: path.clone(),
+                path: path.to_path_buf(),
                 read_count: 0,
                 write_count: 0,
                 edit_count: 0,
@@ -41,12 +41,12 @@ impl FileHistory {
         entry.last_accessed = now_secs();
     }
 
-    pub fn record_write(&mut self, path: &PathBuf) {
+    pub fn record_write(&mut self, path: &Path) {
         let entry = self
             .entries
-            .entry(path.clone())
+            .entry(path.to_path_buf())
             .or_insert_with(|| FileAccess {
-                path: path.clone(),
+                path: path.to_path_buf(),
                 read_count: 0,
                 write_count: 0,
                 edit_count: 0,
@@ -56,12 +56,12 @@ impl FileHistory {
         entry.last_accessed = now_secs();
     }
 
-    pub fn record_edit(&mut self, path: &PathBuf) {
+    pub fn record_edit(&mut self, path: &Path) {
         let entry = self
             .entries
-            .entry(path.clone())
+            .entry(path.to_path_buf())
             .or_insert_with(|| FileAccess {
-                path: path.clone(),
+                path: path.to_path_buf(),
                 read_count: 0,
                 write_count: 0,
                 edit_count: 0,
@@ -74,7 +74,7 @@ impl FileHistory {
     /// Get all accessed files, sorted by last access (most recent first).
     pub fn all_files(&self) -> Vec<&FileAccess> {
         let mut files: Vec<_> = self.entries.values().collect();
-        files.sort_by(|a, b| b.last_accessed.cmp(&a.last_accessed));
+        files.sort_by_key(|f| std::cmp::Reverse(f.last_accessed));
         files
     }
 
@@ -85,7 +85,7 @@ impl FileHistory {
             .values()
             .filter(|f| f.write_count > 0 || f.edit_count > 0)
             .collect();
-        files.sort_by(|a, b| b.last_accessed.cmp(&a.last_accessed));
+        files.sort_by_key(|f| std::cmp::Reverse(f.last_accessed));
         files
     }
 

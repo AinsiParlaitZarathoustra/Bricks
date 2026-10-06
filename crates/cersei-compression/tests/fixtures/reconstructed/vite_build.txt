@@ -1,0 +1,40 @@
+vite v5.2.11 building for production...
+transforming...
+✓ 1834 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                     0.46 kB │ gzip:  0.30 kB
+dist/assets/chunk-01A9f3.js       3.12 kB │ gzip: 1.40 kB
+dist/assets/chunk-02A9f3.js       6.12 kB │ gzip: 2.40 kB
+dist/assets/chunk-03A9f3.js       9.12 kB │ gzip: 3.40 kB
+dist/assets/chunk-04A9f3.js       12.12 kB │ gzip: 4.40 kB
+dist/assets/chunk-05A9f3.js       15.12 kB │ gzip: 5.40 kB
+dist/assets/chunk-06A9f3.js       18.12 kB │ gzip: 6.40 kB
+dist/assets/chunk-07A9f3.js       21.12 kB │ gzip: 7.40 kB
+dist/assets/chunk-08A9f3.js       24.12 kB │ gzip: 8.40 kB
+dist/assets/chunk-09A9f3.js       27.12 kB │ gzip: 9.40 kB
+dist/assets/chunk-10A9f3.js       30.12 kB │ gzip: 10.40 kB
+dist/assets/chunk-11A9f3.js       33.12 kB │ gzip: 11.40 kB
+dist/assets/chunk-12A9f3.js       36.12 kB │ gzip: 12.40 kB
+dist/assets/chunk-13A9f3.js       39.12 kB │ gzip: 13.40 kB
+dist/assets/chunk-14A9f3.js       42.12 kB │ gzip: 14.40 kB
+dist/assets/chunk-15A9f3.js       45.12 kB │ gzip: 15.40 kB
+dist/assets/chunk-16A9f3.js       48.12 kB │ gzip: 16.40 kB
+dist/assets/chunk-17A9f3.js       51.12 kB │ gzip: 17.40 kB
+dist/assets/chunk-18A9f3.js       54.12 kB │ gzip: 18.40 kB
+dist/assets/chunk-19A9f3.js       57.12 kB │ gzip: 19.40 kB
+dist/assets/chunk-20A9f3.js       60.12 kB │ gzip: 20.40 kB
+dist/assets/chunk-21A9f3.js       63.12 kB │ gzip: 21.40 kB
+dist/assets/chunk-22A9f3.js       66.12 kB │ gzip: 22.40 kB
+dist/assets/chunk-23A9f3.js       69.12 kB │ gzip: 23.40 kB
+dist/assets/chunk-24A9f3.js       72.12 kB │ gzip: 24.40 kB
+dist/assets/chunk-25A9f3.js       75.12 kB │ gzip: 25.40 kB
+dist/assets/chunk-26A9f3.js       78.12 kB │ gzip: 26.40 kB
+dist/assets/chunk-27A9f3.js       81.12 kB │ gzip: 27.40 kB
+dist/assets/chunk-28A9f3.js       84.12 kB │ gzip: 28.40 kB
+dist/assets/chunk-29A9f3.js       87.12 kB │ gzip: 29.40 kB
+dist/assets/chunk-30A9f3.js       90.12 kB │ gzip: 30.40 kB
+dist/assets/index-Bq1x2.css        12.39 kB │ gzip:  3.10 kB
+
+(!) Some chunks are larger than 500 kB after minification.
+✓ built in 4.21s

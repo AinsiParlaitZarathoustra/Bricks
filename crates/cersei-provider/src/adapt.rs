@@ -1,21 +1,13 @@
-//! B1 — the tool-serialization seam (TOOL-CALLING-RELIABILITY.md §6 Option B).
+//! The tool-serialization seam.
 //!
-//! There are exactly three places where a `ToolDefinition` becomes provider
-//! JSON: `build_anthropic_body` (which the Vertex provider reuses),
-//! `openai.rs::complete`, and `gemini.rs::complete`. Each calls [`adapt_tools`]
-//! with its dialect instead of serializing `input_schema` verbatim.
+//! Every protocol adapter turns a `ToolDefinition` into wire JSON through
+//! [`adapt_tools`] with its dialect, instead of serializing `input_schema`
+//! verbatim: tool names are sanitized to `^[a-zA-Z0-9_-]{1,64}$` (collisions
+//! deduplicated) and `$ref`/`$schema`/`definitions` are inlined or stripped.
 //!
-//! The transforms are the ones MEASURED in §7.0 Exp 3, not assumed. Gemini
-//! rejects `$schema`, `$ref`, `definitions`, and `additionalProperties` — and
-//! the rejection kills the entire request, every tool in the turn, not just
-//! the offending one. OpenAI strict mode REQUIRES `additionalProperties:
-//! false`. Those two constraints are irreconcilable, which is why this is a
-//! per-dialect enum and cannot be a single normalization pass.
-//!
-//! `OpenAiStrict` has no wire site yet: the OpenAI provider stays on
-//! `OpenAiLoose` until B2's `ProviderQuirks` selects dialects per provider.
-//! It exists (and is tested) here because the strict transform is the
-//! prerequisite for ever sending `strict: true`.
+//! `OpenAiStrict` has no wire site yet: no adapter sends `strict: true`. It
+//! exists (and is tested) because the strict transform is the prerequisite for
+//! ever doing so.
 
 use cersei_types::ToolDefinition;
 use serde_json::{json, Map, Value};
@@ -35,10 +27,6 @@ pub enum SchemaDialect {
     /// schema passes through apart from the common cleanup — in particular
     /// `additionalProperties` is preserved exactly as written.
     OpenAiLoose,
-    /// Gemini `functionDeclarations` entry. Strips the four keys Gemini
-    /// rejects; leaves `oneOf`/`anyOf`/`enum`/`format`/`default`/nesting
-    /// alone — Exp 3 measured that Gemini accepts all of them.
-    GeminiSubset,
 }
 
 /// Normalize once, at the only three places schemas cross the provider
@@ -62,11 +50,6 @@ pub fn adapt_tools(tools: &[ToolDefinition], dialect: SchemaDialect) -> Vec<Valu
                     "name": name,
                     "description": t.description,
                     "input_schema": schema,
-                }),
-                SchemaDialect::GeminiSubset => json!({
-                    "name": name,
-                    "description": t.description,
-                    "parameters": schema,
                 }),
                 SchemaDialect::OpenAiLoose => json!({
                     "type": "function",
@@ -159,15 +142,17 @@ fn rewrite(
 ) -> Value {
     match node {
         Value::Array(items) => Value::Array(
-            items.iter().map(|v| rewrite(v, dialect, defs, stack)).collect(),
+            items
+                .iter()
+                .map(|v| rewrite(v, dialect, defs, stack))
+                .collect(),
         ),
         Value::Object(map) => {
             // `$ref` first: draft-07 semantics replace the whole node with the
             // resolved target (siblings are ignored). A cyclic or unresolvable
             // ref degrades to the node minus its `$ref` key — the key itself
-            // must go (Gemini rejects it and kills the request), and an empty
-            // `{}` is a permissive schema, which the tool's own deserializer
-            // still backstops.
+            // must go, and an empty `{}` is a permissive schema, which the
+            // tool's own deserializer still backstops.
             if let Some(Value::String(r)) = map.get("$ref") {
                 if let Some(def_name) = local_def_name(r) {
                     if !stack.iter().any(|s| s == def_name) {
@@ -184,13 +169,9 @@ fn rewrite(
             let mut out = Map::new();
             for (k, v) in map {
                 // Stripped in every dialect: `$ref` survives only via the
-                // resolution above; `$schema` is noise everywhere and rejected
-                // by Gemini; `definitions`/`$defs` are dead once refs are
-                // inlined and rejected by Gemini.
+                // resolution above; `$schema` is noise everywhere;
+                // `definitions`/`$defs` are dead once refs are inlined.
                 if k == "$ref" || k == "$schema" || k == "definitions" || k == "$defs" {
-                    continue;
-                }
-                if dialect == SchemaDialect::GeminiSubset && k == "additionalProperties" {
                     continue;
                 }
                 out.insert(k.clone(), rewrite(v, dialect, defs, stack));
@@ -228,11 +209,9 @@ fn local_def_name(r: &str) -> Option<&str> {
 mod tests {
     use super::*;
 
-    /// The shape schemars 0.8's `schema_for!` emits — the exact shape Exp 1
-    /// measured Gemini rejecting: `$schema` at the root, a `$ref` inside
-    /// `properties`, the target under `definitions`, plus the constructs
-    /// Exp 3 measured Gemini *accepting*, so the tests can pin that they
-    /// survive.
+    /// The shape schemars 0.8's `schema_for!` emits: `$schema` at the root, a
+    /// `$ref` inside `properties`, the target under `definitions`, plus
+    /// constructs that must survive untouched.
     fn schemars_like_tool() -> ToolDefinition {
         ToolDefinition {
             name: "Read".to_string(),
@@ -272,7 +251,6 @@ mod tests {
     fn schema_of(tool: &Value, dialect: SchemaDialect) -> &Value {
         match dialect {
             SchemaDialect::AnthropicNative => &tool["input_schema"],
-            SchemaDialect::GeminiSubset => &tool["parameters"],
             SchemaDialect::OpenAiLoose | SchemaDialect::OpenAiStrict => {
                 &tool["function"]["parameters"]
             }
@@ -282,43 +260,10 @@ mod tests {
     /// True if `key` appears as an object key anywhere in the tree.
     fn contains_key(v: &Value, key: &str) -> bool {
         match v {
-            Value::Object(m) => {
-                m.contains_key(key) || m.values().any(|v| contains_key(v, key))
-            }
+            Value::Object(m) => m.contains_key(key) || m.values().any(|v| contains_key(v, key)),
             Value::Array(items) => items.iter().any(|v| contains_key(v, key)),
             _ => false,
         }
-    }
-
-    // ─── GeminiSubset: the four measured-rejected keys ───────────────────────
-
-    #[test]
-    fn gemini_strips_all_four_rejected_keys_at_every_depth() {
-        let tool = adapt_one(SchemaDialect::GeminiSubset);
-        let schema = schema_of(&tool, SchemaDialect::GeminiSubset);
-        for key in ["$schema", "$ref", "definitions", "additionalProperties"] {
-            assert!(
-                !contains_key(schema, key),
-                "Gemini rejects `{key}` and the rejection kills the whole \
-                 request (Exp 1/3); it must not survive adaptation: {schema:#}"
-            );
-        }
-    }
-
-    #[test]
-    fn gemini_preserves_the_eight_measured_accepted_constructs() {
-        let tool = adapt_one(SchemaDialect::GeminiSubset);
-        let schema = schema_of(&tool, SchemaDialect::GeminiSubset);
-        // Exp 3: nesting, enum, oneOf, anyOf, format, default, minimum all
-        // accepted — stripping them would shrink the schema for no reason.
-        assert!(contains_key(schema, "oneOf"), "{schema:#}");
-        assert!(contains_key(schema, "anyOf"), "{schema:#}");
-        assert!(contains_key(schema, "enum"), "{schema:#}");
-        assert!(contains_key(schema, "format"), "{schema:#}");
-        assert!(contains_key(schema, "default"), "{schema:#}");
-        assert!(contains_key(schema, "minimum"), "{schema:#}");
-        // The $ref was inlined, not dropped: Range's properties are in place.
-        assert_eq!(schema["properties"]["range"]["properties"]["start"]["type"], "integer");
     }
 
     // ─── OpenAiStrict ────────────────────────────────────────────────────────
@@ -350,23 +295,6 @@ mod tests {
         assert_eq!(tool["function"]["strict"], json!(true));
     }
 
-    /// The load-bearing measured fact from Exp 3: `additionalProperties:
-    /// false` is REQUIRED by OpenAI strict and REJECTED by Gemini. If one
-    /// normalization pass could serve both, this test could not pass.
-    #[test]
-    fn strict_and_gemini_are_irreconcilable_on_additional_properties() {
-        let strict = adapt_one(SchemaDialect::OpenAiStrict);
-        let gemini = adapt_one(SchemaDialect::GeminiSubset);
-        assert!(contains_key(
-            schema_of(&strict, SchemaDialect::OpenAiStrict),
-            "additionalProperties"
-        ));
-        assert!(!contains_key(
-            schema_of(&gemini, SchemaDialect::GeminiSubset),
-            "additionalProperties"
-        ));
-    }
-
     // ─── OpenAiLoose / AnthropicNative: common cleanup only ──────────────────
 
     #[test]
@@ -376,7 +304,10 @@ mod tests {
             let schema = schema_of(&tool, dialect);
             assert!(!contains_key(schema, "$schema"), "{dialect:?}: {schema:#}");
             assert!(!contains_key(schema, "$ref"), "{dialect:?}: {schema:#}");
-            assert!(!contains_key(schema, "definitions"), "{dialect:?}: {schema:#}");
+            assert!(
+                !contains_key(schema, "definitions"),
+                "{dialect:?}: {schema:#}"
+            );
             // Preserved exactly as written — loose must NOT invent strict
             // constraints, and the author's `required` list survives.
             assert_eq!(schema["additionalProperties"], json!(false), "{dialect:?}");
@@ -394,10 +325,6 @@ mod tests {
         assert!(native.get("input_schema").is_some());
         assert!(native.get("type").is_none());
 
-        let gemini = adapt_one(SchemaDialect::GeminiSubset);
-        assert!(gemini.get("parameters").is_some());
-        assert!(gemini.get("input_schema").is_none());
-
         let loose = adapt_one(SchemaDialect::OpenAiLoose);
         assert_eq!(loose["type"], "function");
         assert_eq!(loose["function"]["name"], "Read");
@@ -414,13 +341,14 @@ mod tests {
             input_schema: json!({"type": "object"}),
         };
         let tools = [tool("my.tool"), tool("my tool"), tool("my_tool"), tool("")];
-        let out = adapt_tools(&tools, SchemaDialect::GeminiSubset);
+        let out = adapt_tools(&tools, SchemaDialect::AnthropicNative);
         let names: Vec<&str> = out.iter().map(|t| t["name"].as_str().unwrap()).collect();
         assert_eq!(names, ["my_tool", "my_tool_2", "my_tool_3", "tool"]);
         let re_valid = |n: &str| {
             !n.is_empty()
                 && n.len() <= 64
-                && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+                && n.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
         };
         assert!(names.iter().all(|n| re_valid(n)), "{names:?}");
     }
@@ -451,8 +379,8 @@ mod tests {
                 }
             }),
         };
-        let out = adapt_tools(&[tool], SchemaDialect::GeminiSubset);
-        let schema = &out[0]["parameters"];
+        let out = adapt_tools(&[tool], SchemaDialect::AnthropicNative);
+        let schema = &out[0]["input_schema"];
         // One level inlined; the cyclic re-entry degraded to a permissive
         // node; and no `$ref` key survived anywhere.
         assert_eq!(schema["properties"]["node"]["type"], "object");
@@ -472,8 +400,8 @@ mod tests {
                 }
             }),
         };
-        let out = adapt_tools(&[tool], SchemaDialect::GeminiSubset);
-        let schema = &out[0]["parameters"];
+        let out = adapt_tools(&[tool], SchemaDialect::AnthropicNative);
+        let schema = &out[0]["input_schema"];
         assert!(!contains_key(schema, "$ref"), "{schema:#}");
         assert_eq!(schema["properties"]["x"]["description"], "kept");
     }

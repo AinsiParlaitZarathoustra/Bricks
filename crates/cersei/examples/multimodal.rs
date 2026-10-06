@@ -1,15 +1,14 @@
 //! # Multimodal Input
 //!
-//! Attach images, video, audio, or PDFs to a message and send them to any
-//! provider. The same provider-agnostic [`ContentBlock`]s work everywhere —
-//! each backend takes what it supports (Anthropic: images + PDFs, OpenAI:
-//! images + PDF files, Gemini: images + video + audio + PDFs) and drops the
-//! rest.
+//! Attach images, audio, or PDFs to a message and send them to a configured
+//! model. The same protocol-agnostic [`ContentBlock`]s work everywhere; what a
+//! given model accepts is what its configuration declares *and* what its
+//! protocol adapter can carry (see the capability matrix in `docs/providers.md`).
+//! A block that cannot be carried is refused with an explicit error before
+//! anything is sent — it is never silently dropped.
 //!
 //! ```bash
-//! # Pick whichever provider key you have set.
-//! ANTHROPIC_API_KEY=sk-ant-... cargo run --example multimodal -- path/to/image.png
-//! GEMINI_API_KEY=...           cargo run --example multimodal -- clip.mp4 diagram.png
+//! cargo run --example multimodal -- provider_id/model_id path/to/image.png
 //! ```
 //!
 //! High-level entry points shown here:
@@ -23,11 +22,15 @@ use cersei::provider::{CompletionRequest, Provider, ProviderOptions};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let paths: Vec<String> = std::env::args().skip(1).collect();
-    if paths.is_empty() {
-        eprintln!("usage: multimodal <file> [<file> ...]   (image / video / audio / pdf)");
+    let mut args = std::env::args().skip(1);
+    let selection = args.next();
+    let paths: Vec<String> = args.collect();
+    let Some(selection) = selection.filter(|_| !paths.is_empty()) else {
+        eprintln!(
+            "usage: multimodal provider_id/model_id <file> [<file> ...]   (image / audio / pdf)"
+        );
         std::process::exit(2);
-    }
+    };
 
     // ── Build a multimodal user message in one line ─────────────────────────
     // Each file is read from disk, its MIME type is sniffed from the bytes
@@ -40,17 +43,9 @@ async fn main() -> anyhow::Result<()> {
     //   let block = ContentBlock::image_url("https://example.com/cat.jpg");
     //   let msg   = Message::user_with_media("caption", vec![block]);
 
-    // ── Pick a provider from whatever key is in the environment ─────────────
-    let (provider, model): (Box<dyn Provider>, &str) =
-        if std::env::var("ANTHROPIC_API_KEY").is_ok() {
-            (Box::new(Anthropic::from_env()?), "claude-sonnet-4-6")
-        } else if std::env::var("GEMINI_API_KEY").is_ok() {
-            (Box::new(Gemini::from_env()?), "gemini-2.5-flash")
-        } else if std::env::var("OPENAI_API_KEY").is_ok() {
-            (Box::new(OpenAi::from_env()?), "gpt-5")
-        } else {
-            anyhow::bail!("set ANTHROPIC_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY");
-        };
+    // ── Resolve the model from ~/.bricks/providers.toml ─────────────────────
+    let provider = cersei::provider_from_config(None, &selection)?;
+    let model = selection.as_str();
 
     let request = CompletionRequest {
         model: model.to_string(),
@@ -61,6 +56,7 @@ async fn main() -> anyhow::Result<()> {
         temperature: None,
         stop_sequences: Vec::new(),
         options: ProviderOptions::default(),
+        output_modalities: Vec::new(),
     };
 
     println!("─── Sending {} file(s) to {model} ───", paths.len());

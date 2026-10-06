@@ -7,6 +7,7 @@ use std::time::Duration;
 
 mod media;
 pub use media::{detect_mime, MediaKind};
+pub mod tokens;
 
 // ─── Roles ───────────────────────────────────────────────────────────────────
 
@@ -16,6 +17,39 @@ pub enum Role {
     User,
     Assistant,
     System,
+}
+
+// ─── Modalities ──────────────────────────────────────────────────────────────
+
+/// A kind of media a model can read or produce. Tool calls are not a
+/// modality: they are structured control flow, carried by
+/// [`ContentBlock::ToolUse`] / [`ContentBlock::ToolResult`].
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum Modality {
+    Text,
+    Image,
+    Audio,
+    Video,
+    Document,
+}
+
+impl Modality {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Modality::Text => "text",
+            Modality::Image => "image",
+            Modality::Audio => "audio",
+            Modality::Video => "video",
+            Modality::Document => "document",
+        }
+    }
+}
+
+impl std::fmt::Display for Modality {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
 }
 
 // ─── Content blocks ──────────────────────────────────────────────────────────
@@ -62,9 +96,40 @@ pub enum ContentBlock {
         #[serde(skip_serializing_if = "Option::is_none")]
         citations: Option<CitationsConfig>,
     },
+    /// Audio input. Kept as audio (never converted to text implicitly).
+    Audio {
+        source: MediaSource,
+    },
+    /// Video input. Kept as video (never converted to text implicitly).
+    Video {
+        source: MediaSource,
+    },
+    /// An item a wire protocol requires to be echoed back verbatim when the
+    /// history is re-sent (e.g. a Responses-API `reasoning` item carrying
+    /// `encrypted_content`). Only the protocol named in `protocol` reads it;
+    /// every other adapter skips it.
+    ProtocolItem {
+        protocol: String,
+        item: Value,
+    },
     /// Escape hatch for provider-specific block types not covered above.
     #[serde(other)]
     Opaque,
+}
+
+impl ContentBlock {
+    /// The input modality this block represents, or `None` for blocks that are
+    /// not media (tool calls and results, reasoning, opaque protocol items).
+    pub fn modality(&self) -> Option<Modality> {
+        match self {
+            ContentBlock::Text { .. } => Some(Modality::Text),
+            ContentBlock::Image { .. } => Some(Modality::Image),
+            ContentBlock::Audio { .. } => Some(Modality::Audio),
+            ContentBlock::Video { .. } => Some(Modality::Video),
+            ContentBlock::Document { .. } => Some(Modality::Document),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,6 +149,9 @@ pub struct ImageSource {
     pub data: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// Identifier of a file already uploaded to the provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -96,6 +164,25 @@ pub struct DocumentSource {
     pub data: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// Identifier of a file already uploaded to the provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_id: Option<String>,
+}
+
+/// Payload of an audio or video block: inline base64 data, a URL, or the id of
+/// a file already uploaded to the provider.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MediaSource {
+    #[serde(rename = "type")]
+    pub source_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub media_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -252,7 +339,7 @@ pub const SYSTEM_PROMPT_DYNAMIC_BOUNDARY: &str = "__SYSTEM_PROMPT_DYNAMIC_BOUNDA
 
 // ─── Usage / Cost ────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct Usage {
     /// Uncached prompt tokens billed at the full input rate. The total prompt
     /// size is `input_tokens + cache_creation_input_tokens + cache_read_input_tokens`.
@@ -268,14 +355,83 @@ pub struct Usage {
     /// (Anthropic: billed at ~0.1x the input rate).
     #[serde(default)]
     pub cache_read_input_tokens: u64,
+    /// Reasoning ("thinking") tokens. Informational: every supported protocol
+    /// already counts them inside `output_tokens`, so this is a subset of
+    /// `output_tokens` and must never be added to it.
+    #[serde(default)]
+    pub reasoning_tokens: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cost_usd: Option<f64>,
+    /// How `cost_usd` was estimated (tariff, partial or complete). `None` when
+    /// no price was known — an absent price is "unknown", never "free".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_estimate: Option<CostEstimate>,
     /// Provider-specific usage data not covered by the fields above.
     #[serde(default, skip_serializing_if = "Value::is_null")]
     pub provider_usage: Value,
 }
 
+/// A cost estimate in USD, with the information needed to read it honestly.
+///
+/// This is an estimate from declared per-token prices, not an invoice: it
+/// covers only the token categories whose price was known, and media billed
+/// per second, per image or per other unit is not included.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct CostEstimate {
+    pub amount_usd: f64,
+    /// Name of the tariff the estimate was computed with.
+    pub tariff: String,
+    /// True when some consumed category had no known price (or a billing unit
+    /// not expressible as a per-token price), so `amount_usd` is a lower bound.
+    pub partial: bool,
+    /// Categories that were consumed but could not be priced.
+    #[serde(default)]
+    pub unpriced: Vec<String>,
+}
+
 impl Usage {
+    fn has_tokens(&self) -> bool {
+        self.input_tokens
+            + self.output_tokens
+            + self.cache_creation_input_tokens
+            + self.cache_read_input_tokens
+            > 0
+    }
+
+    /// Accumulate a cost estimate across requests. An estimate that is
+    /// missing for a request that consumed tokens makes the sum partial.
+    fn merge_cost_across(&mut self, other: &Usage, self_had_tokens: bool) {
+        self.cost_estimate = match (self.cost_estimate.take(), other.cost_estimate.as_ref()) {
+            (Some(mut a), Some(b)) => {
+                a.amount_usd += b.amount_usd;
+                a.partial |= b.partial;
+                if a.tariff != b.tariff {
+                    a.tariff = format!("{}+{}", a.tariff, b.tariff);
+                }
+                for u in &b.unpriced {
+                    if !a.unpriced.contains(u) {
+                        a.unpriced.push(u.clone());
+                    }
+                }
+                Some(a)
+            }
+            (Some(mut a), None) => {
+                if other.has_tokens() {
+                    a.partial = true;
+                }
+                Some(a)
+            }
+            (None, Some(b)) => {
+                let mut b = b.clone();
+                if self_had_tokens {
+                    b.partial = true;
+                }
+                Some(b)
+            }
+            (None, None) => None,
+        };
+    }
+
     pub fn total(&self) -> u64 {
         if self.total_tokens > 0 {
             self.total_tokens
@@ -288,6 +444,9 @@ impl Usage {
     /// cost tracking). Do not use this to combine usage events within one
     /// streamed message — see [`Usage::merge_cumulative`].
     pub fn merge(&mut self, other: &Usage) {
+        let self_had_tokens = self.has_tokens();
+        self.merge_cost_across(other, self_had_tokens);
+        self.reasoning_tokens += other.reasoning_tokens;
         self.input_tokens += other.input_tokens;
         self.output_tokens += other.output_tokens;
         self.cache_creation_input_tokens += other.cache_creation_input_tokens;
@@ -306,6 +465,10 @@ impl Usage {
     /// the final `message_delta` carries the cumulative output total. Adding
     /// them would double-count, so each field takes the larger snapshot.
     pub fn merge_cumulative(&mut self, other: &Usage) {
+        self.reasoning_tokens = self.reasoning_tokens.max(other.reasoning_tokens);
+        if other.cost_estimate.is_some() {
+            self.cost_estimate = other.cost_estimate.clone();
+        }
         self.input_tokens = self.input_tokens.max(other.input_tokens);
         self.output_tokens = self.output_tokens.max(other.output_tokens);
         self.cache_creation_input_tokens = self
@@ -389,6 +552,13 @@ pub enum StreamEvent {
     ContentBlockStop {
         index: usize,
     },
+    /// A complete [`ContentBlock::ProtocolItem`] the protocol needs echoed back
+    /// verbatim (e.g. a Responses `reasoning` item). Placed at `index`.
+    ProtocolItem {
+        index: usize,
+        protocol: String,
+        item: Value,
+    },
     MessageDelta {
         stop_reason: Option<StopReason>,
         usage: Option<Usage>,
@@ -434,6 +604,11 @@ pub enum CerseiError {
     #[error("Configuration error: {0}")]
     Config(String),
 
+    /// The request asks for something the selected model or its protocol
+    /// adapter cannot carry. Raised before anything is sent.
+    #[error("Unsupported request: {0}")]
+    Unsupported(String),
+
     #[error("MCP error: {0}")]
     Mcp(String),
 
@@ -471,6 +646,41 @@ impl CerseiError {
                 message: message.into(),
             },
         }
+    }
+
+    /// The server refused the request because the prompt does not fit the
+    /// model's context. Recognised from the documented error codes and
+    /// messages of the supported protocols (HTTP 400/413/422, or an error
+    /// event in a stream). Retrying the same request cannot succeed; the
+    /// context has to shrink first.
+    pub fn is_context_overflow(&self) -> bool {
+        let message = match self {
+            CerseiError::ContextOverflow { .. } => return true,
+            CerseiError::ProviderStatus { status, message } => {
+                if !matches!(status, 400 | 413 | 422) {
+                    return false;
+                }
+                message
+            }
+            CerseiError::Provider(message) => message,
+            _ => return false,
+        };
+        let m = message.to_ascii_lowercase();
+        [
+            "context_length_exceeded",
+            "context length",
+            "context window",
+            "maximum context",
+            "prompt is too long",
+            "input is too long",
+            "too many tokens",
+            "too many input tokens",
+            "reduce the length of the messages",
+            "exceeds the maximum number of tokens",
+            "request_too_large",
+        ]
+        .iter()
+        .any(|p| m.contains(p))
     }
 
     pub fn is_retryable(&self) -> bool {
@@ -591,6 +801,42 @@ mod usage_tests {
 
 #[cfg(test)]
 mod retry_tests {
+    #[test]
+    fn context_overflow_refusals_are_recognised() {
+        use super::CerseiError;
+        let overflow = [
+            CerseiError::ProviderStatus {
+                status: 400,
+                message: r#"{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 210000 tokens > 200000 maximum"}}"#.into(),
+            },
+            CerseiError::ProviderStatus {
+                status: 400,
+                message: r#"{"error":{"code":"context_length_exceeded","message":"This model's maximum context length is 128000 tokens."}}"#.into(),
+            },
+            CerseiError::ProviderStatus { status: 413, message: "request_too_large".into() },
+            CerseiError::Provider("stream error: context_length_exceeded".into()),
+            CerseiError::ContextOverflow { used: 10, limit: 5 },
+        ];
+        for e in overflow {
+            assert!(e.is_context_overflow(), "{e}");
+            assert!(!e.is_retryable() || matches!(e, CerseiError::Provider(_)));
+        }
+        let other = [
+            CerseiError::ProviderStatus {
+                status: 400,
+                message: "invalid tool schema".into(),
+            },
+            CerseiError::ProviderStatus {
+                status: 500,
+                message: "context length".into(),
+            },
+            CerseiError::Auth("bad key".into()),
+        ];
+        for e in other {
+            assert!(!e.is_context_overflow(), "{e}");
+        }
+    }
+
     use super::*;
 
     fn status(code: u16) -> CerseiError {
@@ -653,5 +899,119 @@ mod retry_tests {
         assert!(!CerseiError::Provider("anything".into()).is_retryable());
         assert!(!CerseiError::Auth("bad key".into()).is_retryable());
         assert!(!CerseiError::Cancelled.is_retryable());
+    }
+}
+
+#[cfg(test)]
+mod modality_tests {
+    use super::*;
+
+    #[test]
+    fn blocks_report_their_modality() {
+        assert_eq!(
+            ContentBlock::Text { text: "x".into() }.modality(),
+            Some(Modality::Text)
+        );
+        assert_eq!(
+            ContentBlock::image_url("u").modality(),
+            Some(Modality::Image)
+        );
+        assert_eq!(
+            ContentBlock::audio_url("u").modality(),
+            Some(Modality::Audio)
+        );
+        assert_eq!(
+            ContentBlock::video_url("u").modality(),
+            Some(Modality::Video)
+        );
+        assert_eq!(
+            ContentBlock::document_url("u").modality(),
+            Some(Modality::Document)
+        );
+        // Tool calls and reasoning are not media.
+        let call = ContentBlock::ToolUse {
+            id: "i".into(),
+            name: "n".into(),
+            input: Value::Null,
+        };
+        assert_eq!(call.modality(), None);
+        assert_eq!(
+            ContentBlock::Thinking {
+                thinking: "t".into(),
+                signature: String::new()
+            }
+            .modality(),
+            None
+        );
+    }
+
+    #[test]
+    fn new_blocks_roundtrip_through_json() {
+        for block in [
+            ContentBlock::audio_base64("audio/wav", "UklG"),
+            ContentBlock::video_url("https://x/v.mp4"),
+            ContentBlock::image_file_id("file-1"),
+            ContentBlock::document_file_id("file-2"),
+            ContentBlock::ProtocolItem {
+                protocol: "responses".into(),
+                item: serde_json::json!({"type": "reasoning", "encrypted_content": "E"}),
+            },
+        ] {
+            let json = serde_json::to_value(&block).unwrap();
+            let back: ContentBlock = serde_json::from_value(json.clone()).unwrap();
+            assert_eq!(serde_json::to_value(&back).unwrap(), json);
+        }
+        let v = serde_json::to_value(ContentBlock::video_url("u")).unwrap();
+        assert_eq!(v["type"], "video");
+        assert_eq!(v["source"]["type"], "url");
+    }
+
+    #[test]
+    fn older_serialized_blocks_and_usage_still_load() {
+        // A session saved before `file_id` and the reasoning/cost fields existed.
+        let img: ContentBlock = serde_json::from_str(
+            r#"{"type":"image","source":{"type":"base64","media_type":"image/png","data":"QQ=="}}"#,
+        )
+        .unwrap();
+        assert!(matches!(img, ContentBlock::Image { source } if source.file_id.is_none()));
+        let usage: Usage = serde_json::from_str(r#"{"input_tokens":5,"output_tokens":2}"#).unwrap();
+        assert_eq!(
+            (usage.reasoning_tokens, usage.cost_estimate.is_none()),
+            (0, true)
+        );
+    }
+
+    #[test]
+    fn reasoning_tokens_are_a_subset_of_output_not_an_addend() {
+        let mut total = Usage {
+            output_tokens: 100,
+            reasoning_tokens: 60,
+            ..Default::default()
+        };
+        total.merge(&Usage {
+            output_tokens: 50,
+            reasoning_tokens: 10,
+            ..Default::default()
+        });
+        assert_eq!(total.output_tokens, 150);
+        assert_eq!(total.reasoning_tokens, 70);
+        assert_eq!(
+            total.total(),
+            150,
+            "reasoning is already inside the output count"
+        );
+        let mut snap = Usage {
+            reasoning_tokens: 3,
+            ..Default::default()
+        };
+        snap.merge_cumulative(&Usage {
+            reasoning_tokens: 9,
+            ..Default::default()
+        });
+        snap.merge_cumulative(&Usage {
+            reasoning_tokens: 9,
+            ..Default::default()
+        });
+        assert_eq!(snap.reasoning_tokens, 9);
     }
 }

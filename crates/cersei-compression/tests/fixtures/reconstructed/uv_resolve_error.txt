@@ -1,0 +1,2 @@
+  × No solution found when resolving dependencies:
+  ╰─▶ Because there is no version of fastapi==99.0 and your project depends on fastapi==99.0, we can conclude that your project's requirements are unsatisfiable.

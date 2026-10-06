@@ -42,9 +42,9 @@ impl Workflow {
         for node in &def.nodes {
             if let NodeKind::Step { step_id, .. } = &node.kind {
                 if !steps.contains_key(step_id) {
-                    let step = registry.get(step_id).ok_or_else(|| {
-                        CerseiError::Tool(format!("unknown step: '{}'", step_id))
-                    })?;
+                    let step = registry
+                        .get(step_id)
+                        .ok_or_else(|| CerseiError::Tool(format!("unknown step: '{}'", step_id)))?;
                     steps.insert(step_id.clone(), step);
                 }
             }
@@ -65,7 +65,10 @@ impl Workflow {
                     edge.to
                 )));
             }
-            outgoing.entry(edge.from.clone()).or_default().push(edge.clone());
+            outgoing
+                .entry(edge.from.clone())
+                .or_default()
+                .push(edge.clone());
         }
 
         // Structural checks per node kind.
@@ -73,23 +76,18 @@ impl Workflow {
             match &node.kind {
                 NodeKind::Branch => {
                     let outs = outgoing.get(&node.id).map(|v| v.as_slice()).unwrap_or(&[]);
-                    if !outs
-                        .iter()
-                        .any(|e| matches!(e.kind, EdgeKind::When { .. }))
-                    {
+                    if !outs.iter().any(|e| matches!(e.kind, EdgeKind::When { .. })) {
                         return Err(CerseiError::Config(format!(
                             "branch node '{}' has no `When` arms",
                             node.id
                         )));
                     }
                 }
-                NodeKind::Loop { body, .. } => {
-                    if def.node(body).is_none() {
-                        return Err(CerseiError::Config(format!(
-                            "loop node '{}' references missing body '{}'",
-                            node.id, body
-                        )));
-                    }
+                NodeKind::Loop { body, .. } if def.node(body).is_none() => {
+                    return Err(CerseiError::Config(format!(
+                        "loop node '{}' references missing body '{}'",
+                        node.id, body
+                    )));
                 }
                 _ => {}
             }

@@ -1,509 +1,247 @@
-//! cersei-mcp: Model Context Protocol (MCP) client.
+//! cersei-mcp: Model Context Protocol client.
 //!
-//! Full JSON-RPC 2.0 implementation with stdio transport for connecting
-//! to MCP servers. Discovers tools and resources, makes them available
-//! as standard Cersei tool definitions.
+//! Built on the official Rust SDK (`rmcp` 3.5) behind Bricks' types:
+//! protocol revision **2026-07-28** (stateless requests with per-request
+//! metadata, `server/discover`, `resultType`, multi round-trip requests)
+//! and, for older servers, the `initialize`-based **2025-11-25** — detected
+//! per connection (see [`client`]). Transports: **stdio** and **Streamable
+//! HTTP**. The deprecated HTTP+SSE transport (2024-11-05) is not supported.
+//!
+//! [`McpManager`] holds the connections of an agent, exposes their tools and
+//! routes calls; [`McpClient`] is one connection.
 
-pub mod jsonrpc;
-pub mod transport;
+pub mod client;
+pub mod config;
+pub mod http;
+pub mod stdio;
 
-use cersei_types::*;
-use serde::{Deserialize, Serialize};
+pub use client::{Era, McpCallResult, McpClient, McpContent, McpToolDef, ProgressFn, ServerInfo};
+pub use config::{expand_env_vars, expand_server_config, McpLimits, McpServerConfig, ProtocolMode};
+
+use cersei_types::ToolDefinition;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use std::time::Duration;
 
-// ─── MCP server config ──────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct McpServerConfig {
-    pub name: String,
-    pub command: Option<String>,
-    #[serde(default)]
-    pub args: Vec<String>,
-    #[serde(default)]
-    pub env: HashMap<String, String>,
-    pub url: Option<String>,
-    #[serde(rename = "type", default = "default_type")]
-    pub server_type: String,
+/// Errors of MCP connections and calls.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum McpError {
+    #[error("MCP configuration: {0}")]
+    Config(String),
+    #[error("MCP server '{server}' could not be reached: {reason}")]
+    Connect { server: String, reason: String },
+    #[error("the MCP request {} after {after:?}", if *total { "hit its total time limit" } else { "got no answer" })]
+    Timeout { after: Duration, total: bool },
+    #[error("the connection to MCP server '{server}' was lost{}{}{}", reason.as_deref().map(|r| format!(" ({r})")).unwrap_or_default(), if *in_flight { " during the call; it was not retried (the tool may have run)" } else { "" }, if stderr_tail.is_empty() { String::new() } else { format!(" — server log: {}", stderr_tail.join(" | ")) })]
+    ConnectionLost {
+        server: String,
+        in_flight: bool,
+        reason: Option<String>,
+        stderr_tail: Vec<String>,
+    },
+    #[error("MCP server error {code}: {message}")]
+    Server { code: i32, message: String },
+    #[error("the MCP request was cancelled{}", .0.as_deref().map(|r| format!(": {r}")).unwrap_or_default())]
+    Cancelled(Option<String>),
+    #[error(
+        "the server needs `{0}` input, which Bricks does not provide (capability not declared)"
+    )]
+    InputNotSupported(String),
+    #[error("the server still needed more input after {0} round(s) (input_required)")]
+    RoundsExceeded(usize),
+    #[error("malformed or unexpected MCP response: {0}")]
+    Protocol(String),
+    #[error("no MCP server '{server}' has a tool '{tool}'")]
+    UnknownTool { server: String, tool: String },
 }
 
-fn default_type() -> String {
-    "stdio".to_string()
-}
-
-impl McpServerConfig {
-    pub fn stdio(name: impl Into<String>, command: impl Into<String>, args: &[&str]) -> Self {
-        Self {
-            name: name.into(),
-            command: Some(command.into()),
-            args: args.iter().map(|s| s.to_string()).collect(),
-            env: HashMap::new(),
-            url: None,
-            server_type: "stdio".to_string(),
-        }
-    }
-
-    pub fn sse(name: impl Into<String>, url: impl Into<String>) -> Self {
-        Self {
-            name: name.into(),
-            command: None,
-            args: Vec::new(),
-            env: HashMap::new(),
-            url: Some(url.into()),
-            server_type: "sse".to_string(),
-        }
+impl From<McpError> for cersei_types::CerseiError {
+    fn from(e: McpError) -> Self {
+        cersei_types::CerseiError::Mcp(e.to_string())
     }
 }
 
-// ─── MCP protocol types ─────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct McpToolDef {
-    pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    pub input_schema: serde_json::Value,
-}
-
-impl From<&McpToolDef> for ToolDefinition {
-    fn from(t: &McpToolDef) -> Self {
-        ToolDefinition {
-            name: t.name.clone(),
-            description: t.description.clone().unwrap_or_default(),
-            input_schema: t.input_schema.clone(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct McpResource {
-    pub uri: String,
-    pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", rename = "mimeType")]
-    pub mime_type: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
-pub enum McpContent {
-    Text {
-        text: String,
-    },
-    Image {
-        data: String,
-        #[serde(rename = "mimeType")]
-        mime_type: String,
-    },
-    Resource {
-        resource: McpResource,
-    },
-}
-
-// ─── Server status ───────────────────────────────────────────────────────────
-
+/// Connection state of a configured server.
 #[derive(Debug, Clone, PartialEq)]
 pub enum McpServerStatus {
-    Connecting,
     Connected,
     Error(String),
     Disconnected,
 }
 
-// ─── MCP client (per-server) ─────────────────────────────────────────────────
-
-/// A client connected to a single MCP server.
-pub struct McpClient {
-    pub config: McpServerConfig,
-    pub status: McpServerStatus,
-    pub tools: Vec<McpToolDef>,
-    pub resources: Vec<McpResource>,
-    transport: Option<transport::StdioTransport>,
-}
-
-impl McpClient {
-    /// Connect to an MCP server and perform the handshake.
-    pub async fn connect(config: McpServerConfig) -> Result<Self> {
-        let config_expanded = expand_server_config(&config);
-
-        if config_expanded.server_type == "stdio" {
-            let command = config_expanded
-                .command
-                .as_deref()
-                .ok_or_else(|| CerseiError::Mcp("stdio server requires 'command'".into()))?;
-
-            let mut transport = transport::StdioTransport::spawn(
-                command,
-                &config_expanded.args,
-                &config_expanded.env,
-            )
-            .await?;
-
-            // Initialize handshake
-            let init_params = serde_json::json!({
-                "protocolVersion": "2024-11-05",
-                "capabilities": {
-                    "roots": { "listChanged": true }
-                },
-                "clientInfo": {
-                    "name": "cersei",
-                    "version": env!("CARGO_PKG_VERSION")
-                }
-            });
-
-            let init_result = transport.request("initialize", Some(init_params)).await?;
-            tracing::debug!("MCP initialize result: {:?}", init_result);
-
-            // Send initialized notification
-            transport.notify("notifications/initialized", None).await?;
-
-            // Discover tools
-            let tools_result = transport.request("tools/list", None).await?;
-            let tools: Vec<McpToolDef> = tools_result
-                .get("tools")
-                .and_then(|t| serde_json::from_value(t.clone()).ok())
-                .unwrap_or_default();
-
-            // Discover resources
-            let resources = match transport.request("resources/list", None).await {
-                Ok(res) => res
-                    .get("resources")
-                    .and_then(|r| serde_json::from_value(r.clone()).ok())
-                    .unwrap_or_default(),
-                Err(_) => Vec::new(), // resources are optional
-            };
-
-            tracing::info!(
-                server = %config.name,
-                tools = tools.len(),
-                resources = resources.len(),
-                "MCP server connected"
-            );
-
-            Ok(Self {
-                config,
-                status: McpServerStatus::Connected,
-                tools,
-                resources,
-                transport: Some(transport),
-            })
-        } else {
-            // SSE transport placeholder
-            Err(CerseiError::Mcp(format!(
-                "SSE transport not yet implemented for server '{}'",
-                config.name
-            )))
-        }
-    }
-
-    /// Call a tool on this MCP server.
-    pub async fn call_tool(
-        &mut self,
-        tool_name: &str,
-        arguments: Option<serde_json::Value>,
-    ) -> Result<String> {
-        let transport = self
-            .transport
-            .as_mut()
-            .ok_or_else(|| CerseiError::Mcp("Not connected".into()))?;
-
-        let params = serde_json::json!({
-            "name": tool_name,
-            "arguments": arguments.unwrap_or(serde_json::Value::Object(Default::default())),
-        });
-
-        let result = transport.request("tools/call", Some(params)).await?;
-
-        // Parse content array
-        let content: Vec<McpContent> = result
-            .get("content")
-            .and_then(|c| serde_json::from_value(c.clone()).ok())
-            .unwrap_or_default();
-
-        let is_error = result
-            .get("isError")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-
-        let text: String = content
-            .iter()
-            .filter_map(|c| match c {
-                McpContent::Text { text } => Some(text.as_str()),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        if is_error {
-            Err(CerseiError::Mcp(text))
-        } else {
-            Ok(text)
-        }
-    }
-
-    /// Read a resource from this MCP server.
-    pub async fn read_resource(&mut self, uri: &str) -> Result<String> {
-        let transport = self
-            .transport
-            .as_mut()
-            .ok_or_else(|| CerseiError::Mcp("Not connected".into()))?;
-
-        let params = serde_json::json!({ "uri": uri });
-        let result = transport.request("resources/read", Some(params)).await?;
-
-        let contents = result
-            .get("contents")
-            .and_then(|c| c.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|item| item.get("text").and_then(|t| t.as_str()))
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            })
-            .unwrap_or_default();
-
-        Ok(contents)
-    }
-
-    /// Get tool definitions for the provider.
-    pub fn tool_definitions(&self) -> Vec<ToolDefinition> {
-        self.tools.iter().map(ToolDefinition::from).collect()
-    }
-}
-
-// ─── MCP manager (multi-server) ──────────────────────────────────────────────
-
-/// Manages connections to multiple MCP servers.
+/// The MCP servers of an agent.
 pub struct McpManager {
-    clients: Arc<Mutex<HashMap<String, McpClient>>>,
+    configs: Vec<McpServerConfig>,
+    clients: tokio::sync::RwLock<HashMap<String, Arc<McpClient>>>,
+    errors: parking_lot::Mutex<HashMap<String, String>>,
 }
 
 impl McpManager {
-    /// Connect to all configured MCP servers.
-    pub async fn connect(configs: &[McpServerConfig]) -> Result<Self> {
+    /// Connect to every server, concurrently, each within its own connect
+    /// timeout. A server that fails is reported in [`Self::statuses`]; the
+    /// others are usable.
+    pub async fn connect(configs: &[McpServerConfig]) -> Self {
+        let results =
+            futures::future::join_all(configs.iter().map(|c| McpClient::connect(c.clone()))).await;
         let mut clients = HashMap::new();
-
-        for config in configs {
-            match McpClient::connect(config.clone()).await {
+        let mut errors = HashMap::new();
+        for (c, r) in configs.iter().zip(results) {
+            match r {
                 Ok(client) => {
-                    clients.insert(config.name.clone(), client);
+                    clients.insert(c.name.clone(), Arc::new(client));
                 }
                 Err(e) => {
-                    tracing::warn!(server = %config.name, error = %e, "Failed to connect MCP server");
+                    tracing::warn!(server = %c.name, error = %e, "MCP server not connected");
+                    errors.insert(c.name.clone(), e.to_string());
                 }
             }
         }
-
-        Ok(Self {
-            clients: Arc::new(Mutex::new(clients)),
-        })
+        Self {
+            configs: configs.to_vec(),
+            clients: tokio::sync::RwLock::new(clients),
+            errors: parking_lot::Mutex::new(errors),
+        }
     }
 
-    /// Get all discovered tool definitions across all servers.
-    pub async fn tool_definitions(&self) -> Vec<ToolDefinition> {
-        let clients = self.clients.lock().await;
-        clients
-            .values()
-            .flat_map(|c| c.tool_definitions())
+    /// A manager over already connected clients (custom transports, tests).
+    pub fn from_clients(clients: Vec<McpClient>) -> Self {
+        Self {
+            configs: clients.iter().map(|c| c.config.clone()).collect(),
+            clients: tokio::sync::RwLock::new(
+                clients
+                    .into_iter()
+                    .map(|c| (c.config.name.clone(), Arc::new(c)))
+                    .collect(),
+            ),
+            errors: parking_lot::Mutex::new(HashMap::new()),
+        }
+    }
+
+    /// `(server, tool)` for every tool of every connected server, in a
+    /// stable order.
+    pub async fn tools(&self) -> Vec<(String, McpToolDef)> {
+        let clients = self.clients.read().await;
+        let mut names: Vec<&String> = clients.keys().collect();
+        names.sort();
+        names
+            .into_iter()
+            .flat_map(|n| clients[n].tools().into_iter().map(move |t| (n.clone(), t)))
             .collect()
     }
 
-    /// Call a tool by name (routes to the correct server).
+    pub async fn tool_definitions(&self) -> Vec<ToolDefinition> {
+        self.tools()
+            .await
+            .iter()
+            .map(|(_, t)| ToolDefinition::from(t))
+            .collect()
+    }
+
+    pub async fn client(&self, server: &str) -> Option<Arc<McpClient>> {
+        self.clients.read().await.get(server).cloned()
+    }
+
+    /// Call `tool` on `server`. A connection found closed is re-opened once
+    /// before the call; a call interrupted by a lost connection is never
+    /// replayed.
+    pub async fn call(
+        &self,
+        server: &str,
+        tool: &str,
+        arguments: Option<serde_json::Value>,
+        progress: Option<ProgressFn>,
+    ) -> Result<McpCallResult, McpError> {
+        let client = self.live_client(server).await?;
+        if client.tools_changed() {
+            let _ = client.refresh_tools().await;
+        }
+        if !client.tools().iter().any(|t| t.name == tool) {
+            return Err(McpError::UnknownTool {
+                server: server.into(),
+                tool: tool.into(),
+            });
+        }
+        client.call_tool(tool, arguments, progress).await
+    }
+
+    async fn live_client(&self, server: &str) -> Result<Arc<McpClient>, McpError> {
+        let existing = self.clients.read().await.get(server).cloned();
+        match existing {
+            Some(c) if !c.is_closed() => Ok(c),
+            _ => {
+                let config = self
+                    .configs
+                    .iter()
+                    .find(|c| c.name == server)
+                    .cloned()
+                    .ok_or_else(|| McpError::Config(format!("no MCP server named '{server}'")))?;
+                let fresh = Arc::new(McpClient::connect(config).await.inspect_err(|e| {
+                    self.errors.lock().insert(server.to_string(), e.to_string());
+                })?);
+                self.errors.lock().remove(server);
+                self.clients
+                    .write()
+                    .await
+                    .insert(server.to_string(), fresh.clone());
+                Ok(fresh)
+            }
+        }
+    }
+
+    /// Call a tool by its bare name, on the first server that has it (the
+    /// former API; prefer [`Self::call`]).
     pub async fn call_tool(
         &self,
         tool_name: &str,
         arguments: Option<serde_json::Value>,
-    ) -> Result<String> {
-        let mut clients = self.clients.lock().await;
-
-        for client in clients.values_mut() {
-            if client.tools.iter().any(|t| t.name == tool_name) {
-                return client.call_tool(tool_name, arguments).await;
-            }
-        }
-
-        Err(CerseiError::Mcp(format!(
-            "No MCP server has tool '{}'",
-            tool_name
-        )))
+    ) -> Result<McpCallResult, McpError> {
+        let server = self
+            .tools()
+            .await
+            .into_iter()
+            .find(|(_, t)| t.name == tool_name)
+            .map(|(s, _)| s)
+            .ok_or_else(|| McpError::UnknownTool {
+                server: "*".into(),
+                tool: tool_name.into(),
+            })?;
+        self.call(&server, tool_name, arguments, None).await
     }
 
-    /// List all resources across all servers.
-    pub async fn list_resources(&self) -> Vec<McpResource> {
-        let clients = self.clients.lock().await;
-        clients.values().flat_map(|c| c.resources.clone()).collect()
-    }
-
-    /// Read a resource by URI (routes to the correct server).
-    pub async fn read_resource(&self, uri: &str) -> Result<String> {
-        let mut clients = self.clients.lock().await;
-
-        for client in clients.values_mut() {
-            if client.resources.iter().any(|r| r.uri == uri) {
-                return client.read_resource(uri).await;
-            }
-        }
-
-        Err(CerseiError::Mcp(format!(
-            "No MCP server has resource '{}'",
-            uri
-        )))
-    }
-
-    /// Get the status of all connected servers.
-    pub async fn server_statuses(&self) -> HashMap<String, McpServerStatus> {
-        let clients = self.clients.lock().await;
-        clients
+    pub async fn statuses(&self) -> HashMap<String, McpServerStatus> {
+        let clients = self.clients.read().await;
+        let errors = self.errors.lock();
+        self.configs
             .iter()
-            .map(|(name, client)| (name.clone(), client.status.clone()))
+            .map(|c| {
+                let status = match (clients.get(&c.name), errors.get(&c.name)) {
+                    (_, Some(e)) => McpServerStatus::Error(e.clone()),
+                    (Some(cl), None) if cl.is_closed() => McpServerStatus::Disconnected,
+                    (Some(_), None) => McpServerStatus::Connected,
+                    (None, None) => McpServerStatus::Disconnected,
+                };
+                (c.name.clone(), status)
+            })
             .collect()
     }
 
-    /// Get server configs.
-    pub async fn configs(&self) -> Vec<McpServerConfig> {
-        let clients = self.clients.lock().await;
-        clients.values().map(|c| c.config.clone()).collect()
+    pub async fn infos(&self) -> Vec<ServerInfo> {
+        let clients = self.clients.read().await;
+        let mut v: Vec<ServerInfo> = clients.values().map(|c| c.info().clone()).collect();
+        v.sort_by(|a, b| a.name.cmp(&b.name));
+        v
     }
-}
 
-// ─── Env var expansion ───────────────────────────────────────────────────────
+    pub fn configs(&self) -> &[McpServerConfig] {
+        &self.configs
+    }
 
-/// Expand `${VAR}` and `${VAR:-default}` patterns.
-pub fn expand_env_vars(input: &str) -> String {
-    let mut result = input.to_string();
-    let mut search_from = 0;
-    loop {
-        match result[search_from..].find("${") {
-            None => break,
-            Some(rel_start) => {
-                let start = search_from + rel_start;
-                match result[start..].find('}') {
-                    None => break,
-                    Some(rel_end) => {
-                        let end = start + rel_end;
-                        let inner = &result[start + 2..end];
-                        let (var_name, default_value) = if let Some(pos) = inner.find(":-") {
-                            (&inner[..pos], Some(&inner[pos + 2..]))
-                        } else {
-                            (inner, None)
-                        };
-
-                        let replacement = match std::env::var(var_name) {
-                            Ok(val) => val,
-                            Err(_) => match default_value {
-                                Some(def) => def.to_string(),
-                                None => {
-                                    search_from = end + 1;
-                                    continue;
-                                }
-                            },
-                        };
-
-                        result =
-                            format!("{}{}{}", &result[..start], replacement, &result[end + 1..]);
-                        search_from = start + replacement.len();
-                    }
-                }
-            }
+    /// Close every connection.
+    pub async fn close(&self) {
+        let clients: Vec<Arc<McpClient>> =
+            self.clients.write().await.drain().map(|(_, c)| c).collect();
+        for c in clients {
+            c.close().await;
         }
-    }
-    result
-}
-
-/// Expand env vars in all string fields of a server config.
-pub fn expand_server_config(config: &McpServerConfig) -> McpServerConfig {
-    McpServerConfig {
-        name: config.name.clone(),
-        command: config.command.as_deref().map(expand_env_vars),
-        args: config.args.iter().map(|a| expand_env_vars(a)).collect(),
-        env: config
-            .env
-            .iter()
-            .map(|(k, v)| (k.clone(), expand_env_vars(v)))
-            .collect(),
-        url: config.url.as_deref().map(expand_env_vars),
-        server_type: config.server_type.clone(),
-    }
-}
-
-// ─── Tests ───────────────────────────────────────────────────────────────────
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_expand_env_vars_simple() {
-        std::env::set_var("CERSEI_TEST_VAR", "hello");
-        assert_eq!(expand_env_vars("${CERSEI_TEST_VAR}"), "hello");
-        std::env::remove_var("CERSEI_TEST_VAR");
-    }
-
-    #[test]
-    fn test_expand_env_vars_default() {
-        assert_eq!(expand_env_vars("${NONEXISTENT_VAR:-fallback}"), "fallback");
-    }
-
-    #[test]
-    fn test_expand_env_vars_missing_no_default() {
-        let result = expand_env_vars("${CERSEI_MISSING_XYZ}");
-        assert_eq!(result, "${CERSEI_MISSING_XYZ}"); // left as-is
-    }
-
-    #[test]
-    fn test_expand_env_vars_multiple() {
-        std::env::set_var("CERSEI_A", "one");
-        std::env::set_var("CERSEI_B", "two");
-        assert_eq!(expand_env_vars("${CERSEI_A}-${CERSEI_B}"), "one-two");
-        std::env::remove_var("CERSEI_A");
-        std::env::remove_var("CERSEI_B");
-    }
-
-    #[test]
-    fn test_stdio_config() {
-        let config = McpServerConfig::stdio("test", "node", &["server.js"]);
-        assert_eq!(config.server_type, "stdio");
-        assert_eq!(config.command.as_deref(), Some("node"));
-        assert_eq!(config.args, vec!["server.js"]);
-    }
-
-    #[test]
-    fn test_sse_config() {
-        let config = McpServerConfig::sse("remote", "https://mcp.example.com");
-        assert_eq!(config.server_type, "sse");
-        assert_eq!(config.url.as_deref(), Some("https://mcp.example.com"));
-    }
-
-    #[test]
-    fn test_tool_def_conversion() {
-        let mcp_tool = McpToolDef {
-            name: "search".into(),
-            description: Some("Search docs".into()),
-            input_schema: serde_json::json!({"type": "object"}),
-        };
-        let tool_def: ToolDefinition = ToolDefinition::from(&mcp_tool);
-        assert_eq!(tool_def.name, "search");
-        assert_eq!(tool_def.description, "Search docs");
-    }
-
-    #[test]
-    fn test_expand_server_config() {
-        std::env::set_var("CERSEI_MCP_CMD", "/usr/bin/node");
-        let config = McpServerConfig {
-            name: "test".into(),
-            command: Some("${CERSEI_MCP_CMD}".into()),
-            args: vec!["${CERSEI_MCP_CMD}".into()],
-            env: HashMap::from([("KEY".into(), "${CERSEI_MCP_CMD}".into())]),
-            url: None,
-            server_type: "stdio".into(),
-        };
-        let expanded = expand_server_config(&config);
-        assert_eq!(expanded.command.as_deref(), Some("/usr/bin/node"));
-        assert_eq!(expanded.args[0], "/usr/bin/node");
-        assert_eq!(expanded.env["KEY"], "/usr/bin/node");
-        std::env::remove_var("CERSEI_MCP_CMD");
     }
 }

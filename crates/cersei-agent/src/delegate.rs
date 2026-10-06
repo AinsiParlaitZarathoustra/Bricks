@@ -193,9 +193,8 @@ pub async fn run_batch(cfg: DelegateConfig) -> Result<Vec<DelegateResult>> {
 
     let mut collected: Vec<(usize, DelegateResult)> = Vec::new();
     while let Some(joined) = set.join_next().await {
-        let (i, goal, res) = joined.map_err(|e| {
-            cersei_types::CerseiError::Config(format!("delegate join: {e}"))
-        })?;
+        let (i, goal, res) =
+            joined.map_err(|e| cersei_types::CerseiError::Config(format!("delegate join: {e}")))?;
         match res {
             Ok(r) => collected.push((i, r)),
             Err(e) => collected.push((
@@ -292,9 +291,8 @@ mod tests {
 
     #[test]
     fn child_prompt_includes_context_when_present() {
-        let p = build_child_system_prompt(
-            &DelegateTask::new("fix").with_context("error at line 42"),
-        );
+        let p =
+            build_child_system_prompt(&DelegateTask::new("fix").with_context("error at line 42"));
         assert!(p.contains("CONTEXT:\nerror at line 42"));
     }
 
@@ -306,9 +304,8 @@ mod tests {
 
     #[test]
     fn child_prompt_includes_workspace_when_present() {
-        let p = build_child_system_prompt(
-            &DelegateTask::new("g").with_workspace("/abs/path/to/repo"),
-        );
+        let p =
+            build_child_system_prompt(&DelegateTask::new("g").with_workspace("/abs/path/to/repo"));
         assert!(p.contains("WORKSPACE PATH:\n/abs/path/to/repo"));
     }
 

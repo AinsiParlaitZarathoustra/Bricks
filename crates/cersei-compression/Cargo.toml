@@ -8,10 +8,23 @@ repository.workspace = true
 description = "Structural and command-aware compression for tool outputs in the Cersei SDK. Ports rtk (Rust Token Killer) techniques."
 
 [dependencies]
+cersei-types = { workspace = true }
 anyhow = { workspace = true }
+dirs = { workspace = true }
 once_cell = { workspace = true }
 regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_path_to_error = "0.1"
 toml = { workspace = true }
 tracing = { workspace = true }
+# Same grammar versions as cersei-tools (no new download; no dependency between
+# the two crates). JavaScript is parsed with the TSX grammar.
+tree-sitter = "^0.26"
+tree-sitter-rust = "0.23"
+tree-sitter-typescript = "0.23"
+tree-sitter-python = "0.23"
+tree-sitter-go = "0.23"
+
+[dev-dependencies]
+tempfile = { workspace = true }

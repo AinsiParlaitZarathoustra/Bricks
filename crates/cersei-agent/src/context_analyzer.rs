@@ -81,8 +81,9 @@ impl ContextAnalysis {
 
 // ─── Analysis ────────────────────────────────────────────────────────────────
 
+/// Local estimate (see [`cersei_types::tokens`]): never a measurement.
 fn estimate_tokens(text: &str) -> u64 {
-    (text.len() as u64) / 4
+    cersei_types::tokens::estimate_text(text).tokens
 }
 
 /// Analyze context window usage by category.
@@ -106,20 +107,19 @@ pub fn analyze_context(
                 for block in blocks {
                     match block {
                         ContentBlock::ToolResult { content, .. } => {
-                            let text = match content {
-                                ToolResultContent::Text(t) => t.len(),
+                            tool_result_tokens += match content {
+                                ToolResultContent::Text(t) => estimate_tokens(t),
                                 ToolResultContent::Blocks(b) => b
                                     .iter()
                                     .map(|bb| {
                                         if let ContentBlock::Text { text } = bb {
-                                            text.len()
+                                            estimate_tokens(text)
                                         } else {
                                             50
                                         }
                                     })
                                     .sum(),
                             };
-                            tool_result_tokens += (text as u64) / 4;
                         }
                         ContentBlock::Text { text } => {
                             conversation_tokens += estimate_tokens(text);

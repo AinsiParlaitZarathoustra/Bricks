@@ -37,7 +37,6 @@ fn main() {
     println!("  1. System Prompt Builder");
     println!("  ────────────────────────");
     {
-        use cersei::Agent;
         use cersei_agent::system_prompt::*;
 
         let opts = SystemPromptOptions::default();
@@ -66,9 +65,9 @@ fn main() {
 
         // Test all output styles
         for style in &["concise", "formal", "casual", "learning", "explanatory"] {
-            let s = OutputStyle::from_str(style);
+            let s = OutputStyle::parse_name(style);
             check!(
-                &format!("OutputStyle::from_str({}) roundtrips", style),
+                &format!("OutputStyle::parse_name({}) roundtrips", style),
                 s.prompt_suffix().is_some()
             );
         }
@@ -376,12 +375,12 @@ fn main() {
                 MessageContent::Blocks(b) => b
                     .iter()
                     .filter_map(|bb| {
-                        if let ContentBlock::ToolResult { content, .. } = bb {
-                            if let cersei_types::ToolResultContent::Text(t) = content {
-                                Some(t.len())
-                            } else {
-                                None
-                            }
+                        if let ContentBlock::ToolResult {
+                            content: cersei_types::ToolResultContent::Text(t),
+                            ..
+                        } = bb
+                        {
+                            Some(t.len())
                         } else {
                             None
                         }
@@ -406,12 +405,12 @@ fn main() {
                 MessageContent::Blocks(b) => b
                     .iter()
                     .filter_map(|bb| {
-                        if let ContentBlock::ToolResult { content, .. } = bb {
-                            if let cersei_types::ToolResultContent::Text(t) = content {
-                                Some(t.len())
-                            } else {
-                                None
-                            }
+                        if let ContentBlock::ToolResult {
+                            content: cersei_types::ToolResultContent::Text(t),
+                            ..
+                        } = bb
+                        {
+                            Some(t.len())
                         } else {
                             None
                         }
@@ -427,12 +426,12 @@ fn main() {
                 MessageContent::Blocks(b) => b
                     .iter()
                     .filter(|bb| {
-                        if let ContentBlock::ToolResult { content, .. } = bb {
-                            if let cersei_types::ToolResultContent::Text(t) = content {
-                                t.contains("truncated")
-                            } else {
-                                false
-                            }
+                        if let ContentBlock::ToolResult {
+                            content: cersei_types::ToolResultContent::Text(t),
+                            ..
+                        } = bb
+                        {
+                            t.contains("truncated")
                         } else {
                             false
                         }
@@ -452,12 +451,12 @@ fn main() {
             // Last few messages should NOT be truncated
             let last_result = messages.iter().rev().find_map(|m| match &m.content {
                 MessageContent::Blocks(b) => b.iter().find_map(|bb| {
-                    if let ContentBlock::ToolResult { content, .. } = bb {
-                        if let cersei_types::ToolResultContent::Text(t) = content {
-                            Some(t.clone())
-                        } else {
-                            None
-                        }
+                    if let ContentBlock::ToolResult {
+                        content: cersei_types::ToolResultContent::Text(t),
+                        ..
+                    } = bb
+                    {
+                        Some(t.clone())
                     } else {
                         None
                     }

@@ -17,9 +17,7 @@ use tokio::sync::Mutex as AsyncMutex;
 fn require_sandbox_id(ctx: &ToolContext) -> std::result::Result<SandboxId, ToolResult> {
     match ctx.extensions.get::<Arc<dyn cersei_vms::Sandbox>>() {
         Some(sb) => Ok(sb.id().clone()),
-        None => Err(ToolResult::error(
-            "no active sandbox in this tool context",
-        )),
+        None => Err(ToolResult::error("no active sandbox in this tool context")),
     }
 }
 
@@ -96,13 +94,13 @@ impl Tool for SendVmMessageTool {
 // Subscriptions are stateful — we cache them in extensions keyed by
 // (sandbox_id, topic). The agent calls `RecvVmMessage` repeatedly to drain.
 
+/// Live subscriptions by (sandbox, topic).
+type Subscriptions =
+    std::collections::HashMap<(String, String), Arc<AsyncMutex<MailboxSubscription>>>;
+
 #[derive(Clone, Default)]
 struct SubscriptionRegistry {
-    subs: Arc<
-        parking_lot::Mutex<
-            std::collections::HashMap<(String, String), Arc<AsyncMutex<MailboxSubscription>>>,
-        >,
-    >,
+    subs: Arc<parking_lot::Mutex<Subscriptions>>,
 }
 
 pub struct RecvVmMessageTool;

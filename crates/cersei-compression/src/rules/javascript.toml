@@ -1,0 +1,154 @@
+schema_version = 1
+
+# ── Package managers ─────────────────────────────────────────────────────────
+
+[filters.npm-install]
+description = "`npm install/ci/update`: notices and deprecation warnings summarised."
+match = [{ program = "npm", subcommands = ["install", "i", "ci", "add", "update", "up", "uninstall", "rm"] }]
+options_with_value = ["--prefix", "-w", "--workspace"]
+strip_lines_matching = ['^npm (notice|timing|http)\b', '^\s*$']
+summarize_lines = [{ pattern = '^npm (WARN|warn) deprecated ', label = "deprecation warnings" }]
+max_lines = 150
+
+[filters.npm]
+description = "Other npm commands (`npm test`, `npm run …`): notices removed, the script output handled generically."
+match = [{ program = "npm" }]
+options_with_value = ["--prefix", "-w", "--workspace"]
+strip_lines_matching = ['^npm (notice|timing|http)\b']
+head_lines = 60
+tail_lines = 160
+max_lines = 300
+
+[filters.pnpm-install]
+description = "`pnpm install/add/update`: resolution progress removed."
+match = [{ program = "pnpm", subcommands = ["install", "i", "add", "update", "up", "remove", "rm"] }]
+options_with_value = ["-C", "--dir", "-F", "--filter"]
+strip_lines_matching = [
+    '^\s*Progress: resolved ',
+    '^\s*Packages: [+-]\d+',
+    '^\s*[+-]+\s*$',
+    '^\s*(Downloading|Resolving|Fetching)\b',
+    '^\s*$',
+]
+max_lines = 150
+
+[filters.pnpm]
+description = "Other pnpm commands: progress removed, the script output handled generically."
+match = [{ program = "pnpm" }]
+options_with_value = ["-C", "--dir", "-F", "--filter"]
+strip_lines_matching = ['^\s*Progress: resolved ']
+head_lines = 60
+tail_lines = 160
+max_lines = 300
+
+[filters.yarn-install]
+description = "`yarn` / `yarn install/add`: step banners and fetch progress removed (classic and berry)."
+match = [{ program = "yarn", subcommands = ["install", "add", "upgrade", "remove"] }]
+options_with_value = ["--cwd"]
+strip_lines_matching = [
+    '^\[\d/\d\] ',
+    '^➤ YN0000: [┌└│]',
+    '^➤ YN0013: ',
+    '^info (No lockfile found|Visit https://yarnpkg\.com)',
+    '^success (Saved lockfile|Already up-to-date)',
+    '^\s*$',
+]
+max_lines = 150
+
+[filters.yarn]
+description = "Other yarn commands (`yarn test`, `yarn <script>`): help footer removed."
+match = [{ program = "yarn" }]
+options_with_value = ["--cwd"]
+strip_lines_matching = ['^info Visit https://yarnpkg\.com/', '^yarn run v\d']
+head_lines = 60
+tail_lines = 160
+max_lines = 300
+
+[filters.bun-install]
+description = "`bun install/add`: the list of installed packages summarised."
+match = [{ program = "bun", subcommands = ["install", "i", "add", "a", "remove", "update"] }]
+options_with_value = ["--cwd"]
+strip_lines_matching = ['^\s*$', '^\s*Resolving dependencies', '^\s*Resolved, downloaded and extracted']
+summarize_lines = [{ pattern = '^\s*[+-] \S+@\S+', label = "installed packages" }]
+max_lines = 120
+
+[filters.bun-test]
+description = "`bun test`: passing tests summarised; failures and their errors kept."
+match = [{ program = "bun", subcommands = ["test"] }]
+options_with_value = ["--cwd"]
+summarize_lines = [
+    { pattern = '^\s*(✓|\(pass\)) ', label = "passing tests" },
+    { pattern = '^\s*(»|\(skip\)) ', label = "skipped tests" },
+]
+diagnostic_blocks = [{ start = '^\s*(✗|\(fail\)) ', severity = "error", kind = "failed test" }]
+protect_lines = ['^\s*\d+ (pass|fail|skip)$', '^Ran \d+ tests? ']
+head_lines = 20
+tail_lines = 80
+max_lines = 250
+
+[filters.bun]
+description = "Other bun commands: output handled generically."
+match = [{ program = "bun" }]
+options_with_value = ["--cwd"]
+head_lines = 60
+tail_lines = 160
+max_lines = 300
+
+# ── Build tools and test runners ─────────────────────────────────────────────
+
+[filters.vitest]
+description = "`vitest`: passing files/tests summarised; FAIL sections, diffs and code frames kept."
+match = [{ program = "vitest" }]
+strip_lines_matching = ['^\s*RUN\s+v\d', '^\s*(Start at|Duration)\s']
+summarize_lines = [{ pattern = '^\s*✓ ', label = "passing tests" }]
+protect_lines = ['^\s*(Test Files|Tests|Errors)\s', '^\s*❯ .*\d+ failed']
+head_lines = 20
+tail_lines = 80
+max_lines = 300
+
+[filters.vite]
+description = "`vite build`: build stages and the emitted-asset list summarised; build errors kept."
+match = [{ program = "vite" }]
+strip_lines_matching = ['^transforming\.\.\.$', '^rendering chunks\.\.\.$', '^computing gzip size\.\.\.$']
+summarize_lines = [{ pattern = '^\S+\.(js|mjs|css|html|map|svg|png|woff2?)\s+[\d.,]+ kB', label = "emitted assets" }]
+diagnostic_blocks = [{ start = '^error during build:', end = "blank", severity = "error", kind = "vite build error", max_lines = 80 }]
+protect_lines = ['^✓ built in ', '^\(!\) ']
+max_lines = 200
+
+[filters.turbo]
+description = "`turbo run`: scope banners and cache replays summarised; task failures and the final summary kept."
+match = [{ program = "turbo" }]
+options_with_value = ["--filter", "-F", "--cwd", "--concurrency"]
+strip_lines_matching = ['^\s*• (Packages in scope|Running|Remote caching)']
+summarize_lines = [{ pattern = ': cache hit, replaying (logs|output)', label = "cached tasks" }]
+protect_lines = ['^\s*(Tasks|Cached|Time|Failed):\s']
+head_lines = 40
+tail_lines = 160
+max_lines = 300
+
+[filters.eslint]
+description = "`eslint`: every problem kept with its file header; the summary kept."
+match = [{ program = "eslint" }]
+options_with_value = ["-c", "--config", "-f", "--format", "--ext", "--rule", "--max-warnings", "--resolve-plugins-relative-to"]
+protect_lines = ['^(/|\./|[A-Za-z]:\\)?[^\s:]+\.(c|m)?(j|t)sx?$', '^✖ \d+ problems?', 'potentially fixable']
+max_lines = 400
+
+[filters.next-build]
+description = "`next build`: progress steps removed, route table summarised; compile and prerender errors kept."
+match = [{ program = "next", subcommands = ["build"] }]
+strip_lines_matching = [
+    '^\s*(Creating an optimized production build|Collecting page data|Finalizing page optimization|Collecting build traces|Linting and checking validity of types)\s*\.*\s*$',
+    '^\s*Generating static pages \(\d+/\d+\)\s*$',
+]
+summarize_lines = [{ pattern = '^[┌├└│]\s', label = "route table rows" }]
+diagnostic_blocks = [
+    { start = '^Failed to compile\.', until = '^(Next\.js build worker exited|> Build failed)', inclusive = true, severity = "error", kind = "next build error", max_lines = 120 },
+    { start = '^Error occurred prerendering page', end = "blank", severity = "error", kind = "prerender error" },
+]
+max_lines = 200
+
+[filters.tsc]
+description = "`tsc`: every TypeScript error kept with the final count."
+match = [{ program = "tsc" }, { program = "vue-tsc" }]
+protect_lines = ['^Found \d+ errors?']
+max_lines = 400

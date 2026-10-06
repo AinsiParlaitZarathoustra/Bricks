@@ -1,0 +1,45 @@
+bun test v1.1.8 (89d25807)
+
+src/math.test.ts:
+✓ math > case 1 [0.01ms]
+✓ math > case 2 [0.02ms]
+✓ math > case 3 [0.03ms]
+✓ math > case 4 [0.04ms]
+✓ math > case 5 [0.05ms]
+✓ math > case 6 [0.06ms]
+✓ math > case 7 [0.07ms]
+✓ math > case 8 [0.08ms]
+✓ math > case 9 [0.09ms]
+✓ math > case 10 [0.010ms]
+✓ math > case 11 [0.011ms]
+✓ math > case 12 [0.012ms]
+✓ math > case 13 [0.013ms]
+✓ math > case 14 [0.014ms]
+✓ math > case 15 [0.015ms]
+✓ math > case 16 [0.016ms]
+✓ math > case 17 [0.017ms]
+✓ math > case 18 [0.018ms]
+✓ math > case 19 [0.019ms]
+✓ math > case 20 [0.020ms]
+✓ math > case 21 [0.021ms]
+✓ math > case 22 [0.022ms]
+✓ math > case 23 [0.023ms]
+✓ math > case 24 [0.024ms]
+✓ math > case 25 [0.025ms]
+✓ math > case 26 [0.026ms]
+✓ math > case 27 [0.027ms]
+✓ math > case 28 [0.028ms]
+✓ math > case 29 [0.029ms]
+✓ math > case 30 [0.030ms]
+✗ math > divides by zero [0.31ms]
+
+error: expect(received).toThrow()
+
+Received function did not throw
+
+      at /work/app/src/math.test.ts:42:20
+
+ 30 pass
+ 1 fail
+ 31 expect() calls
+Ran 31 tests across 1 files. [18.00ms]

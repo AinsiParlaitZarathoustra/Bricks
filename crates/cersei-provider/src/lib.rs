@@ -1,16 +1,33 @@
-//! cersei-provider: Provider trait and built-in LLM providers.
+//! cersei-provider: configurable LLM providers.
 //!
-//! Providers abstract over different LLM backends (Anthropic, OpenAI, local models).
-//! Each provider implements streaming completion, token counting, and capability discovery.
+//! Which providers and models exist is decided entirely by a configuration file
+//! (`~/.bricks/providers.toml`, or an explicit `.toml`/`.json` path), loaded
+//! into a [`ProviderRegistry`]. A model is selected explicitly as
+//! `provider_id/model_id` and turned into a [`ConfiguredProvider`], which drives
+//! one of three wire protocols — `chat_completions`, `responses`,
+//! `anthropic_messages` — from configuration alone. Adding a provider or model
+//! compatible with one of those protocols needs a configuration change, not a
+//! recompilation.
+//!
+//! ```no_run
+//! use cersei_provider::ProviderRegistry;
+//!
+//! let registry = ProviderRegistry::load(None)?;              // ~/.bricks/providers.toml
+//! let model = registry.resolve("custom/flash")?;             // explicit selection
+//! let provider = model.build_provider()?;                    // reads api_key_env now
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
 
 pub mod adapt;
-pub mod anthropic;
-pub mod quirks;
-pub mod anthropic_vertex;
-pub mod gemini;
-pub mod openai;
+pub mod config;
+pub mod decimal;
+pub mod endpoint;
+pub mod modality;
+pub mod pricing;
+pub mod protocol;
+pub mod provider;
+pub mod reasoning;
 pub mod registry;
-pub mod router;
 mod stream;
 
 use async_trait::async_trait;
@@ -21,13 +38,28 @@ use tokio::sync::mpsc;
 
 // Re-exports
 pub use adapt::{adapt_tools, SchemaDialect};
-pub use anthropic::Anthropic;
-pub use quirks::{ProviderQuirks, TemperaturePolicy, ThinkingQuirk};
-pub use anthropic_vertex::AnthropicVertex;
-pub use gemini::Gemini;
-pub use openai::OpenAi;
-pub use router::from_model_string;
+pub use config::{
+    default_config_path, AuthMode, ConfigError, ModelConfig, Protocol, ProviderConfig,
+    ProvidersConfig, Secret, SCHEMA_VERSION,
+};
+pub use decimal::Decimal;
+pub use modality::{protocol_support, Capabilities, ProtocolSupport};
+pub use pricing::{Pricing, DEFAULT_TARIFF};
+pub use provider::{ConfiguredProvider, ProviderBuilder, REASONING_PROFILE_OPTION};
+pub use registry::{ModelRef, ProviderRegistry, ResolvedModel};
 pub use stream::StreamAccumulator;
+
+/// Load the configuration (`explicit` path, else `~/.bricks/providers.toml`),
+/// resolve `selection` (`provider_id/model_id`) and build its provider.
+/// There is no fallback: a missing or invalid configuration is an error.
+pub fn provider_from_config(
+    explicit: Option<&std::path::Path>,
+    selection: &str,
+) -> Result<ConfiguredProvider> {
+    ProviderRegistry::load(explicit)?
+        .resolve(selection)?
+        .build_provider()
+}
 
 /// Seconds from a `Retry-After` header, if the provider sent a usable one.
 ///
@@ -48,13 +80,59 @@ pub fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<std::ti
 
 // ─── Provider trait ──────────────────────────────────────────────────────────
 
+/// Declared token limits of the bound model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModelLimits {
+    pub max_input_tokens: u64,
+    pub max_output_tokens: u64,
+    /// Total window shared by input and output, when configured. `None`
+    /// means the configuration does not state one: nothing is inferred.
+    pub context_window_tokens: Option<u64>,
+}
+
+impl ModelLimits {
+    /// Tokens available for the prompt once `reserved_output` is set aside.
+    pub fn input_budget(&self, reserved_output: u64) -> u64 {
+        match self.context_window_tokens {
+            Some(w) => self.max_input_tokens.min(w.saturating_sub(reserved_output)),
+            None => self.max_input_tokens,
+        }
+    }
+}
+
+/// What the context manager needs to know about the bound model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelInfo {
+    /// Identity of the model (`provider_id/model_id`); measurements made
+    /// with one model never apply to another.
+    pub selection: String,
+    /// Wire protocol (`chat_completions`, `responses`, `anthropic_messages`).
+    pub protocol: &'static str,
+    pub limits: ModelLimits,
+    /// Reasoning kept in the history is sent back to the server (and so
+    /// occupies the context): true for `anthropic_messages` and `responses`,
+    /// and for `chat_completions` when `compat.reasoning_field` is set.
+    pub reasoning_resent: bool,
+    /// A token-counting endpoint is configured for this model.
+    pub token_counting: bool,
+}
+
 #[async_trait]
 pub trait Provider: Send + Sync {
-    /// Human-readable provider name (e.g., "anthropic", "openai").
+    /// The configured provider id (e.g. `custom`).
     fn name(&self) -> &str;
 
-    /// Context window size for the given model.
+    /// Tokens available for the prompt with this model: the declared
+    /// `max_input_tokens`, reduced when the window is shared with the output.
     fn context_window(&self, model: &str) -> u64;
+
+    /// Identity, limits and protocol of the bound model. `None` for providers
+    /// that do not come from configuration (tests, custom implementations):
+    /// the context manager then uses [`Provider::context_window`] only and
+    /// reports the missing information.
+    fn model_info(&self) -> Option<ModelInfo> {
+        None
+    }
 
     /// Send a streaming completion request.
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionStream>;
@@ -64,11 +142,12 @@ pub trait Provider: Send + Sync {
         self.complete(request).await?.collect().await
     }
 
-    /// Count tokens for a message list. Returns an estimate if exact counting is unavailable.
-    async fn count_tokens(&self, messages: &[Message], _model: &str) -> Result<u64> {
-        // Default: rough estimate based on character count
-        let chars: usize = messages.iter().map(|m| m.get_all_text().len()).sum();
-        Ok((chars as u64) / 4) // ~4 chars per token
+    /// Count the input tokens of a complete request with the server's
+    /// counting endpoint. `Ok(None)` when no endpoint is configured for this
+    /// model — callers then fall back to a local estimate. Counting is a
+    /// pre-flight measurement: it never sends the request itself.
+    async fn count_request_tokens(&self, _request: &CompletionRequest) -> Result<Option<u64>> {
+        Ok(None)
     }
 }
 
@@ -81,59 +160,18 @@ impl Provider for Box<dyn Provider> {
     fn context_window(&self, model: &str) -> u64 {
         (**self).context_window(model)
     }
+    fn model_info(&self) -> Option<ModelInfo> {
+        (**self).model_info()
+    }
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionStream> {
         (**self).complete(request).await
     }
     async fn complete_blocking(&self, request: CompletionRequest) -> Result<CompletionResponse> {
         (**self).complete_blocking(request).await
     }
-    async fn count_tokens(&self, messages: &[Message], model: &str) -> Result<u64> {
-        (**self).count_tokens(messages, model).await
+    async fn count_request_tokens(&self, request: &CompletionRequest) -> Result<Option<u64>> {
+        (**self).count_request_tokens(request).await
     }
-}
-
-// ─── Authentication ──────────────────────────────────────────────────────────
-
-#[derive(Debug, Clone)]
-pub enum Auth {
-    /// API key sent as `x-api-key` header (Anthropic Console) or `Authorization: Bearer` (OpenAI).
-    ApiKey(String),
-    /// Bearer token sent as `Authorization: Bearer <token>`.
-    Bearer(String),
-    /// OAuth flow with client ID and token.
-    OAuth {
-        client_id: String,
-        token: OAuthToken,
-    },
-    /// Custom auth provider for non-standard flows.
-    Custom(std::sync::Arc<dyn AuthProvider>),
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OAuthToken {
-    pub access_token: String,
-    pub refresh_token: Option<String>,
-    pub expires_at_ms: Option<i64>,
-    pub scopes: Vec<String>,
-}
-
-impl OAuthToken {
-    pub fn is_expired(&self) -> bool {
-        if let Some(exp) = self.expires_at_ms {
-            chrono::Utc::now().timestamp_millis() >= exp
-        } else {
-            false
-        }
-    }
-}
-
-#[async_trait]
-pub trait AuthProvider: Send + Sync + std::fmt::Debug {
-    /// Returns (header_name, header_value) for the request.
-    async fn get_credentials(&self) -> Result<(String, String)>;
-
-    /// Refresh credentials if they have expired.
-    async fn refresh(&self) -> Result<()>;
 }
 
 // ─── Completion request/response ─────────────────────────────────────────────
@@ -147,8 +185,13 @@ pub struct CompletionRequest {
     pub max_tokens: u32,
     pub temperature: Option<f32>,
     pub stop_sequences: Vec<String>,
-    /// Provider-specific options (thinking budget, top_p, etc.)
+    /// Engine-level options an adapter understands: `tool_choice = "required"`
+    /// (forced tool call) and `reasoning_profile` (profile id for this call).
+    /// Everything else a model needs is configuration, not request options.
     pub options: ProviderOptions,
+    /// Output modalities the caller needs. Empty means text only. A modality
+    /// the model or its adapter cannot produce is refused before sending.
+    pub output_modalities: Vec<Modality>,
 }
 
 impl CompletionRequest {
@@ -162,6 +205,7 @@ impl CompletionRequest {
             temperature: None,
             stop_sequences: Vec::new(),
             options: ProviderOptions::default(),
+            output_modalities: Vec::new(),
         }
     }
 }
@@ -195,12 +239,6 @@ pub struct CompletionResponse {
     pub usage: Usage,
     pub stop_reason: StopReason,
 }
-
-// F-23: `ProviderCapabilities` is gone. It was written 40+ times in the
-// registry and read exactly once — a `Box<dyn Provider>` forwarder to
-// nothing (H6). The living per-(provider, model) surface is
-// `quirks::ProviderQuirks`, whose fields derive from the live-verified
-// gates instead of a hand-maintained table.
 
 // ─── Completion stream ───────────────────────────────────────────────────────
 

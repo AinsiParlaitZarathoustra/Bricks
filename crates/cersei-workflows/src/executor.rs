@@ -51,7 +51,9 @@ impl Workflow {
         let (tx, mut rx) = mpsc::channel::<WorkflowEvent>(1024);
         // Drain events so senders never block.
         let drain = tokio::spawn(async move { while rx.recv().await.is_some() {} });
-        let res = self.run_inner(new_run_id(), input, tx, None, HashMap::new()).await;
+        let res = self
+            .run_inner(new_run_id(), input, tx, None, HashMap::new())
+            .await;
         let _ = drain.await;
         Ok(res)
     }
@@ -77,7 +79,12 @@ impl Workflow {
     }
 
     /// Resume a suspended run from a stored snapshot.
-    pub async fn resume(&self, run_id: &str, node_id: &NodeId, data: Value) -> Result<WorkflowResult> {
+    pub async fn resume(
+        &self,
+        run_id: &str,
+        node_id: &NodeId,
+        data: Value,
+    ) -> Result<WorkflowResult> {
         let snapshot = self
             .store
             .load(run_id)
@@ -218,13 +225,17 @@ impl Workflow {
 
             match &node.kind {
                 NodeKind::Step { step_id, config } => {
-                    self.exec_step(rctx, node_id, step_id, config, input, stop_at).await
+                    self.exec_step(rctx, node_id, step_id, config, input, stop_at)
+                        .await
                 }
                 NodeKind::Map { mapping } => {
                     let scope = self.build_scope(rctx, &input);
                     let mut obj = Map::new();
                     for (field, ptr) in &mapping.fields {
-                        let val = scope.pointer(&normalize_ptr(ptr)).cloned().unwrap_or(Value::Null);
+                        let val = scope
+                            .pointer(&normalize_ptr(ptr))
+                            .cloned()
+                            .unwrap_or(Value::Null);
                         obj.insert(field.clone(), val);
                     }
                     let output = Value::Object(obj);
@@ -243,8 +254,16 @@ impl Workflow {
                     body,
                     condition,
                 } => {
-                    self.exec_loop(rctx, node_id, body, mode, condition.as_ref(), input, stop_at)
-                        .await
+                    self.exec_loop(
+                        rctx,
+                        node_id,
+                        body,
+                        mode,
+                        condition.as_ref(),
+                        input,
+                        stop_at,
+                    )
+                    .await
                 }
             }
         })
@@ -543,15 +562,12 @@ impl Workflow {
         stop_at: Option<&'a str>,
     ) -> WalkFut<'a> {
         Box::pin(async move {
-            let next = self
-                .outgoing
-                .get(node_id)
-                .and_then(|edges| {
-                    edges
-                        .iter()
-                        .find(|e| matches!(e.kind, EdgeKind::Then))
-                        .map(|e| e.to.clone())
-                });
+            let next = self.outgoing.get(node_id).and_then(|edges| {
+                edges
+                    .iter()
+                    .find(|e| matches!(e.kind, EdgeKind::Then))
+                    .map(|e| e.to.clone())
+            });
             match next {
                 Some(n) if Some(n.as_str()) != stop_at => {
                     self.walk(rctx, &n, output, stop_at).await

@@ -1,0 +1,72 @@
+
+ RUN  v1.6.0 /work/app
+
+ ✓ src/feature1.test.ts (6 tests) 1ms
+ ✓ src/feature2.test.ts (6 tests) 2ms
+ ✓ src/feature3.test.ts (6 tests) 3ms
+ ✓ src/feature4.test.ts (6 tests) 4ms
+ ✓ src/feature5.test.ts (6 tests) 5ms
+ ✓ src/feature6.test.ts (6 tests) 6ms
+ ✓ src/feature7.test.ts (6 tests) 7ms
+ ✓ src/feature8.test.ts (6 tests) 8ms
+ ✓ src/feature9.test.ts (6 tests) 9ms
+ ✓ src/feature10.test.ts (6 tests) 10ms
+ ✓ src/feature11.test.ts (6 tests) 11ms
+ ✓ src/feature12.test.ts (6 tests) 12ms
+ ✓ src/feature13.test.ts (6 tests) 13ms
+ ✓ src/feature14.test.ts (6 tests) 14ms
+ ✓ src/feature15.test.ts (6 tests) 15ms
+ ✓ src/feature16.test.ts (6 tests) 16ms
+ ✓ src/feature17.test.ts (6 tests) 17ms
+ ✓ src/feature18.test.ts (6 tests) 18ms
+ ✓ src/feature19.test.ts (6 tests) 19ms
+ ✓ src/feature20.test.ts (6 tests) 20ms
+ ✓ src/feature21.test.ts (6 tests) 21ms
+ ✓ src/feature22.test.ts (6 tests) 22ms
+ ✓ src/feature23.test.ts (6 tests) 23ms
+ ✓ src/feature24.test.ts (6 tests) 24ms
+ ✓ src/feature25.test.ts (6 tests) 25ms
+ ✓ src/feature26.test.ts (6 tests) 26ms
+ ✓ src/feature27.test.ts (6 tests) 27ms
+ ✓ src/feature28.test.ts (6 tests) 28ms
+ ✓ src/feature29.test.ts (6 tests) 29ms
+ ✓ src/feature30.test.ts (6 tests) 30ms
+ ✓ src/feature31.test.ts (6 tests) 31ms
+ ✓ src/feature32.test.ts (6 tests) 32ms
+ ✓ src/feature33.test.ts (6 tests) 33ms
+ ✓ src/feature34.test.ts (6 tests) 34ms
+ ✓ src/feature35.test.ts (6 tests) 35ms
+ ✓ src/feature36.test.ts (6 tests) 36ms
+ ✓ src/feature37.test.ts (6 tests) 37ms
+ ✓ src/feature38.test.ts (6 tests) 38ms
+ ✓ src/feature39.test.ts (6 tests) 39ms
+ ✓ src/feature40.test.ts (6 tests) 40ms
+ ❯ src/math.test.ts (3 tests | 1 failed) 9ms
+   × add > handles négatifs 4ms
+     → expected -2 to be 2 // Object.is equality
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/math.test.ts > add > handles négatifs
+AssertionError: expected -2 to be 2 // Object.is equality
+
+- Expected
++ Received
+
+- 2
++ -2
+
+ ❯ src/math.test.ts:9:24
+      7|   it('handles négatifs', () => {
+      8|     expect(add(-1, -1)).toBe(-2)
+      9|     expect(add(-1, -1)).toBe(2)
+       |                        ^
+     10|   })
+     11| })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+ Test Files  1 failed | 40 passed (41)
+      Tests  1 failed | 242 passed (243)
+   Start at  10:12:03
+   Duration  1.32s (transform 210ms, setup 0ms, collect 610ms, tests 95ms, environment 2ms, prepare 300ms)

@@ -1,0 +1,21 @@
+schema_version = 1
+
+# Commands whose output is the value that was asked for. They are never
+# filtered: only a size cap applies, with a reference to the full output.
+[filters.exact-output]
+description = "Values, file contents, search results and listings: never filtered, only capped."
+mode = "exact"
+match = [
+    { program = "cat" }, { program = "head" }, { program = "tail" }, { program = "less" },
+    { program = "sed" }, { program = "awk" }, { program = "cut" }, { program = "sort" },
+    { program = "uniq" }, { program = "tr" }, { program = "jq" }, { program = "yq" },
+    { program = "echo" }, { program = "printf" }, { program = "base64" }, { program = "xxd" },
+    { program = "od" }, { program = "hexdump" }, { program = "sha256sum" }, { program = "sha1sum" },
+    { program = "shasum" }, { program = "md5sum" }, { program = "md5" }, { program = "wc" },
+    { program = "diff" }, { program = "cmp" }, { program = "env" }, { program = "printenv" },
+    { program = "stat" }, { program = "file" }, { program = "readlink" }, { program = "realpath" },
+    { program = "date" }, { program = "pwd" }, { program = "which" }, { program = "whoami" },
+    { program = "uname" }, { program = "grep" }, { program = "egrep" }, { program = "rg" },
+    { program = "ag" }, { program = "find" }, { program = "fd" }, { program = "ls" },
+    { program = "tree" }, { program = "du" }, { program = "df" },
+]

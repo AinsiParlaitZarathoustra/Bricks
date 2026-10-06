@@ -8,12 +8,16 @@
 //! - v0: Pre-versioning (no SchemaVersion node)
 //! - v1: Stamp version node (current schema, no data changes)
 //! - v2: Add `last_validated_at`, `decay_rate`, `embedding_model_version` to Memory nodes
+//! - v3: Structured memory (`:Episode`, `:Entity`, `:Fact`, `:MemoryMeta`, see
+//!   `structured::store`). Each legacy `:Memory` node gets an `:Episode`
+//!   (role `legacy`, space `space:legacy`, extraction skipped) so it is
+//!   searchable by the new recall; the `:Memory` nodes stay for `GraphMemory`.
 
 #[cfg(feature = "graph")]
 use grafeo::GrafeoDB;
 
 /// Current schema version that this code expects.
-pub const CURRENT_SCHEMA_VERSION: u32 = 2;
+pub const CURRENT_SCHEMA_VERSION: u32 = 3;
 
 /// Result of a schema version check.
 #[derive(Debug, PartialEq)]
@@ -31,23 +35,25 @@ pub enum VersionCheck {
 
 // ─── GQL queries for version management ────────────────────────────────────
 
+#[cfg(feature = "graph")]
 mod queries {
     pub const READ_VERSION: &str = "MATCH (v:SchemaVersion) RETURN v.version";
+    pub const INSERT_VERSION: &str = "INSERT (:SchemaVersion {singleton: 'schema_version', \
+        version: $version, migrated_at: $now, code_version: $code})";
+    pub const DELETE_VERSION: &str = "MATCH (v:SchemaVersion) DELETE v";
+    pub const LEGACY_MEMORIES: &str =
+        "MATCH (m:Memory) RETURN m.id, m.content, m.created_at ORDER BY m.created_at, m.id";
+    pub const EPISODE_EXISTS: &str = "MATCH (e:Episode {id: $id}) RETURN e.id";
+    pub const MAX_IKEY: &str = "MATCH (n) WHERE n.ikey IS NOT NULL RETURN max(n.ikey)";
+    pub const INSERT_LEGACY_EPISODE: &str = "INSERT (:Episode {id: $id, space: 'space:legacy', \
+        session_id: NULL, role: 'legacy', author: NULL, content: $content, occurred_at: $occurred_at, \
+        recorded_at: $recorded_at, source_ref: $source_ref, extraction_state: 'skipped', \
+        extraction_attempts: 0, embed_model: '', ikey: $ikey})";
+}
 
-    pub fn insert_version(version: u32, now: &str, code_ver: &str) -> String {
-        format!(
-            "INSERT (:SchemaVersion {{singleton: 'schema_version', version: {}, migrated_at: '{}', code_version: '{}'}})",
-            version, now, code_ver
-        )
-    }
-
-    /// Migration v1→v2: add decay and embedding fields to Memory nodes that lack them.
-    /// Grafeo is schema-less, so we SET properties on existing nodes.
-    /// Idempotent: only targets nodes where last_validated_at is not already set.
-    ///
-    /// Since Grafeo may not support `WHERE ... IS NULL` or `SET` in a single query,
-    /// we do this in Rust by iterating. See `migrate_v1_to_v2`.
-    pub const MATCH_ALL_MEMORIES: &str = "MATCH (m:Memory) RETURN m.id, m.created_at";
+#[cfg(feature = "graph")]
+fn params(pairs: Vec<(&str, grafeo::Value)>) -> std::collections::HashMap<String, grafeo::Value> {
+    pairs.into_iter().map(|(k, v)| (k.to_string(), v)).collect()
 }
 
 // ─── Version check ─────────────────────────────────────────────────────────
@@ -116,6 +122,7 @@ pub fn run_migrations(db: &GrafeoDB, from: u32, to: u32) -> cersei_types::Result
         match current {
             0 => migrate_v0_to_v1(db)?,
             1 => migrate_v1_to_v2(db)?,
+            2 => migrate_v2_to_v3(db)?,
             _ => {
                 return Err(cersei_types::CerseiError::Config(format!(
                     "Unknown migration: v{} → v{}",
@@ -150,9 +157,16 @@ fn stamp_version(db: &GrafeoDB, version: u32) -> cersei_types::Result<()> {
 
     // Delete old version node if exists, then insert fresh one.
     // This is simpler than trying to UPDATE which Grafeo may not support.
-    let _ = session.execute("MATCH (v:SchemaVersion) DELETE v");
+    let _ = session.execute(queries::DELETE_VERSION);
     session
-        .execute(&queries::insert_version(version, &now, code_ver))
+        .execute_with_params(
+            queries::INSERT_VERSION,
+            params(vec![
+                ("version", grafeo::Value::Int64(version as i64)),
+                ("now", grafeo::Value::from(now.as_str())),
+                ("code", grafeo::Value::from(code_ver)),
+            ]),
+        )
         .map_err(|e| {
             cersei_types::CerseiError::Config(format!("Failed to stamp schema version: {}", e))
         })?;
@@ -165,7 +179,7 @@ fn stamp_version(db: &GrafeoDB, version: u32) -> cersei_types::Result<()> {
 /// v0 → v1: Stamp initial schema version. No data changes needed —
 /// v1 IS the pre-existing schema.
 #[cfg(feature = "graph")]
-fn migrate_v0_to_v1(db: &GrafeoDB) -> cersei_types::Result<()> {
+fn migrate_v0_to_v1(_db: &GrafeoDB) -> cersei_types::Result<()> {
     tracing::debug!("Running migration v0 → v1 (stamp version, no data changes)");
     // Nothing to change — v1 is the original schema.
     // The stamp_version call after all migrations handles creating the node.
@@ -183,7 +197,7 @@ fn migrate_v0_to_v1(db: &GrafeoDB) -> cersei_types::Result<()> {
 /// Since the INSERT creates new nodes with these fields, and old nodes
 /// just don't have them, the forward-compatible read helpers handle the gap.
 #[cfg(feature = "graph")]
-fn migrate_v1_to_v2(db: &GrafeoDB) -> cersei_types::Result<()> {
+fn migrate_v1_to_v2(_db: &GrafeoDB) -> cersei_types::Result<()> {
     tracing::debug!("Running migration v1 → v2 (add decay/embedding fields)");
 
     // Grafeo is schema-less. "Adding fields" means new INSERT statements include them.
@@ -198,6 +212,80 @@ fn migrate_v1_to_v2(db: &GrafeoDB) -> cersei_types::Result<()> {
     // The tradeoff: old nodes never get the physical properties, but they
     // behave identically through the API because defaults are applied at read time.
 
+    Ok(())
+}
+
+/// v2 → v3: one `:Episode` per legacy `:Memory` node (idempotent: an
+/// episode already created for a memory is not created again). The legacy
+/// content keeps its creation time as its source time; extraction is
+/// skipped (no model is called during a migration) and embedding happens
+/// when the structured memory next processes pending work.
+#[cfg(feature = "graph")]
+fn migrate_v2_to_v3(db: &GrafeoDB) -> cersei_types::Result<()> {
+    use grafeo::Value;
+    tracing::debug!("Running migration v2 → v3 (legacy memories become episodes)");
+    let err = |e: grafeo::Error| cersei_types::CerseiError::Config(format!("migration v2→v3: {e}"));
+    let session = db.session();
+    let rows: Vec<Vec<Value>> = session
+        .execute(queries::LEGACY_MEMORIES)
+        .map_err(err)?
+        .iter()
+        .map(|r| r.to_vec())
+        .collect();
+    let mut next = session
+        .execute(queries::MAX_IKEY)
+        .ok()
+        .and_then(|r| r.iter().next().and_then(|row| row.first().cloned()))
+        .and_then(|v| match v {
+            Value::Int64(n) => Some(n),
+            _ => None,
+        })
+        .unwrap_or(0)
+        + 1;
+    let now = chrono::Utc::now().timestamp_millis();
+    for row in rows {
+        let text = |i: usize| match row.get(i) {
+            Some(Value::String(s)) => Some(s.to_string()),
+            _ => None,
+        };
+        let (Some(id), Some(content)) = (text(0), text(1)) else {
+            continue;
+        };
+        let episode_id = format!("ep_legacy_{id}");
+        let exists = session
+            .execute_with_params(
+                queries::EPISODE_EXISTS,
+                params(vec![("id", Value::from(episode_id.as_str()))]),
+            )
+            .map_err(err)?
+            .iter()
+            .next()
+            .is_some();
+        if exists {
+            continue;
+        }
+        let created = text(2)
+            .and_then(|c| chrono::DateTime::parse_from_rfc3339(&c).ok())
+            .map(|d| Value::Int64(d.timestamp_millis()))
+            .unwrap_or(Value::Null);
+        session
+            .execute_with_params(
+                queries::INSERT_LEGACY_EPISODE,
+                params(vec![
+                    ("id", Value::from(episode_id.as_str())),
+                    ("content", Value::from(content.as_str())),
+                    ("occurred_at", created),
+                    ("recorded_at", Value::Int64(now)),
+                    (
+                        "source_ref",
+                        Value::from(format!("legacy-memory:{id}").as_str()),
+                    ),
+                    ("ikey", Value::Int64(next)),
+                ]),
+            )
+            .map_err(err)?;
+        next += 1;
+    }
     Ok(())
 }
 
@@ -284,10 +372,16 @@ mod tests {
 
         // Fresh graph → needs migration
         let check = check_version(&db);
-        assert_eq!(check, VersionCheck::NeedsMigration { from: 0, to: 2 });
+        assert_eq!(
+            check,
+            VersionCheck::NeedsMigration {
+                from: 0,
+                to: CURRENT_SCHEMA_VERSION
+            }
+        );
 
         // Run migrations
-        run_migrations(&db, 0, 2).unwrap();
+        run_migrations(&db, 0, CURRENT_SCHEMA_VERSION).unwrap();
 
         // Now should be up to date
         let check = check_version(&db);
@@ -300,8 +394,8 @@ mod tests {
         let db = GrafeoDB::new_in_memory();
 
         // Run migrations twice — should not fail
-        run_migrations(&db, 0, 2).unwrap();
-        run_migrations(&db, 0, 2).unwrap();
+        run_migrations(&db, 0, CURRENT_SCHEMA_VERSION).unwrap();
+        run_migrations(&db, 0, CURRENT_SCHEMA_VERSION).unwrap();
 
         let check = check_version(&db);
         assert_eq!(check, VersionCheck::UpToDate);

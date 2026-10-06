@@ -13,6 +13,7 @@ name = "tbench-agent"
 path = "src/main.rs"
 
 [dependencies]
+cersei-agent = { workspace = true }
 cersei-agentrl = { workspace = true }
 cersei-provider = { workspace = true }
 cersei-tools = { workspace = true }
@@ -23,3 +24,6 @@ anyhow = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 serde_json = { workspace = true }
 dirs = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

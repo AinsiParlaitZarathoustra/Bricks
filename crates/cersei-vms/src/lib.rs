@@ -21,9 +21,9 @@ pub mod runtime;
 pub mod snapshot;
 pub mod types;
 
-pub use backends::LocalProcessRuntime;
 #[cfg(feature = "backend-docker")]
 pub use backends::DockerRuntime;
+pub use backends::LocalProcessRuntime;
 
 pub use commands::{CommandStream, Commands, StreamChunk};
 pub use error::{Result, VmError};

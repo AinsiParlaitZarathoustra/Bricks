@@ -73,7 +73,7 @@ pub enum HookAction {
     /// Replace the tool input with modified data (PreToolUse only).
     ModifyInput(Value),
     /// Inject a message into the conversation.
-    InjectMessage(Message),
+    InjectMessage(Box<Message>),
 }
 
 // ─── Shell hook (compat with cc-core HookEntry) ──────────────────────────────

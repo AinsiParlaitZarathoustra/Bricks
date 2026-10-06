@@ -24,7 +24,7 @@ impl Provider for EchoProvider {
     fn context_window(&self, _: &str) -> u64 {
         4096
     }
-        async fn complete(
+    async fn complete(
         &self,
         req: cersei::provider::CompletionRequest,
     ) -> cersei_types::Result<CompletionStream> {
@@ -380,7 +380,7 @@ async fn run() {
         check!("3 tasks created", tasks.len() >= 3);
 
         // Spawn 3 parallel workers
-        let agent_tool = AgentTool::new(|| Box::new(EchoProvider), cersei::tools::coding());
+        let _agent_tool = AgentTool::new(|| Box::new(EchoProvider), cersei::tools::coding());
         let mut handles = Vec::new();
         for task in &tasks {
             let desc = task.description.clone();

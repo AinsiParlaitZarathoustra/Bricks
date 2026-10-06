@@ -1,0 +1,65 @@
+aws_security_group_rule.r1: Refreshing state... [id=sgrule-1]
+aws_security_group_rule.r2: Refreshing state... [id=sgrule-2]
+aws_security_group_rule.r3: Refreshing state... [id=sgrule-3]
+aws_security_group_rule.r4: Refreshing state... [id=sgrule-4]
+aws_security_group_rule.r5: Refreshing state... [id=sgrule-5]
+aws_security_group_rule.r6: Refreshing state... [id=sgrule-6]
+aws_security_group_rule.r7: Refreshing state... [id=sgrule-7]
+aws_security_group_rule.r8: Refreshing state... [id=sgrule-8]
+aws_security_group_rule.r9: Refreshing state... [id=sgrule-9]
+aws_security_group_rule.r10: Refreshing state... [id=sgrule-10]
+aws_security_group_rule.r11: Refreshing state... [id=sgrule-11]
+aws_security_group_rule.r12: Refreshing state... [id=sgrule-12]
+aws_security_group_rule.r13: Refreshing state... [id=sgrule-13]
+aws_security_group_rule.r14: Refreshing state... [id=sgrule-14]
+aws_security_group_rule.r15: Refreshing state... [id=sgrule-15]
+aws_security_group_rule.r16: Refreshing state... [id=sgrule-16]
+aws_security_group_rule.r17: Refreshing state... [id=sgrule-17]
+aws_security_group_rule.r18: Refreshing state... [id=sgrule-18]
+aws_security_group_rule.r19: Refreshing state... [id=sgrule-19]
+aws_security_group_rule.r20: Refreshing state... [id=sgrule-20]
+aws_security_group_rule.r21: Refreshing state... [id=sgrule-21]
+aws_security_group_rule.r22: Refreshing state... [id=sgrule-22]
+aws_security_group_rule.r23: Refreshing state... [id=sgrule-23]
+aws_security_group_rule.r24: Refreshing state... [id=sgrule-24]
+aws_security_group_rule.r25: Refreshing state... [id=sgrule-25]
+aws_security_group_rule.r26: Refreshing state... [id=sgrule-26]
+aws_security_group_rule.r27: Refreshing state... [id=sgrule-27]
+aws_security_group_rule.r28: Refreshing state... [id=sgrule-28]
+aws_security_group_rule.r29: Refreshing state... [id=sgrule-29]
+aws_security_group_rule.r30: Refreshing state... [id=sgrule-30]
+data.aws_ami.ubuntu: Reading...
+data.aws_ami.ubuntu: Read complete after 1s [id=ami-0abc]
+
+Terraform used the selected providers to generate the following execution plan. Resource actions are indicated with the following symbols:
+  ~ update in-place
+
+Terraform will perform the following actions:
+
+  # aws_instance.web will be updated in-place
+  ~ resource "aws_instance" "web" {
+        id    = "i-0123"
+      ~ tags  = {
+          ~ "Name" = "ancien" -> "nouveau"
+        }
+        # (30 unchanged attributes hidden)
+    }
+
+Plan: 0 to add, 1 to change, 0 to destroy.
+╷
+│ Warning: Argument is deprecated
+│ 
+│   with aws_s3_bucket.logs,
+│   on main.tf line 40, in resource "aws_s3_bucket" "logs":
+│   40:   acl = "private"
+│ 
+│ Use the aws_s3_bucket_acl resource instead.
+╵
+╷
+│ Error: Invalid reference
+│ 
+│   on main.tf line 12, in resource "aws_instance" "db":
+│   12:   ami = var.amix
+│ 
+│ A reference to a resource type must be followed by at least one attribute access.
+╵

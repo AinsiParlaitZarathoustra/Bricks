@@ -10,7 +10,8 @@ use cersei::prelude::*;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let output = Agent::builder()
-        .provider(Anthropic::from_env()?)
+        // Models are configuration: ~/.bricks/providers.toml, selected as provider_id/model_id.
+        .provider(provider_from_config(None, "my-provider/my-model")?)
         .tools(cersei::tools::coding())
         .permission_policy(AllowAll)
         .run_with("Fix the failing tests in src/")
@@ -25,13 +26,29 @@ async fn main() -> anyhow::Result<()> {
 
 ---
 
+### The `bricks` command
+
+```bash
+cargo install --path crates/bricks-cli
+bricks                                   # interactive terminal interface
+bricks run --json --non-interactive "Analyse the build errors"   # scripts and CI: JSONL events
+bricks resume                            # pick a stored session
+```
+
+The CLI and its terminal interface are thin frontends over the engine's
+command/event contract (`cersei_agent::control`): models come from
+`providers.toml`, settings from `bricks.toml`, approvals from its
+`[permissions]` policy. See [docs/cli.md](docs/cli.md).
+
+---
+
 ## Why Cersei
 
 | | Claude Code | OpenCode | **Cersei SDK** | **Abstract CLI** |
 |---|---|---|---|---|
 | Form factor | CLI app | CLI app | **Library** | **CLI app** |
 | Embeddable | No | No | **Yes** | No (uses SDK) |
-| Provider | Anthropic only | Multi-provider | **Multi-provider** | **Multi-provider** |
+| Provider | Anthropic only | Multi-provider | **Configurable (no code)** | **Configurable (no code)** |
 | Language | TypeScript | TypeScript | **Rust** | **Rust** |
 | Custom tools | Plugins | Plugins | **`impl Tool` / `#[derive(Tool)]`** | Via SDK |
 | Startup | ~269ms | ~300ms | N/A (library) | **~34ms** |
@@ -40,60 +57,6 @@ async fn main() -> anyhow::Result<()> {
 | Skills | `.claude/commands/` | `.claude/skills/` | **Both formats** | **Both formats** |
 
 Cersei is built from the architecture of Claude Code (reverse-engineered Rust port) and designed so that anyone can build a complete, drop-in replacement for Claude Code, OpenCode, or any coding agent — as a library call.
-
----
-
-## Abstract — The CLI
-
-**Abstract** is a complete CLI coding agent built on Cersei. One binary, zero runtime dependencies, graph memory by default.
-
-```bash
-# Install
-cargo install --path crates/abstract-cli
-
-# Use
-abstract                           # Interactive REPL
-abstract "fix the failing tests"   # Single-shot
-abstract --resume                  # Resume last session
-abstract --model opus --max        # Opus with max thinking
-abstract --no-permissions --json   # CI mode with NDJSON output
-```
-
-### Abstract vs Claude Code
-
-All numbers from `run_tool_bench.sh --full`.
-
-| Metric | Abstract | Claude Code | Winner |
-|--------|----------|-------------|--------|
-| Startup (warm) | **32ms** | 266ms | Abstract (8.2x) |
-| Binary size | **6.0 MB** | 174 MB | Abstract (29x) |
-| Memory (RSS) | **4.9 MB** | 333 MB | Abstract (68x) |
-| Tool dispatch | **0.02-17ms** | 5-265ms+ | Abstract |
-| Memory recall | **98us** (graph) | 7,545ms (LLM) | Abstract (77,000x) |
-| Memory write | **30us** (graph) | 20,687ms (agent) | Abstract (689,000x) |
-| MEMORY.md load | **9.6us** | 17.1ms | Abstract (1,781x) |
-| Sequential throughput | **906ms/req** | 12,079ms/req | Abstract (13.3x) |
-| System prompt tokens | **~2,200** | ~8,000+ | Abstract (3.6x fewer) |
-| LLM call for recall | **Not needed** | Required (Sonnet) | Abstract |
-
-> Claude Code's memory recall calls Sonnet every turn to rank the top 5 files by relevance (7.5s measured).
-> Abstract's graph does indexed lookups in 98 microseconds — same capability, no LLM call, no API cost.
-
-Full benchmark: [`crates/abstract-cli/benchmarks/REPORT.md`](crates/abstract-cli/benchmarks/REPORT.md)
-
-### Features
-
-- 34 built-in tools (file, shell, web, planning, orchestration, scheduling)
-- Multi-provider: Anthropic + OpenAI (+ Ollama, Azure, vLLM)
-- Graph memory (Grafeo) on by default
-- Auto-compact, auto-dream, effort levels (Low/Medium/High/Max)
-- MCP server support
-- Session persistence (Claude Code-compatible JSONL)
-- Interactive permissions with session caching
-- 12 slash commands (`/help`, `/commit`, `/review`, `/memory`, `/model`, `/diff`, etc.)
-- Streaming markdown rendering with syntax highlighting
-- TOML config: `~/.abstract/config.toml` + `.abstract/config.toml`
-- JSON output mode for piping (`--json`)
 
 ---
 
@@ -118,14 +81,13 @@ cersei-memory = { git = "https://github.com/pacifio/cersei", features = ["graph"
 ```
 cersei                    Facade crate — use cersei::prelude::*;
   cersei-types            Provider-agnostic messages, errors, stream events
-  cersei-provider         Provider trait + Anthropic/OpenAI implementations
+  cersei-provider         Provider trait + configuration-driven registry, 3 protocol adapters
   cersei-tools            30+ tools, permissions, bash classifier, skills, git utils
   cersei-tools-derive     #[derive(Tool)] proc macro
   cersei-agent            Agent builder, agentic loop, compact, coordinator, effort
   cersei-memory           Memory trait, memdir, CLAUDE.md, sessions, Grafeo graph
   cersei-hooks            Hook/middleware system
   cersei-mcp              MCP client (JSON-RPC 2.0, stdio transport)
-abstract-cli              CLI coding agent ("abstract") — REPL, commands, config, permissions
 ```
 
 ---
@@ -134,15 +96,21 @@ abstract-cli              CLI coding agent ("abstract") — REPL, commands, conf
 
 ### Provider
 
-Any LLM backend. Built-in: Anthropic (with OAuth), OpenAI (compatible with Ollama, Azure, vLLM).
+Providers and models are **configuration**, not code. A file (`~/.bricks/providers.toml`, or any
+`.toml`/`.json` path you pass) lists providers, their models, limits, capabilities, reasoning profiles and
+prices; a model is selected explicitly as `provider_id/model_id`. Three wire protocols are built in —
+`chat_completions`, `responses` and `anthropic_messages` — so any compatible server (Ollama, vLLM, a
+gateway, a hosted API) is added by editing the file, with no recompilation.
 
 ```rust
-Agent::builder().provider(Anthropic::from_env()?)           // Anthropic API key
-Agent::builder().provider(OpenAi::builder()
-    .base_url("http://localhost:11434/v1")                   // Ollama
-    .model("llama3.1:70b").api_key("ollama").build()?)
-Agent::builder().provider(MyCustomProvider)                  // impl Provider
+let provider = cersei::provider_from_config(None, "my-provider/my-model")?;   // ~/.bricks/providers.toml
+let provider = cersei::provider_from_config(Some("./providers.json".as_ref()), "local/coder")?;
+Agent::builder().provider(provider).reasoning_profile("deep")                  // a profile *you* defined
+Agent::builder().provider(MyCustomProvider)                                    // impl Provider
 ```
+
+See [`docs/providers.md`](docs/providers.md) (schema, capability matrix, migration) and the annotated
+[`docs/providers.example.toml`](docs/providers.example.toml).
 
 ### Tools (30+)
 
@@ -191,7 +159,7 @@ Spawn parallel workers, coordinate tasks, pass messages between agents:
 ```rust
 // AgentTool — model spawns sub-agents autonomously
 Agent::builder()
-    .tool(AgentTool::new(|| Box::new(Anthropic::from_env()?), cersei::tools::coding()))
+    .tool(AgentTool::new(|| provider_factory(), cersei::tools::coding()))   // a closure returning your configured provider
 
 // Coordinator mode — orchestrate parallel workers
 Agent::builder()
@@ -271,12 +239,25 @@ while let Some(e) = stream.next().await {
 
 ```rust
 Agent::builder()
-    .auto_compact(true)          // summarize old messages at 90% context usage
-    .compact_threshold(0.9)      // trigger threshold
-    .tool_result_budget(50_000)  // truncate oldest tool results above 50K chars
-    .thinking_budget(8192)       // extended thinking tokens
-    .effort(EffortLevel::High)   // Low/Medium/High/Max
+    .bricks_config(BricksConfig::load(&working_dir)) // bricks.toml + ~/.bricks/rules
+    .auto_compact(true)                   // compact near the limit (see docs/context.md)
+    .compact_threshold(0.85)              // fraction of the prompt budget
+    .compression_level(CompressionLevel::Minimal)
+    .tool_result_budget(50_000)           // old tool results removed above 50K chars
+    .reasoning_profile("deep")            // a profile defined in providers.toml
+
+agent.context_status();   // context used (measured/estimated), window, session totals
+agent.raw_history();      // every message, tool results unreduced
 ```
+
+Occupation comes from the server's reported usage, with explicit estimates in
+between; a request that cannot fit is compacted first or not sent. Tool outputs
+are reduced with diagnostics kept first, and every reduced output names its
+saved original. See [docs/context.md](docs/context.md),
+[docs/shell.md](docs/shell.md) (shell, file tools, result format),
+[docs/web.md](docs/web.md) (web search and reading), [docs/mcp.md](docs/mcp.md) (MCP client),
+[docs/memory.md](docs/memory.md) (long-term memory and recall), [docs/cli.md](docs/cli.md) (the `bricks` command, events and terminal interface) and
+[docs/compression.md](docs/compression.md).
 
 ### MCP (Model Context Protocol)
 
@@ -295,21 +276,14 @@ let mcp = McpManager::connect(&[
 Agent::builder().tools(mcp.tool_definitions().await)
 ```
 
-### OAuth (Anthropic Native)
-
-```rust
-// Opens browser, PKCE flow, token storage, refresh
-cargo run --example oauth_login
-```
-
 ---
 
 ## Agent Builder — Complete API
 
 ```rust
 Agent::builder()
-    // Provider (required)
-    .provider(Anthropic::from_env()?)
+    // Provider (required): a configured model (see docs/providers.md)
+    .provider(provider_from_config(None, "my-provider/my-model")?)
 
     // Tools
     .tool(MyTool)
@@ -379,8 +353,6 @@ Measured on Apple Silicon, release build, 100 iterations with 3 warmup runs.
 | CLI startup | N/A (library) | 269ms | Claude `--version` warm avg |
 | Sub-agent spawn | ~1ms (in-process) | ~300ms (fork) | Agent tool overhead |
 
-For an apples-to-apples CLI comparison, see [Abstract CLI benchmarks](crates/abstract-cli/benchmarks/REPORT.md).
-
 ### Memory I/O
 
 | Operation | Abstract (Cersei) | Claude Code (measured) | Ratio |
@@ -403,9 +375,8 @@ Each bench lives in its own self-contained directory with its own runner and res
 | **General-agent frameworks** | [`bench/general-agents/`](bench/general-agents/) | Per-agent memory, instantiation time, max concurrent agents — Cersei vs Agno / PydanticAI / LangGraph / CrewAI. | `./bench/general-agents/run.sh` |
 | **Terminal Bench 2.0** | [`bench/term-bench/`](bench/term-bench/) | End-to-end coding tasks inside Daytona sandboxes using the full `abstract` CLI (Linux x86_64 / arm64 binaries shipped in-tree). | `./bench/term-bench/run.sh` |
 | **LongMemEval (long-term memory)** | [`bench/long-mem/`](bench/long-mem/) | Recall accuracy on the ICLR-25 LongMemEval 500-question benchmark — head-to-head vs Mastra / Zep / Supermemory with identical prompts and LLM-as-judge rubric. Four Cersei configs: full-context baseline, usearch-HNSW semantic, grafeo-graph substring, hybrid w/ LLM fact extraction + RRF fusion. | `cargo run --release -p longmem-bench -- --dataset s --config all` |
-| **Compression (real LLMs)** | `crates/cersei-agent/tests/e2e_openai_compression.rs` | Input-token savings from `cersei-compression` on OpenAI (`gpt-4o-mini`) and Gemini (`gemini-2.5-flash`). `#[ignore]`, runs with real API keys. | `cargo test -p cersei-agent --test e2e_openai_compression -- --ignored --nocapture` |
+| **Compression (real LLMs)** | `crates/cersei-agent/tests/e2e_live_compression.rs` | Input-token savings from `cersei-compression` on a model of your providers configuration. `#[ignore]`, paid call; set `BRICKS_LIVE_MODEL=provider_id/model_id`. | `BRICKS_LIVE_MODEL=… cargo test -p cersei-agent --test e2e_live_compression -- --ignored --nocapture` |
 | **SDK Tool I/O** | `examples/benchmark_io.rs` | In-process tool dispatch latency for Read / Write / Edit / Grep / Bash / Glob. | `cargo run --example benchmark_io --release` |
-| **SDK Memory I/O** | `crates/abstract-cli/examples/memory_bench.rs` | Graph-memory vs filesystem vs Claude Code-style paths. | `cargo run -p abstract-cli --example memory_bench --release` |
 | **vs Claude Code CLI** | `run_tool_bench_claude.sh` · `run_tool_bench_codex.sh` | CLI-vs-CLI startup, memory, and dispatch overhead. | `./run_tool_bench.sh --iterations 20 --full` |
 
 ### Run benchmarks
@@ -413,7 +384,6 @@ Each bench lives in its own self-contained directory with its own runner and res
 ```bash
 # Rust-side SDK benches (no external services)
 cargo run --example benchmark_io --release
-cargo run --release -p abstract-cli --example memory_bench
 
 # vs Claude Code / Codex CLIs
 ./run_tool_bench.sh --iterations 20 --full
@@ -425,11 +395,12 @@ cargo run --release -p abstract-cli --example memory_bench
 # LongMemEval memory benchmark (head-to-head vs Mastra / Zep / Supermemory)
 ./bench/long-mem/setup.sh              # downloads oracle + s datasets
 OPENAI_API_KEY=sk-… cargo run --release -p longmem-bench -- \
-  --dataset s --config all --concurrency 8
+  --answerer-model provider_id/model_id --judge-model provider_id/model_id \
+  --embeddings openai --dataset s --config all --concurrency 8   # models from ~/.bricks/providers.toml
 
-# Real-LLM compression savings (requires API keys)
-OPENAI_API_KEY=sk-… cargo test -p cersei-agent \
-  --test e2e_openai_compression -- --ignored --nocapture
+# Real-LLM compression savings (a paid call; key = the api_key_env of your configuration)
+BRICKS_LIVE_MODEL=provider_id/model_id cargo test -p cersei-agent \
+  --test e2e_live_compression -- --ignored --nocapture
 ```
 
 ---
@@ -455,12 +426,11 @@ cargo run --example stress_memory --release                # memdir, CLAUDE.md, 
 | [`streaming_events`](examples/streaming_events.rs) | Real-time `run_stream()` with colored output |
 | [`multi_listener`](examples/multi_listener.rs) | Broadcast channel with multiple consumers |
 | [`resumable_session`](examples/resumable_session.rs) | Persist and resume with `JsonlMemory` |
-| [`custom_provider`](examples/custom_provider.rs) | Echo provider + OpenAI-compatible endpoints |
+| [`custom_provider`](examples/custom_provider.rs) | Echo provider + configuring a compatible endpoint |
 | [`hooks_middleware`](examples/hooks_middleware.rs) | Cost guard + audit logger + tool blocker |
 | [`benchmark_io`](examples/benchmark_io.rs) | Full I/O benchmark suite |
 | [`usage_report`](examples/usage_report.rs) | Token/cost tracking and billing estimates |
 | [`coding_agent`](examples/coding_agent.rs) | Build a Python todo CLI (end-to-end) |
-| [`oauth_login`](examples/oauth_login.rs) | Anthropic OAuth PKCE login flow |
 
 ```bash
 cargo run --example simple_agent --release

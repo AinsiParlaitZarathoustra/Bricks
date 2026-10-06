@@ -16,7 +16,10 @@ struct MockDispatch {
 #[async_trait]
 impl ToolDispatch for MockDispatch {
     async fn call(&self, name: &str, input: Value, _ctx: &ToolContext) -> ToolResult {
-        self.calls.lock().unwrap().push((name.to_string(), input.clone()));
+        self.calls
+            .lock()
+            .unwrap()
+            .push((name.to_string(), input.clone()));
         match name {
             "Read" => ToolResult::success("FILE CONTENTS"),
             "Write" => ToolResult::success("wrote ok"),
@@ -25,7 +28,10 @@ impl ToolDispatch for MockDispatch {
         }
     }
     fn has(&self, name: &str) -> bool {
-        matches!(name, "Read" | "Write" | "WebFetch" | "Glob" | "Grep" | "Bash")
+        matches!(
+            name,
+            "Read" | "Write" | "WebFetch" | "Glob" | "Grep" | "Bash"
+        )
     }
     fn list(&self) -> Vec<String> {
         vec!["Read".into(), "Write".into()]
@@ -96,14 +102,16 @@ async fn chaining_threads_previous_result_into_pipe_target() {
 async fn step_limit_aborts() {
     let dispatch = Arc::new(MockDispatch::default());
     let ctx = ctx_with(Arc::new(AllowAll));
-    let mut ev = EvalCtx::new(&ctx, dispatch)
-        .with_limits(Limits { max_steps: 1 });
+    let mut ev = EvalCtx::new(&ctx, dispatch).with_limits(Limits { max_steps: 1 });
     let err = run_program("io.read('/a')\nio.read('/b')", &mut ev)
         .await
         .unwrap_err();
     match err {
         ProgramError::Runtime(e) => {
-            assert_eq!(e.kind, cersei_agentlang::RuntimeErrorKind::StepLimitExceeded)
+            assert_eq!(
+                e.kind,
+                cersei_agentlang::RuntimeErrorKind::StepLimitExceeded
+            )
         }
         other => panic!("expected step limit, got {other}"),
     }

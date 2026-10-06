@@ -21,11 +21,11 @@ pub use graph::{ExecutionGraph, FailurePoint, FailureTrace, NodeKind, NodeStatus
 pub use graph_reporter::GraphReporter;
 pub use orchestrator::{
     AgentRlRunner, GeneralResult, Orchestrator, OrchestratorConfig, Proposal, ProposalOutcome,
-    Solved, SolveOutcome,
+    SolveOutcome, Solved,
 };
 pub use registry::dynamic_tool::{DynamicTool, RegistrySearchTool, SolutionReplayer};
 pub use registry::{RegistryEntry, SolutionSpec, ToolRegistry};
 pub use runner::{CerseiRunner, ProviderFactory, ToolsFactory};
 pub use verify::{
-    AcceptVerifier, ChainVerifier, CommandVerifier, TestScriptVerifier, VerifyResult, Verifier,
+    AcceptVerifier, ChainVerifier, CommandVerifier, TestScriptVerifier, Verifier, VerifyResult,
 };

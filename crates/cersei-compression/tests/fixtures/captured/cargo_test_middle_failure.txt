@@ -1,0 +1,416 @@
+   Compiling rs v0.1.0 (/work/rs)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.23s
+     Running unittests src/lib.rs (target/debug/deps/rs-19626d093cde6369)
+
+running 14 tests
+test tests::slow ... ignored
+test tests::panics_unwrap ... ok
+test tests::t02 ... ok
+test tests::fails_with_message ... ok
+test tests::t01 ... ok
+test tests::t03 ... ok
+test tests::t04 ... ok
+test tests::t05 ... ok
+test tests::t06 ... ok
+test tests::t07 ... ok
+test tests::t08 ... ok
+test tests::t09 ... ok
+test tests::t10 ... ok
+test tests::t11 - should panic ... ok
+
+test result: ok. 13 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/a.rs (target/debug/deps/a-5ee722162dcae8b3)
+
+running 25 tests
+test case_1 ... ok
+test case_11 ... ok
+test case_10 ... ok
+test case_12 ... ok
+test case_14 ... ok
+test case_13 ... ok
+test case_15 ... ok
+test case_16 ... ok
+test case_17 ... ok
+test case_18 ... ok
+test case_19 ... ok
+test case_2 ... ok
+test case_20 ... ok
+test case_21 ... ok
+test case_22 ... ok
+test case_23 ... ok
+test case_24 ... ok
+test case_25 ... ok
+test case_3 ... ok
+test case_4 ... ok
+test case_5 ... ok
+test case_6 ... ok
+test case_7 ... ok
+test case_8 ... ok
+test case_9 ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/b.rs (target/debug/deps/b-8750219761fb9925)
+
+running 25 tests
+test case_1 ... ok
+test case_10 ... ok
+test case_12 ... ok
+test case_11 ... ok
+test case_13 ... ok
+test case_14 ... ok
+test case_15 ... ok
+test case_16 ... ok
+test case_17 ... ok
+test case_18 ... ok
+test case_19 ... ok
+test case_2 ... ok
+test case_20 ... ok
+test case_21 ... ok
+test case_22 ... ok
+test case_23 ... ok
+test case_24 ... ok
+test case_25 ... ok
+test case_3 ... ok
+test case_4 ... ok
+test case_5 ... ok
+test case_6 ... ok
+test case_7 ... ok
+test case_8 ... ok
+test case_9 ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/c.rs (target/debug/deps/c-d4c5439c90eccbfc)
+
+running 25 tests
+test case_1 ... ok
+test case_12 ... ok
+test case_10 ... ok
+test case_11 ... ok
+test case_13 ... ok
+test case_14 ... ok
+test case_15 ... ok
+test case_16 ... ok
+test case_17 ... ok
+test case_18 ... ok
+test case_19 ... ok
+test case_2 ... ok
+test case_20 ... ok
+test case_21 ... ok
+test case_22 ... ok
+test case_23 ... ok
+test case_24 ... ok
+test case_25 ... ok
+test case_3 ... ok
+test case_4 ... ok
+test case_5 ... ok
+test case_6 ... ok
+test case_7 ... ok
+test case_8 ... ok
+test case_9 ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/d.rs (target/debug/deps/d-12dee0cc1f176e64)
+
+running 25 tests
+test case_1 ... ok
+test case_11 ... ok
+test case_10 ... ok
+test case_13 ... ok
+test case_14 ... ok
+test case_12 ... ok
+test case_15 ... ok
+test case_16 ... ok
+test case_17 ... ok
+test case_18 ... ok
+test case_19 ... ok
+test case_2 ... ok
+test case_20 ... ok
+test case_21 ... ok
+test case_22 ... ok
+test case_23 ... ok
+test case_24 ... ok
+test case_25 ... ok
+test case_3 ... ok
+test case_4 ... ok
+test case_5 ... ok
+test case_6 ... ok
+test case_7 ... ok
+test case_8 ... ok
+test case_9 ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/e.rs (target/debug/deps/e-a0bd7a2c1be450e9)
+
+running 25 tests
+test case_1 ... ok
+test case_10 ... ok
+test case_11 ... ok
+test case_12 ... ok
+test case_14 ... ok
+test case_13 ... ok
+test case_15 ... ok
+test case_16 ... ok
+test case_17 ... ok
+test case_18 ... ok
+test case_19 ... ok
+test case_2 ... ok
+test case_20 ... ok
+test case_21 ... ok
+test case_22 ... ok
+test case_23 ... ok
+test case_24 ... ok
+test case_25 ... ok
+test case_3 ... ok
+test case_4 ... ok
+test case_5 ... ok
+test case_6 ... ok
+test case_7 ... ok
+test case_8 ... ok
+test case_9 ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/f.rs (target/debug/deps/f-542933a0fb95f23b)
+
+running 26 tests
+test case_1 ... ok
+test case_10 ... ok
+test case_11 ... ok
+test case_12 ... ok
+test case_14 ... ok
+test case_13 ... ok
+test case_15 ... ok
+test case_16 ... ok
+test case_17 ... ok
+test case_18 ... ok
+test case_19 ... ok
+test case_2 ... ok
+test case_20 ... ok
+test case_21 ... ok
+test case_22 ... ok
+test case_23 ... ok
+test case_24 ... ok
+test case_25 ... ok
+test case_3 ... ok
+test case_4 ... ok
+test case_5 ... ok
+test case_6 ... ok
+test case_7 ... ok
+test case_8 ... ok
+test case_9 ... ok
+test middle_failure ... FAILED
+
+failures:
+
+---- middle_failure stdout ----
+
+thread 'middle_failure' (6521241) panicked at tests/f.rs:27:82:
+parse failed: Err(ParseIntError { kind: InvalidDigit })
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    middle_failure
+
+test result: FAILED. 25 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--test f`
+     Running tests/g.rs (target/debug/deps/g-0265f820fd05e07e)
+
+running 25 tests
+test case_10 ... ok
+test case_1 ... ok
+test case_11 ... ok
+test case_12 ... ok
+test case_13 ... ok
+test case_14 ... ok
+test case_15 ... ok
+test case_16 ... ok
+test case_17 ... ok
+test case_18 ... ok
+test case_19 ... ok
+test case_2 ... ok
+test case_20 ... ok
+test case_21 ... ok
+test case_22 ... ok
+test case_23 ... ok
+test case_24 ... ok
+test case_25 ... ok
+test case_3 ... ok
+test case_4 ... ok
+test case_5 ... ok
+test case_6 ... ok
+test case_7 ... ok
+test case_8 ... ok
+test case_9 ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/h.rs (target/debug/deps/h-b19f09c7bc7537b0)
+
+running 25 tests
+test case_1 ... ok
+test case_11 ... ok
+test case_12 ... ok
+test case_13 ... ok
+test case_10 ... ok
+test case_14 ... ok
+test case_15 ... ok
+test case_16 ... ok
+test case_17 ... ok
+test case_18 ... ok
+test case_19 ... ok
+test case_2 ... ok
+test case_20 ... ok
+test case_21 ... ok
+test case_22 ... ok
+test case_23 ... ok
+test case_24 ... ok
+test case_25 ... ok
+test case_3 ... ok
+test case_4 ... ok
+test case_5 ... ok
+test case_6 ... ok
+test case_7 ... ok
+test case_8 ... ok
+test case_9 ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/i.rs (target/debug/deps/i-a9605fddb3c6ea01)
+
+running 25 tests
+test case_1 ... ok
+test case_11 ... ok
+test case_10 ... ok
+test case_12 ... ok
+test case_14 ... ok
+test case_13 ... ok
+test case_15 ... ok
+test case_16 ... ok
+test case_17 ... ok
+test case_18 ... ok
+test case_19 ... ok
+test case_2 ... ok
+test case_20 ... ok
+test case_21 ... ok
+test case_22 ... ok
+test case_23 ... ok
+test case_24 ... ok
+test case_25 ... ok
+test case_3 ... ok
+test case_4 ... ok
+test case_5 ... ok
+test case_6 ... ok
+test case_7 ... ok
+test case_8 ... ok
+test case_9 ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/j.rs (target/debug/deps/j-28ed9f2245b06da3)
+
+running 25 tests
+test case_10 ... ok
+test case_11 ... ok
+test case_1 ... ok
+test case_13 ... ok
+test case_14 ... ok
+test case_12 ... ok
+test case_15 ... ok
+test case_16 ... ok
+test case_17 ... ok
+test case_18 ... ok
+test case_19 ... ok
+test case_2 ... ok
+test case_20 ... ok
+test case_21 ... ok
+test case_22 ... ok
+test case_23 ... ok
+test case_24 ... ok
+test case_25 ... ok
+test case_3 ... ok
+test case_4 ... ok
+test case_5 ... ok
+test case_6 ... ok
+test case_7 ... ok
+test case_8 ... ok
+test case_9 ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/k.rs (target/debug/deps/k-a75f99e1b5ab6a9d)
+
+running 25 tests
+test case_1 ... ok
+test case_10 ... ok
+test case_12 ... ok
+test case_14 ... ok
+test case_13 ... ok
+test case_11 ... ok
+test case_15 ... ok
+test case_16 ... ok
+test case_17 ... ok
+test case_18 ... ok
+test case_19 ... ok
+test case_2 ... ok
+test case_20 ... ok
+test case_21 ... ok
+test case_22 ... ok
+test case_23 ... ok
+test case_24 ... ok
+test case_25 ... ok
+test case_3 ... ok
+test case_4 ... ok
+test case_5 ... ok
+test case_6 ... ok
+test case_7 ... ok
+test case_8 ... ok
+test case_9 ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/l.rs (target/debug/deps/l-e5cf5bdab4ed0e26)
+
+running 25 tests
+test case_1 ... ok
+test case_11 ... ok
+test case_12 ... ok
+test case_10 ... ok
+test case_14 ... ok
+test case_13 ... ok
+test case_15 ... ok
+test case_16 ... ok
+test case_17 ... ok
+test case_18 ... ok
+test case_19 ... ok
+test case_2 ... ok
+test case_20 ... ok
+test case_21 ... ok
+test case_22 ... ok
+test case_23 ... ok
+test case_24 ... ok
+test case_25 ... ok
+test case_3 ... ok
+test case_4 ... ok
+test case_5 ... ok
+test case_6 ... ok
+test case_7 ... ok
+test case_8 ... ok
+test case_9 ... ok
+
+test result: ok. 25 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests rs
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: 1 target failed:
+    `--test f`

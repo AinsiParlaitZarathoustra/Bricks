@@ -25,11 +25,18 @@ SOFTWARE.
 Portions of this crate are derived from rtk (Rust Token Killer),
 https://github.com/rtk-ai/rtk, Copyright (c) Patrick Szymkowiak, MIT licensed.
 
-Specifically, the following modules are adapted ports:
-- src/ansi.rs       — from rtk/src/core/utils.rs (strip_ansi, truncate)
-- src/code.rs       — from rtk/src/core/filter.rs (Language, Minimal/Aggressive)
-- src/truncate.rs   — from rtk/src/core/filter.rs (smart_truncate)
-- src/toml_rules.rs — from rtk/src/core/toml_filter.rs (pipeline engine, simplified)
+Specifically, the following parts are adapted from it:
+- src/ansi.rs        — strip_ansi and truncate, from rtk/src/core/utils.rs
+- src/rules.rs,
+  src/log.rs         — the rule pipeline stages (replace, match_output,
+                       strip/keep_lines_matching, truncate_lines_at,
+                       head/tail_lines, max_lines, on_empty), from
+                       rtk/src/core/toml_filter.rs. Command matching, rule
+                       layering, diagnostics, error-block detection and the
+                       budget are new.
+- src/rules/*.toml   — the first git, cargo, npm, pnpm, pytest and docker
+                       rules started from rtk/src/filters/*.toml; they have
+                       since been rewritten for the new schema.
 
 rtk's MIT license text:
 

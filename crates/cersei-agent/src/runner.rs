@@ -1,8 +1,9 @@
 //! Agent runner: the core agentic loop.
 
 use crate::compact;
-use crate::events::{AgentControl, AgentEvent};
-use crate::{Agent, AgentOutput, ToolCallRecord};
+use crate::context::{BudgetDecision, ContextStatus, ModelView, RequestView};
+use crate::events::{AgentEvent, CompactReason};
+use crate::{Agent, AgentOutput, ToolCallRecord, UserInput};
 use cersei_hooks::{HookAction, HookContext, HookEvent};
 use cersei_provider::{CompletionRequest, ProviderOptions, StreamAccumulator};
 use cersei_tools::permissions::{PermissionDecision, PermissionRequest};
@@ -53,16 +54,7 @@ fn write_targets(tool_name: &str, tool_input: &serde_json::Value) -> Vec<String>
         "ApplyPatch" | "apply_patch" => tool_input
             .get("patch")
             .and_then(serde_json::Value::as_str)
-            .map(|p| {
-                p.lines()
-                    .filter_map(|l| l.strip_prefix("+++ "))
-                    // Mirrors apply_patch.rs: timestamp, then git prefix.
-                    .map(|t| t.split('\t').next().unwrap_or(t))
-                    .map(|t| t.strip_prefix("b/").unwrap_or(t))
-                    .map(|t| t.trim().to_string())
-                    .filter(|t| !t.is_empty() && t != "/dev/null")
-                    .collect()
-            })
+            .map(cersei_tools::apply_patch::patch_targets)
             .unwrap_or_default(),
         _ => Vec::new(),
     }
@@ -186,95 +178,66 @@ fn error_budget_note(tool_name: &str, count: u32) -> String {
 
 // ─── Tool result size management ─────────────────────────────────────────────
 
-/// Maximum number of lines to keep in a tool result before truncation.
-const MAX_HEAD_LINES: usize = 80;
-const MAX_TAIL_LINES: usize = 80;
-/// Char-based fallback for results without many newlines.
-const MAX_SINGLE_RESULT_CHARS: usize = 20_000;
-
-/// Truncate an individual tool result using a head+tail line strategy.
-/// Keeps the first N and last N lines, which preserves both the command
-/// context (head) and error messages (tail) — errors are usually at the end.
-fn cap_tool_result(content: &str) -> String {
-    let lines: Vec<&str> = content.lines().collect();
-    let total_lines = lines.len();
-
-    // Line-based truncation if enough lines
-    if total_lines > MAX_HEAD_LINES + MAX_TAIL_LINES + 5 {
-        let head: String = lines[..MAX_HEAD_LINES].join("\n");
-        let tail: String = lines[total_lines.saturating_sub(MAX_TAIL_LINES)..].join("\n");
-        let omitted = total_lines - MAX_HEAD_LINES - MAX_TAIL_LINES;
-        return format!(
-            "{head}\n\n[... {omitted} lines omitted ({total_lines} total). Pipe through `head` or `tail` for specific sections ...]\n\n{tail}"
-        );
+fn tool_result_len(content: &ToolResultContent) -> usize {
+    match content {
+        ToolResultContent::Text(t) => t.len(),
+        ToolResultContent::Blocks(b) => b
+            .iter()
+            .map(|bb| {
+                if let ContentBlock::Text { text } = bb {
+                    text.len()
+                } else {
+                    0
+                }
+            })
+            .sum(),
     }
-
-    // Char-based fallback for single long lines or binary-ish output
-    if content.len() > MAX_SINGLE_RESULT_CHARS {
-        // Floor/ceil the cut points to char boundaries so we never slice
-        // through a multibyte UTF-8 sequence (which would panic).
-        let mut head_end = MAX_SINGLE_RESULT_CHARS * 70 / 100;
-        while head_end > 0 && !content.is_char_boundary(head_end) {
-            head_end -= 1;
-        }
-        let tail_chars = MAX_SINGLE_RESULT_CHARS * 20 / 100;
-        let mut tail_start = content.len().saturating_sub(tail_chars);
-        while tail_start < content.len() && !content.is_char_boundary(tail_start) {
-            tail_start += 1;
-        }
-        let omitted = tail_start.saturating_sub(head_end);
-        return format!(
-            "{}\n\n[... {omitted} chars omitted ...]\n\n{}",
-            &content[..head_end],
-            &content[tail_start..]
-        );
-    }
-
-    content.to_string()
 }
 
-/// Truncate oldest tool results when cumulative size exceeds budget.
-/// Modifies messages in place.
-pub fn apply_tool_result_budget(messages: &mut [Message], budget_chars: usize) {
-    // Collect total tool result size
+/// Remove the oldest tool results from the active history when their total
+/// size exceeds `budget_chars`, replacing each with a placeholder.
+/// Returns whether anything was removed. See
+/// [`apply_tool_result_budget_with`] to say where the removed text can be
+/// read back.
+pub fn apply_tool_result_budget(messages: &mut [Message], budget_chars: usize) -> bool {
+    apply_tool_result_budget_with(messages, budget_chars, |_, len| {
+        format!(
+            "[tool result removed from the active context to save space ({len} chars); it was \
+             not saved — run the tool again if you need it]"
+        )
+    })
+}
+
+/// Like [`apply_tool_result_budget`]; `placeholder(tool_use_id, len)` writes
+/// the replacement text (normally naming the saved original). The six most
+/// recent messages are never touched.
+pub fn apply_tool_result_budget_with(
+    messages: &mut [Message],
+    budget_chars: usize,
+    mut placeholder: impl FnMut(&str, usize) -> String,
+) -> bool {
     let total: usize = messages
         .iter()
         .flat_map(|m| match &m.content {
             MessageContent::Blocks(blocks) => blocks
                 .iter()
-                .filter_map(|b| {
-                    if let ContentBlock::ToolResult { content, .. } = b {
-                        Some(match content {
-                            ToolResultContent::Text(t) => t.len(),
-                            ToolResultContent::Blocks(b) => b
-                                .iter()
-                                .map(|bb| {
-                                    if let ContentBlock::Text { text } = bb {
-                                        text.len()
-                                    } else {
-                                        0
-                                    }
-                                })
-                                .sum(),
-                        })
-                    } else {
-                        None
-                    }
+                .filter_map(|b| match b {
+                    ContentBlock::ToolResult { content, .. } => Some(tool_result_len(content)),
+                    _ => None,
                 })
                 .collect::<Vec<_>>(),
             _ => vec![],
         })
         .sum();
-
     if total <= budget_chars {
-        return;
+        return false;
     }
 
-    // Truncate oldest tool results first (skip the last KEEP_RECENT messages)
-    let keep_recent = 6; // don't touch recent tool results
+    let keep_recent = 6;
     let truncatable_end = messages.len().saturating_sub(keep_recent);
     let mut freed = 0usize;
     let target_free = total - budget_chars;
+    let mut changed = false;
 
     for msg in messages[..truncatable_end].iter_mut() {
         if freed >= target_free {
@@ -285,36 +248,63 @@ pub fn apply_tool_result_budget(messages: &mut [Message], budget_chars: usize) {
                 if freed >= target_free {
                     break;
                 }
-                if let ContentBlock::ToolResult { content, .. } = block {
-                    let size = match content {
-                        ToolResultContent::Text(t) => t.len(),
-                        ToolResultContent::Blocks(_) => 100,
-                    };
-                    if size > 200 {
+                if let ContentBlock::ToolResult {
+                    tool_use_id,
+                    content,
+                    ..
+                } = block
+                {
+                    let size = tool_result_len(content);
+                    let already = matches!(content, ToolResultContent::Text(t) if t.starts_with("[tool result removed"));
+                    if size > 200 && !already {
                         freed += size;
-                        *content = ToolResultContent::Text(
-                            "[truncated — re-read file if needed]".to_string(),
-                        );
+                        *content = ToolResultContent::Text(placeholder(tool_use_id, size));
+                        changed = true;
                     }
                 }
             }
         }
     }
+    changed
 }
 
-/// Run the agent without streaming (blocking until complete).
-pub async fn run_agent(agent: &Agent, prompt: &str) -> Result<AgentOutput> {
-    let (event_tx, _event_rx) = mpsc::channel(512);
-    let (_control_tx, control_rx) = mpsc::channel(64);
+/// The unreduced text of a tool result in the raw history.
+fn raw_tool_result(raw: &[Message], id: &str) -> Option<String> {
+    raw.iter().rev().find_map(|m| match &m.content {
+        MessageContent::Blocks(bs) => bs.iter().find_map(|b| match b {
+            ContentBlock::ToolResult {
+                tool_use_id,
+                content: ToolResultContent::Text(t),
+                ..
+            } if tool_use_id == id => Some(t.clone()),
+            _ => None,
+        }),
+        _ => None,
+    })
+}
 
-    let prompt = prompt.to_string();
+/// Append to the active history and to the raw history.
+fn push_message(agent: &Agent, msg: Message) {
+    agent.raw_history.lock().push(msg.clone());
+    agent.messages.lock().push(msg);
+}
 
-    // Run in a background task and collect events
-    let result = run_agent_streaming(agent, &prompt, event_tx, control_rx).await;
+/// Run the agent without streaming (blocking until complete), then the
+/// long-term memory's maintenance.
+pub async fn run_agent(agent: &Agent, input: &UserInput) -> Result<AgentOutput> {
+    // Nobody reads this stream (listeners use `on_event`, broadcast or
+    // reporters): with its receiver gone, sends return at once instead of
+    // blocking the run once a buffer fills.
+    let (event_tx, event_rx) = mpsc::channel(1);
+    drop(event_rx);
+
+    let result = run_agent_streaming(agent, input, event_tx).await;
 
     match result {
         Ok(output) => {
             agent.emit(AgentEvent::Complete(output.clone()));
+            let cancel = agent.run_cancellation();
+            maintain_memory(agent, &cancel, None).await;
             Ok(output)
         }
         Err(e) => {
@@ -324,20 +314,192 @@ pub async fn run_agent(agent: &Agent, prompt: &str) -> Result<AgentOutput> {
     }
 }
 
-/// Core agentic loop with streaming events.
+/// One run: the agentic loop. A run that fails or is cancelled leaves a
+/// history that can be continued — tool calls without results get one
+/// saying they were interrupted — and the session is stored.
 pub async fn run_agent_streaming(
     agent: &Agent,
-    prompt: &str,
+    input: &UserInput,
     event_tx: mpsc::Sender<AgentEvent>,
-    _control_rx: mpsc::Receiver<AgentControl>,
 ) -> Result<AgentOutput> {
+    let cancel = agent.begin_run();
+    run_prepared(agent, input, event_tx, cancel).await
+}
+
+/// [`run_agent_streaming`] with a run token the caller already made current
+/// (`Agent::begin_run`), so it can cancel the run from the first instant.
+pub async fn run_prepared(
+    agent: &Agent,
+    input: &UserInput,
+    event_tx: mpsc::Sender<AgentEvent>,
+    cancel: tokio_util::sync::CancellationToken,
+) -> Result<AgentOutput> {
+    let result = run_loop(agent, input, &event_tx, &cancel).await;
+    if let Err(e) = &result {
+        let why = if matches!(e, CerseiError::Cancelled) {
+            "cancelled by the user"
+        } else {
+            "interrupted by an error"
+        };
+        repair_interrupted(agent, why);
+        match save_session(agent).await {
+            Ok(true) => {
+                if let Some(session_id) = &agent.session_id {
+                    send(
+                        agent,
+                        Some(&event_tx),
+                        AgentEvent::SessionSaved {
+                            session_id: session_id.clone(),
+                        },
+                    )
+                    .await;
+                }
+            }
+            Ok(false) => {}
+            Err(err) => {
+                send(
+                    agent,
+                    Some(&event_tx),
+                    AgentEvent::Status(format!("The session could not be saved: {err}")),
+                )
+                .await;
+            }
+        }
+    }
+    result
+}
+
+/// Answer every tool call left without a result (a run stopped while tools
+/// were running), so the history stays valid for the next request. Effects
+/// the tools already had are not undone; the result says so.
+fn repair_interrupted(agent: &Agent, why: &str) {
+    let unanswered = compact::find_unanswered_tool_uses(&agent.messages.lock());
+    if unanswered.is_empty() {
+        return;
+    }
+    let blocks: Vec<ContentBlock> = unanswered
+        .into_iter()
+        .map(|id| ContentBlock::ToolResult {
+            tool_use_id: id,
+            content: ToolResultContent::Text(format!(
+                "[the run was {why} before this tool call finished; any effect it already \
+                 had remains]"
+            )),
+            is_error: Some(true),
+        })
+        .collect();
+    push_message(agent, Message::user_blocks(blocks));
+}
+
+/// Store the active and raw histories under the session id.
+pub(crate) async fn save_session(agent: &Agent) -> Result<bool> {
+    let (Some(memory), Some(session_id)) = (&agent.memory, &agent.session_id) else {
+        return Ok(false);
+    };
+    let messages = agent.messages.lock().clone();
+    memory.store(session_id, &messages).await?;
+    let raw = agent.raw_history.lock().clone();
+    memory
+        .store(&cersei_memory::session_keys::raw_history(session_id), &raw)
+        .await?;
+    Ok(true)
+}
+
+/// Empty the active history, keeping it as a snapshot (stored with the
+/// session) and in the raw history.
+pub(crate) async fn clear_context(agent: &Agent) -> Result<usize> {
+    let cleared = std::mem::take(&mut *agent.messages.lock());
+    let n = cleared.len();
+    if n == 0 {
+        return Ok(0);
+    }
+    let number = agent.snapshots.lock().len() + 1;
+    let memory_key = match (&agent.memory, &agent.session_id) {
+        (Some(memory), Some(session_id)) => {
+            let key = cersei_memory::session_keys::snapshot(session_id, number);
+            memory.store(&key, &cleared).await?;
+            Some(key)
+        }
+        _ => None,
+    };
+    agent.snapshots.lock().push(crate::CompactionSnapshot {
+        number,
+        messages: cleared,
+        memory_key,
+    });
+    agent.compaction_state.lock().applied = number;
+    agent
+        .context
+        .lock()
+        .invalidate("the active context was cleared");
+    save_session(agent).await?;
+    Ok(n)
+}
+
+/// The long-term memory's maintenance after a run, reported as its own
+/// phase: started, then finished (completed, cancelled or failed). The
+/// answer was already delivered; a failure here never changes it.
+pub(crate) async fn maintain_memory(
+    agent: &Agent,
+    cancel: &tokio_util::sync::CancellationToken,
+    tx: Option<&mpsc::Sender<AgentEvent>>,
+) {
+    let Some(ltm) = &agent.long_term_memory else {
+        return;
+    };
+    send(agent, tx, AgentEvent::MemoryMaintenanceStarted).await;
+    let result = ltm.maintain(cancel).await.map_err(|e| e.to_string());
+    send(agent, tx, AgentEvent::MemoryMaintenanceFinished(result)).await;
+}
+
+/// The agentic loop of one run.
+async fn run_loop(
+    agent: &Agent,
+    input: &UserInput,
+    event_tx: &mpsc::Sender<AgentEvent>,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> Result<AgentOutput> {
+    let prompt = input.text.as_str();
+    let event_tx = event_tx.clone();
     // Load session history (skip if messages were pre-populated via with_messages)
     if agent.messages.lock().is_empty() {
         if let (Some(memory), Some(session_id)) = (&agent.memory, &agent.session_id) {
             let history = memory.load(session_id).await?;
             if !history.is_empty() {
                 let count = history.len();
+                // The raw history is stored next to the session; an older
+                // session without one starts from the active history.
+                let raw = memory
+                    .load(&cersei_memory::session_keys::raw_history(session_id))
+                    .await
+                    .ok()
+                    .filter(|r| !r.is_empty())
+                    .unwrap_or_else(|| history.clone());
+                *agent.raw_history.lock() = raw;
+                // Pre-compaction snapshots, numbered from 1 without gaps; later
+                // compactions continue the numbering instead of overwriting.
+                let mut snapshots = Vec::new();
+                loop {
+                    let number = snapshots.len() + 1;
+                    let key = cersei_memory::session_keys::snapshot(session_id, number);
+                    match memory.load(&key).await {
+                        Ok(messages) if !messages.is_empty() => {
+                            snapshots.push(crate::CompactionSnapshot {
+                                number,
+                                messages,
+                                memory_key: Some(key),
+                            })
+                        }
+                        _ => break,
+                    }
+                }
+                agent.compaction_state.lock().applied = snapshots.len();
+                *agent.snapshots.lock() = snapshots;
                 agent.messages.lock().extend(history);
+                agent
+                    .context
+                    .lock()
+                    .invalidate("the session was restored from storage");
                 let _ = event_tx
                     .send(AgentEvent::SessionLoaded {
                         session_id: session_id.clone(),
@@ -369,7 +531,65 @@ pub async fn run_agent_streaming(
         prompt.to_string()
     };
 
-    agent.messages.lock().push(Message::user(&expanded_prompt));
+    let mut notes = std::mem::take(&mut *agent.config_notes.lock());
+    notes.extend(agent.connect_mcp().await);
+    // Long-term memory: recall for this prompt, within its budget (at most
+    // a tenth of the prompt budget), appended to the system prompt.
+    *agent.recalled.lock() = None;
+    if let Some(ltm) = &agent.long_term_memory {
+        let budget = (agent.memory_recall_tokens as u64)
+            .min(context_status(agent).input_limit / 10)
+            .max(1) as usize;
+        match ltm.recall_context(prompt, budget).await {
+            Ok(Some(r)) => {
+                send(
+                    agent,
+                    Some(&event_tx),
+                    AgentEvent::MemoryRecalled {
+                        items: r.items,
+                        tokens: r.tokens,
+                        omitted: r.omitted,
+                        budget,
+                    },
+                )
+                .await;
+                *agent.recalled.lock() = Some(r.text);
+            }
+            Ok(None) => {
+                send(
+                    agent,
+                    Some(&event_tx),
+                    AgentEvent::MemoryRecalled {
+                        items: 0,
+                        tokens: 0,
+                        omitted: 0,
+                        budget,
+                    },
+                )
+                .await;
+            }
+            Err(e) => notes.push(format!("long-term memory unavailable for this run: {e}")),
+        }
+    }
+    for note in notes {
+        send(
+            agent,
+            Some(&event_tx),
+            AgentEvent::Status(format!("Configuration: {note}")),
+        )
+        .await;
+    }
+
+    if input.attachments.is_empty() {
+        push_message(agent, Message::user(&expanded_prompt));
+    } else {
+        let mut blocks = vec![ContentBlock::Text {
+            text: expanded_prompt.clone(),
+        }];
+        blocks.extend(input.attachments.iter().cloned());
+        push_message(agent, Message::user_blocks(blocks));
+    }
+    let mut overflow_recoveries: u32 = 0;
 
     let mut tool_calls: Vec<ToolCallRecord> = Vec::new();
     let mut turn: u32 = 0;
@@ -394,15 +614,31 @@ pub async fn run_agent_streaming(
         std::collections::HashMap::new();
 
     // Build tool context
+    // Progress of long tool calls (shell commands) reaches the event stream.
+    {
+        let tx = event_tx.clone();
+        let reporters_emit = agent.emit_handle();
+        agent
+            .extensions
+            .insert(cersei_tools::shell::ProgressSink(Arc::new(
+                move |tool: &str, message: &str| {
+                    let event = AgentEvent::ToolProgress {
+                        name: tool.to_string(),
+                        message: message.to_string(),
+                    };
+                    let _ = tx.try_send(event.clone());
+                    reporters_emit(event);
+                },
+            )));
+    }
     let tool_ctx = ToolContext {
         working_dir: agent.working_dir.clone(),
-        session_id: agent
-            .session_id
-            .clone()
-            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+        // One shell session per agent (not per run): state persists across
+        // turns and `reply` calls; sub-agents have their own.
+        session_id: agent.shell_session_id.clone(),
         permissions: Arc::clone(&agent.permission_policy),
         cost_tracker: Arc::clone(&agent.cost_tracker),
-        mcp_manager: agent.mcp_manager.clone(),
+        mcp_manager: agent.mcp_manager(),
         extensions: agent.extensions.clone(),
     };
 
@@ -414,32 +650,65 @@ pub async fn run_agent_streaming(
         }
 
         // Check cancellation
-        if agent.cancel_token.is_cancelled() {
+        if cancel.is_cancelled() {
             return Err(CerseiError::Cancelled);
         }
 
         let _ = event_tx.send(AgentEvent::TurnStart { turn }).await;
         agent.emit(AgentEvent::TurnStart { turn });
 
-        // Apply tool result budget to keep context manageable
-        {
+        // Apply tool result budget to keep context manageable. Removed
+        // results name their saved original, and the measurement of the old
+        // history no longer applies.
+        let removed = {
             let mut msgs = agent.messages.lock();
-            apply_tool_result_budget(&mut msgs, agent.tool_result_budget);
+            let refs = agent.raw_refs.lock();
+            let raw = agent.raw_history.lock();
+            apply_tool_result_budget_with(&mut msgs, agent.tool_result_budget, |id, len| {
+                let saved = refs.get(id).cloned().or_else(|| {
+                    raw_tool_result(&raw, id).and_then(|text| {
+                        agent
+                            .compressor
+                            .raw_store()?
+                            .put(&format!("removed-{id}"), &text)
+                            .ok()
+                    })
+                });
+                match saved {
+                    Some(r) => format!(
+                        "[tool result removed from the active context to save space ({len} chars);                          full output: {}]",
+                        r.hint()
+                    ),
+                    None => format!(
+                        "[tool result removed from the active context to save space ({len} chars);                          it could not be saved — run the tool again if you need it]"
+                    ),
+                }
+            })
+        };
+        if removed {
+            agent
+                .context
+                .lock()
+                .invalidate("old tool results were removed from the active context");
         }
 
         // Build completion request
         let messages = agent.messages.lock().clone();
-        let tool_defs: Vec<ToolDefinition> =
-            agent.tools.iter().map(|t| t.to_definition()).collect();
+        let tool_defs: Vec<ToolDefinition> = agent
+            .tool_list()
+            .iter()
+            .map(|t| t.to_definition())
+            .collect();
 
-        let model = agent
-            .model
-            .clone()
-            .unwrap_or_else(|| "claude-sonnet-4-6".to_string());
+        // The provider is bound to one configured model and ignores this
+        // string; it is only a label for events and metadata.
+        // Read once per turn: a model change applies from the next turn.
+        let provider = agent.provider();
+        let model = model_label(agent);
 
         let mut options = ProviderOptions::default();
-        if let Some(budget) = agent.thinking_budget {
-            options.set("thinking_budget", budget);
+        if let Some(profile) = agent.reasoning_profile.lock().clone() {
+            options.set(cersei_provider::REASONING_PROFILE_OPTION, &profile);
         }
         // F-08: one-shot — applies only to the retry turn right after the
         // no-tool-call nudge, then reverts to the provider default (auto).
@@ -447,11 +716,6 @@ pub async fn run_agent_streaming(
             force_tool_choice = false;
             options.set("tool_choice", "required");
         }
-        // F-09: the window this loop budgets against rides on every request;
-        // only providers flagged for it (Ollama) put it on the wire as
-        // options.num_ctx. Without it Ollama stays at its server-side
-        // default window and silently truncates the prompt front.
-        options.set("num_ctx", compact::context_window_for_model(&model));
 
         // Todo nudge: on turns > 2, remind model about incomplete todos
         let system_with_nudge = if turn > 2 {
@@ -467,12 +731,12 @@ pub async fn run_agent_streaming(
                     incomplete,
                     if incomplete == 1 { "" } else { "s" }
                 );
-                agent.system_prompt.as_ref().map(|s| format!("{s}{nudge}"))
+                agent.effective_system().map(|s| format!("{s}{nudge}"))
             } else {
-                agent.system_prompt.clone()
+                agent.effective_system()
             }
         } else {
-            agent.system_prompt.clone()
+            agent.effective_system()
         };
 
         // F-04: last line of defence. Compaction is the known way to sever a
@@ -505,7 +769,7 @@ pub async fn run_agent_streaming(
         }
 
         let tools_available = !tool_defs.is_empty();
-        let request = CompletionRequest {
+        let mut request = CompletionRequest {
             model: model.clone(),
             messages: messages.clone(),
             system: system_with_nudge,
@@ -514,13 +778,15 @@ pub async fn run_agent_streaming(
             temperature: agent.temperature,
             stop_sequences: Vec::new(),
             options,
+            output_modalities: Vec::new(),
         };
 
+        let status = ensure_budget(agent, &mut request, &event_tx).await?;
         let _ = event_tx
             .send(AgentEvent::ModelRequestStart {
                 turn,
-                message_count: messages.len(),
-                token_estimate: 0,
+                message_count: request.messages.len(),
+                token_estimate: status.context_used.tokens,
             })
             .await;
 
@@ -540,17 +806,46 @@ pub async fn run_agent_streaming(
             // until the first byte arrives — forever, against a server that
             // accepts the connection and then goes quiet.
             let outcome = tokio::select! {
-                result = agent.provider.complete(req_clone) => result,
-                _ = agent.cancel_token.cancelled() => return Err(CerseiError::Cancelled),
+                result = provider.complete(req_clone) => result,
+                _ = cancel.cancelled() => return Err(CerseiError::Cancelled),
             };
             match outcome {
                 Ok(stream) => {
                     break (stream.into_receiver(), StreamAccumulator::new());
                 }
+                Err(e)
+                    if e.is_context_overflow()
+                        && overflow_recoveries
+                            < agent.context.lock().policy().max_overflow_recoveries =>
+                {
+                    // The server says it does not fit: shrink, then resend.
+                    // Nothing ran yet for this turn, so no tool effect repeats.
+                    overflow_recoveries += 1;
+                    send(
+                        agent,
+                        Some(&event_tx),
+                        AgentEvent::Status(format!(
+                            "The server refused the request as too long ({e}); compacting."
+                        )),
+                    )
+                    .await;
+                    let outcome = run_compaction(
+                        agent,
+                        CompactReason::ContextOverflow,
+                        true,
+                        Some(&event_tx),
+                    )
+                    .await;
+                    if !outcome.is_compacted() {
+                        return Err(e);
+                    }
+                    request.messages = agent.messages.lock().clone();
+                    continue;
+                }
                 Err(e) if e.is_retryable() && retry_count < MAX_RETRIES => {
                     retry_count += 1;
                     let delay_ms = (1000 * 2u64.pow(retry_count - 1)).min(30_000); // 1s, 2s, 4s, 8s, 16s
-                    let jitter = (delay_ms / 4) as u64;
+                    let jitter = delay_ms / 4;
                     let actual_delay = delay_ms + (rand_jitter() % jitter.max(1));
                     tracing::warn!(
                         "Provider error (retryable, attempt {}/{}): {}. Retrying in {}ms...",
@@ -579,7 +874,7 @@ pub async fn run_agent_streaming(
                     // ~31s of it.
                     tokio::select! {
                         _ = tokio::time::sleep(std::time::Duration::from_millis(actual_delay)) => {}
-                        _ = agent.cancel_token.cancelled() => return Err(CerseiError::Cancelled),
+                        _ = cancel.cancelled() => return Err(CerseiError::Cancelled),
                     }
                     continue;
                 }
@@ -595,6 +890,7 @@ pub async fn run_agent_streaming(
             .await;
 
         // Process stream events (with cancellation support)
+        let mut stream_error: Option<CerseiError> = None;
         loop {
             tokio::select! {
                 event = rx.recv() => {
@@ -612,7 +908,8 @@ pub async fn run_agent_streaming(
                                     agent.emit(AgentEvent::ThinkingDelta(thinking.clone()));
                                 }
                                 StreamEvent::Error { message } => {
-                                    return Err(CerseiError::Provider(message.clone()));
+                                    stream_error = Some(CerseiError::Provider(message.clone()));
+                                    break;
                                 }
                                 _ => {}
                             }
@@ -621,20 +918,36 @@ pub async fn run_agent_streaming(
                         None => break, // Stream ended
                     }
                 }
-                _ = agent.cancel_token.cancelled() => {
+                _ = cancel.cancelled() => {
                     return Err(CerseiError::Cancelled);
                 }
             }
         }
 
+        if let Some(e) = stream_error {
+            let allowed = agent.context.lock().policy().max_overflow_recoveries;
+            if e.is_context_overflow() && overflow_recoveries < allowed {
+                // Refused mid-stream before any tool ran: compact and redo the turn.
+                overflow_recoveries += 1;
+                let outcome =
+                    run_compaction(agent, CompactReason::ContextOverflow, true, Some(&event_tx))
+                        .await;
+                if outcome.is_compacted() {
+                    continue;
+                }
+            }
+            return Err(e);
+        }
+
         // Convert accumulated response
         let response = accumulator.into_response()?;
+        overflow_recoveries = 0;
         last_stop_reason = response.stop_reason.clone();
         _last_usage = response.usage.clone();
 
         // Update cumulative usage
         agent.cumulative_usage.lock().merge(&response.usage);
-        agent.cost_tracker.add_with_model(&response.usage, &model);
+        agent.cost_tracker.add(&response.usage);
 
         // Emit cost update
         let cumulative = agent.cumulative_usage.lock().clone();
@@ -653,8 +966,28 @@ pub async fn run_agent_streaming(
             output_tokens: cumulative.output_tokens,
         });
 
-        // Add assistant message to history
-        agent.messages.lock().push(response.message.clone());
+        // Add assistant message to history, and record what the usage
+        // measured: the request just executed, with this model.
+        let assistant_index = request.messages.len();
+        push_message(agent, response.message.clone());
+        let model = model_view(agent);
+        let status = {
+            let mut ctx = agent.context.lock();
+            let view = RequestView::of(&request);
+            ctx.record_response(
+                &model,
+                &view,
+                &response.usage,
+                Some((assistant_index, &response.message)),
+            );
+            let msgs = agent.messages.lock().clone();
+            let next = RequestView {
+                messages: &msgs,
+                ..RequestView::of(&request)
+            };
+            ctx.status(&model, &next)
+        };
+        send(agent, Some(&event_tx), AgentEvent::ContextUpdate(status)).await;
 
         // Fire PostModelTurn hooks
         let hook_ctx = HookContext {
@@ -678,7 +1011,7 @@ pub async fn run_agent_streaming(
         // Fire TurnsElapsed every `turns_elapsed_cadence` turns (default 10).
         // Callers can register a SkillNudgeHook here for agent-curated skill
         // creation without blocking the agent loop.
-        if turn > 0 && turn % agent.turns_elapsed_cadence == 0 {
+        if turn > 0 && turn.is_multiple_of(agent.turns_elapsed_cadence) {
             let cadence_ctx = HookContext {
                 event: HookEvent::TurnsElapsed,
                 tool_name: None,
@@ -728,7 +1061,7 @@ pub async fn run_agent_streaming(
                     });
                     if !recent_has_verify {
                         completion_verified = true;
-                        agent.messages.lock().push(Message::user(
+                        push_message(agent, Message::user(
                             "[system] Before finishing, verify your solution is correct:\n\
                              1. Check that all expected output files exist and have correct content\n\
                              2. Run your solution to confirm it produces the right output\n\
@@ -766,10 +1099,10 @@ pub async fn run_agent_streaming(
                     if has_instruction_tests {
                         let verification = benchmark_check_tests(&tool_calls);
                         match verification {
-                            BenchmarkVerification::TestsNotRun => {
+                            BenchmarkVerification::NotRun => {
                                 if benchmark_retries == 0 {
                                     benchmark_retries += 1;
-                                    agent.messages.lock().push(Message::user(
+                                    push_message(agent, Message::user(
                                         "[system] The task instruction mentions a verification command. \
                                          Run it now to check your solution. Look at the instruction again \
                                          for the exact command."
@@ -784,11 +1117,11 @@ pub async fn run_agent_streaming(
                                 }
                                 break;
                             }
-                            BenchmarkVerification::TestsFailed(ref test_output) => {
+                            BenchmarkVerification::Failed(ref test_output) => {
                                 benchmark_retries += 1;
                                 let truncated: String = test_output.chars().take(3000).collect();
-                                agent.messages.lock().push(Message::user(
-                                    &format!(
+                                push_message(agent, Message::user(
+                                    format!(
                                         "[system] Verification FAILED (attempt {}/{}).\n\n\
                                          Output:\n```\n{}\n```\n\n\
                                          Try a COMPLETELY DIFFERENT approach. Do NOT patch — rewrite.",
@@ -803,7 +1136,7 @@ pub async fn run_agent_streaming(
                                     .await;
                                 continue;
                             }
-                            BenchmarkVerification::TestsPassed => {
+                            BenchmarkVerification::Passed => {
                                 break;
                             }
                         }
@@ -823,12 +1156,15 @@ pub async fn run_agent_streaming(
                 if !had_tool_use && tools_available && !no_tool_nudge_sent {
                     no_tool_nudge_sent = true;
                     force_tool_choice = true;
-                    agent.messages.lock().push(Message::user(
-                        "[system] You answered without using any tools. Claims about \
+                    push_message(
+                        agent,
+                        Message::user(
+                            "[system] You answered without using any tools. Claims about \
                          the codebase must be verified with tools before answering. \
                          Gather evidence first (Read, Grep, Glob, Bash, ...), then \
-                         give your final answer grounded in what the tools returned."
-                    ));
+                         give your final answer grounded in what the tools returned.",
+                        ),
+                    );
                     let _ = event_tx
                         .send(AgentEvent::Status(
                             "Nudging agent to use tools before answering".into(),
@@ -842,7 +1178,7 @@ pub async fn run_agent_streaming(
                 // This prevents shallow 1-round analysis. Only nudge once.
                 if had_tool_use && turn <= 4 && !depth_nudge_sent {
                     depth_nudge_sent = true;
-                    agent.messages.lock().push(Message::user(
+                    push_message(agent, Message::user(
                         "[system] Your analysis is not deep enough yet. You MUST read actual source code files before writing a summary. Use Read to examine at least 8-10 source files (stores, components, commands, types, configs). Use parallel Read calls. Do NOT write the final output until you have read enough source files to provide specific details about implementations, not just file names."
                     ));
                     continue; // Don't break — force another round
@@ -888,8 +1224,11 @@ pub async fn run_agent_streaming(
                 // `agent.tools` the lookup below uses (so MCP-injected tools
                 // stay consistent), and building it inside the closure would
                 // re-allocate every tool name for every parallel call (F-A15).
-                let registered_tool_names: Vec<String> =
-                    agent.tools.iter().map(|t| t.name().to_string()).collect();
+                let registered_tool_names: Vec<String> = agent
+                    .tool_list()
+                    .iter()
+                    .map(|t| t.name().to_string())
+                    .collect();
 
                 // ── Guard: read-before-edit, decided BEFORE dispatch (F-11) ──
                 // This used to run over the *returned* ToolResult, which meant
@@ -913,27 +1252,76 @@ pub async fn run_agent_streaming(
                         let cumulative_cost = cumulative.cost_usd.unwrap_or(0.0);
 
                         // Find tool reference by name
-                        let tool_idx = agent.tools.iter().position(|t| t.name() == tool_name);
+                        let tool_ref = agent.tool_by_name(&tool_name);
 
                         async move {
                             let start = Instant::now();
+                            // The change an approval was given for (written
+                            // if the call succeeds).
+                            let mut approved_change: Option<cersei_tools::preview::ChangePreview> = None;
 
                             let result = if let Some(msg) = refusal {
                                 // Refused before dispatch: the tool never runs,
                                 // so nothing reaches disk.
                                 ToolResult::error(msg)
-                            } else if let Some(idx) = tool_idx {
-                                let tool = &agent.tools[idx];
-                                // Check permissions
-                                let perm_req = PermissionRequest {
-                                    tool_name: tool_name.clone(),
-                                    tool_input: tool_input.clone(),
-                                    permission_level: tool.permission_level(),
-                                    description: format!("Execute tool '{}'", tool_name),
-                                    id: tool_id.clone(),
+                            } else if let Some(tool) = tool_ref {
+                                // Check permissions. Session state a shell
+                                // command depends on (aliases, functions) is
+                                // shown to the policy, so it cannot hide what
+                                // will actually run.
+                                let mut description = format!("Execute tool '{}'", tool_name);
+                                if let Some(details) = tool.permission_details(&tool_input, &tool_ctx).await {
+                                    description.push('\n');
+                                    description.push_str(&details);
+                                }
+                                // What the call would change, computed
+                                // without writing, so the decision is taken
+                                // on it. If a file changes while the decision
+                                // is pending, the change is recomputed and
+                                // asked again: an approval never applies to
+                                // a state it was not given for.
+                                let mut preview = tool.preview(&tool_input, &tool_ctx).await;
+                                let mut stale_rounds = 0;
+                                let decision = loop {
+                                    if let Some(reason) = preview.as_ref().and_then(|p| p.refusal.clone()) {
+                                        // The tool would refuse it: nothing to approve.
+                                        break PermissionDecision::Deny(format!("{reason}\nNothing was written."));
+                                    }
+                                    let perm_req = PermissionRequest {
+                                        tool_name: tool_name.clone(),
+                                        tool_input: tool_input.clone(),
+                                        permission_level: tool.permission_level(),
+                                        description: description.clone(),
+                                        id: tool_id.clone(),
+                                        preview: preview.clone(),
+                                    };
+                                    let d = permission_policy.check(&perm_req).await;
+                                    let allowed = matches!(
+                                        d,
+                                        PermissionDecision::Allow
+                                            | PermissionDecision::AllowOnce
+                                            | PermissionDecision::AllowForSession
+                                    );
+                                    match preview.as_ref().map(|p| p.check_current()) {
+                                        Some(Err(changed)) if allowed => {
+                                            stale_rounds += 1;
+                                            if stale_rounds >= 3 {
+                                                break PermissionDecision::Deny(format!(
+                                                    "{} changed on disk while the change was awaiting approval; \
+                                                     nothing was written. Read the file again and retry.",
+                                                    changed.join(", ")
+                                                ));
+                                            }
+                                            preview = tool.preview(&tool_input, &tool_ctx).await;
+                                        }
+                                        _ => {
+                                            if allowed {
+                                                approved_change = preview.clone();
+                                            }
+                                            break d;
+                                        }
+                                    }
                                 };
-
-                                let decision = permission_policy.check(&perm_req).await;
 
                                 match decision {
                                     PermissionDecision::Allow
@@ -979,17 +1367,37 @@ pub async fn run_agent_streaming(
                             };
 
                             let duration = start.elapsed();
-                            (tool_id, tool_name, tool_input, result, duration)
+                            (tool_id, tool_name, tool_input, result, duration, approved_change)
                         }
                     })
                     .collect();
 
-                let results = futures::future::join_all(exec_futures).await;
+                // Cancelling the turn drops the running tool futures: a shell
+                // command is then interrupted by its own guard instead of
+                // running to its timeout.
+                let results = tokio::select! {
+                    r = futures::future::join_all(exec_futures) => r,
+                    _ = cancel.cancelled() => return Err(CerseiError::Cancelled),
+                };
 
                 // Phase 3: Process results sequentially (emit events, build result blocks)
                 let mut result_blocks: Vec<ContentBlock> = Vec::new();
+                let mut raw_blocks: Vec<ContentBlock> = Vec::new();
 
-                for (tool_id, tool_name, tool_input, mut result, duration) in results {
+                for (tool_id, tool_name, tool_input, mut result, duration, change) in results {
+                    if let Some(change) = change.filter(|c| !result.is_error && !c.files.is_empty())
+                    {
+                        send(
+                            agent,
+                            Some(&event_tx),
+                            AgentEvent::EditApplied {
+                                tool_call_id: tool_id.clone(),
+                                tool: tool_name.clone(),
+                                files: change.files,
+                            },
+                        )
+                        .await;
+                    }
                     // ── Bookkeeping for the read-before-edit guard ──
                     // The refusal itself now happens before dispatch; see
                     // `refusals_for_batch`. What remains here is recording the
@@ -1008,46 +1416,61 @@ pub async fn run_agent_streaming(
                             files_read.insert(resolve_path(&tool_ctx.working_dir, &target));
                         }
                     }
-                    if (tool_name == "Read" || tool_name == "read") && !result.is_error {
-                        if let Some(path) = tool_input.get("file_path").and_then(|v| v.as_str()) {
-                            files_read.insert(resolve_path(&tool_ctx.working_dir, path));
-                        }
-                    }
-                    // The write-side guard now runs before dispatch; see
-                    // `refusals_for_batch`. Only the bookkeeping remains here,
-                    // because it needs the result to know the Read succeeded.
 
                     // ── Guard: Per-tool error counter with reflection (F-06) ──
                     if result.is_error {
                         let count = tool_error_counts.entry(tool_name.clone()).or_insert(0);
                         *count += 1;
-                        result.content =
-                            format!("{}\n\n{}", result.content, error_budget_note(&tool_name, *count));
+                        let note = error_budget_note(&tool_name, *count);
+                        match result.report.as_mut() {
+                            Some(r) => r.notes.push(note),
+                            None => result.content = format!("{}\n\n{}", result.content, note),
+                        }
                     } else {
                         tool_error_counts.remove(&tool_name);
                     }
 
-                    // Compress before emitting ToolEnd so the savings stats ride
-                    // along on the event (error results are not compressed).
-                    let (capped_content, compression) = if result.is_error {
-                        // F-07: errors skip *compression* (a stack trace does
-                        // not summarise well) but must still be capped. They
-                        // were previously exempt from both, so an unbounded
-                        // failure body — a compiler dump, a full stack trace —
-                        // entered history whole and was re-sent on every
-                        // subsequent turn of the conversation.
-                        (cap_tool_result(&result.content), None)
-                    } else {
-                        let level = *agent.compression_level.lock();
-                        let (compressed, stats) =
-                            cersei_compression::compress_tool_output_with_stats(
-                                &tool_name,
-                                &tool_input,
-                                &result.content,
-                                level,
-                            );
-                        (cap_tool_result(&compressed), Some(stats))
-                    };
+                    // One rendering for every tool: a header (status,
+                    // duration, code), then the output, notes, suggestion.
+                    // Only the output is reduced for the active context
+                    // (errors too: diagnostics are kept first); the original
+                    // stays in the raw history and, when reduced, in the
+                    // output store.
+                    let report = result.to_report();
+                    let output = report.render_output();
+                    let level = *agent.compression_level.lock();
+                    let processed = agent.compressor.process(
+                        &cersei_compression::ToolOutput {
+                            tool: &tool_name,
+                            input: &tool_input,
+                            content: &output,
+                            is_error: report.status.is_error(),
+                            call_id: &tool_id,
+                            exit_code: report.exit_code,
+                        },
+                        level,
+                    );
+                    if let Some(r) = &processed.raw {
+                        agent.raw_refs.lock().insert(tool_id.clone(), r.clone());
+                    }
+                    // A file counts as read only when the model saw its exact
+                    // text: a skeleton or a summary is not enough to edit it.
+                    if (tool_name == "Read" || tool_name == "read")
+                        && !result.is_error
+                        && !processed.partial_view
+                    {
+                        if let Some(path) = tool_input.get("file_path").and_then(|v| v.as_str()) {
+                            files_read.insert(resolve_path(&tool_ctx.working_dir, path));
+                        }
+                    }
+                    let capped_content = report.render(&tool_name, duration, Some(&processed.text));
+                    let full_text = report.render(&tool_name, duration, None);
+                    let compression = Some(processed.stats);
+                    raw_blocks.push(ContentBlock::ToolResult {
+                        tool_use_id: tool_id.clone(),
+                        content: ToolResultContent::Text(full_text.clone()),
+                        is_error: Some(result.is_error),
+                    });
 
                     let _ = event_tx
                         .send(AgentEvent::ToolEnd {
@@ -1072,7 +1495,7 @@ pub async fn run_agent_streaming(
                         name: tool_name,
                         id: tool_id.clone(),
                         input: tool_input,
-                        result: result.content.clone(),
+                        result: full_text,
                         is_error: result.is_error,
                         duration,
                     });
@@ -1083,7 +1506,12 @@ pub async fn run_agent_streaming(
                     });
                 }
 
-                // Add tool results as user message
+                // Add tool results as user message: reduced in the active
+                // history, unreduced in the raw history.
+                agent
+                    .raw_history
+                    .lock()
+                    .push(Message::user_blocks(raw_blocks));
                 agent
                     .messages
                     .lock()
@@ -1124,7 +1552,7 @@ pub async fn run_agent_streaming(
 
                     if is_3_identical || is_2_pattern {
                         doom_loop_warned = true;
-                        agent.messages.lock().push(Message::user(
+                        push_message(agent, Message::user(
                             "[system] You are stuck in a repetitive loop. Your recent tool calls \
                              are repeating the same pattern. STOP and reconsider:\n\
                              1. What exactly is going wrong? Read the error messages carefully.\n\
@@ -1145,26 +1573,19 @@ pub async fn run_agent_streaming(
                 if max_tokens_retries > MAX_TOKENS_RETRY_LIMIT {
                     break; // Give up after 3 retries
                 }
-                agent
-                    .messages
-                    .lock()
-                    .push(Message::user("Continue from exactly where you stopped."));
+                push_message(
+                    agent,
+                    Message::user("Continue from exactly where you stopped."),
+                );
             }
             _ => break,
         }
 
-        // Auto-compact: check context utilization after each turn
+        // After the turn: warn near the limit, and compact proactively once
+        // the occupation crosses the policy's threshold.
         if agent.auto_compact {
-            let model_name = agent.model.as_deref().unwrap_or("claude-sonnet-4-6");
-            let tokens_used = compact::estimate_messages_tokens(&agent.messages.lock());
-            let context_window = compact::context_window_for_model(model_name);
-            let pct = if context_window > 0 {
-                tokens_used as f64 / context_window as f64
-            } else {
-                0.0
-            };
-
-            // Emit token warnings
+            let status = context_status(agent);
+            let pct = status.fraction_used();
             if pct >= compact::WARNING_PCT {
                 use crate::events::WarningState;
                 let state = if pct >= compact::CRITICAL_PCT {
@@ -1172,76 +1593,31 @@ pub async fn run_agent_streaming(
                 } else {
                     WarningState::Warning
                 };
-                let _ = event_tx
-                    .send(AgentEvent::TokenWarning {
+                send(
+                    agent,
+                    Some(&event_tx),
+                    AgentEvent::TokenWarning {
                         pct_used: pct,
                         state,
-                    })
-                    .await;
-                agent.emit(AgentEvent::TokenWarning {
-                    pct_used: pct,
-                    state,
-                });
-            }
-
-            // Auto-compact at 90%: try LLM summarization, fall back to snip
-            if compact::should_compact(tokens_used, context_window) {
-                let msgs_snapshot = agent.messages.lock().clone();
-                let model_name_owned = model_name.to_string();
-
-                // Try LLM-based summarization first
-                match compact::compact_conversation(
-                    agent.provider.as_ref(),
-                    &msgs_snapshot,
-                    &model_name_owned,
-                    compact::KEEP_RECENT_MESSAGES,
-                    None,
+                    },
                 )
-                .await
-                {
-                    Ok(result) if !result.summary.is_empty() => {
-                        let mut msgs = agent.messages.lock();
-                        let before = msgs.len();
-                        // F-04: not `len - KEEP_RECENT_MESSAGES`. That lands on
-                        // a `user[tool_result]` for every even-length history
-                        // and discards the `tool_use` answering it, which the
-                        // provider rejects with a 400 — an error the retry loop
-                        // does not match, so the conversation wedges exactly
-                        // when the context was full enough to need compacting.
-                        let split_idx =
-                            compact::pair_aware_split(&msgs, compact::KEEP_RECENT_MESSAGES);
-                        let recent = msgs[split_idx..].to_vec();
-                        *msgs = vec![Message::user(&result.summary)];
-                        msgs.extend(recent);
-                        tracing::info!(
-                            "LLM compact: {before} → {} messages, freed ~{} tokens",
-                            msgs.len(),
-                            result.tokens_freed_estimate
-                        );
-                    }
-                    _ => {
-                        // Fallback: snip-compact (truncation)
-                        let mut msgs = agent.messages.lock();
-                        let before = msgs.len();
-                        let (compacted, freed) = compact::snip_compact(
-                            std::mem::take(&mut *msgs),
-                            compact::KEEP_RECENT_MESSAGES,
-                        );
-                        *msgs = compacted;
-                        tracing::info!(
-                            "Snip compact (fallback): {before} → {} messages, freed ~{freed} tokens",
-                            msgs.len()
-                        );
-                    }
-                }
+                .await;
+            }
+            if agent.context.lock().should_compact(&status) {
+                run_compaction(
+                    agent,
+                    CompactReason::ThresholdExceeded,
+                    false,
+                    Some(&event_tx),
+                )
+                .await;
             }
         }
     }
 
-    // Persist session
-    if let (Some(memory), Some(session_id)) = (&agent.memory, &agent.session_id) {
-        let messages = agent.messages.lock().clone();
-        memory.store(session_id, &messages).await?;
+    // Persist session: the active history, and next to it the raw history.
+    if save_session(agent).await? {
+        let session_id = agent.session_id.clone().unwrap_or_default();
         let _ = event_tx
             .send(AgentEvent::SessionSaved {
                 session_id: session_id.clone(),
@@ -1262,6 +1638,33 @@ pub async fn run_agent_streaming(
         .cloned()
         .unwrap_or_else(|| Message::assistant(""));
 
+    // Remember the exchange durably (failures are reported, never fatal).
+    // Processing it — extraction, embeddings — is the maintenance phase
+    // that follows the answer.
+    if let Some(ltm) = &agent.long_term_memory {
+        let now = chrono::Utc::now().timestamp_millis();
+        let mut turns = vec![cersei_memory::MemoryTurn {
+            role: "user".into(),
+            content: prompt.to_string(),
+            at: Some(now),
+        }];
+        if let Some(text) = last_message.get_text().filter(|t| !t.trim().is_empty()) {
+            turns.push(cersei_memory::MemoryTurn {
+                role: "assistant".into(),
+                content: text.to_string(),
+                at: Some(now),
+            });
+        }
+        if let Err(e) = ltm.record_turns(agent.session_id.as_deref(), &turns).await {
+            send(
+                agent,
+                Some(&event_tx),
+                AgentEvent::Status(format!("Long-term memory not updated: {e}")),
+            )
+            .await;
+        }
+    }
+
     let output = AgentOutput {
         message: last_message,
         usage: agent.cumulative_usage.lock().clone(),
@@ -1278,13 +1681,360 @@ pub async fn run_agent_streaming(
     Ok(output)
 }
 
+// ─── Context management ──────────────────────────────────────────────────────
+
+/// Automatic compaction bookkeeping for one agent.
+#[derive(Debug, Default)]
+pub(crate) struct CompactionState {
+    failures: u32,
+    disabled: bool,
+    /// (context version, message count) of the last attempt that did not
+    /// compact: retrying on the same history cannot make progress.
+    last_unsuccessful: Option<(u64, usize)>,
+    /// Compactions applied so far (numbers the snapshots).
+    applied: usize,
+}
+
+pub(crate) fn model_label(agent: &Agent) -> String {
+    let provider = agent.provider();
+    agent
+        .model
+        .lock()
+        .clone()
+        .or_else(|| provider.model_info().map(|m| m.selection))
+        .unwrap_or_else(|| provider.name().to_string())
+}
+
+fn tool_definitions(agent: &Agent) -> Vec<ToolDefinition> {
+    agent
+        .tool_list()
+        .iter()
+        .map(|t| t.to_definition())
+        .collect()
+}
+
+fn model_view(agent: &Agent) -> ModelView {
+    ModelView::of(agent.provider().as_ref(), &model_label(agent))
+}
+
+/// Status of the next request as it would be built now.
+pub(crate) fn context_status(agent: &Agent) -> ContextStatus {
+    let messages = agent.messages.lock().clone();
+    let tools = tool_definitions(agent);
+    let system = agent.effective_system();
+    let view = RequestView {
+        system: system.as_deref(),
+        tools: &tools,
+        messages: &messages,
+        max_output: agent.max_tokens,
+    };
+    agent.context.lock().status(&model_view(agent), &view)
+}
+
+async fn send(agent: &Agent, tx: Option<&mpsc::Sender<AgentEvent>>, event: AgentEvent) {
+    if let Some(tx) = tx {
+        let _ = tx.send(event.clone()).await;
+    }
+    agent.emit(event);
+}
+
+pub(crate) async fn compact_now(agent: &Agent) -> crate::compact::CompactionOutcome {
+    run_compaction(agent, CompactReason::ManualTrigger, true, None).await
+}
+
+/// Run one compaction attempt and apply it if it succeeds. `force` skips the
+/// no-progress guard (manual request, or a request that cannot be sent).
+async fn run_compaction(
+    agent: &Agent,
+    reason: CompactReason,
+    force: bool,
+    tx: Option<&mpsc::Sender<AgentEvent>>,
+) -> crate::compact::CompactionOutcome {
+    use crate::compact::{compact_history, CompactionOutcome, CompactionPlan};
+
+    let messages = agent.messages.lock().clone();
+    let version = agent.context.lock().version();
+    let skip = {
+        let state = agent.compaction_state.lock();
+        if state.disabled && reason != CompactReason::ManualTrigger {
+            Some(format!(
+                "automatic compaction is off for this session after {} unsuccessful attempts",
+                state.failures
+            ))
+        } else if !force && state.last_unsuccessful == Some((version, messages.len())) {
+            Some("the history has not changed since the last unsuccessful attempt".to_string())
+        } else {
+            None
+        }
+    };
+    if let Some(reason_text) = skip {
+        let outcome = CompactionOutcome::Skipped {
+            reason: reason_text,
+        };
+        send(
+            agent,
+            tx,
+            AgentEvent::CompactionResult {
+                reason,
+                outcome: outcome.clone(),
+            },
+        )
+        .await;
+        return outcome;
+    }
+
+    send(
+        agent,
+        tx,
+        AgentEvent::CompactStart {
+            reason,
+            messages_before: messages.len(),
+        },
+    )
+    .await;
+
+    let model = model_view(agent);
+    let (est, policy) = {
+        let ctx = agent.context.lock();
+        (ctx.estimator(&model), ctx.policy().clone())
+    };
+    let tools = tool_definitions(agent);
+    let frame_tokens = agent
+        .effective_system()
+        .as_deref()
+        .map(|s| est.text(s).tokens)
+        .unwrap_or(0)
+        + est.tools(&tools).tokens;
+    let input_limit = model
+        .limits
+        .input_budget(policy.summary_max_tokens as u64)
+        .max(1);
+    let plan = CompactionPlan {
+        keep_recent_messages: policy.keep_recent_messages,
+        max_recent_tokens: (input_limit as f64 * policy.max_recent_ratio) as u64,
+        input_limit,
+        summary_max_tokens: policy.summary_max_tokens,
+        min_gain: policy.min_compaction_gain,
+        frame_tokens,
+        instructions: None,
+    };
+    let run = compact_history(agent.provider().as_ref(), &messages, &est, &plan).await;
+
+    // The summary call counts once in the session totals, whatever its fate.
+    if let Some(u) = &run.usage {
+        agent.context.lock().record_compaction_usage(u);
+        agent.cumulative_usage.lock().merge(u);
+        agent.cost_tracker.add(u);
+    }
+
+    match (&run.outcome, run.messages) {
+        (
+            CompactionOutcome::Compacted {
+                messages_after,
+                tokens_before,
+                tokens_after,
+                ..
+            },
+            Some(new),
+        ) => {
+            let number = {
+                let mut st = agent.compaction_state.lock();
+                st.failures = 0;
+                st.last_unsuccessful = None;
+                st.applied += 1;
+                st.applied
+            };
+            let memory_key = match (&agent.memory, &agent.session_id) {
+                (Some(memory), Some(sid)) => {
+                    let key = cersei_memory::session_keys::snapshot(sid, number);
+                    match memory.store(&key, &messages).await {
+                        Ok(()) => Some(key),
+                        Err(e) => {
+                            tracing::warn!("could not store the pre-compaction snapshot: {e}");
+                            None
+                        }
+                    }
+                }
+                _ => None,
+            };
+            agent.snapshots.lock().push(crate::CompactionSnapshot {
+                number,
+                messages,
+                memory_key,
+            });
+            *agent.messages.lock() = new;
+            agent
+                .context
+                .lock()
+                .invalidate(format!("compaction #{number} rewrote the history"));
+            // Persist now, so the session, its raw history and the snapshot
+            // stay consistent even if the run stops before its end.
+            if let (Some(memory), Some(sid)) = (&agent.memory, &agent.session_id) {
+                let active = agent.messages.lock().clone();
+                let raw = agent.raw_history.lock().clone();
+                let stored = async {
+                    memory.store(sid, &active).await?;
+                    memory
+                        .store(&cersei_memory::session_keys::raw_history(sid), &raw)
+                        .await
+                }
+                .await;
+                if let Err(e) = stored {
+                    tracing::warn!("could not store the compacted session: {e}");
+                }
+            }
+            send(
+                agent,
+                tx,
+                AgentEvent::CompactEnd {
+                    messages_after: *messages_after,
+                    tokens_freed: tokens_before.saturating_sub(*tokens_after),
+                },
+            )
+            .await;
+        }
+        (outcome, _) => {
+            let mut st = agent.compaction_state.lock();
+            st.last_unsuccessful = Some((version, messages.len()));
+            if matches!(
+                outcome,
+                CompactionOutcome::Failed { .. } | CompactionOutcome::InsufficientGain { .. }
+            ) {
+                st.failures += 1;
+                if st.failures >= policy.max_compaction_failures {
+                    st.disabled = true;
+                }
+            }
+        }
+    }
+    tracing::info!(?reason, outcome = %run.outcome, "compaction");
+    send(
+        agent,
+        tx,
+        AgentEvent::CompactionResult {
+            reason,
+            outcome: run.outcome.clone(),
+        },
+    )
+    .await;
+    run.outcome
+}
+
+/// Check the budget of `request` before it is sent, compacting once if it
+/// manifestly does not fit. A request that still does not fit is not sent.
+async fn ensure_budget(
+    agent: &Agent,
+    request: &mut CompletionRequest,
+    tx: &mpsc::Sender<AgentEvent>,
+) -> Result<ContextStatus> {
+    for attempt in 0..2 {
+        let model = model_view(agent);
+        let (status, decision) = {
+            let ctx = agent.context.lock();
+            let status = ctx.status(&model, &RequestView::of(request));
+            let decision = ctx.decide(&status);
+            (status, decision)
+        };
+        let fits = match decision {
+            BudgetDecision::Fits => return Ok(status),
+            BudgetDecision::Preflight(why) => {
+                match preflight(agent, &model, request, &status, &why, tx).await {
+                    Some(st) => return Ok(st),
+                    None => false,
+                }
+            }
+            BudgetDecision::Exceeded => false,
+        };
+        debug_assert!(!fits);
+        if attempt == 0 && agent.auto_compact {
+            let outcome =
+                run_compaction(agent, CompactReason::BudgetExceeded, true, Some(tx)).await;
+            if outcome.is_compacted() {
+                request.messages = agent.messages.lock().clone();
+                continue;
+            }
+        }
+        let used = status.context_used.tokens;
+        let limit = status.input_limit.saturating_sub(status.margin);
+        send(
+            agent,
+            Some(tx),
+            AgentEvent::Status(format!(
+                "Request not sent: the context (~{used} tokens, {:?}) exceeds the budget of {limit} \
+                 tokens ({} input limit − {} margin, {} reserved for output) and compaction could \
+                 not reduce it.",
+                status.context_used.provenance, status.input_limit, status.margin, status.reserved_output
+            )),
+        )
+        .await;
+        return Err(CerseiError::ContextOverflow { used, limit });
+    }
+    unreachable!("the second attempt always returns")
+}
+
+/// A precise check of the complete request: the configured counting endpoint
+/// when there is one, else a full local estimate. `Some(status)` when the
+/// request fits.
+async fn preflight(
+    agent: &Agent,
+    model: &ModelView,
+    request: &CompletionRequest,
+    status: &ContextStatus,
+    why: &str,
+    tx: &mpsc::Sender<AgentEvent>,
+) -> Option<ContextStatus> {
+    let limit = status.input_limit.saturating_sub(status.margin);
+    let mut note = None;
+    if model.token_counting {
+        match agent.provider().count_request_tokens(request).await {
+            Ok(Some(n)) => {
+                let st = {
+                    let mut ctx = agent.context.lock();
+                    ctx.record_count(model, &RequestView::of(request), n);
+                    ctx.status(model, &RequestView::of(request))
+                };
+                send(
+                    agent,
+                    Some(tx),
+                    AgentEvent::Status(format!(
+                        "Pre-flight ({why}): counted {n} input tokens, budget {limit}."
+                    )),
+                )
+                .await;
+                return (n <= limit).then_some(st);
+            }
+            Ok(None) => {}
+            Err(e) => {
+                note = Some(format!(
+                    "counting endpoint unavailable ({e}); local estimate used"
+                ))
+            }
+        }
+    }
+    // Local fallback: a full, conservative estimate of the request.
+    let est = agent.context.lock().estimator(model);
+    let full = est.request(request.system.as_deref(), &request.tools, &request.messages);
+    let central = full.tokens.max(status.context_used.tokens);
+    send(
+        agent,
+        Some(tx),
+        AgentEvent::Status(format!(
+            "Pre-flight ({why}): estimated ~{central} input tokens (up to ~{}), budget {limit}{}.",
+            full.upper.max(status.context_used.upper_bound),
+            note.map(|n| format!("; {n}")).unwrap_or_default()
+        )),
+    )
+    .await;
+    (central <= limit).then(|| status.clone())
+}
+
 // ─── Benchmark self-verification helpers ────────────────────────────────────
 
 #[derive(Debug)]
 enum BenchmarkVerification {
-    TestsNotRun,
-    TestsFailed(String), // carries the test output for retry feedback
-    TestsPassed,
+    NotRun,
+    Failed(String), // carries the test output for retry feedback
+    Passed,
 }
 
 /// Analyze tool call history to determine if tests were run and whether they passed.
@@ -1354,20 +2104,16 @@ fn benchmark_check_tests(tool_calls: &[ToolCallRecord]) -> BenchmarkVerification
                 && !result_lower.contains("error handling")
                 && !result_lower.contains("error_"));
 
-        if has_failure && !has_pass {
-            last_test_failed = true;
-        } else {
-            last_test_failed = false;
-        }
+        last_test_failed = has_failure && !has_pass;
         break; // Only care about the most recent test run
     }
 
     if !found_test_run {
-        BenchmarkVerification::TestsNotRun
+        BenchmarkVerification::NotRun
     } else if last_test_failed {
-        BenchmarkVerification::TestsFailed(last_test_output)
+        BenchmarkVerification::Failed(last_test_output)
     } else {
-        BenchmarkVerification::TestsPassed
+        BenchmarkVerification::Passed
     }
 }
 
@@ -1423,8 +2169,13 @@ mod guard_tests {
 
         for tool in ["Edit", "Write", "MultiEdit", "NotebookEdit"] {
             assert!(
-                read_before_edit_block(tool, &json!({ "file_path": p }), &seen(tmp.path(), &[p]), tmp.path())
-                    .is_none(),
+                read_before_edit_block(
+                    tool,
+                    &json!({ "file_path": p }),
+                    &seen(tmp.path(), &[p]),
+                    tmp.path()
+                )
+                .is_none(),
                 "{tool} must run once the file has been read"
             );
         }
@@ -1473,14 +2224,19 @@ mod guard_tests {
             "patch": "--- a/a.rs\n+++ a.rs\n@@ -1 +1 @@\n-x\n+y\n"
         });
 
-        assert_eq!(write_targets("ApplyPatch", &patch), vec!["a.rs".to_string()]);
+        assert_eq!(
+            write_targets("ApplyPatch", &patch),
+            vec!["a.rs".to_string()]
+        );
         assert!(
-            read_before_edit_block("ApplyPatch", &patch, &seen(tmp.path(), &[]), tmp.path()).is_some(),
+            read_before_edit_block("ApplyPatch", &patch, &seen(tmp.path(), &[]), tmp.path())
+                .is_some(),
             "an unread patched file must be refused"
         );
         let abs = tmp.path().join("a.rs").to_string_lossy().to_string();
         assert!(
-            read_before_edit_block("ApplyPatch", &patch, &seen(tmp.path(), &[&abs]), tmp.path()).is_none(),
+            read_before_edit_block("ApplyPatch", &patch, &seen(tmp.path(), &[&abs]), tmp.path())
+                .is_none(),
             "reading the absolute path must satisfy a relative patch target"
         );
     }
@@ -1500,8 +2256,16 @@ mod guard_tests {
         let p = f.to_str().unwrap().to_string();
 
         let batch = vec![
-            ("id_read".to_string(), "Read".to_string(), json!({ "file_path": p })),
-            ("id_edit".to_string(), "Edit".to_string(), json!({ "file_path": p })),
+            (
+                "id_read".to_string(),
+                "Read".to_string(),
+                json!({ "file_path": p }),
+            ),
+            (
+                "id_edit".to_string(),
+                "Edit".to_string(),
+                json!({ "file_path": p }),
+            ),
         ];
 
         let refusals = refusals_for_batch(&batch, &seen(tmp.path(), &[]), tmp.path());
@@ -1509,10 +2273,7 @@ mod guard_tests {
             refusals.contains_key("id_edit"),
             "the edit must be refused: a concurrent read has not landed yet"
         );
-        assert!(
-            !refusals.contains_key("id_read"),
-            "reads are never refused"
-        );
+        assert!(!refusals.contains_key("id_read"), "reads are never refused");
     }
 
     /// Refusals are keyed by tool_use id, so one bad call in a batch cannot
@@ -1527,8 +2288,16 @@ mod guard_tests {
         let known_p = known.to_str().unwrap().to_string();
 
         let batch = vec![
-            ("ok".to_string(), "Edit".to_string(), json!({ "file_path": known_p })),
-            ("bad".to_string(), "Edit".to_string(), json!({ "file_path": unknown.to_str().unwrap() })),
+            (
+                "ok".to_string(),
+                "Edit".to_string(),
+                json!({ "file_path": known_p }),
+            ),
+            (
+                "bad".to_string(),
+                "Edit".to_string(),
+                json!({ "file_path": unknown.to_str().unwrap() }),
+            ),
         ];
 
         let refusals = refusals_for_batch(&batch, &seen(tmp.path(), &[&known_p]), tmp.path());
@@ -1561,7 +2330,8 @@ mod guard_tests {
                 "header {header:?} must resolve to the path apply_patch writes"
             );
             assert!(
-                read_before_edit_block("ApplyPatch", &patch, &seen(tmp.path(), &[]), tmp.path()).is_some(),
+                read_before_edit_block("ApplyPatch", &patch, &seen(tmp.path(), &[]), tmp.path())
+                    .is_some(),
                 "header {header:?}: guard failed open on an unread file"
             );
         }
@@ -1580,10 +2350,13 @@ mod guard_tests {
         let ps = p.to_str().unwrap().to_string();
 
         // Turn 1: creating it is allowed.
-        assert!(
-            read_before_edit_block("Write", &json!({ "file_path": ps }), &seen(tmp.path(), &[]), tmp.path())
-                .is_none()
-        );
+        assert!(read_before_edit_block(
+            "Write",
+            &json!({ "file_path": ps }),
+            &seen(tmp.path(), &[]),
+            tmp.path()
+        )
+        .is_none());
         std::fs::write(&p, "v1\n").unwrap();
 
         // The runner records write targets the same way it records reads.
@@ -1655,20 +2428,36 @@ mod guard_tests {
         assert!(error_budget_note("Bash", MAX_TOOL_ERRORS_PER_TOOL).contains("different tool"));
     }
 
-    /// F-07: error results bypassed `cap_tool_result`, so an unbounded failure
-    /// body (a compiler dump, a stack trace) landed in history in full and was
-    /// re-sent on every subsequent turn.
+    /// Old tool results removed for space name where their full text is.
     #[test]
-    fn oversized_error_results_are_capped() {
-        let huge = (0..5_000)
-            .map(|i| format!("error line {i}"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let capped = cap_tool_result(&huge);
-        assert!(
-            capped.len() < huge.len(),
-            "a 5000-line failure must not enter history whole"
-        );
-        assert!(capped.contains("lines omitted"), "{capped}");
+    fn removed_tool_results_name_their_original() {
+        let mut msgs = vec![Message::user("go")];
+        for i in 0..10 {
+            msgs.push(Message::assistant_blocks(vec![ContentBlock::ToolUse {
+                id: format!("t{i}"),
+                name: "Read".into(),
+                input: json!({}),
+            }]));
+            msgs.push(Message::user_blocks(vec![ContentBlock::ToolResult {
+                tool_use_id: format!("t{i}"),
+                content: ToolResultContent::Text("x".repeat(5_000)),
+                is_error: Some(false),
+            }]));
+        }
+        let mut seen = Vec::new();
+        let changed = apply_tool_result_budget_with(&mut msgs, 20_000, |id, len| {
+            seen.push(id.to_string());
+            format!("[tool result removed ({len} chars); full output: /raw/{id}]")
+        });
+        assert!(changed);
+        assert_eq!(seen[0], "t0", "oldest first");
+        assert!(matches!(&msgs[2].content, MessageContent::Blocks(b)
+            if matches!(&b[0], ContentBlock::ToolResult { content: ToolResultContent::Text(t), .. } if t.contains("/raw/t0"))));
+        // Nothing left to remove: no change, no double placeholder.
+        assert!(!apply_tool_result_budget_with(
+            &mut msgs,
+            1_000_000,
+            |_, _| unreachable!()
+        ));
     }
 }

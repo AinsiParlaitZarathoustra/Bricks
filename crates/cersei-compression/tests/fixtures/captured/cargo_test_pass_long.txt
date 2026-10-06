@@ -1,0 +1,166 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.65s
+     Running unittests src/lib.rs (target/debug/deps/cersei_provider-6d2ca80db7513e3e)
+
+running 128 tests
+test adapt::tests::non_object_schema_passes_through ... ok
+test adapt::tests::unresolvable_ref_is_dropped_not_kept ... ok
+test adapt::tests::valid_names_pass_through_untouched_and_long_names_are_capped ... ok
+test adapt::tests::ref_cycle_terminates_and_the_ref_key_still_dies ... ok
+test adapt::tests::wrappers_match_each_provider_wire_shape ... ok
+test config::tests::compat_overlay ... ok
+test adapt::tests::loose_and_native_inline_refs_strip_schema_and_touch_nothing_else ... ok
+test adapt::tests::strict_forces_additional_properties_false_and_full_required_recursively ... ok
+test adapt::tests::invalid_names_are_sanitized_and_collisions_deduped ... ok
+test config::tests::default_path_is_under_the_home_directory ... ok
+test config::tests::limits_rules ... ok
+test config::tests::errors_name_provider_model_and_field ... ok
+test config::tests::contract_example_loads ... ok
+test config::tests::duplicates_are_rejected ... ok
+test config::tests::pricing_rules ... ok
+test config::tests::effective_auth_follows_protocol_override ... ok
+test config::tests::reasoning_rules ... ok
+test config::tests::auth_rules ... ok
+test config::tests::missing_and_unknown_fields_are_located ... ok
+test config::tests::schema_version_is_checked ... ok
+test config::tests::modality_and_document_rules ... ok
+test decimal::tests::deserializes_strings_and_numbers ... ok
+test decimal::tests::parses_exact_decimals ... ok
+test decimal::tests::price_per_million_is_exact ... ok
+test config::tests::selector_parts_are_validated ... ok
+test decimal::tests::rejects_bad_input ... ok
+test endpoint::tests::absolute_override_replaces_everything ... ok
+test endpoint::tests::default_paths_per_protocol ... ok
+test config::tests::toml_and_json_are_equivalent ... ok
+test endpoint::tests::gateway_prefix_is_kept ... ok
+test endpoint::tests::query_string_is_preserved ... ok
+test endpoint::tests::overrides_are_validated ... ok
+test endpoint::tests::trailing_slash_and_bare_host ... ok
+test config::tests::unknown_extension_is_rejected_and_explicit_path_is_used ... ok
+test endpoint::tests::local_servers ... ok
+test endpoint::tests::version_is_not_doubled ... ok
+test modality::tests::ambiguous_sources_are_refused ... ok
+test modality::tests::matrix_matches_the_documented_surface ... ok
+test modality::tests::effective_is_declared_intersect_transportable ... ok
+test modality::tests::requested_outputs_must_be_declared_and_transportable ... ok
+test modality::tests::source_kinds_are_checked_per_protocol ... ok
+test modality::tests::tools_require_the_declaration ... ok
+test config::tests::secrets_never_appear_in_debug_or_errors ... ok
+test modality::tests::undeclared_media_is_refused_with_an_explicit_error ... ok
+test pricing::tests::config_validation ... ok
+test pricing::tests::full_estimate_with_cache ... ok
+test pricing::tests::media_billed_by_unit_makes_it_partial ... ok
+test modality::tests::declared_but_untransportable_media_is_refused ... ok
+test pricing::tests::cache_write_variants_are_priced_separately ... ok
+test modality::tests::tool_produced_media_vs_model_native_media ... ok
+test modality::tests::document_mime_types_are_enforced ... ok
+test pricing::tests::missing_price_is_partial_never_free ... ok
+test pricing::tests::named_variant_does_not_inherit ... ok
+test pricing::tests::no_known_price_is_unknown_not_zero ... ok
+test pricing::tests::usage_merge_flags_partial_across_requests ... ok
+test config::tests::structural_fields_are_protected_at_load ... ok
+test protocol::anthropic_messages::tests::forced_tool_choice_and_stop_sequences ... ok
+test protocol::anthropic_messages::tests::error_events_and_refusal ... ok
+test protocol::anthropic_messages::tests::request_basics_and_no_automatic_thinking ... ok
+test protocol::anthropic_messages::tests::unsupported_media_errors ... ok
+test protocol::anthropic_messages::tests::cache_markers_follow_the_boundary_and_the_compat_switch ... ok
+test protocol::anthropic_messages::tests::tool_exchange_keeps_thinking_signature_and_redacted_data ... ok
+test protocol::anthropic_messages::tests::media_and_tool_result_media ... ok
+test protocol::anthropic_messages::tests::usage_keeps_cache_split_and_retention_variants ... ok
+test protocol::anthropic_messages::tests::non_streaming_message ... ok
+test protocol::chat_completions::tests::compat_renames_max_tokens_and_drops_stream_options ... ok
+test protocol::chat_completions::tests::multimodal_parts ... ok
+test protocol::anthropic_messages::tests::streams_thinking_signature_text_and_fragmented_tool_use ... ok
+test protocol::chat_completions::tests::in_stream_error_object_fails_the_turn ... ok
+test protocol::chat_completions::tests::indexless_servers_get_slots_by_id ... ok
+test protocol::chat_completions::tests::non_streaming_response_yields_the_same_result ... ok
+test protocol::chat_completions::tests::cut_stream_with_nothing_is_an_error ... ok
+test protocol::chat_completions::tests::body_basics_and_api_model ... ok
+test protocol::chat_completions::tests::reasoning_is_echoed_only_when_configured ... ok
+test protocol::chat_completions::tests::streams_fragmented_tool_arguments_and_reasoning ... ok
+test protocol::chat_completions::tests::streams_text_with_usage ... ok
+test protocol::chat_completions::tests::tools_and_forced_choice ... ok
+test protocol::chat_completions::tests::truncated_arguments_keep_the_length_reason_and_the_parse_error ... ok
+test protocol::chat_completions::tests::unsupported_media_is_an_error_not_a_drop ... ok
+test protocol::chat_completions::tests::tool_exchange_serializes_in_wire_order ... ok
+test protocol::chat_completions::tests::unusable_calls_are_reported_without_losing_siblings ... ok
+test protocol::chat_completions::tests::usage_is_normalized_without_double_counting ... ok
+test protocol::responses::tests::multimodal_items ... ok
+test protocol::responses::tests::non_streaming_response ... ok
+test protocol::responses::tests::failures_and_cut_streams_are_errors ... ok
+test protocol::responses::tests::call_arguments_delivered_only_at_item_done ... ok
+test protocol::responses::tests::stop_sequences_are_refused ... ok
+test protocol::responses::tests::request_shape_is_responses_not_chat ... ok
+test protocol::responses::tests::incomplete_maps_to_max_tokens_or_filter_and_runnable_call_wins ... ok
+test protocol::responses::tests::usage_is_normalized ... ok
+test protocol::responses::tests::tool_exchange_with_reasoning_item_is_echoed_in_order ... ok
+test protocol::sse::tests::byte_by_byte_feed ... ok
+test protocol::sse::tests::comments_ignored_and_eof_flushes ... ok
+test protocol::responses::tests::streams_text ... ok
+test protocol::responses::tests::streams_reasoning_then_fragmented_tool_call ... ok
+test protocol::sse::tests::crlf_and_multiline_data ... ok
+test protocol::sse::tests::splits_events_and_names ... ok
+test reasoning::tests::merge_is_recursive_for_objects_and_replacing_for_the_rest ... ok
+test protocol::sse::tests::utf8_split_across_chunks_is_reassembled ... ok
+test reasoning::tests::profile_ids_are_never_sent_by_themselves ... ok
+test reasoning::tests::structural_fields_cannot_be_overwritten_or_removed ... ok
+test reasoning::tests::removal_happens_after_model_parameters_and_before_profile_parameters ... ok
+test reasoning::tests::order_is_adapter_then_model_then_removals_then_profile ... ok
+test reasoning::tests::model_removals_run_before_model_parameters ... ok
+test reasoning::tests::remove_pointer_handles_arrays_escapes_and_misses ... ok
+test registry::tests::capabilities_and_pricing_are_resolved ... ok
+test reasoning::tests::selection_rules ... ok
+test registry::tests::headers_merge_by_name_case_insensitively ... ok
+test registry::tests::path_and_endpoint_overrides_apply_to_the_right_models ... ok
+test registry::tests::model_ids_may_contain_slashes ... ok
+test registry::tests::protocol_override_gets_its_own_path_auth_and_headers ... ok
+test stream::tests::cache_usage_from_message_start_survives_to_the_response ... ok
+test stream::tests::first_stream_error_wins_over_cascade_noise ... ok
+test stream::tests::literal_null_arguments_yield_empty_object ... ok
+test stream::tests::malformed_arguments_preserve_raw_text_and_parse_error ... ok
+test stream::tests::message_stop_alone_is_a_clean_end_turn ... ok
+test registry::tests::resolves_by_explicit_selection_only ... ok
+test stream::tests::protocol_items_and_redacted_thinking_keep_order_without_placeholders ... ok
+test stream::tests::stop_reason_via_message_delta_counts_as_terminal ... ok
+test registry::tests::debug_never_shows_keys_or_header_values ... ok
+test stream::tests::signature_delta_round_trips_into_the_thinking_block ... ok
+test stream::tests::stream_error_fails_the_turn_even_with_a_terminal_event ... ok
+test stream::tests::terminal_less_stream_is_an_error_not_end_turn ... ok
+test stream::tests::tool_use_with_no_argument_deltas_yields_empty_object ... ok
+test stream::tests::whitespace_only_arguments_yield_empty_object ... ok
+test stream::tests::uncaptured_signature_is_omitted_from_serialized_history ... ok
+test registry::tests::the_shipped_example_loads_resolves_and_holds_no_secret ... ok
+test registry::tests::no_cap_on_providers_or_models ... ok
+
+test result: ok. 128 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.16s
+
+     Running tests/protocols_e2e.rs (target/debug/deps/protocols_e2e-68ede2fef313f0b5)
+
+running 18 tests
+test an_unknown_tariff_is_refused_at_build_time ... ok
+test an_error_body_that_echoes_the_key_is_redacted ... ok
+test connection_refused_is_a_retryable_transport_error_without_the_url ... ok
+test a_connection_dropped_mid_stream_becomes_a_stream_error ... ok
+test http_statuses_are_typed_and_retryable_from_complete_itself ... ok
+test api_errors_inside_a_stream_fail_the_turn ... ok
+test limits_cap_the_output_and_report_the_prompt_budget ... ok
+test non_streaming_models_use_a_blocking_request_for_every_protocol ... ok
+test auth_modes_and_custom_headers ... ok
+test secret_resolution_from_the_environment_reference ... ok
+test chat_completions_tool_exchange_over_two_turns ... ok
+test unknown_profile_and_empty_profile_lists_never_send_a_request ... ok
+test untransportable_or_undeclared_input_is_refused_before_sending ... ok
+test profiles_are_merged_removed_and_selected_as_configured ... ok
+test anthropic_tool_exchange_keeps_thinking_signature ... ok
+test responses_tool_exchange_echoes_the_reasoning_item ... ok
+test supported_media_goes_on_the_wire_in_each_protocol_form ... ok
+test cost_is_estimated_from_known_prices_only ... ok
+
+test result: ok. 18 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.88s
+
+   Doc-tests cersei_provider
+
+running 1 test
+test crates/cersei-provider/src/lib.rs - (line 12) - compile ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.29s
+

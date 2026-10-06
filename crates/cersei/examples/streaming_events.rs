@@ -14,7 +14,12 @@ use std::time::Instant;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let agent = Agent::builder()
-        .provider(Anthropic::from_env()?)
+        .provider(cersei::provider_from_config(
+            None,
+            &std::env::args()
+                .nth(1)
+                .expect("usage: <example> provider_id/model_id  (see docs/providers.md)"),
+        )?)
         .tools(cersei::tools::coding())
         .system_prompt("You are a helpful coding assistant. Be concise.")
         .max_turns(5)
@@ -46,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
                 eprint!("\x1b[33m⚙ {}...\x1b[0m ", name);
             }
             AgentEvent::ToolEnd {
-                name,
+                name: _,
                 duration,
                 is_error,
                 ..

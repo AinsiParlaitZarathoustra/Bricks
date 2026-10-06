@@ -4,10 +4,15 @@
 //!   longmem-bench --dataset s --config all --limit 10
 //!
 //! Datasets:   s | m | oracle       (must be pre-downloaded into ./data/)
-//! Configs:    all | baseline | embed | graph | hybrid
+//! Configs:    all | baseline | embed | graph | hybrid | structured-vector | structured-hybrid
 //!
-//! Environment:
-//!   OPENAI_API_KEY   — required for embeddings, judge, answerer, extractor
+//! Models (answerer, judge, extractor) are selected as `provider_id/model_id` from
+//! the providers configuration (`--providers`, default `~/.bricks/providers.toml`);
+//! their keys are the `api_key_env` variables that configuration names.
+//!
+//! Embeddings are a separate service and keep their own key variable:
+//!   OPENAI_API_KEY   — with `--embeddings openai`
+//!   GOOGLE_API_KEY   — with `--embeddings gemini` (or GEMINI_API_KEY)
 //!
 //! Output: JSON + summary JSON in ./results/<config>-<dataset>.json
 
@@ -23,8 +28,11 @@ mod runner;
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use cersei_embeddings::{EmbeddingError, EmbeddingProvider, GeminiEmbeddings, OpenAiEmbeddings};
-use cersei_provider::{Auth, Gemini, OpenAi, Provider};
+use cersei_provider::{
+    CompletionRequest, CompletionStream, ConfiguredProvider, Provider, ProviderRegistry,
+};
 use clap::{Parser, ValueEnum};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
@@ -49,6 +57,12 @@ impl EmbeddingProvider for AnyEmbeddings {
         match self {
             AnyEmbeddings::Openai(p) => p.dimensions(),
             AnyEmbeddings::Gemini(p) => p.dimensions(),
+        }
+    }
+    fn model_id(&self) -> String {
+        match self {
+            AnyEmbeddings::Openai(p) => p.model_id(),
+            AnyEmbeddings::Gemini(p) => p.model_id(),
         }
     }
     async fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, EmbeddingError> {
@@ -81,25 +95,30 @@ struct Cli {
     #[arg(long, default_value = "./results")]
     results_dir: PathBuf,
 
-    /// Which LLM provider to use for answerer + judge + extractor + embeddings.
-    /// Default: gemini (uses `GOOGLE_API_KEY` / `GEMINI_API_KEY`).
-    #[arg(long, default_value = "gemini")]
-    provider: ProviderArg,
+    /// Providers configuration file (`.toml` or `.json`). Default:
+    /// `~/.bricks/providers.toml`. An explicit path replaces the default.
+    #[arg(long)]
+    providers: Option<PathBuf>,
 
-    /// Which model to use for the answerer.
-    #[arg(long, default_value = "gemini-2.5-flash")]
+    /// Embedding service for the retrieval configs (a separate service from the
+    /// chat models; it reads its own key variable, see above).
+    #[arg(long, default_value = "gemini")]
+    embeddings: ProviderArg,
+
+    /// Answerer model, as `provider_id/model_id`.
+    #[arg(long)]
     answerer_model: String,
 
-    /// Judge model. Mastra's published numbers use gpt-4o-mini; keep this
-    /// default on gemini-2.5-flash for Google-only runs, override to
-    /// `gpt-4o-mini` when you want Mastra-comparable scoring.
-    #[arg(long, default_value = "gemini-2.5-flash")]
+    /// Judge model, as `provider_id/model_id`. Mastra's published numbers use
+    /// gpt-4o-mini; pick the equivalent from your configuration when you want
+    /// Mastra-comparable scoring.
+    #[arg(long)]
     judge_model: String,
 
-    /// Observer / fact-extractor model (only used by the hybrid config).
-    /// Mastra's OM default is `google/gemini-2.5-flash`.
-    #[arg(long, default_value = "gemini-2.5-flash")]
-    extractor_model: String,
+    /// Observer / fact-extractor model (only used by the hybrid config), as
+    /// `provider_id/model_id`. Defaults to the answerer model.
+    #[arg(long)]
+    extractor_model: Option<String>,
 
     /// Top-k for retrieval-based configs. Matches Mastra's RAG config.
     #[arg(long, default_value = "20")]
@@ -151,6 +170,10 @@ enum ConfigArg {
     Embed,
     Graph,
     Hybrid,
+    #[value(name = "structured-vector")]
+    StructuredVector,
+    #[value(name = "structured-hybrid")]
+    StructuredHybrid,
 }
 
 #[tokio::main]
@@ -164,7 +187,11 @@ async fn main() -> Result<()> {
         .without_time()
         .init();
 
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
+    let extractor = cli
+        .extractor_model
+        .clone()
+        .unwrap_or_else(|| cli.answerer_model.clone());
 
     // Load dataset
     let dataset_path = PathBuf::from("./data").join(cli.dataset.file_name());
@@ -186,36 +213,41 @@ async fn main() -> Result<()> {
         eprintln!("Limit applied → running {} questions", questions.len());
     }
 
-    // Set up providers (api key is shared across embeddings + completion)
-    let (provider, embed_factory): (Arc<dyn Provider + Send + Sync>, EmbedFactoryArc) =
-        match cli.provider {
-            ProviderArg::Gemini => {
-                let api_key = std::env::var("GOOGLE_API_KEY")
-                    .or_else(|_| std::env::var("GEMINI_API_KEY"))
-                    .map_err(|_| {
-                        anyhow!(
-                            "GOOGLE_API_KEY (or GEMINI_API_KEY) is required for --provider=gemini"
-                        )
-                    })?;
-                let p: Arc<dyn Provider + Send + Sync> = Arc::new(Gemini::new(api_key.clone()));
-                let key = api_key.clone();
-                let f: EmbedFactoryArc = Arc::new(move || {
-                    AnyEmbeddings::Gemini(GeminiEmbeddings::new(key.clone()))
-                });
-                (p, f)
-            }
-            ProviderArg::Openai => {
-                let api_key = std::env::var("OPENAI_API_KEY")
-                    .map_err(|_| anyhow!("OPENAI_API_KEY is required for --provider=openai"))?;
-                let p: Arc<dyn Provider + Send + Sync> =
-                    Arc::new(OpenAi::new(Auth::ApiKey(api_key.clone())));
-                let key = api_key.clone();
-                let f: EmbedFactoryArc = Arc::new(move || {
-                    AnyEmbeddings::Openai(OpenAiEmbeddings::new(key.clone()))
-                });
-                (p, f)
-            }
-        };
+    // Chat models: one configured provider per distinct selection, behind a
+    // router that dispatches on the request's model string.
+    let registry = ProviderRegistry::load(cli.providers.as_deref()).map_err(|e| anyhow!("{e}"))?;
+    let mut by_selection: HashMap<String, ConfiguredProvider> = HashMap::new();
+    for selection in [&cli.answerer_model, &cli.judge_model, &extractor] {
+        if !by_selection.contains_key(selection.as_str()) {
+            let provider = registry
+                .resolve(selection)
+                .map_err(|e| anyhow!("{e}"))?
+                .build_provider()
+                .map_err(|e| anyhow!("{e}"))?;
+            by_selection.insert(selection.clone(), provider);
+        }
+    }
+    cli.extractor_model = Some(extractor);
+    let provider: Arc<dyn Provider + Send + Sync> = Arc::new(ModelRouter { by_selection });
+
+    // Embeddings: an independent service with its own key variable.
+    let embed_factory: EmbedFactoryArc = match cli.embeddings {
+        ProviderArg::Gemini => {
+            let api_key = std::env::var("GOOGLE_API_KEY")
+                .or_else(|_| std::env::var("GEMINI_API_KEY"))
+                .map_err(|_| {
+                    anyhow!(
+                        "GOOGLE_API_KEY (or GEMINI_API_KEY) is required for --embeddings gemini"
+                    )
+                })?;
+            Arc::new(move || AnyEmbeddings::Gemini(GeminiEmbeddings::new(api_key.clone())))
+        }
+        ProviderArg::Openai => {
+            let api_key = std::env::var("OPENAI_API_KEY")
+                .map_err(|_| anyhow!("OPENAI_API_KEY is required for --embeddings openai"))?;
+            Arc::new(move || AnyEmbeddings::Openai(OpenAiEmbeddings::new(api_key.clone())))
+        }
+    };
 
     std::fs::create_dir_all(&cli.results_dir)?;
 
@@ -282,7 +314,43 @@ fn config_slug(c: &ConfigArg) -> &'static str {
         ConfigArg::Embed => "b-embed-only",
         ConfigArg::Graph => "c-graph-substring",
         ConfigArg::Hybrid => "d-hybrid-embed-graph",
+        ConfigArg::StructuredVector => "e-structured-vector",
+        ConfigArg::StructuredHybrid => "f-structured-hybrid",
         ConfigArg::All => "all",
+    }
+}
+
+/// Routes a request to the configured provider named by its `model` field
+/// (a `provider_id/model_id` selection), so the answerer, the judge and the
+/// extractor can each be a different configured model.
+struct ModelRouter {
+    by_selection: HashMap<String, ConfiguredProvider>,
+}
+
+impl ModelRouter {
+    fn lookup(&self, model: &str) -> cersei_types::Result<&ConfiguredProvider> {
+        self.by_selection.get(model).ok_or_else(|| {
+            cersei_types::CerseiError::Config(format!(
+                "model `{model}` was not configured for this run"
+            ))
+        })
+    }
+}
+
+#[async_trait]
+impl Provider for ModelRouter {
+    fn name(&self) -> &str {
+        "router"
+    }
+
+    fn context_window(&self, model: &str) -> u64 {
+        self.lookup(model)
+            .map(|p| p.context_window(model))
+            .unwrap_or(0)
+    }
+
+    async fn complete(&self, request: CompletionRequest) -> cersei_types::Result<CompletionStream> {
+        self.lookup(&request.model)?.complete(request).await
     }
 }
 
@@ -315,7 +383,7 @@ async fn run_one_config(
         let factory = embed_factory.clone();
         let answerer_model = cli.answerer_model.clone();
         let judge_model = cli.judge_model.clone();
-        let extractor_model = cli.extractor_model.clone();
+        let extractor_model = cli.extractor_model.clone().expect("set in main");
         let top_k = cli.top_k;
         set.spawn(async move {
             let _permit = permit; // released on drop
@@ -329,9 +397,11 @@ async fn run_one_config(
                 &q,
                 provider,
                 closure,
-                &answerer_model,
-                &judge_model,
-                &extractor_model,
+                Models {
+                    answerer: &answerer_model,
+                    judge: &judge_model,
+                    extractor: &extractor_model,
+                },
                 top_k,
             )
             .await;
@@ -344,7 +414,7 @@ async fn run_one_config(
     while let Some(joined) = set.join_next().await {
         let (_i, q, res) = joined.context("task join failed")?;
         completed += 1;
-        if completed % 10 == 0 || completed == total {
+        if completed.is_multiple_of(10) || completed == total {
             eprintln!("  [{}/{}] done (last={})", completed, total, q.question_id);
         }
         match res {
@@ -386,19 +456,29 @@ async fn run_one_config(
     ))
 }
 
+/// The model selections a question is run with.
+struct Models<'a> {
+    answerer: &'a str,
+    judge: &'a str,
+    extractor: &'a str,
+}
+
 async fn run_one<F>(
     choice: ConfigArg,
     q: &dataset::Question,
     provider: Arc<dyn Provider + Send + Sync>,
     embed_factory: F,
-    answerer_model: &str,
-    judge_model: &str,
-    extractor_model: &str,
+    models: Models<'_>,
     top_k: usize,
 ) -> Result<report::PerQuestion>
 where
     F: Fn() -> AnyEmbeddings + Send + Sync + 'static + Clone,
 {
+    let Models {
+        answerer: answerer_model,
+        judge: judge_model,
+        extractor: extractor_model,
+    } = models;
     match choice {
         ConfigArg::Baseline => {
             let mut c = configs::baseline::BaselineConfig::new();
@@ -413,10 +493,30 @@ where
             runner::run_question(&mut c, provider, answerer_model, judge_model, q).await
         }
         ConfigArg::Hybrid => {
-            let mut c = configs::hybrid::HybridConfig::<
-                AnyEmbeddings,
-                dyn Provider + Send + Sync,
-            >::new(embed_factory, provider.clone(), extractor_model.to_string())
+            let mut c =
+                configs::hybrid::HybridConfig::<AnyEmbeddings, dyn Provider + Send + Sync>::new(
+                    embed_factory,
+                    provider.clone(),
+                    extractor_model.to_string(),
+                )
+                .with_top_k(top_k);
+            runner::run_question(&mut c, provider, answerer_model, judge_model, q).await
+        }
+        ConfigArg::StructuredVector => {
+            let f = embed_factory.clone();
+            let mut c = configs::structured::StructuredConfig::vector(move || {
+                Arc::new(f()) as Arc<dyn EmbeddingProvider>
+            })
+            .with_top_k(top_k);
+            runner::run_question(&mut c, provider, answerer_model, judge_model, q).await
+        }
+        ConfigArg::StructuredHybrid => {
+            let f = embed_factory.clone();
+            let mut c = configs::structured::StructuredConfig::hybrid(
+                move || Arc::new(f()) as Arc<dyn EmbeddingProvider>,
+                provider.clone(),
+                extractor_model.to_string(),
+            )
             .with_top_k(top_k);
             runner::run_question(&mut c, provider, answerer_model, judge_model, q).await
         }

@@ -1,0 +1,43 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.00s
+     Running unittests src/lib.rs (target/debug/deps/rs-19626d093cde6369)
+
+running 14 tests
+test tests::slow ... ignored
+test tests::t01 ... ok
+test tests::t02 ... ok
+test tests::t03 ... ok
+test tests::fails_with_message ... FAILED
+test tests::t04 ... ok
+test tests::panics_unwrap ... FAILED
+test tests::t05 ... ok
+test tests::t06 ... ok
+test tests::t07 ... ok
+test tests::t08 ... ok
+test tests::t09 ... ok
+test tests::t10 ... ok
+test tests::t11 - should panic ... ok
+
+failures:
+
+---- tests::fails_with_message stdout ----
+débogage: état intermédiaire ✓
+
+thread 'tests::fails_with_message' (6519707) panicked at src/lib.rs:16:83:
+assertion `left == right` failed: arithmétique cassée
+  left: 4
+ right: 5
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- tests::panics_unwrap stdout ----
+
+thread 'tests::panics_unwrap' (6519708) panicked at src/lib.rs:19:62:
+called `Option::unwrap()` on a `None` value
+
+
+failures:
+    tests::fails_with_message
+    tests::panics_unwrap
+
+test result: FAILED. 11 passed; 2 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `--lib`

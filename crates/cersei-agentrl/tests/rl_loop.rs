@@ -29,7 +29,11 @@ fn failing_graph() -> ExecutionGraph {
         },
     );
     g.add_edge(turn, tool, EdgeRel::Contains);
-    g.finish_tool(tool, "error[E0433]: compile error; exit code 101".into(), true);
+    g.finish_tool(
+        tool,
+        "error[E0433]: compile error; exit code 101".into(),
+        true,
+    );
     g.set_status(root, NodeStatus::Failed);
     g
 }
@@ -42,7 +46,11 @@ struct MockRunner {
 
 #[async_trait]
 impl AgentRlRunner for MockRunner {
-    async fn run_general(&self, task: &str, available: &[cersei_agentrl::RegistryEntry]) -> GeneralResult {
+    async fn run_general(
+        &self,
+        task: &str,
+        available: &[cersei_agentrl::RegistryEntry],
+    ) -> GeneralResult {
         if let Some(tool) = available.first() {
             // A matching cached tool exists → solve immediately via it.
             GeneralResult {
@@ -111,8 +119,15 @@ async fn full_loop_registers_then_reuses_tool() {
     assert!(out.solved, "first task should be solved via a new tool");
     assert_eq!(out.how, Some(Solved::ByNewTool("tool-fixed".into())));
     assert_eq!(registry.len(), 1, "a tool should be registered");
-    assert_eq!(runner.plan_calls.load(Ordering::SeqCst), 1, "planner ran once");
-    assert!(runner.proposal_runs.load(Ordering::SeqCst) >= 1, "proposals ran");
+    assert_eq!(
+        runner.plan_calls.load(Ordering::SeqCst),
+        1,
+        "planner ran once"
+    );
+    assert!(
+        runner.proposal_runs.load(Ordering::SeqCst) >= 1,
+        "proposals ran"
+    );
 
     // ── Round 2: similar task → cache hit, NO planner invocation ──
     let task2 = "fix the parser build error";

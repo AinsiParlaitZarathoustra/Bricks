@@ -1,6 +1,7 @@
 //! HTTP client primitives.
 //!
-//! GET, POST, and HTML-to-text fetching built on reqwest.
+//! GET and POST built on reqwest. Reading web pages (bounded downloads,
+//! network policy, Markdown extraction) is `cersei-web`'s job.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -148,33 +149,4 @@ pub async fn post(url: &str, body: &str, opts: HttpOptions) -> Result<HttpRespon
         body,
         content_type,
     })
-}
-
-/// Fetch a URL and convert HTML to readable plain text.
-/// Non-HTML content is returned as-is. Truncated to at most `max_bytes`
-/// without splitting a UTF-8 character.
-pub async fn fetch_html(
-    url: &str,
-    max_bytes: usize,
-    opts: HttpOptions,
-) -> Result<String, HttpError> {
-    let resp = get(url, opts).await?;
-
-    let is_html = resp
-        .content_type
-        .as_deref()
-        .map(|ct| ct.contains("html"))
-        .unwrap_or(false);
-
-    let text = if is_html {
-        html2text::from_read(resp.body.as_bytes(), 80)
-    } else {
-        resp.body
-    };
-
-    if text.len() > max_bytes {
-        Ok(text[..text.floor_char_boundary(max_bytes)].to_string())
-    } else {
-        Ok(text)
-    }
 }

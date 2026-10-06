@@ -8,7 +8,7 @@
 //! No writes happen here — mutating skills is `cersei-tools::skills`
 //! territory. This crate only reads.
 
-use crate::parser::{parse_skill, Skill, SkillMeta, SkillParseError};
+use crate::parser::{parse_skill, Skill, SkillMeta};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -20,7 +20,7 @@ pub enum RegistrySource {
     Project,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct SkillRegistry {
     /// name → (skill, source). Only the winning copy is stored (project beats
     /// global on name collision).
@@ -28,15 +28,6 @@ pub struct SkillRegistry {
     /// Parse failures, tuple of (path, error string). Kept around for
     /// reporting; loader never bails on a single bad skill.
     errors: Vec<(PathBuf, String)>,
-}
-
-impl Default for SkillRegistry {
-    fn default() -> Self {
-        Self {
-            skills: BTreeMap::new(),
-            errors: Vec::new(),
-        }
-    }
 }
 
 impl SkillRegistry {
@@ -55,9 +46,7 @@ impl SkillRegistry {
                 reg.load_dir(&global_dir, RegistrySource::Global);
             }
         }
-        let project_dir = std::env::current_dir()?
-            .join(".cersei")
-            .join("skills");
+        let project_dir = std::env::current_dir()?.join(".cersei").join("skills");
         if project_dir.exists() {
             reg.load_dir(&project_dir, RegistrySource::Project);
         }
@@ -74,10 +63,7 @@ impl SkillRegistry {
             .filter_map(Result::ok)
         {
             if entry.file_type().is_file()
-                && entry
-                    .path()
-                    .file_name()
-                    .is_some_and(|n| n == "SKILL.md")
+                && entry.path().file_name().is_some_and(|n| n == "SKILL.md")
             {
                 self.load_one(entry.path(), source);
             }

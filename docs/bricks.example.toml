@@ -1,0 +1,171 @@
+# bricks.toml — agent, approvals, context, compression, web and memory
+# settings (annotated example).
+#
+# Put it at the root of the project (`BricksConfig::load(working_dir)` reads
+# `<working_dir>/bricks.toml` and `~/.bricks/rules/*.toml`). Every key is
+# optional; the values below are the defaults. They are starting points for
+# models with 100k–200k-token windows, not universal values. Changes apply the
+# next time the configuration is loaded. An invalid section is reported and
+# replaced by its defaults; an invalid rule only disables itself.
+#
+# Details: docs/cli.md, docs/context.md, docs/compression.md, docs/web.md
+# and docs/memory.md.
+
+[agent]
+# Default model, as `provider_id/model_id` of providers.toml. Without it,
+# `bricks` needs --model (no model is ever chosen silently).
+# model = "my-provider/my-model"
+# reasoning = "deep"             # one of that model's reasoning profiles
+max_turns = 50
+
+[permissions]
+# The approval policy of every frontend (interface and headless):
+# allow | ask | deny. By tool name first, then by permission level, then
+# `default`. Forbidden tools are always refused.
+default = "ask"
+none = "allow"
+read_only = "allow"
+write = "ask"                    # Write, Edit, MultiEdit, ApplyPatch: shown as a diff first
+execute = "ask"                  # shell commands
+dangerous = "ask"
+
+[permissions.tools]
+# WebFetch = "allow"
+# Bash = "deny"
+
+[context]
+safety_margin_tokens = 1024     # minimum free margin below the prompt budget
+safety_margin_ratio = 0.02      # margin as a fraction of the budget (larger wins)
+large_injection_tokens = 8000   # additions since the last measurement → pre-flight
+preflight_ratio = 0.80          # occupation (upper bound) → pre-flight
+compact_threshold = 0.85        # occupation → compaction after the turn
+keep_recent_messages = 10       # tail kept verbatim (never splits a tool call)
+max_recent_ratio = 0.30         # largest share of the budget for that tail
+summary_max_tokens = 4096       # output reserved for the summary call
+min_compaction_gain = 0.20      # a compaction must shrink the context by 20 %
+max_compaction_failures = 3     # then automatic compaction stops for the session
+max_overflow_recoveries = 1     # compactions per turn after a "too long" refusal
+image_tokens = 1600             # estimate per image
+document_tokens = 3000          # estimate per document / audio / video item
+
+[compression]
+level = "minimal"               # off | minimal | aggressive (builder default: off)
+max_output_chars = 40000        # hard cap of any tool output, at every level
+max_lines = 300                 # budget of ordinary log lines (rules may lower it)
+max_error_lines = 250           # budget of diagnostic lines
+max_block_lines = 80            # longer blocks keep head and tail
+context_lines = 2               # lines kept around each error
+max_line_chars = 2000           # longest ordinary line
+json_summary_min_bytes = 16384  # JSON summarised from this size (aggressive: ÷4)
+json_sample_items = 3           # items sampled per array
+json_max_depth = 6
+json_max_keys = 40
+json_max_string_chars = 200
+json_max_output_bytes = 12000
+skeleton_min_lines = 150        # aggressive: skeletons for files at least this long
+# raw_output_dir = "/var/tmp/bricks-outputs"   # default: the session's storage, else <temp>/bricks/raw-outputs/<session>
+
+# Project rules: same schema as ~/.bricks/rules/*.toml, highest priority.
+[compression.filters.make]
+description = "make: directory changes removed; compiler diagnostics kept by the built-in detectors."
+match = [{ program = "make" }, { program = "gmake" }]
+options_with_value = ["-C", "-f", "-j"]
+strip_lines_matching = ['^make(\[\d+\])?: (Entering|Leaving) directory']
+max_lines = 200
+
+# Replace a built-in rule by reusing its id…
+# [compression.filters.git-log]
+# match = [{ program = "git", subcommands = ["log"] }]
+# max_lines = 80
+#
+# …or disable it.
+# [compression.filters.vite]
+# disabled = true
+
+# ── Web search and reading (docs/web.md) ─────────────────────────────────────
+# Without this section: DuckDuckGo's HTML interface, no key. A keyed provider
+# is used only when named here, and its key is read only from the variable
+# named by `api_key_env` — never write a key in this file.
+
+[web.search]
+provider = "duckduckgo"         # duckduckgo | brave | tavily | exa
+fallback = []                   # e.g. ["tavily", "duckduckgo"], tried in order
+max_attempts = 3                # provider requests per search, retries included
+timeout_ms = 5000               # one provider request
+budget_ms = 12000               # the whole search, fallbacks included
+max_retry_wait_ms = 2000        # longest Retry-After / rate-limit wait honoured once
+
+# [web.search.brave]
+# api_key_env = "BRAVE_SEARCH_API_KEY"
+# mode = "FR"                   # Brave: country
+# [web.search.tavily]
+# api_key_env = "TAVILY_API_KEY"
+# mode = "basic"                # Tavily: search_depth
+# [web.search.exa]
+# api_key_env = "EXA_API_KEY"
+# mode = "auto"                 # Exa: type
+# endpoint = "https://api.exa.ai/search"   # https only (http only to loopback)
+
+[web.fetch]
+max_pages = 5                   # pages read after a search
+concurrency = 5                 # downloads at once
+per_host = 2                    # downloads at once to one host
+page_timeout_ms = 4000          # connection + redirects + body of one page
+max_page_bytes = 1500000        # decoded bytes kept per page (after decompression)
+max_total_bytes = 8000000       # decoded bytes for all pages of one call
+max_redirects = 5
+budget_ms = 12000               # all downloads of one call
+allow_private = []              # explicit exceptions, e.g. ["127.0.0.1:8080"] for a local server
+
+[web.extract]
+max_elements = 60000            # larger pages are not parsed
+concurrency = 2                 # pages parsed at once (blocking threads)
+min_reliable_chars = 400        # below: extraction flagged as possibly incomplete
+
+[web.passages]
+min_chars = 500
+max_chars = 1500
+max_passages = 5
+budget_chars = 6000             # characters of passages in one result
+per_source = 2                  # first pass: at most this many per page
+
+[web.store]
+max_session_bytes = 67108864    # documents kept per session (oldest removed beyond)
+
+# ── Long-term memory (docs/memory.md) ────────────────────────────────────────
+# Read by `cersei_memory::structured::MemoryConfig::from_bricks_toml` (feature
+# `structured`). The values below are the defaults, except `space`.
+
+[memory]
+enabled = false                 # the CLI attaches the long-term memory only when true
+# path = "/absolute/path/memory.grafeo"   # default: ~/.bricks/memory/memory.grafeo
+embeddings = "hashing"          # hashing[:dims] (local) | openai[:model] | gemini[:model]
+# extractor_model = "my-provider/small-model"   # facts extraction; absent: turns only
+space = "project:bricks"        # user:<id> | project:<name> | space:<name>
+recall_spaces = []              # other spaces searched too, e.g. ["user:me"]
+# Predicates with one value per subject at a time: an explicit change replaces
+# the old value; a silent different value is recorded as a contradiction.
+exclusive_predicates = ["uses_framework", "framework", "lives_in", "employer", "works_at", "job_title", "language", "database", "deadline", "status", "owner", "version"]
+
+[memory.recall]
+seeds = 10                      # vector candidates that seed the relational expansion
+candidates = 30                 # candidates taken from each list
+hops = 2                        # relational hops (0, 1 or 2)
+max_neighbors = 8               # neighbours followed per node
+max_visited = 200               # nodes visited per expansion
+expansion_budget_ms = 50
+rrf_k = 60                      # score = Σ w / (rrf_k + rank), ranks from 1
+weight_vector = 1.0
+weight_relational = 1.2
+weight_lexical = 0.8
+max_results = 8
+max_tokens = 1200               # the agent also caps it at a tenth of the prompt budget
+passage_chars = 600
+
+[memory.extraction]
+max_input_chars = 12000
+max_output_tokens = 2000
+max_output_chars = 32000
+timeout_ms = 60000
+max_facts = 40
+max_attempts = 3

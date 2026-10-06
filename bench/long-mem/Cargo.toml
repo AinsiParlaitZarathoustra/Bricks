@@ -11,11 +11,16 @@ publish = false
 name = "longmem-bench"
 path = "src/main.rs"
 
+[[bin]]
+name = "longmem-recall"
+path = "src/bin/longmem_recall.rs"
+
 [dependencies]
 cersei-types      = { workspace = true }
 cersei-provider   = { workspace = true }
 cersei-embeddings = { workspace = true }
-cersei-memory     = { workspace = true, features = ["embed", "graph"] }
+cersei-memory     = { workspace = true, features = ["embed", "graph", "structured"] }
+tokio-util        = { workspace = true }
 
 tokio             = { workspace = true }
 async-trait       = { workspace = true }

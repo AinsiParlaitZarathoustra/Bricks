@@ -79,15 +79,6 @@ impl Question {
     pub fn is_abstention(&self) -> bool {
         self.question_id.ends_with("_abs")
     }
-
-    /// Total turns across all haystack sessions.
-    pub fn total_turns(&self) -> usize {
-        self.haystack_sessions.iter().map(|s| s.len()).sum()
-    }
-
-    pub fn session_count(&self) -> usize {
-        self.haystack_sessions.len()
-    }
 }
 
 pub fn load_dataset(path: &Path) -> Result<Vec<Question>> {

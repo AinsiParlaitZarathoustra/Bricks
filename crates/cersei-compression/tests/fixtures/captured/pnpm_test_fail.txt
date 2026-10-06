@@ -1,0 +1,37 @@
+Already up to date
+Update available! 12.4.1 → 12.9.1.
+Changelog: https://pnpm.io/v/12.9.1
+To update, run: curl -fsSL https://get.pnpm.io/install.sh | sh -
+Done in 267ms using pnpm v12.4.1
+$ node test.js
+ok 0 - addition fonctionne
+ok 1 - addition fonctionne
+ok 2 - addition fonctionne
+ok 3 - addition fonctionne
+ok 4 - addition fonctionne
+node:internal/assert/utils:146
+  throw error;
+  ^
+
+AssertionError [ERR_ASSERTION]: valeur inattendue
+
+1 !== 2
+
+    at Object.<anonymous> (/work/js/test.js:4:8)
+    at Module._compile (node:internal/modules/cjs/loader:1956:14)
+    at Object..js (node:internal/modules/cjs/loader:2096:10)
+    at Module.load (node:internal/modules/cjs/loader:1678:32)
+    at Module._load (node:internal/modules/cjs/loader:1470:12)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:261:19)
+    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)
+    at node:internal/main/run_main_module:33:47 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: 1,
+  expected: 2,
+  operator: 'strictEqual',
+  diff: 'simple'
+}
+
+Node.js v26.9.0
+[ELIFECYCLE] Test failed. See above for more details.

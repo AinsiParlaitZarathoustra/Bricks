@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Client API — Retry policy | Example Docs</title>
+<script>window.analytics = {};</script><style>body{font-family:sans-serif}</style></head>
+<body>
+<header><div class="logo">Example Docs</div><nav><ul><li><a href="/">Home</a></li><li><a href="/docs/">Docs</a></li><li><a href="/blog/">Blog</a></li><li><a href="/pricing">Pricing</a></li></ul></nav></header>
+<div class="layout">
+<aside class="sidebar"><ul><li><a href="/docs/install.html">Install</a></li><li><a href="/docs/retry.html">Retry policy</a></li><li><a href="/docs/timeouts.html">Timeouts</a></li><li><a href="/docs/errors.html">Errors</a></li></ul></aside>
+<main>
+<h1>Retry policy</h1>
+<p>The client retries <strong>idempotent</strong> requests automatically when the server answers with a transient error (502, 503, 504) or the connection is reset. Requests that change state are never retried unless you mark them as idempotent.</p>
+<div class="admonition warning"><p><b>Warning:</b> do not retry <code>POST /payments</code>: it is not idempotent and a retry may charge twice.</p></div>
+<h2>Configuration</h2>
+<p>Set the number of attempts with <code>max_retries</code> on the builder. The delay between attempts grows exponentially from <code>backoff_ms</code>.</p>
+<table><thead><tr><th>Option</th><th>Default</th><th>Since</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td><code>max_retries</code></td><td>3</td><td>v2.1</td><td>Attempts after the first one.</td></tr>
+<tr><td><code>backoff_ms</code></td><td>250</td><td>v2.3</td><td>Initial delay, doubled at each attempt.</td></tr>
+<tr><td><code>retry_on_timeout</code></td><td>false</td><td>v2.4</td><td>Also retry requests that timed out.</td></tr>
+</tbody></table>
+<h2>Example</h2>
+<pre><code class="language-rust">let client = Client::builder()
+    .max_retries(5)
+    .backoff_ms(100)
+    .build()?;
+</code></pre>
+<h2>Limits</h2>
+<p>Retries are not supported before v2.0. The total time spent retrying is bounded by the request timeout (see <a href="timeouts.html">Timeouts</a> and <a href="../errors.html#transient">transient errors</a>).</p>
+</main>
+</div>
+<footer><p>© 2026 Example Docs. <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a></p></footer>
+</body></html>

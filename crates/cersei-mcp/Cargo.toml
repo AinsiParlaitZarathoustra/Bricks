@@ -10,9 +10,28 @@ readme = "../../README.md"
 
 [dependencies]
 cersei-types = { workspace = true }
-async-trait = { workspace = true }
 tokio = { workspace = true }
+futures = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+thiserror = { workspace = true }
 tracing = { workspace = true }
-uuid = { workspace = true }
+parking_lot = { workspace = true }
+bytes = { workspace = true }
+reqwest = { workspace = true }
+# Official MCP SDK: protocol (2026-07-28 and the initialize-based revisions),
+# lifecycle detection, progress and timeouts. Its HTTP client is plugged with
+# Bricks' bounded client (src/http.rs) over the workspace's reqwest.
+rmcp = { version = "3.5.0", default-features = false, features = ["client", "transport-async-rw", "transport-streamable-http-client"] }
+sse-stream = "0.2.4"
+http = "1"
+libc = "0.2"
+url = { workspace = true }
+
+[dev-dependencies]
+rmcp = { version = "3.5.0", default-features = false, features = ["client", "server", "macros", "schemars", "transport-async-rw", "transport-streamable-http-server"] }
+schemars = "1"
+cersei-testkit = { workspace = true }
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "service"] }
+tempfile = { workspace = true }

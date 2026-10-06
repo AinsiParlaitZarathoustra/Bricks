@@ -1,0 +1,16 @@
+   ▲ Next.js 14.2.3
+
+   Creating an optimized production build ...
+Failed to compile.
+
+./app/page.tsx:3:7
+Type error: Type 'number' is not assignable to type 'string'.
+
+  1 | export default function Page() {
+  2 |   const title: string = 'Accueil';
+> 3 |   const count: string = 42;
+    |       ^
+  4 |   return <h1>{title}</h1>;
+  5 | }
+
+Next.js build worker exited with code: 1 and signal: null

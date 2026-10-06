@@ -139,11 +139,8 @@ impl ToolRegistry {
             .entries
             .iter()
             .filter_map(|e| {
-                let hay = format!(
-                    "{} {} {}",
-                    e.name, e.description, e.problem_domain
-                )
-                .to_lowercase();
+                let hay =
+                    format!("{} {} {}", e.name, e.description, e.problem_domain).to_lowercase();
                 let score: u32 = terms.iter().filter(|t| hay.contains(t.as_str())).count() as u32;
                 if score > 0 {
                     Some((score, e.clone()))

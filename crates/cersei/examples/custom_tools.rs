@@ -130,7 +130,12 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let agent = Agent::builder()
-        .provider(Anthropic::from_env()?)
+        .provider(cersei::provider_from_config(
+            None,
+            &std::env::args()
+                .nth(1)
+                .expect("usage: <example> provider_id/model_id  (see docs/providers.md)"),
+        )?)
         .tool(WordCountTool)
         .tool(KvLookupTool {
             store: store.clone(),

@@ -32,8 +32,8 @@
 pub mod builder;
 mod compile;
 pub mod condition;
-mod executor;
 pub mod events;
+mod executor;
 pub mod ir;
 pub mod registry;
 pub mod result;
@@ -46,8 +46,8 @@ pub use compile::Workflow;
 pub use condition::Condition;
 pub use events::{WorkflowControl, WorkflowEvent, WorkflowStream};
 pub use ir::{
-    EdgeKind, JoinStrategy, LoopMode, MapSpec, NodeId, NodeKind, UiHints, WorkflowDef, WorkflowEdge,
-    WorkflowNode,
+    EdgeKind, JoinStrategy, LoopMode, MapSpec, NodeId, NodeKind, UiHints, WorkflowDef,
+    WorkflowEdge, WorkflowNode,
 };
 pub use registry::{StepInfo, StepRegistry};
 pub use result::{RunStatus, StepResult, SuspendPoint, WorkflowResult};

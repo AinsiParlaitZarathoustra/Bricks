@@ -88,7 +88,11 @@ impl Mailbox {
 
     /// List currently-known topics.
     pub fn topics(&self) -> Vec<String> {
-        self.inner.topics.iter().map(|kv| kv.key().clone()).collect()
+        self.inner
+            .topics
+            .iter()
+            .map(|kv| kv.key().clone())
+            .collect()
     }
 }
 

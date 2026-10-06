@@ -14,8 +14,8 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    let socket = env::var("CERSEI_ENVD_SOCKET")
-        .unwrap_or_else(|_| "/run/cersei-envd.sock".to_string());
+    let socket =
+        env::var("CERSEI_ENVD_SOCKET").unwrap_or_else(|_| "/run/cersei-envd.sock".to_string());
     cersei_vms::envd::run(&socket).await?;
     Ok(())
 }

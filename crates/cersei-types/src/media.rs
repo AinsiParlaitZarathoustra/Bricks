@@ -20,19 +20,20 @@
 //! # Ok::<(), cersei_types::CerseiError>(())
 //! ```
 //!
-//! What each provider actually accepts differs (Anthropic: images + PDFs;
-//! OpenAI: images + PDF files; Gemini: images, video, audio, PDFs). The blocks
-//! are provider-agnostic — each provider's serializer takes what it supports and
-//! drops the rest — so the same message can be sent to any backend.
+//! What each protocol can carry differs (see the capability matrix in
+//! `docs/providers.md`). The blocks are protocol-agnostic; an adapter that cannot
+//! transport a block refuses the request with an explicit error before anything
+//! is sent — it never drops an attachment silently.
 
 use crate::{
-    CerseiError, ContentBlock, DocumentSource, ImageSource, Message, MessageContent, Result, Role,
+    CerseiError, ContentBlock, DocumentSource, ImageSource, MediaSource, Message, MessageContent,
+    Result, Role,
 };
 use base64::Engine;
 use std::path::Path;
 
 /// Broad category of a media file, derived from its MIME type. Used to decide
-/// whether a file becomes an [`ContentBlock::Image`] or [`ContentBlock::Document`].
+/// whether a file becomes an image, audio, video or document block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MediaKind {
     Image,
@@ -159,6 +160,7 @@ impl ContentBlock {
                 media_type: Some(media_type.into()),
                 data: Some(data.into()),
                 url: None,
+                file_id: None,
             },
         }
     }
@@ -176,6 +178,20 @@ impl ContentBlock {
                 media_type: None,
                 data: None,
                 url: Some(url.into()),
+                file_id: None,
+            },
+        }
+    }
+
+    /// Image block referencing a file already uploaded to the provider.
+    pub fn image_file_id(file_id: impl Into<String>) -> Self {
+        ContentBlock::Image {
+            source: ImageSource {
+                source_type: "file".into(),
+                media_type: None,
+                data: None,
+                url: None,
+                file_id: Some(file_id.into()),
             },
         }
     }
@@ -188,6 +204,7 @@ impl ContentBlock {
                 media_type: Some(media_type.into()),
                 data: Some(data.into()),
                 url: None,
+                file_id: None,
             },
             title: None,
             context: None,
@@ -208,6 +225,7 @@ impl ContentBlock {
                 media_type: None,
                 data: None,
                 url: Some(url.into()),
+                file_id: None,
             },
             title: None,
             context: None,
@@ -215,20 +233,101 @@ impl ContentBlock {
         }
     }
 
-    /// Build a block from raw bytes plus a known MIME type. Images, video, and
-    /// audio become [`ContentBlock::Image`]; everything else becomes a
+    /// Document block referencing a file already uploaded to the provider.
+    pub fn document_file_id(file_id: impl Into<String>) -> Self {
+        ContentBlock::Document {
+            source: DocumentSource {
+                source_type: "file".into(),
+                media_type: None,
+                data: None,
+                url: None,
+                file_id: Some(file_id.into()),
+            },
+            title: None,
+            context: None,
+            citations: None,
+        }
+    }
+
+    /// Audio block from already-base64-encoded data and an explicit MIME type.
+    pub fn audio_base64(media_type: impl Into<String>, data: impl Into<String>) -> Self {
+        ContentBlock::Audio {
+            source: MediaSource {
+                source_type: "base64".into(),
+                media_type: Some(media_type.into()),
+                data: Some(data.into()),
+                url: None,
+                file_id: None,
+            },
+        }
+    }
+
+    /// Audio block from raw bytes; the bytes are base64-encoded for you.
+    pub fn audio_bytes(media_type: impl Into<String>, bytes: &[u8]) -> Self {
+        Self::audio_base64(media_type, b64(bytes))
+    }
+
+    /// Audio block referencing a remote URL.
+    pub fn audio_url(url: impl Into<String>) -> Self {
+        ContentBlock::Audio {
+            source: MediaSource {
+                source_type: "url".into(),
+                media_type: None,
+                data: None,
+                url: Some(url.into()),
+                file_id: None,
+            },
+        }
+    }
+
+    /// Video block from already-base64-encoded data and an explicit MIME type.
+    pub fn video_base64(media_type: impl Into<String>, data: impl Into<String>) -> Self {
+        ContentBlock::Video {
+            source: MediaSource {
+                source_type: "base64".into(),
+                media_type: Some(media_type.into()),
+                data: Some(data.into()),
+                url: None,
+                file_id: None,
+            },
+        }
+    }
+
+    /// Video block from raw bytes; the bytes are base64-encoded for you.
+    pub fn video_bytes(media_type: impl Into<String>, bytes: &[u8]) -> Self {
+        Self::video_base64(media_type, b64(bytes))
+    }
+
+    /// Video block referencing a remote URL.
+    pub fn video_url(url: impl Into<String>) -> Self {
+        ContentBlock::Video {
+            source: MediaSource {
+                source_type: "url".into(),
+                media_type: None,
+                data: None,
+                url: Some(url.into()),
+                file_id: None,
+            },
+        }
+    }
+
+    /// Build a block from raw bytes plus a known MIME type, routed by kind:
+    /// images → [`ContentBlock::Image`], audio → [`ContentBlock::Audio`],
+    /// video → [`ContentBlock::Video`], everything else →
     /// [`ContentBlock::Document`].
     pub fn media_bytes(media_type: impl Into<String>, bytes: &[u8]) -> Self {
         let mt = media_type.into();
         match MediaKind::from_mime(&mt) {
+            MediaKind::Image => Self::image_bytes(mt, bytes),
+            MediaKind::Audio => Self::audio_bytes(mt, bytes),
+            MediaKind::Video => Self::video_bytes(mt, bytes),
             MediaKind::Document => Self::document_bytes(mt, bytes),
-            _ => Self::image_bytes(mt, bytes),
         }
     }
 
     /// Build a block from a local file, auto-detecting the MIME type from the
-    /// file's contents (and extension as a fallback). Images/video/audio become
-    /// image blocks; PDFs and other files become document blocks.
+    /// file's contents (and extension as a fallback). Each file becomes an
+    /// image, audio, video or document block according to its MIME type.
     ///
     /// Returns [`CerseiError::Config`] if the media type can't be determined,
     /// or [`CerseiError::Io`] if the file can't be read.
@@ -308,7 +407,11 @@ mod tests {
         ));
         assert!(matches!(
             ContentBlock::media_bytes("video/mp4", b"x"),
-            ContentBlock::Image { .. }
+            ContentBlock::Video { .. }
+        ));
+        assert!(matches!(
+            ContentBlock::media_bytes("audio/wav", b"x"),
+            ContentBlock::Audio { .. }
         ));
         assert!(matches!(
             ContentBlock::media_bytes("application/pdf", b"x"),

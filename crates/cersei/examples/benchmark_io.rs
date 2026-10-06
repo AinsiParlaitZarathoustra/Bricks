@@ -16,7 +16,6 @@
 //! ```
 
 use cersei::prelude::*;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -81,52 +80,9 @@ async fn bench_tool(
     }
 }
 
-async fn bench_claude_cli(prompt: &str, iters: u32) -> Option<BenchResult> {
-    let claude_path = which::which("claude").ok()?;
-
-    let mut total = Duration::ZERO;
-    let mut min = Duration::MAX;
-    let mut max = Duration::ZERO;
-
-    // Warmup
-    let _ = tokio::process::Command::new(&claude_path)
-        .args(["--print", "--max-turns", "1", "-p", prompt])
-        .output()
-        .await;
-
-    for _ in 0..iters {
-        let start = Instant::now();
-        let output = tokio::process::Command::new(&claude_path)
-            .args(["--print", "--max-turns", "1", "-p", prompt])
-            .output()
-            .await;
-        let elapsed = start.elapsed();
-
-        match output {
-            Ok(o) if o.status.success() => {
-                total += elapsed;
-                min = min.min(elapsed);
-                max = max.max(elapsed);
-            }
-            _ => {
-                eprintln!("  claude CLI failed, skipping...");
-                return None;
-            }
-        }
-    }
-
-    Some(BenchResult {
-        name: "claude-cli".into(),
-        total,
-        min,
-        max,
-        iters,
-    })
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let working_dir = std::env::current_dir()?;
+    let _working_dir = std::env::current_dir()?;
     let tmp = tempfile::tempdir()?;
 
     // Create a test file for read/edit benchmarks
@@ -163,10 +119,7 @@ async fn main() -> anyhow::Result<()> {
         "║  {} iterations per test, --release recommended              ║",
         ITERATIONS
     );
-    println!(
-        "║  Working dir: {}║",
-        format!("{:<42}", tmp.path().display())
-    );
+    println!("║  Working dir: {:<42}║", tmp.path().display().to_string());
     println!("╚══════════════════════════════════════════════════════════════╝\n");
 
     let mut results: Vec<BenchResult> = Vec::new();

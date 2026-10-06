@@ -20,7 +20,7 @@ pub enum MemoryType {
 }
 
 impl MemoryType {
-    pub fn from_str(s: &str) -> Option<Self> {
+    pub fn parse_name(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "user" => Some(Self::User),
             "feedback" => Some(Self::Feedback),
@@ -136,7 +136,7 @@ fn parse_frontmatter_quick(content: &str) -> (Option<String>, Option<String>, Op
             match key.as_str() {
                 "name" => name = Some(value),
                 "description" => description = Some(value),
-                "type" => memory_type = MemoryType::from_str(&value),
+                "type" => memory_type = MemoryType::parse_name(&value),
                 _ => {}
             }
         }
@@ -160,7 +160,7 @@ pub fn scan_memory_dir(dir: &Path) -> Vec<MemoryFileMeta> {
     scan_dir_recursive(dir, dir, &mut results);
 
     // Sort newest-first
-    results.sort_by(|a, b| b.modified_secs.cmp(&a.modified_secs));
+    results.sort_by_key(|r| std::cmp::Reverse(r.modified_secs));
 
     // Cap
     results.truncate(MAX_MEMORY_FILES);

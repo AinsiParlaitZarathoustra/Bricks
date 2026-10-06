@@ -1,0 +1,36 @@
+[package]
+name = "cersei-web"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Web search, bounded fetching, Markdown extraction and BM25 passage selection for the Cersei SDK"
+readme = "../../README.md"
+
+[dependencies]
+tokio = { workspace = true }
+futures = { workspace = true }
+reqwest = { workspace = true, features = ["gzip", "brotli", "deflate", "http2"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+url = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+parking_lot = { workspace = true }
+sha2 = { workspace = true }
+# HTML: Readability extraction and its DOM (Markdown serialiser included).
+dom_smoothie = "0.18.2"
+dom_query = { version = "0.28", features = ["markdown"] }
+# Lexical ranking; the default tokenizer (stemmers, stop-word lists) is not used.
+bm25 = { version = "2.3.2", default-features = false }
+encoding_rs = "0.8.42"
+# DNS through the same resolver reqwest uses here (static musl builds).
+hickory-resolver = { version = "0.25", features = ["tokio", "system-config"] }
+
+[dev-dependencies]
+cersei-types = { workspace = true }
+cersei-testkit = { workspace = true }
+tempfile = { workspace = true }
+flate2 = "1"

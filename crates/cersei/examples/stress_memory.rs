@@ -15,7 +15,6 @@
 //! ```
 
 use cersei::prelude::*;
-use std::path::Path;
 use std::time::Instant;
 
 fn main() {
@@ -251,7 +250,7 @@ fn main() {
 
         // Write entries
         let u1 = write_user_entry(&path, "s1", Message::user("Hello"), "/tmp").unwrap();
-        let a1 = write_assistant_entry(
+        let _a1 = write_assistant_entry(
             &path,
             "s1",
             Message::assistant("Hi there!"),

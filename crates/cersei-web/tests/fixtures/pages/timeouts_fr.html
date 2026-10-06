@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><title>Comprendre les délais d'expiration — Le blog</title></head>
+<body>
+<nav class="navbar"><a href="/">Accueil</a> <a href="/blog/">Blog</a> <a href="/contact">Contact</a></nav>
+<article>
+<h1>Comprendre les délais d'expiration</h1>
+<p class="byline">Par l'équipe plateforme, 12 mars 2026</p>
+<p>Un délai d'expiration (timeout) borne le temps qu'un client accepte d'attendre une réponse. Sans lui, une requête bloquée peut immobiliser un fil d'exécution indéfiniment, et les reprises s'accumulent derrière elle.</p>
+<p>Il faut distinguer trois délais. Le délai de connexion couvre l'établissement de la connexion TCP et la négociation TLS. Le délai de lecture borne l'attente entre deux paquets. Le délai total, enfin, couvre la requête entière, redirections comprises.</p>
+<h2>Valeurs par défaut</h2>
+<p>Dans notre client, le délai total par défaut est de 30 secondes depuis la version 2.1 ; il était de 60 secondes auparavant. Le délai de connexion est de 5 secondes.</p>
+<h2>Reprises et délais</h2>
+<p>Les reprises ne prolongent pas le délai total : si le délai total est atteint pendant une reprise, la requête échoue. C'est pourquoi il ne faut pas fixer un délai total inférieur à la somme des attentes entre reprises.</p>
+<p>Cela vaut aussi pour les requêtes en flux : le délai total s'applique jusqu'à la fin du corps de la réponse.</p>
+</article>
+<aside class="related"><h3>À lire aussi</h3><ul><li><a href="/blog/retries">Les reprises</a></li><li><a href="/blog/pools">Les pools de connexions</a></li></ul></aside>
+<footer>Le blog — tous droits réservés</footer>
+</body></html>

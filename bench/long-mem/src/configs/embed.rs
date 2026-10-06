@@ -35,10 +35,6 @@ impl<P: EmbeddingProvider + Send + Sync + 'static> EmbedConfig<P> {
 
 #[async_trait]
 impl<P: EmbeddingProvider + Send + Sync + 'static> Config for EmbedConfig<P> {
-    fn name(&self) -> &'static str {
-        "embed-only"
-    }
-
     async fn ingest(&mut self, q: &Question) -> Result<()> {
         // Fresh memory per question — haystacks don't share turns across Qs.
         let provider = (self.provider_factory)();

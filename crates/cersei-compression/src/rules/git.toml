@@ -1,38 +1,42 @@
 schema_version = 1
 
+[filters.git-exact]
+description = "Diffs, file contents and plumbing output are values: never filtered, only capped."
+mode = "exact"
+match = [{ program = "git", subcommands = [
+    "diff", "show", "blame", "cat-file", "ls-files", "ls-tree", "rev-parse", "config",
+    "rev-list", "grep", "format-patch", "describe", "tag", "branch", "remote", "stash list",
+] }]
+options_with_value = ["-C", "-c", "--git-dir", "--work-tree", "--namespace"]
+
 [filters.git-log]
-description = "Condense `git log` verbose output."
-match_command = '^git\s+log'
-strip_ansi = true
-strip_lines_matching = [
-    '^Author:',
-    '^Date:',
-    '^\s*$',
-]
-max_lines = 60
+description = "`git log`: blank lines removed, entries kept as written."
+match = [{ program = "git", subcommands = ["log", "reflog", "shortlog"] }]
+options_with_value = ["-C", "-c", "--git-dir", "--work-tree"]
+strip_lines_matching = ['^\s*$']
+head_lines = 200
+tail_lines = 20
+max_lines = 220
 
 [filters.git-status]
-description = "Drop the `(use \"git add\" ...)` help chrome from `git status`."
-match_command = '^git\s+status'
-strip_ansi = true
+description = "`git status`: the `(use \"git add\" ...)` help lines removed."
+match = [{ program = "git", subcommands = ["status"] }]
+options_with_value = ["-C", "-c", "--git-dir", "--work-tree"]
+strip_lines_matching = ['^\s*\(use "git ', '^\s*\(commit or discard', '^\s*\(create/copy files', '^\s*$']
+
+[filters.git-transfer]
+description = "`git clone/fetch/pull/push`: transfer progress removed."
+match = [{ program = "git", subcommands = ["clone", "fetch", "pull", "push", "submodule"] }]
+options_with_value = ["-C", "-c", "--git-dir", "--work-tree"]
 strip_lines_matching = [
-    '^\s*\(use "git',
-    '^\s*\(commit or discard',
+    '^(remote: )?(Enumerating|Counting|Compressing|Receiving|Resolving|Writing|Total|Unpacking) ',
+    '^remote: ?$',
     '^\s*$',
 ]
 
-[filters.git-diff]
-description = "Keep `git diff` structure but cap total size."
-match_command = '^git\s+diff'
-strip_ansi = true
-max_lines = 400
-
-[filters.zz-git-generic]
-description = "Catch-all for other git subcommands."
-match_command = '^git\b'
-strip_ansi = true
-strip_lines_matching = [
-    '^hint:',
-    '^\s*$',
-]
-max_lines = 120
+[filters.git]
+description = "Other git sub-commands: hints removed."
+match = [{ program = "git" }]
+options_with_value = ["-C", "-c", "--git-dir", "--work-tree"]
+strip_lines_matching = ['^hint:', '^\s*$']
+max_lines = 200

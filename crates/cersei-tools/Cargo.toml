@@ -26,11 +26,14 @@ glob = { workspace = true }
 walkdir = { workspace = true }
 which = { workspace = true }
 nix = { workspace = true }
+libc = "0.2"
 tempfile = { workspace = true }
 similar = { workspace = true }
+sha2 = { workspace = true }
 uuid = { workspace = true }
 reqwest = { workspace = true }
-html2text = { workspace = true }
+cersei-web = { workspace = true }
+cersei-compression = { workspace = true }
 chrono = { workspace = true }
 dirs = { workspace = true }
 tree-sitter = "^0.26"

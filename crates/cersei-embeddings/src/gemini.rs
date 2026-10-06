@@ -10,7 +10,6 @@ use crate::{EmbeddingError, EmbeddingProvider};
 const DEFAULT_MODEL: &str = "gemini-embedding-001";
 const DEFAULT_DIMENSIONS: usize = 3072;
 const DEFAULT_TRUNCATE: usize = 2000;
-const BATCH_LIMIT: usize = 100;
 const API_BASE: &str = "https://generativelanguage.googleapis.com/v1beta";
 
 /// Google Gemini text embeddings.
@@ -79,6 +78,10 @@ impl EmbeddingProvider for GeminiEmbeddings {
     }
     fn dimensions(&self) -> usize {
         self.dimensions
+    }
+
+    fn model_id(&self) -> String {
+        format!("gemini/{}:{}", self.model, self.dimensions())
     }
 
     async fn embed_batch(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, EmbeddingError> {
@@ -171,16 +174,14 @@ impl EmbeddingProvider for GeminiEmbeddings {
                                             );
                                         }
                                         Err(e) => {
-                                            last_err = Some(EmbeddingError::Parse(
-                                                redact_errors(&e),
-                                            ));
+                                            last_err =
+                                                Some(EmbeddingError::Parse(redact_errors(&e)));
                                             continue;
                                         }
                                     }
                                 }
                                 let body_text = resp.text().await.unwrap_or_default();
-                                let retryable =
-                                    status.as_u16() == 429 || status.is_server_error();
+                                let retryable = status.as_u16() == 429 || status.is_server_error();
                                 last_err = Some(EmbeddingError::Api(format!(
                                     "Gemini embedding failed ({status}, {safe_url}): {}",
                                     redact_url_key(&body_text)

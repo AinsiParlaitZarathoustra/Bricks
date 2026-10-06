@@ -12,7 +12,6 @@
 # Usage:
 #   ./sync_cargo.sh                 # publish everything that isn't already up
 #   ./sync_cargo.sh --dry-run       # run `cargo publish --dry-run` for each
-#   ./sync_cargo.sh --include-cli    # also publish the `abstract` CLI binary
 #   ./sync_cargo.sh --allow-dirty    # pass --allow-dirty to cargo publish
 #
 # Auth: set CARGO_REGISTRY_TOKEN, or run `cargo login` beforehand.
@@ -22,12 +21,10 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 DRY_RUN=0
-INCLUDE_CLI=0
 ALLOW_DIRTY=0
 for arg in "$@"; do
   case "$arg" in
     --dry-run)     DRY_RUN=1 ;;
-    --include-cli) INCLUDE_CLI=1 ;;
     --allow-dirty) ALLOW_DIRTY=1 ;;
     *) echo "unknown flag: $arg" >&2; exit 2 ;;
   esac
@@ -47,8 +44,7 @@ fi
 echo "Workspace version: $VERSION"
 
 # Library crates in dependency order (a crate appears after everything it
-# depends on). `cersei` is the umbrella facade and goes last among libraries;
-# `abstract-cli` (binary) is optional and goes after that.
+# depends on). `cersei` is the umbrella facade and goes last.
 CRATES=(
   cersei-types
   cersei-compression
@@ -69,9 +65,6 @@ CRATES=(
   cersei-tbench
   cersei
 )
-if [[ "$INCLUDE_CLI" == "1" ]]; then
-  CRATES+=(abstract-cli)
-fi
 
 # Return 0 if <name>@<version> already exists on crates.io.
 already_published() {

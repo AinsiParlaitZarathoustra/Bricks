@@ -1,16 +1,14 @@
-//! §10.5 #4: F-02's end-to-end retry coverage for the two native-protocol
-//! providers.
+//! §10.5 #4: F-02's end-to-end retry coverage for the other two protocols.
 //!
 //! `retry_on_429.rs` proves a 429 is retried through the real runner on the
-//! OpenAI path; the Anthropic and Gemini paths were covered only at the
-//! `complete()` boundary (`http_status_is_retryable.rs`). These tests close
-//! that gap: a scripted socket answers 429-then-success in each provider's
-//! own wire format, `Agent::run` drives the real runner, and the assertions
+//! `chat_completions` path; these tests do the same for `anthropic_messages`
+//! and `responses`: a scripted socket answers 429-then-success in each
+//! protocol's own wire format, `Agent::run` drives the real runner, and the assertions
 //! are exactly the OpenAI test's — two requests on the socket, and the
 //! retried attempt's content is what the turn returns.
 
 use cersei_agent::Agent;
-use cersei_provider::{Anthropic, Gemini};
+mod common;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -64,12 +62,23 @@ impl Canned {
         }
     }
 
-    /// A minimal Gemini `streamGenerateContent` SSE stream saying `pong`.
-    fn gemini_sse_pong() -> Self {
+    /// A minimal Responses-API SSE stream saying `pong`.
+    fn responses_sse_pong() -> Self {
         let body = concat!(
-            "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"pong\"}],\
-             \"role\":\"model\"},\"finishReason\":\"STOP\"}],\
-             \"usageMetadata\":{\"promptTokenCount\":3,\"candidatesTokenCount\":1}}\n\n",
+            "event: response.created\n",
+            "data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_test\"}}\n\n",
+            "event: response.output_item.added\n",
+            "data: {\"type\":\"response.output_item.added\",\"output_index\":0,\
+             \"item\":{\"type\":\"message\"}}\n\n",
+            "event: response.output_text.delta\n",
+            "data: {\"type\":\"response.output_text.delta\",\"output_index\":0,\
+             \"delta\":\"pong\"}\n\n",
+            "event: response.output_item.done\n",
+            "data: {\"type\":\"response.output_item.done\",\"output_index\":0,\
+             \"item\":{\"type\":\"message\"}}\n\n",
+            "event: response.completed\n",
+            "data: {\"type\":\"response.completed\",\"response\":{\"usage\":\
+             {\"input_tokens\":3,\"output_tokens\":1}}}\n\n",
         );
         Canned {
             status_line: "200 OK",
@@ -151,18 +160,11 @@ fn serve_sequence(responses: Vec<Canned>) -> (String, Arc<AtomicUsize>) {
 /// the turn through the real runner, with exactly one retry.
 #[tokio::test]
 async fn anthropic_429_is_retried_through_the_runner() {
-    let (url, hits) =
-        serve_sequence(vec![Canned::rate_limited(), Canned::anthropic_sse_pong()]);
+    let (url, hits) = serve_sequence(vec![Canned::rate_limited(), Canned::anthropic_sse_pong()]);
     let agent = Agent::builder()
         .provider(
-            Anthropic::builder()
-                .api_key("test-key")
-                .base_url(&url) // provider appends /v1/messages
-                .model("claude-sonnet-5")
-                .build()
-                .expect("build provider"),
+            common::provider(&url, "anthropic_messages", 128_000), // appends /messages
         )
-        .model("claude-sonnet-5")
         .max_turns(2)
         .max_tokens(64)
         .build()
@@ -182,20 +184,14 @@ async fn anthropic_429_is_retried_through_the_runner() {
     assert_eq!(out.text(), "pong");
 }
 
-/// Gemini path: same contract, Gemini wire format.
+/// Responses path: same contract, Responses wire format.
 #[tokio::test]
-async fn gemini_429_is_retried_through_the_runner() {
-    let (url, hits) = serve_sequence(vec![Canned::rate_limited(), Canned::gemini_sse_pong()]);
+async fn responses_429_is_retried_through_the_runner() {
+    let (url, hits) = serve_sequence(vec![Canned::rate_limited(), Canned::responses_sse_pong()]);
     let agent = Agent::builder()
         .provider(
-            Gemini::builder()
-                .api_key("test-key")
-                .base_url(&url) // provider appends /models/{model}:streamGenerateContent
-                .model("gemini-flash-lite-latest")
-                .build()
-                .expect("build provider"),
+            common::provider(&url, "responses", 128_000), // appends /responses
         )
-        .model("gemini-flash-lite-latest")
         .max_turns(2)
         .max_tokens(64)
         .build()
@@ -206,7 +202,7 @@ async fn gemini_429_is_retried_through_the_runner() {
     let requests = hits.load(Ordering::SeqCst);
     let out = out.unwrap_or_else(|e| {
         panic!(
-            "gemini: a 429 then a good response must complete the turn, got \
+            "responses: a 429 then a good response must complete the turn, got \
              Err({e}) after {requests} request(s). requests == 1 means the \
              retry never fired on this path."
         )

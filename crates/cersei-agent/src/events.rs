@@ -32,6 +32,12 @@ pub enum AgentEvent {
         /// (None for error results, which are not compressed).
         compression: Option<cersei_compression::CompressionStats>,
     },
+    /// Progress of a long tool call (a shell command still running, a
+    /// timeout being enforced).
+    ToolProgress {
+        name: String,
+        message: String,
+    },
     ToolPermissionCheck {
         name: String,
         id: String,
@@ -73,6 +79,13 @@ pub enum AgentEvent {
         messages_after: usize,
         tokens_freed: u64,
     },
+    /// Every compaction attempt ends with its outcome, applied or not.
+    CompactionResult {
+        reason: CompactReason,
+        outcome: crate::compact::CompactionOutcome,
+    },
+    /// Occupation, window and totals after a response or a rewrite.
+    ContextUpdate(crate::context::ContextStatus),
 
     // Session lifecycle
     SessionLoaded {
@@ -112,6 +125,40 @@ pub enum AgentEvent {
         reason: String,
     },
 
+    // Long-term memory
+    /// What was recalled into this run's system prompt (zero items when
+    /// nothing was relevant).
+    MemoryRecalled {
+        items: usize,
+        tokens: u64,
+        omitted: usize,
+        /// Token budget the recall had.
+        budget: usize,
+    },
+    /// The maintenance after the answer (extraction, embeddings) started.
+    MemoryMaintenanceStarted,
+    /// It ended: its report (possibly cancelled), or why it failed. The
+    /// answer was delivered before and is not affected.
+    MemoryMaintenanceFinished(std::result::Result<cersei_memory::MaintenanceReport, String>),
+
+    // Approvals and changes
+    /// A tool call waits for a decision (see `control::ApprovalGate`).
+    ApprovalRequested(crate::control::ApprovalRequest),
+    /// The decision taken for it, and by whom.
+    ApprovalResolved {
+        approval_id: String,
+        tool_call_id: String,
+        decision: crate::control::Decision,
+        by: crate::control::DecidedBy,
+    },
+    /// A tool call whose change was previewed succeeded: these files were
+    /// written.
+    EditApplied {
+        tool_call_id: String,
+        tool: String,
+        files: Vec<cersei_tools::preview::FileChange>,
+    },
+
     // Terminal
     Status(String),
     Error(String),
@@ -125,11 +172,15 @@ pub enum WarningState {
     Critical,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompactReason {
+    /// The occupation crossed `compact_threshold` after a turn.
     ThresholdExceeded,
     ManualTrigger,
+    /// The server refused a request for exceeding the context.
     ContextOverflow,
+    /// The next request would manifestly not fit: compacted before sending.
+    BudgetExceeded,
 }
 
 // ─── Agent stream ────────────────────────────────────────────────────────────

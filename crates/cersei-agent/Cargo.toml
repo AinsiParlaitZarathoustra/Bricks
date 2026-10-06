@@ -16,6 +16,7 @@ cersei-hooks = { workspace = true }
 cersei-memory = { workspace = true }
 cersei-mcp = { workspace = true }
 cersei-compression = { workspace = true }
+cersei-web = { workspace = true }
 async-trait = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
@@ -29,6 +30,10 @@ parking_lot = { workspace = true }
 chrono = { workspace = true }
 anyhow = { workspace = true }
 tempfile = { workspace = true }
+toml = { workspace = true }
+serde_path_to_error = "0.1"
+base64 = { workspace = true }
+ignore = { workspace = true }
 
 [features]
 # Benchmark features — opt-in for general_agent_bench example.
@@ -47,7 +52,12 @@ optional = true
 
 [dev-dependencies]
 cersei-embeddings = { workspace = true }
+cersei-testkit = { workspace = true }
+cersei-memory = { workspace = true, features = ["structured"] }
+tokio-util = { workspace = true }
+url = { workspace = true }
 tracing-subscriber = { workspace = true }
+regex = { workspace = true }
 
 [[example]]
 name = "general_agent_bench"

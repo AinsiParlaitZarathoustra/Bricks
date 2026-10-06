@@ -7,7 +7,6 @@ pub mod bash_classifier;
 pub mod code_search;
 pub mod config_tool;
 pub mod cron;
-pub mod exa_search;
 pub mod file_edit;
 pub mod file_history;
 pub mod file_read;
@@ -18,25 +17,30 @@ pub mod git_utils;
 pub mod glob_tool;
 pub mod grep_tool;
 pub mod lsp_tool;
+pub mod mcp_tool;
 pub mod multi_edit;
 pub mod notebook_edit;
 pub mod permissions;
 pub mod plan_mode;
 pub mod powershell;
+pub mod preview;
 pub mod remote_trigger;
 pub mod send_message;
+pub mod shell;
 pub mod skill_tool;
 pub mod skills;
 pub mod sleep;
 pub mod synthetic_output;
 pub mod tasks;
 pub mod todo_write;
-#[cfg(feature = "vms")]
-pub mod vm_tools;
 pub mod tool_feedback;
 pub mod tool_primitives;
+pub mod tool_report;
 pub mod tool_search;
+#[cfg(feature = "vms")]
+pub mod vm_tools;
 pub mod web_fetch;
+pub mod web_runtime;
 pub mod web_search;
 pub mod worktree;
 
@@ -44,7 +48,6 @@ use async_trait::async_trait;
 use cersei_mcp::McpManager;
 use cersei_types::*;
 use serde_json::Value;
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -73,6 +76,22 @@ pub trait Tool: Send + Sync {
 
     /// Execute the tool with the given JSON input.
     async fn execute(&self, input: Value, ctx: &ToolContext) -> ToolResult;
+
+    /// Facts a permission policy should see beyond the input itself (for a
+    /// shell: the working directory the command will run in, and the
+    /// definitions of session aliases or functions it invokes). Added to the
+    /// permission request's description by the agent.
+    async fn permission_details(&self, _input: &Value, _ctx: &ToolContext) -> Option<String> {
+        None
+    }
+
+    /// The file changes this call would make, computed without writing, for
+    /// an approval to show before anything is written. `None` for tools
+    /// whose effects are not file edits (a shell command, an MCP call): a
+    /// diff could not represent them, so none is pretended.
+    async fn preview(&self, _input: &Value, _ctx: &ToolContext) -> Option<preview::ChangePreview> {
+        None
+    }
 
     /// Convert to a ToolDefinition for the provider.
     fn to_definition(&self) -> ToolDefinition {
@@ -121,9 +140,13 @@ pub enum ToolCategory {
 
 #[derive(Debug, Clone)]
 pub struct ToolResult {
+    /// Text of the result (without the uniform header the agent adds).
     pub content: String,
     pub is_error: bool,
     pub metadata: Option<Value>,
+    /// Structured form of the result, when the tool provides one; the agent
+    /// renders it uniformly (see [`tool_report`]).
+    pub report: Option<Box<tool_report::ToolReport>>,
 }
 
 impl ToolResult {
@@ -132,6 +155,7 @@ impl ToolResult {
             content: content.into(),
             is_error: false,
             metadata: None,
+            report: None,
         }
     }
 
@@ -140,12 +164,50 @@ impl ToolResult {
             content: content.into(),
             is_error: true,
             metadata: None,
+            report: None,
         }
     }
 
     pub fn with_metadata(mut self, meta: Value) -> Self {
         self.metadata = Some(meta);
         self
+    }
+
+    /// A result described by a report. `content` holds its text without the
+    /// header (output, notes, suggestion), for callers that read text.
+    pub fn from_report(report: tool_report::ToolReport) -> Self {
+        let mut content = report.render_output();
+        if !report.notes.is_empty() {
+            content.push_str("--- remarques ---\n");
+            for n in &report.notes {
+                content.push_str(&format!("- {n}\n"));
+            }
+        }
+        if let Some(s) = &report.suggestion {
+            content.push_str(&format!("--- suggestion ---\n{s}\n"));
+        }
+        Self {
+            is_error: report.status.is_error(),
+            metadata: report.data.clone(),
+            content: content.trim_end_matches('\n').to_string(),
+            report: Some(Box::new(report)),
+        }
+    }
+
+    /// The report of this result: the tool's own, or one derived from its
+    /// text and error flag (no exit code is invented).
+    pub fn to_report(&self) -> tool_report::ToolReport {
+        match &self.report {
+            Some(r) => (**r).clone(),
+            None => tool_report::ToolReport::new(
+                if self.is_error {
+                    tool_report::ToolStatus::Failure
+                } else {
+                    tool_report::ToolStatus::Success
+                },
+                tool_report::ToolBody::Text(self.content.clone()),
+            ),
+        }
     }
 }
 
@@ -180,6 +242,12 @@ impl Extensions {
 }
 
 /// Tracks cumulative token usage and cost.
+///
+/// Costs are not computed here: the provider attaches a [`CostEstimate`]
+/// (from the prices declared in the provider configuration) to each response's
+/// usage, and the tracker only accumulates it. A response whose model declares
+/// no price carries no estimate, and the running total then reports itself as
+/// partial rather than counting that usage as free.
 pub struct CostTracker {
     usage: parking_lot::Mutex<Usage>,
 }
@@ -195,16 +263,6 @@ impl CostTracker {
         self.usage.lock().merge(usage);
     }
 
-    /// Add usage with cost estimation based on model pricing, including the
-    /// prompt-cache accounting fields (reads ~0.1x, writes ~1.25x input rate).
-    pub fn add_with_model(&self, usage: &Usage, model: &str) {
-        let mut u = usage.clone();
-        if u.cost_usd.is_none() || u.cost_usd == Some(0.0) {
-            u.cost_usd = Some(estimate_cost_usage(model, &u));
-        }
-        self.usage.lock().merge(&u);
-    }
-
     pub fn current(&self) -> Usage {
         self.usage.lock().clone()
     }
@@ -216,137 +274,71 @@ impl Default for CostTracker {
     }
 }
 
-/// Anthropic prompt-cache write premium for the default 5-minute-TTL
-/// `{"type": "ephemeral"}` breakpoint Cersei sends (a 1h TTL would be 2.0).
-const CACHE_WRITE_MULTIPLIER: f64 = 1.25;
-/// Anthropic prompt-cache read discount relative to the base input rate.
-const CACHE_READ_MULTIPLIER: f64 = 0.1;
-
-/// Estimate USD cost for a full [`Usage`], pricing prompt-cache writes at
-/// 1.25x and cache reads at 0.1x the model's input rate. The cache fields are
-/// populated only on the Anthropic path (OpenAI/Gemini report cached tokens
-/// inside their prompt totals, under different discounts), so for other
-/// providers this reduces to [`estimate_cost`].
-pub fn estimate_cost_usage(model: &str, usage: &Usage) -> f64 {
-    let (input_per_m, _) = model_rates(model);
-    estimate_cost(model, usage.input_tokens, usage.output_tokens)
-        + (usage.cache_creation_input_tokens as f64 / 1_000_000.0)
-            * input_per_m
-            * CACHE_WRITE_MULTIPLIER
-        + (usage.cache_read_input_tokens as f64 / 1_000_000.0) * input_per_m * CACHE_READ_MULTIPLIER
-}
-
-/// Estimate USD cost from token counts based on model pricing (per 1M tokens).
-/// Cache-unaware; prefer [`estimate_cost_usage`] when a full `Usage` is at hand.
-pub fn estimate_cost(model: &str, input_tokens: u64, output_tokens: u64) -> f64 {
-    let (input_per_m, output_per_m) = model_rates(model);
-    (input_tokens as f64 / 1_000_000.0) * input_per_m
-        + (output_tokens as f64 / 1_000_000.0) * output_per_m
-}
-
-/// (input, output) USD per 1M tokens for a model id.
-fn model_rates(model: &str) -> (f64, f64) {
-    match model {
-        m if m.contains("gpt-5.3") => (2.0, 10.0),
-        m if m.contains("gpt-5") => (2.0, 10.0),
-        m if m.contains("gpt-4o") => (2.50, 10.0),
-        m if m.contains("gpt-4-turbo") => (10.0, 30.0),
-        m if m.starts_with("o1") => (15.0, 60.0),
-        m if m.starts_with("o3") => (10.0, 40.0),
-        m if m.contains("opus") => (15.0, 75.0),
-        m if m.contains("sonnet") => (3.0, 15.0),
-        m if m.contains("haiku") => (0.25, 1.25),
-        m if m.contains("gemini-2.0-flash") => (0.075, 0.30),
-        m if m.contains("gemini") => (1.25, 5.0),
-        m if m.contains("deepseek") => (0.27, 1.10),
-        m if m.contains("mistral-large") => (2.0, 6.0),
-        m if m.contains("llama") => (0.0, 0.0), // local/free
-        _ => (2.0, 10.0),
-    }
-}
-
 #[cfg(test)]
 mod cost_tests {
     use super::*;
+    use cersei_types::CostEstimate;
 
-    /// P3 #2: cache reads price at 0.1x and cache writes at 1.25x the input
-    /// rate (sonnet input rate: $3/M).
-    #[test]
-    fn cache_tokens_price_at_their_multipliers() {
-        let read_only = Usage {
-            cache_read_input_tokens: 1_000_000,
+    fn priced(input: u64, cache_read: u64, usd: f64, partial: bool) -> Usage {
+        Usage {
+            input_tokens: input,
+            cache_read_input_tokens: cache_read,
+            cost_usd: Some(usd),
+            cost_estimate: Some(CostEstimate {
+                amount_usd: usd,
+                tariff: "default".into(),
+                partial,
+                unpriced: vec![],
+            }),
             ..Default::default()
-        };
-        let cost = estimate_cost_usage("claude-sonnet-4-6", &read_only);
-        assert!((cost - 0.30).abs() < 1e-9, "1M cached reads = $0.30, got {cost}");
-
-        let write_only = Usage {
-            cache_creation_input_tokens: 1_000_000,
-            ..Default::default()
-        };
-        let cost = estimate_cost_usage("claude-sonnet-4-6", &write_only);
-        assert!((cost - 3.75).abs() < 1e-9, "1M cache writes = $3.75, got {cost}");
+        }
     }
 
-    /// Without cache fields the usage-aware estimator must agree with the
-    /// legacy pair, so non-Anthropic providers price exactly as before.
+    /// The cache counters themselves must accumulate across requests.
     #[test]
-    fn without_cache_fields_the_estimators_agree() {
-        let plain = Usage {
-            input_tokens: 200_000,
-            output_tokens: 50_000,
-            ..Default::default()
-        };
-        assert_eq!(
-            estimate_cost_usage("claude-sonnet-4-6", &plain),
-            estimate_cost("claude-sonnet-4-6", 200_000, 50_000),
-        );
-    }
-
-    /// Wiring: `add_with_model` must price through the cache-aware estimator
-    /// and the tracker must accumulate the cache fields themselves.
-    #[test]
-    fn cost_tracker_prices_and_accumulates_cache_fields() {
+    fn tracker_accumulates_tokens_cache_fields_and_cost() {
         let tracker = CostTracker::new();
-        tracker.add_with_model(
-            &Usage {
-                input_tokens: 1_000_000,
-                cache_read_input_tokens: 1_000_000,
-                ..Default::default()
-            },
-            "claude-sonnet-4-6",
-        );
-        let current = tracker.current();
-        assert_eq!(current.cache_read_input_tokens, 1_000_000);
-        let cost = current.cost_usd.expect("cost estimated");
+        tracker.add(&priced(1_000_000, 0, 3.0, false));
+        tracker.add(&priced(0, 1_000_000, 0.3, false));
+        let cur = tracker.current();
+        assert_eq!(cur.input_tokens, 1_000_000);
+        assert_eq!(cur.cache_read_input_tokens, 1_000_000);
+        let est = cur.cost_estimate.expect("estimate carried");
+        assert!((est.amount_usd - 3.3).abs() < 1e-9 && !est.partial);
+    }
+
+    /// A request with no known price must not be counted as free: the running
+    /// total becomes a partial estimate.
+    #[test]
+    fn unpriced_usage_makes_the_total_partial_not_free() {
+        let tracker = CostTracker::new();
+        tracker.add(&priced(1_000, 0, 0.003, false));
+        tracker.add(&Usage {
+            input_tokens: 5_000,
+            ..Default::default()
+        });
+        let cur = tracker.current();
+        assert_eq!(cur.input_tokens, 6_000);
+        let est = cur.cost_estimate.unwrap();
+        assert!(est.partial, "{est:?}");
         assert!(
-            (cost - 3.30).abs() < 1e-9,
-            "1M input + 1M cached reads on sonnet = $3.30, got {cost}"
+            (est.amount_usd - 0.003).abs() < 1e-12,
+            "only the priced part is counted"
         );
     }
-}
 
-// ─── Shell state (persisted across Bash invocations) ─────────────────────────
-
-#[derive(Debug, Clone, Default)]
-pub struct ShellState {
-    pub cwd: Option<PathBuf>,
-    pub env_vars: HashMap<String, String>,
-}
-
-static SHELL_STATE_REGISTRY: once_cell::sync::Lazy<
-    dashmap::DashMap<String, Arc<parking_lot::Mutex<ShellState>>>,
-> = once_cell::sync::Lazy::new(dashmap::DashMap::new);
-
-pub fn session_shell_state(session_id: &str) -> Arc<parking_lot::Mutex<ShellState>> {
-    SHELL_STATE_REGISTRY
-        .entry(session_id.to_string())
-        .or_insert_with(|| Arc::new(parking_lot::Mutex::new(ShellState::default())))
-        .clone()
-}
-
-pub fn clear_session_shell_state(session_id: &str) {
-    SHELL_STATE_REGISTRY.remove(session_id);
+    /// When nothing was ever priced there is no estimate at all: unknown, not $0.
+    #[test]
+    fn nothing_priced_means_no_estimate() {
+        let tracker = CostTracker::new();
+        tracker.add(&Usage {
+            input_tokens: 10,
+            output_tokens: 5,
+            ..Default::default()
+        });
+        assert!(tracker.current().cost_estimate.is_none());
+        assert!(tracker.current().cost_usd.is_none());
+    }
 }
 
 // ─── Built-in tool sets ──────────────────────────────────────────────────────
@@ -393,20 +385,23 @@ pub fn filesystem() -> Vec<Box<dyn Tool>> {
     ]
 }
 
-/// Shell tools: Bash, PowerShell.
+/// Shell tools: Bash (with its background task tools), PowerShell.
 pub fn shell() -> Vec<Box<dyn Tool>> {
     vec![
         Box::new(bash::BashTool),
+        Box::new(bash::BashTaskStatusTool),
+        Box::new(bash::BashTaskOutputTool),
+        Box::new(bash::BashTaskStopTool),
         Box::new(powershell::PowerShellTool),
     ]
 }
 
-/// Web tools: WebFetch, WebSearch, ExaSearch.
+/// Web tools: WebFetch, WebSearch (providers, including Exa, are configured
+/// in `bricks.toml` `[web.search]`).
 pub fn web() -> Vec<Box<dyn Tool>> {
     vec![
         Box::new(web_fetch::WebFetchTool),
         Box::new(web_search::WebSearchTool),
-        Box::new(exa_search::ExaSearchTool),
     ]
 }
 

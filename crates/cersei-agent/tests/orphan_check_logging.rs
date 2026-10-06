@@ -11,7 +11,7 @@
 //! tracing subscriber, which can only be done once per process.
 
 use cersei_agent::Agent;
-use cersei_provider::OpenAi;
+mod common;
 use cersei_types::{ContentBlock, Message, ToolResultContent};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
@@ -102,14 +102,7 @@ async fn a_request_carrying_an_orphaned_tool_result_is_reported_before_send() {
 
     let url = serve_text_replies();
     let agent = Agent::builder()
-        .provider(
-            OpenAi::builder()
-                .api_key("test-key")
-                .base_url(&url)
-                .model("gpt-4o")
-                .build()
-                .expect("build provider"),
-        )
+        .provider(common::provider(&url, "chat_completions", 128_000))
         .model("gpt-4o")
         .max_turns(2)
         .max_tokens(64)

@@ -21,7 +21,12 @@ async fn main() -> anyhow::Result<()> {
     println!("\n\x1b[36m── Session 1: Initial prompt ──\x1b[0m");
 
     let agent = Agent::builder()
-        .provider(Anthropic::from_env()?)
+        .provider(cersei::provider_from_config(
+            None,
+            &std::env::args()
+                .nth(1)
+                .expect("usage: <example> provider_id/model_id  (see docs/providers.md)"),
+        )?)
         .tools(cersei::tools::filesystem())
         .system_prompt("You are a helpful assistant. Remember context across messages.")
         .memory(JsonlMemory::new(tmp.path()))
@@ -41,7 +46,12 @@ async fn main() -> anyhow::Result<()> {
     println!("\n\x1b[36m── Session 2: Resume and verify ──\x1b[0m");
 
     let agent2 = Agent::builder()
-        .provider(Anthropic::from_env()?)
+        .provider(cersei::provider_from_config(
+            None,
+            &std::env::args()
+                .nth(1)
+                .expect("usage: <example> provider_id/model_id  (see docs/providers.md)"),
+        )?)
         .tools(cersei::tools::filesystem())
         .system_prompt("You are a helpful assistant. Remember context across messages.")
         .memory(JsonlMemory::new(tmp.path()))

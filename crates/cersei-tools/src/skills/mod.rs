@@ -71,8 +71,7 @@ impl LoadedSkill {
 /// Strip YAML frontmatter from content.
 /// Handles `---\n...\n---\n` format.
 pub fn strip_frontmatter(content: &str) -> String {
-    if content.starts_with("---") {
-        let after_open = &content[3..];
+    if let Some(after_open) = content.strip_prefix("---") {
         if let Some(close_pos) = after_open.find("\n---") {
             let rest = &after_open[close_pos + 4..];
             return rest.trim_start_matches('\n').to_string();

@@ -1,0 +1,69 @@
+schema_version = 1
+
+[filters.cargo-test]
+description = "`cargo test` / `cargo nextest run`: build noise and passing tests summarised; failures, panics and summaries kept."
+match = [{ program = "cargo", subcommands = ["test", "t", "nextest run"] }]
+options_with_value = ["-p", "--package", "-j", "--jobs", "--target", "--features", "-F", "--manifest-path", "--config", "-Z", "-C", "--profile", "--test", "--bench", "--bin", "--example"]
+structured = "cargo-json"
+strip_lines_matching = [
+    '^\s*(Compiling|Checking|Downloaded|Downloading|Updating|Locking|Adding|Fresh|Blocking|Finished|Running|Doc-tests|Documenting)\s',
+    '^\s*Building \[',
+    '^running \d+ tests?$',
+    '^\s*$',
+]
+summarize_lines = [
+    { pattern = '^test .+ \.\.\. ok$', label = "passing tests" },
+    { pattern = '^test .+ \.\.\. ignored(, .*)?$', label = "ignored tests" },
+    { pattern = '^\s+PASS \[', label = "passing tests (nextest)" },
+    { pattern = '^test result: ok\. 0 passed; 0 failed; 0 ignored', label = "empty test targets" },
+]
+protect_lines = ['^test result: ', '^\s+`--(lib|test|bin|bench|doc)', '^error: \d+ targets? failed']
+head_lines = 20
+tail_lines = 60
+max_lines = 250
+
+[filters.cargo-build]
+description = "`cargo build/check/clippy/doc`: progress removed; every diagnostic kept."
+match = [{ program = "cargo", subcommands = ["build", "b", "check", "c", "clippy", "doc", "rustc", "fix"] }]
+options_with_value = ["-p", "--package", "-j", "--jobs", "--target", "--features", "-F", "--manifest-path", "--config", "-Z", "-C", "--profile"]
+structured = "cargo-json"
+strip_lines_matching = [
+    '^\s*(Compiling|Checking|Documenting|Downloaded|Downloading|Updating|Locking|Adding|Fresh|Blocking|Finished|Packaging|Generated|Removed|Fixed|Migrating)\s',
+    '^\s*Building \[',
+    '^\s*$',
+]
+protect_lines = ['^(warning|error): .*generated \d+ (warnings?|errors?)']
+max_lines = 300
+
+[filters.cargo-run]
+description = "`cargo run`: cargo's own build noise removed; the program output is handled generically."
+match = [{ program = "cargo", subcommands = ["run", "r"] }]
+options_with_value = ["-p", "--package", "-j", "--jobs", "--target", "--features", "-F", "--manifest-path", "--config", "-Z", "-C", "--profile", "--bin", "--example"]
+strip_lines_matching = [
+    '^\s*(Compiling|Checking|Downloaded|Downloading|Updating|Locking|Adding|Fresh|Blocking|Finished)\s',
+    '^\s*Running `',
+    '^\s*Building \[',
+]
+head_lines = 60
+tail_lines = 140
+max_lines = 300
+
+[filters.cargo-audit]
+description = "`cargo audit`: database loading removed; every advisory kept, vulnerabilities ranked above warnings."
+match = [{ program = "cargo", subcommands = ["audit"] }, { program = "cargo-audit" }]
+strip_lines_matching = ['^\s*(Fetching|Loaded|Updating|Scanning)\s', '^\s*$']
+diagnostic_blocks = [
+    { start = '^Crate:\s', end = "blank", severity = "error", warning_if = '^Warning:\s', kind = "advisory", max_lines = 60 },
+]
+max_lines = 300
+
+[filters.cargo]
+description = "Other cargo sub-commands: build noise removed."
+match = [{ program = "cargo" }]
+options_with_value = ["-p", "--package", "-j", "--jobs", "--manifest-path", "--config", "-Z", "-C"]
+strip_lines_matching = [
+    '^\s*(Compiling|Checking|Downloaded|Downloading|Updating|Locking|Adding|Fresh|Blocking|Finished)\s',
+    '^\s*Building \[',
+    '^\s*$',
+]
+max_lines = 250
