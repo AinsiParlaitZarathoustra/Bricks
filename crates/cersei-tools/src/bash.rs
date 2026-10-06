@@ -703,6 +703,37 @@ mod tests {
         }
     }
 
+    /// A quick command returns quickly, with all its output: the end of the
+    /// output is not waited for once nothing can write to it any more (on
+    /// macOS the FIFO's end was never reported and each command took two
+    /// 500 ms windows).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_quick_command_does_not_wait_for_the_output_window() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = ctx(dir.path());
+        let big = "seq 1 20000";
+        BashTool
+            .execute(serde_json::json!({ "command": "true" }), &c)
+            .await;
+        let start = std::time::Instant::now();
+        let r = BashTool
+            .execute(serde_json::json!({ "command": big }), &c)
+            .await;
+        let took = start.elapsed();
+        let Some(ToolBody::Streams { stdout, .. }) = r.report.map(|r| r.body) else {
+            panic!("streams")
+        };
+        assert!(
+            stdout.starts_with("1\n") && stdout.trim_end().ends_with("20000"),
+            "complete output"
+        );
+        assert!(
+            took < std::time::Duration::from_millis(400),
+            "took {took:?}"
+        );
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn results_carry_structured_data() {

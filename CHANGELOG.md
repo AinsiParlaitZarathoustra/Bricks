@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Fixed — performance regressions found by re-running the benchmarks
+
+- **Bash: 1 s per command on macOS.** The kernel never reports the end of the output FIFOs, so each command waited two 500 ms drain windows (1 051 ms per `echo`). When nothing the command started is left, the output is now read until it is quiet (15 ms) instead: 37.6 ms per command. Regression test `a_quick_command_does_not_wait_for_the_output_window`.
+- **Agent construction: 29 ms and 2.3 MB per agent.** The built-in compression rules were re-parsed from TOML for every agent built with the default configuration. They are now parsed once per process and shared (`RuleSet::builtin_shared`): 33.9 µs and 71.8 KB per agent.
+- Stress suites (`crates/cersei/examples/stress_*`): expectations brought up to date (tool counts, compaction prompt wording, removed tool results, a stub model window too small for today's tool definitions); all 258 checks pass. `orchestration() = 3 tools` already failed in Cersei 0.1.6.
+
+### Added — benchmarks
+
+- `cersei-memory` example `memory_bench` (the README's Memory I/O table on the current API) and `scripts/bench_cli.py` (startup, binary size and peak RSS of `bricks` vs other agent CLIs; `--version` only). README rewritten with the re-measured figures and what was not re-run.
+
 ### Added — `bricks` CLI, command/event contract and terminal interface
 
 - **Engine contract `cersei_agent::control`**: typed `Command`s (submit, cancel, set_model, compact, clear_context, resume, approve) and versioned `Envelope`s (schema 1, `session_id`, `run_id`, contiguous `seq`, `type`) with one `run_finished` per run (succeeded, failed, cancelled) and memory maintenance as its own phase after it. A `Controller` (the narrow entry point frontends use) and an `EventQueue`: bounded, deltas merged when the consumer is slow, nothing else dropped, cancellation never blocked by the consumer. Rules during a run: cancel immediate; model change applies from the next turn; submit/resume/compact/clear refused. See `docs/cli.md`.

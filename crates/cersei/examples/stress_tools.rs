@@ -65,8 +65,8 @@ async fn run() {
             &format!("all() returns {} tools", all.len()),
             all.len() >= 24
         );
-        check!(&format!("filesystem() = {} tools", fs.len()), fs.len() == 6);
-        check!(&format!("shell() = {} tools", sh.len()), sh.len() == 2);
+        check!(&format!("filesystem() = {} tools", fs.len()), fs.len() == 9);
+        check!(&format!("shell() = {} tools", sh.len()), sh.len() == 5);
         check!(&format!("web() = {} tools", web.len()), web.len() == 2);
         check!(
             &format!("planning() = {} tools", plan.len()),
@@ -78,7 +78,7 @@ async fn run() {
         );
         check!(
             &format!("orchestration() = {} tools", orch.len()),
-            orch.len() == 3
+            orch.len() == 9
         );
         check!("none() is empty", cersei::tools::none().is_empty());
 

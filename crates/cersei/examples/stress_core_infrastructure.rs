@@ -343,7 +343,7 @@ fn main() {
         );
         check!(
             "Compact prompt includes instructions",
-            prompt.contains("Summarize")
+            prompt.contains("Summarise")
         );
 
         println!();
@@ -431,7 +431,7 @@ fn main() {
                             ..
                         } = bb
                         {
-                            t.contains("truncated")
+                            t.contains("removed from the active context")
                         } else {
                             false
                         }
@@ -446,7 +446,7 @@ fn main() {
             total_after, truncated_count
         );
         check!("Budget reduced total size", total_after < total_before);
-        check!("Some results were truncated", truncated_count > 0);
+        check!("Some results were removed (budget)", truncated_count > 0);
         check!("Recent results preserved", {
             // Last few messages should NOT be truncated
             let last_result = messages.iter().rev().find_map(|m| match &m.content {

@@ -566,7 +566,18 @@ impl BashSession {
         // nothing else holds the FIFOs.
         drop(out_keep);
         drop(err_keep);
-        let pending = drain(vec![out_task, err_task], self.config.drain).await;
+        let readers = vec![out_task, err_task];
+        let pending = if !self.is_dead() && procs::descendants(self.pid).is_empty() {
+            // Nothing the command started is left: nobody can write to the
+            // FIFOs any more. Some kernels (macOS) never report the EOF of a
+            // FIFO to the readers, so instead of waiting for it, read what
+            // already arrived (until the streams are quiet) and stop.
+            let bytes = || out_cap.lock().raw_bytes() + err_cap.lock().raw_bytes();
+            settle(readers, bytes).await;
+            Vec::new()
+        } else {
+            drain(readers, self.config.drain).await
+        };
         if !self.is_dead() {
             // Processes left behind by the command (`cmd &`, a daemon that
             // kept the shell's outputs) must not outlive it unsupervised.
@@ -688,6 +699,30 @@ async fn drain(
         }
     }
     pending
+}
+
+/// Wait until the readers end, or their streams have been quiet for a
+/// while (bounded), then stop them. For streams nobody can write to any
+/// more: what is in flight is still read, nothing is waited for beyond it.
+async fn settle(tasks: Vec<tokio::task::JoinHandle<()>>, bytes: impl Fn() -> u64) {
+    const QUIET: Duration = Duration::from_millis(15);
+    const LIMIT: Duration = Duration::from_millis(200);
+    let started = Instant::now();
+    let mut last = bytes();
+    let mut quiet_since = Instant::now();
+    while started.elapsed() < LIMIT && tasks.iter().any(|h| !h.is_finished()) {
+        tokio::time::sleep(Duration::from_millis(2)).await;
+        let now = bytes();
+        if now != last {
+            last = now;
+            quiet_since = Instant::now();
+        } else if quiet_since.elapsed() >= QUIET {
+            break;
+        }
+    }
+    for h in tasks {
+        h.abort();
+    }
 }
 
 /// Wait for the END reply of request `id`, up to `limit`.

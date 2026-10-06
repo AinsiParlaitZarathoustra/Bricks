@@ -304,6 +304,16 @@ impl RuleSet {
         Self::load(&RuleSources::default())
     }
 
+    /// The built-in rules, parsed once per process and shared: parsing them
+    /// costs tens of milliseconds, which every agent built with the default
+    /// configuration used to pay.
+    pub fn builtin_shared() -> std::sync::Arc<RuleSet> {
+        static SHARED: std::sync::OnceLock<std::sync::Arc<RuleSet>> = std::sync::OnceLock::new();
+        SHARED
+            .get_or_init(|| std::sync::Arc::new(Self::builtin()))
+            .clone()
+    }
+
     pub fn load(sources: &RuleSources) -> Self {
         let mut loader = Loader::default();
         for (name, text) in BUILTIN_RULE_FILES {

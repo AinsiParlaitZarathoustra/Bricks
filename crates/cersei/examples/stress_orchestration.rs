@@ -22,15 +22,18 @@ impl Provider for EchoProvider {
         "echo"
     }
     fn context_window(&self, _: &str) -> u64 {
-        4096
+        200_000
     }
     async fn complete(
         &self,
         req: cersei::provider::CompletionRequest,
     ) -> cersei_types::Result<CompletionStream> {
+        // The task the agent received (its first user message): the engine
+        // may add its own follow-up messages (nudges) after it.
         let prompt = req
             .messages
-            .last()
+            .iter()
+            .find(|m| m.role == cersei_types::Role::User)
             .and_then(|m| m.get_text())
             .unwrap_or("")
             .to_string();
@@ -405,6 +408,18 @@ async fn run() {
         let all_ok = results
             .iter()
             .all(|r| r.as_ref().map(|(_, r)| !r.is_error).unwrap_or(false));
+        if !all_ok {
+            for (_, r) in results
+                .iter()
+                .filter_map(|r| r.as_ref().ok())
+                .filter(|(_, r)| r.is_error)
+            {
+                eprintln!(
+                    "    worker error: {}",
+                    &r.content[..r.content.len().min(200)]
+                );
+            }
+        }
         check!("All 3 workers completed", all_ok);
 
         // Mark tasks complete

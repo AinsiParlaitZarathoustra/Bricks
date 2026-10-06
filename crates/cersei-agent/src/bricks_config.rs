@@ -39,7 +39,7 @@ impl Default for BricksConfig {
             context: ContextPolicy::default(),
             compression: CompressionConfig::default(),
             compression_level: None,
-            rules: Arc::new(RuleSet::builtin()),
+            rules: RuleSet::builtin_shared(),
             raw_output_dir: None,
             web: cersei_web::WebConfig::default(),
             diagnostics: Vec::new(),
