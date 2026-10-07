@@ -2,6 +2,31 @@
 
 ## [Unreleased]
 
+## [0.3.6] — 2026-10-07
+
+### Added — shared code understanding engine (`bricks-semantic`, Sprint 9)
+
+- **`bricks-semantic` crate**: one `SemanticEngine` per workspace (`SemanticRegistry`; a sub-folder shares it, a worktree or another checkout gets its own), `query(CodeQuery, &Requester) -> CodeResponse`. Intents `auto` (deterministic, explained routing), `text_search`, `find_symbol`, `definition`, `references`, `understand`, `diagnostics`; targets by position, offset, item id or file; scope, limits capped by configuration, context policy, `compact`/`normal`/`deep`. Items carry exact ranges and the content revision, with certainty (`confirmed`/`syntactic`/`textual`), freshness and a ranking score kept apart, plus provenance; homonyms are listed as `ambiguous`, never chosen silently. See `docs/semantic.md`.
+- **9A, without any server**: lexical search on ripgrep's libraries (literal, regex, extensions, exclusions, ignore rules; files and buffers searched alike; parallel, deterministic, bounded by files, matches, size and time, with omissions reported); `PositionMapper` (bytes, lines, Tree-sitter points, LSP positions in UTF-8/16/32; CRLF, lone CR, emoji, invalid positions); views (disk, private buffers, isolated previews) and per-query snapshots, with files changed during a query flagged stale; Tree-sitter scopes, definitions and signatures (Rust, TypeScript, TSX, JavaScript via TSX, Python, Go), per-thread parsers, content-addressed tree cache with incremental reparse, line fallback for other languages; budgeted context (estimated with the Context Manager's heuristic, upper bound kept under the budget, explicit excerpts).
+- **9B, optional language servers**: shared instances per (server, project root), single start under concurrency, per-document versioned synchronization, bounded restarts, idle shutdown, concurrency limit, open-document LRU; document symbols (outline), workspace symbols (on a running server), definition, references, hover and diagnostics with explicit fallbacks. Diagnostics are `analyzed`, `outdated`, `pending` or `unavailable` (no fixed delay), and compared with the previous analyzed version of the file. Servers are never installed by Bricks.
+- **9C**: `CodeScout` tool (in `cersei_tools::filesystem()`), sharing the engine with sub-agents and the controller; prompt guidance only when it is registered (no quota, no relaunch); compiler locations (`cargo --message-format=json` preferred, text parsing marked heuristic) feed `understand` without running anything. Controller command `search` / event `search_results` and `/search` in the terminal interface (text only, never starts a server). Cached answers dropped after every non-read-only tool call. `[semantic]` in `bricks.toml`.
+- **Indexing servers**: `$/progress` and `experimental/serverStatus` are followed; a query waits (bounded) for a server that is indexing, else reports `partial` and adds syntax/text results when the server answered nothing (found by the `--lsp` benchmark: rust-analyzer answered "no reference" before indexing and the result said `complete`). Re-exports listed by `workspace/symbol` are references, not definitions.
+- **Benchmark** `cersei-tools` example `semantic_bench` with `bench/semantic/corpus.json`: on this repository, one call instead of 2–4 and 97–98 % fewer estimated tokens than Grep + Read, equal recall; references exact with rust-analyzer (precision 1.00 vs 0.25–0.40), text mentions without; latency regression when cold (up to ~4×), close warm. Tested against a real rust-analyzer 1.98.1. Numbers and limits in `docs/semantic.md`.
+
+### Changed — `cersei-lsp`
+
+- Capabilities from `initialize` kept (`ServerCaps`: position encoding, sync kind, providers, pull diagnostics); UTF-8 offered besides UTF-16.
+- Server requests (`workspace/configuration`, `client/registerCapability`…) are answered; they were parsed as responses (ids could collide with pending requests) or dropped when their id was a string.
+- `LspClient::request` with timeout and cancellation (`$/cancelRequest`); pending requests fail at once when the server exits (`LspError::ServerExited`; new variants `Cancelled`, `Unsupported`); `did_open`, versioned `did_change_full`, `did_save`, `did_close`; `connect` for in-process servers; the end of the server's stderr explains a failed start.
+- Diagnostics kept with their version and arrival order; `wait_diagnostics`, `pull_diagnostics`. `LspManager::diagnostics` no longer sleeps 200 ms and returns whatever is there: it waits for the version sent (`diagnostics_with_state`); the `LSP` tool says when diagnostics are outdated or pending. `LspManager` resends a file whose content changed (it used to keep the first version forever).
+- URIs percent-encoded and normalized (paths with spaces); `LocationLink` results accepted.
+- `mock` feature: a scripted in-process server for tests.
+
+### Changed — contract
+
+- JSONL schema 3 (`search` command, `search_results` event).
+- `Grep` uses the engine's walker (same ignore rules).
+
 ### Fixed — reliable stop and bounded sub-agents
 
 - **A final answer ends the run.** Removed the relaunches that made agents over-zealous: the F-08 "you answered without using any tools" message with a forced `tool_choice: required` (every session, sub-agents and CLI included); the "read at least 8–10 source files" depth relaunch after an early answer; the "read at least 10 files" hint appended to prompts containing words such as *index* or *summary*. The benchmark verification nudges remain, only in `benchmark_mode` and bounded.

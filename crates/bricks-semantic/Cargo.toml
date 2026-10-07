@@ -1,0 +1,35 @@
+[package]
+name = "bricks-semantic"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shared, per-workspace code understanding engine: lexical search, syntax context and optional LSP"
+
+[dependencies]
+cersei-lsp = { workspace = true }
+cersei-types = { workspace = true }
+grep = { workspace = true }
+ignore = { workspace = true }
+tree-sitter = "^0.26"
+tree-sitter-rust = "0.23"
+tree-sitter-typescript = "0.23"
+tree-sitter-python = "0.23"
+tree-sitter-go = "0.23"
+tokio = { workspace = true, features = ["sync", "time", "rt", "fs", "macros"] }
+tokio-util = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+parking_lot = { workspace = true }
+dashmap = { workspace = true }
+sha2 = { workspace = true }
+tracing = { workspace = true }
+which = { workspace = true }
+
+[dev-dependencies]
+cersei-lsp = { workspace = true, features = ["mock"] }
+tempfile = { workspace = true }
+tokio = { workspace = true, features = ["full", "test-util"] }
+parking_lot = { workspace = true }

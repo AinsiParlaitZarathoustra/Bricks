@@ -26,7 +26,13 @@ pub mod jsonrpc;
 pub mod manager;
 pub mod types;
 
-pub use client::{LspClient, LspError, LspResult};
+pub use client::{
+    normalize_uri, parse_locations, path_to_uri, uri_to_path, DiagnosticsEntry, LspClient,
+    LspError, LspResult, RawLocation, ServerCaps, SyncKind,
+};
 pub use config::LspServerConfig;
-pub use manager::{global_lsp_manager, LspManager};
+pub use manager::{global_lsp_manager, DiagnosticsFreshness, LspManager};
+
+#[cfg(any(test, feature = "mock"))]
+pub mod mock;
 pub use types::*;

@@ -12,6 +12,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
 use ratatui::Frame;
 
+/// Hits listed in the transcript; the rest are counted.
+const SEARCH_SHOWN: usize = 20;
+
 pub fn dim() -> Style {
     Style::default().fg(Color::DarkGray)
 }
@@ -232,6 +235,46 @@ pub fn cell_lines(cell: &Cell, show_thinking: bool) -> Vec<Line<'static>> {
             })
             .collect(),
         Cell::Notice(t) => vec![Line::from(Span::styled(format!("· {t}"), dim()))],
+        Cell::Search {
+            query,
+            status,
+            hits,
+            omitted,
+            notes,
+            elapsed_ms,
+        } => {
+            let mut lines = vec![Line::from(vec![
+                Span::styled("⌕ ", Style::default().fg(Color::Cyan)),
+                Span::raw(format!("{query}  ")),
+                Span::styled(
+                    format!("{} hit(s), {status}, {elapsed_ms} ms", hits.len()),
+                    dim(),
+                ),
+            ])];
+            for h in hits.iter().take(SEARCH_SHOWN) {
+                lines.push(Line::from(vec![
+                    Span::styled(format!("  {}:{}:{} ", h.path, h.line, h.column), dim()),
+                    Span::raw(h.text.trim().to_string()),
+                ]));
+            }
+            let more = hits.len().saturating_sub(SEARCH_SHOWN) + omitted;
+            if more > 0 {
+                lines.push(Line::from(Span::styled(
+                    format!("  … {more} more (narrow the search)"),
+                    dim(),
+                )));
+            }
+            if status != "complete" && hits.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    "  no hit, but the search was not complete: absence proves nothing",
+                    dim(),
+                )));
+            }
+            for n in notes {
+                lines.push(Line::from(Span::styled(format!("  · {n}"), dim())));
+            }
+            lines
+        }
         Cell::Error(t) => vec![Line::from(Span::styled(
             format!("✗ {t}"),
             Style::default().fg(Color::Red),

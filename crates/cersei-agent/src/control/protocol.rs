@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 
 /// Version of the event and command schema. Incremented on any change a
 /// consumer could notice; documented in `docs/cli.md`.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 /// One delivered event.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -227,6 +227,21 @@ pub enum Event {
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
     },
+    /// Results of a `search` command (text search in the workspace, by the
+    /// shared code understanding engine).
+    SearchResults {
+        query: String,
+        /// `complete`, `partial` (limits reached: absence proves nothing),
+        /// `cancelled` or `error`.
+        status: String,
+        hits: Vec<SearchHit>,
+        /// Hits found but not listed.
+        omitted: usize,
+        /// Limits reached, files skipped, errors.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        notes: Vec<String>,
+        elapsed_ms: u64,
+    },
     /// A command was refused; nothing changed.
     CommandRejected {
         command: String,
@@ -259,6 +274,7 @@ impl Event {
             Event::RunFinished { .. } => "run_finished",
             Event::MemoryMaintenanceStarted => "memory_maintenance_started",
             Event::MemoryMaintenanceFinished { .. } => "memory_maintenance_finished",
+            Event::SearchResults { .. } => "search_results",
             Event::CommandRejected { .. } => "command_rejected",
         }
     }
@@ -269,6 +285,15 @@ impl Event {
     pub fn is_delta(&self) -> bool {
         matches!(self, Event::TextDelta { .. } | Event::ThinkingDelta { .. })
     }
+}
+
+/// One hit of a `search`: 1-based line, 1-based column in characters.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SearchHit {
+    pub path: String,
+    pub line: u32,
+    pub column: u32,
+    pub text: String,
 }
 
 /// A block of a prompt, as a frontend builds it. The engine converts it at
@@ -322,6 +347,13 @@ pub enum Command {
     ClearContext,
     /// Switch to another stored session. Refused during a run.
     Resume { session_id: String },
+    /// Search the workspace's text (literal, or a regex). Read-only:
+    /// accepted during a run; answered by `search_results`.
+    Search {
+        text: String,
+        #[serde(default)]
+        regex: bool,
+    },
     /// Answer an approval request.
     Approve {
         approval_id: String,
@@ -340,6 +372,7 @@ impl Command {
             Command::Compact => "compact",
             Command::ClearContext => "clear_context",
             Command::Resume { .. } => "resume",
+            Command::Search { .. } => "search",
             Command::Approve { .. } => "approve",
         }
     }

@@ -57,6 +57,15 @@ pub enum Cell {
     },
     Notice(String),
     Error(String),
+    /// Results of `/search` (computed by the engine, shown as is).
+    Search {
+        query: String,
+        status: String,
+        hits: Vec<cersei_agent::control::SearchHit>,
+        omitted: usize,
+        notes: Vec<String>,
+        elapsed_ms: u64,
+    },
     RunEnd {
         outcome: RunOutcome,
         error: Option<String>,
@@ -481,6 +490,21 @@ impl App {
                     error: error.clone(),
                 });
             }
+            Event::SearchResults {
+                query,
+                status,
+                hits,
+                omitted,
+                notes,
+                elapsed_ms,
+            } => self.cells.push(Cell::Search {
+                query: query.clone(),
+                status: status.clone(),
+                hits: hits.clone(),
+                omitted: *omitted,
+                notes: notes.clone(),
+                elapsed_ms: *elapsed_ms,
+            }),
             Event::CommandRejected { reason, .. } => self.error(reason.clone()),
         }
     }

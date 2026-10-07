@@ -90,8 +90,7 @@ fn grep_blocking(
     use grep::regex::RegexMatcherBuilder;
     use grep::searcher::sinks::UTF8;
     use grep::searcher::SearcherBuilder;
-    use ignore::overrides::OverrideBuilder;
-    use ignore::{WalkBuilder, WalkState};
+    use ignore::WalkState;
 
     let matcher = RegexMatcherBuilder::new()
         .case_insensitive(opts.case_insensitive)
@@ -99,30 +98,20 @@ fn grep_blocking(
         .build(pattern)
         .map_err(|e| SearchError::InvalidPattern(e.to_string()))?;
 
-    let mut builder = WalkBuilder::new(path);
-    if opts.no_ignore {
-        builder.standard_filters(false);
-    } else {
-        // Honor .gitignore even when the search root isn't inside a git repo,
-        // so filtering is predictable everywhere (not just in checked-out repos).
-        builder.require_git(false);
-    }
-    builder.hidden(!opts.hidden);
+    // The walker shared with the code understanding engine: same ignore
+    // rules, same hidden-file default.
+    let filters = bricks_semantic::lexical::WalkFilters {
+        include: opts.glob_filter.iter().cloned().collect(),
+        no_ignore: opts.no_ignore,
+        hidden: opts.hidden,
+        ..Default::default()
+    };
+    let mut builder = bricks_semantic::lexical::walk_builder(path, &filters)
+        .map_err(SearchError::InvalidPattern)?;
     let threads = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1);
     builder.threads(threads);
-
-    // Apply an optional whitelist glob (e.g. `*.rs`) over file paths.
-    if let Some(ref glob) = opts.glob_filter {
-        let mut ob = OverrideBuilder::new(path);
-        ob.add(glob)
-            .map_err(|e| SearchError::InvalidPattern(e.to_string()))?;
-        let overrides = ob
-            .build()
-            .map_err(|e| SearchError::InvalidPattern(e.to_string()))?;
-        builder.overrides(overrides);
-    }
 
     let results: Arc<Mutex<Vec<SearchMatch>>> = Arc::new(Mutex::new(Vec::new()));
     let max = opts.max_results;

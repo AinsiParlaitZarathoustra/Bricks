@@ -868,3 +868,86 @@ mod maintenance {
         assert_eq!(gate.completed.load(Ordering::SeqCst), calls);
     }
 }
+
+/// The agent's CodeScout and the frontend's `search` use one engine, and a
+/// final answer still ends the run once.
+#[tokio::test]
+async fn agent_and_frontend_share_the_code_engine() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("lib.rs"),
+        "pub fn shared_marker() -> u32 { 1 }\n",
+    )
+    .unwrap();
+    let script = Script::new(vec![
+        Reply::tool("c1", "CodeScout", json!({"query": "shared_marker"})),
+        Reply::text("found it"),
+    ]);
+    let catalog = ScriptedCatalog::new(&["a"], script.clone());
+    let mut bricks = BricksConfig::default();
+    bricks.agent.model = Some("test/a".into());
+    // A distinct configuration: an engine of its own for this test.
+    bricks.semantic.max_results = 41;
+    bricks.semantic.lsp.enabled = false;
+    let mut cfg = EngineConfig::new(dir.path(), catalog, bricks, dir.path().join(".sessions"));
+    cfg.tools = Arc::new(cersei_tools::filesystem);
+    let (ctl, mut events) = Controller::open(
+        cfg,
+        OpenOptions {
+            session: SessionChoice::New,
+            model: None,
+            reasoning: None,
+        },
+    )
+    .await
+    .unwrap();
+    let engine = ctl.semantic_engine();
+    ctl.send(Command::Submit {
+        prompt: Prompt::text("where is shared_marker?"),
+    })
+    .unwrap();
+    let evs = until_finished(&mut events).await;
+    assert_eq!(
+        evs.iter()
+            .filter(|e| e.event.kind() == "run_finished")
+            .count(),
+        1
+    );
+    assert_eq!(outcome(evs.last().unwrap()), RunOutcome::Succeeded);
+    let tool_out = evs
+        .iter()
+        .find_map(|e| match &e.event {
+            Event::ToolFinished { name, output, .. } if name == "CodeScout" => Some(output.clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert!(tool_out.contains("lib.rs:1:8 · definition"), "{tool_out}");
+    assert_eq!(
+        script.requests().len(),
+        2,
+        "one request for the call, one for the answer"
+    );
+    assert_eq!(engine.stats().queries, 1);
+
+    ctl.send(Command::Search {
+        text: "shared_marker".into(),
+        regex: false,
+    })
+    .unwrap();
+    let e = until(&mut events, "search_results").await;
+    match e.event {
+        Event::SearchResults { hits, status, .. } => {
+            assert_eq!(status, "complete");
+            assert_eq!(hits.len(), 1);
+            assert_eq!((hits[0].line, hits[0].column), (1, 8));
+        }
+        _ => unreachable!(),
+    }
+    assert_eq!(engine.stats().queries, 2, "the same engine answered");
+    assert!(ctl
+        .send(Command::Search {
+            text: "  ".into(),
+            regex: false
+        })
+        .is_err());
+}

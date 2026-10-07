@@ -32,7 +32,7 @@ fn json_output_is_complete_versioned_and_alone_on_stdout() {
         "{k:?}"
     );
     for (i, e) in evs.iter().enumerate() {
-        assert_eq!(e["schema"], 2);
+        assert_eq!(e["schema"], 3);
         assert_eq!(e["seq"], i as u64 + 1, "contiguous");
         assert!(e["session_id"].is_string());
     }

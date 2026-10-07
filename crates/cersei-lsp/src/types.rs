@@ -3,14 +3,14 @@
 use serde::{Deserialize, Serialize};
 
 /// Position in a text document (0-based line and character).
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Position {
     pub line: u32,
     pub character: u32,
 }
 
 /// A range in a text document.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Range {
     pub start: Position,
     pub end: Position,

@@ -318,3 +318,57 @@ async fn approvals_are_answered_from_the_keyboard() {
     assert!(!ui.focus_approval);
     assert_eq!(ui.app.applied.len(), 1);
 }
+
+#[tokio::test]
+async fn slash_search_goes_through_the_engine_and_shows_its_results() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("a.rs"), "fn é() { needle(); }\n").unwrap();
+    let (ctl, mut events) = open(dir.path(), script(), ApprovalRules::default()).await;
+    let mut ui = Ui::new(dir.path());
+    ui.on_event(&events.next().await.unwrap());
+    typed(&mut ui, "/search needle(");
+    let effects = ui.on_key(key(KeyCode::Enter));
+    assert_eq!(
+        effects,
+        vec![Effect::Send(Command::Search {
+            text: "needle(".into(),
+            regex: false
+        })]
+    );
+    execute(&ctl, effects).await;
+    loop {
+        let e = tokio::time::timeout(Duration::from_secs(10), events.next())
+            .await
+            .unwrap()
+            .unwrap();
+        ui.on_event(&e);
+        if e.event.kind() == "search_results" {
+            break;
+        }
+    }
+    let cell = ui
+        .app
+        .cells
+        .iter()
+        .find_map(|c| match c {
+            Cell::Search { hits, status, .. } => Some((hits.clone(), status.clone())),
+            _ => None,
+        })
+        .expect("a search cell");
+    assert_eq!(cell.1, "complete");
+    assert_eq!(cell.0.len(), 1);
+    // Column in characters: `é` is one.
+    assert_eq!(
+        (cell.0[0].path.as_str(), cell.0[0].line, cell.0[0].column),
+        ("a.rs", 1, 10)
+    );
+    // A regex.
+    typed(&mut ui, "/search re:need[l]e");
+    assert_eq!(
+        ui.on_key(key(KeyCode::Enter)),
+        vec![Effect::Send(Command::Search {
+            text: "need[l]e".into(),
+            regex: true
+        })]
+    );
+}

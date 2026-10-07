@@ -950,6 +950,20 @@ impl AgentBuilder {
             .unwrap_or_default();
         let initial = self.initial_messages.unwrap_or_default();
 
+        // The workspace's shared code understanding engine, for CodeScout
+        // (and the sub-agents of this workspace, through the registry).
+        if self.tools.iter().any(|t| t.name() == "CodeScout")
+            && self
+                .extensions
+                .get::<cersei_tools::code_scout::SemanticHandle>()
+                .is_none()
+        {
+            let engine = bricks_semantic::SemanticRegistry::global()
+                .engine_for(&working_dir, &bricks.semantic);
+            self.extensions
+                .insert(cersei_tools::code_scout::SemanticHandle(engine));
+        }
+
         let cancel_token = self.cancel_token.unwrap_or_default();
         let run_cancel = cancel_token.child_token();
         Ok(Agent {

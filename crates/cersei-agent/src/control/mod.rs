@@ -20,7 +20,7 @@ pub use controller::{
 };
 pub use protocol::{
     AttachmentInfo, Command, Envelope, Event, FailureKind, MaintenanceOutcome, Prompt, PromptBlock,
-    RunOutcome, WrittenFile, SCHEMA_VERSION,
+    RunOutcome, SearchHit, WrittenFile, SCHEMA_VERSION,
 };
 pub use session::{SessionMeta, SessionSummary};
 pub use settings::{Action, AgentSettings, ApprovalRules};

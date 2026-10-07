@@ -626,6 +626,10 @@ async fn run_loop(
     agent
         .extensions
         .insert(crate::subagent::RunCancellation(cancel.clone()));
+    // So are code-understanding queries.
+    agent
+        .extensions
+        .insert(cersei_tools::code_scout::RunCancel(cancel.clone()));
     let tool_ctx = ToolContext {
         working_dir: agent.working_dir.clone(),
         // One shell session per agent (not per run): state persists across
@@ -1296,6 +1300,17 @@ async fn run_loop(
                 r = futures::future::join_all(exec_futures) => r,
                 _ = cancel.cancelled() => return Err(CerseiError::Cancelled),
             };
+
+            // Anything but a read may have changed files: cached
+            // code-understanding answers are dropped.
+            if results.iter().any(|(_, name, ..)| {
+                agent.tools.iter().any(|t| {
+                    t.name() == name
+                        && t.permission_level() != cersei_tools::PermissionLevel::ReadOnly
+                })
+            }) {
+                cersei_tools::code_scout::notify_workspace_changed(&tool_ctx);
+            }
 
             // Phase 3: Process results sequentially (emit events, build result blocks)
             let mut result_blocks: Vec<ContentBlock> = Vec::new();

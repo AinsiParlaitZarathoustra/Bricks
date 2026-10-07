@@ -4,6 +4,7 @@ pub mod apply_patch;
 pub mod ask_user;
 pub mod bash;
 pub mod bash_classifier;
+pub mod code_scout;
 pub mod code_search;
 pub mod config_tool;
 pub mod cron;
@@ -370,7 +371,8 @@ pub fn coding() -> Vec<Box<dyn Tool>> {
     tools
 }
 
-/// File system tools: Read, Write, Edit, MultiEdit, ApplyPatch, Glob, Grep, NotebookEdit.
+/// File system tools: Read, Write, Edit, MultiEdit, ApplyPatch, Glob, Grep,
+/// CodeSearch, CodeScout, NotebookEdit.
 pub fn filesystem() -> Vec<Box<dyn Tool>> {
     vec![
         Box::new(file_read::FileReadTool),
@@ -381,6 +383,7 @@ pub fn filesystem() -> Vec<Box<dyn Tool>> {
         Box::new(glob_tool::GlobTool),
         Box::new(grep_tool::GrepTool),
         Box::new(code_search::CodeSearchTool::new()),
+        Box::new(code_scout::CodeScoutTool),
         Box::new(notebook_edit::NotebookEditTool),
     ]
 }

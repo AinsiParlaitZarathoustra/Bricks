@@ -3,7 +3,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::process::ChildStdin;
 
 /// A JSON-RPC 2.0 request.
 #[derive(Debug, Serialize)]
@@ -45,10 +44,12 @@ impl Notification {
     }
 }
 
-/// A JSON-RPC 2.0 response.
+/// An incoming JSON-RPC 2.0 message: a response (`id`, no `method`), a
+/// server request (`id` and `method`) or a notification (`method` only).
+/// Server request ids may be numbers or strings.
 #[derive(Debug, Deserialize)]
 pub struct Response {
-    pub id: Option<u64>,
+    pub id: Option<Value>,
     pub result: Option<Value>,
     pub error: Option<RpcError>,
     /// For notifications like publishDiagnostics
@@ -56,14 +57,28 @@ pub struct Response {
     pub params: Option<Value>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct RpcError {
     pub code: i64,
     pub message: String,
 }
 
+/// A reply to a server request.
+#[derive(Debug, Serialize)]
+pub struct Reply {
+    pub jsonrpc: &'static str,
+    pub id: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<RpcError>,
+}
+
 /// Write a JSON-RPC message with Content-Length framing to stdin.
-pub async fn send_message(writer: &mut ChildStdin, msg: &[u8]) -> std::io::Result<()> {
+pub async fn send_message<W: tokio::io::AsyncWrite + Unpin>(
+    writer: &mut W,
+    msg: &[u8],
+) -> std::io::Result<()> {
     let header = format!("Content-Length: {}\r\n\r\n", msg.len());
     writer.write_all(header.as_bytes()).await?;
     writer.write_all(msg).await?;
@@ -91,8 +106,10 @@ pub async fn read_message<R: tokio::io::AsyncRead + Unpin>(
             break; // End of headers
         }
 
-        if let Some(value) = trimmed.strip_prefix("Content-Length: ") {
-            content_length = value.parse().ok();
+        if let Some((name, value)) = trimmed.split_once(':') {
+            if name.trim().eq_ignore_ascii_case("content-length") {
+                content_length = value.trim().parse().ok();
+            }
         }
     }
 

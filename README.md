@@ -50,6 +50,10 @@ bricks resume                                              # pick a stored sessi
 * **Web.** Web search with ordered provider fallback, page reading in
   Markdown, citable passages, and a private-network policy. See
   [docs/web.md](docs/web.md).
+* **Code understanding.** `CodeScout` (and `/search`) answer "where is it
+  defined, who uses it, what is here" in one call with exact, sourced and
+  bounded results: text search, Tree-sitter, and optional language servers
+  (never installed by Bricks). See [docs/semantic.md](docs/semantic.md).
 * **MCP.** A client on the official SDK (`rmcp`), over stdio and Streamable
   HTTP. See [docs/mcp.md](docs/mcp.md).
 * **Long-term memory.** Sourced episodes, entities scoped by
@@ -141,6 +145,7 @@ cersei                facade crate — use cersei::prelude::*
   cersei-compression  tool-output reduction, rules, tree-sitter skeletons
   cersei-memory       sessions, memdir, graph memory, structured long-term memory
   cersei-embeddings   embedding providers, USearch vector index
+  bricks-semantic     shared code understanding engine: lexical, syntax, LSP
   cersei-web          search, fetching, extraction, passages
   cersei-mcp          MCP client (rmcp)
   cersei-types, cersei-hooks, cersei-skills, cersei-lsp, cersei-workflows, …
@@ -303,6 +308,7 @@ were not run.
 | [docs/compression.md](docs/compression.md) | tool-output compression and rules |
 | [docs/shell.md](docs/shell.md) | shell, file tools, result format |
 | [docs/web.md](docs/web.md) | web search and reading |
+| [docs/semantic.md](docs/semantic.md) | code understanding engine, CodeScout, benchmark |
 | [docs/mcp.md](docs/mcp.md) | MCP client |
 | [docs/memory.md](docs/memory.md) | long-term memory and hybrid recall |
 | [docs/bricks.example.toml](docs/bricks.example.toml) | every `bricks.toml` section, annotated |

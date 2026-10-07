@@ -154,17 +154,17 @@ and at most its tools (never a delegation tool), are cancelled with the
 parent's run, and report `completed`, `incomplete`, `cancelled` or `failed`
 with their partial answer.
 
-## The JSONL schema (version 2)
+## The JSONL schema (version 3)
 
 Every line is one envelope:
 
 ```json
-{"schema":2,"session_id":"20261006-141502-a1b2c3","run_id":"run_5f…","seq":7,"at":1791300902123,"type":"tool_started","tool_call_id":"call_1","name":"Glob","input":{"pattern":"*.md"}}
+{"schema":3,"session_id":"20261006-141502-a1b2c3","run_id":"run_5f…","seq":7,"at":1791300902123,"type":"tool_started","tool_call_id":"call_1","name":"Glob","input":{"pattern":"*.md"}}
 ```
 
 | field | |
 |---|---|
-| `schema` | `2`; incremented on any change a consumer could notice (2: `run_finished` gained `incomplete` and `termination`) |
+| `schema` | `3`; incremented on any change a consumer could notice (2: `run_finished` gained `incomplete` and `termination`; 3: the `search` command and its `search_results` event) |
 | `session_id` | the session |
 | `run_id` | the run (absent for session-level events) |
 | `seq` | 1, 2, 3, … contiguous: a gap never happens silently |
@@ -196,17 +196,18 @@ Events (`type`):
 | `run_finished` | `outcome, failure?, error?, termination?, text, turns, approvals_unsatisfied?` | **exactly one per run**; `outcome`: `succeeded`, `incomplete`, `failed`, `cancelled`; `failure`: `approval_required`, `error`; `termination.kind`: `completed`, `max_turns` (`limit`), `output_truncated` (`continuations`), `no_progress` (`repeats`), `content_filtered`, `empty_response`; `turns`: generation turns that got a response |
 | `memory_maintenance_started` | | after `run_finished` |
 | `memory_maintenance_finished` | `outcome, report?, error?` | `outcome`: `completed`, `cancelled`, `failed` |
+| `search_results` | `query, status, hits[{path, line, column, text}], omitted, notes?, elapsed_ms` | answer to `search`; `line`/`column` 1-based, column in characters; `status`: `complete`, `partial` (a limit was reached: absence proves nothing), `cancelled`, `error` |
 | `command_rejected` | `command, reason` | nothing changed |
 
 A short run:
 
 ```text
-{"schema":2,"session_id":"…","seq":1,"at":…,"type":"session_opened","working_dir":"/p","model":"demo/scripted","resumed":false,"message_count":0,"warnings":[]}
-{"schema":2,"session_id":"…","run_id":"run_…","seq":2,"at":…,"type":"run_started","prompt":"Find the README","attachments":[],"model":"demo/scripted"}
-{"schema":2,…,"seq":3,"type":"tool_started","tool_call_id":"call_0","name":"Glob","input":{"pattern":"*.md"}}
-{"schema":2,…,"seq":4,"type":"tool_finished","tool_call_id":"call_0","name":"Glob","is_error":false,"duration_ms":3,"output":"README.md"}
-{"schema":2,…,"seq":9,"type":"text_delta","text":"I listed the Markdown files. …"}
-{"schema":2,…,"seq":14,"type":"run_finished","outcome":"succeeded","termination":{"kind":"completed"},"text":"…","turns":3}
+{"schema":3,"session_id":"…","seq":1,"at":…,"type":"session_opened","working_dir":"/p","model":"demo/scripted","resumed":false,"message_count":0,"warnings":[]}
+{"schema":3,"session_id":"…","run_id":"run_…","seq":2,"at":…,"type":"run_started","prompt":"Find the README","attachments":[],"model":"demo/scripted"}
+{"schema":3,…,"seq":3,"type":"tool_started","tool_call_id":"call_0","name":"Glob","input":{"pattern":"*.md"}}
+{"schema":3,…,"seq":4,"type":"tool_finished","tool_call_id":"call_0","name":"Glob","is_error":false,"duration_ms":3,"output":"README.md"}
+{"schema":3,…,"seq":9,"type":"text_delta","text":"I listed the Markdown files. …"}
+{"schema":3,…,"seq":14,"type":"run_finished","outcome":"succeeded","termination":{"kind":"completed"},"text":"…","turns":3}
 ```
 
 No API key, authentication header or secret appears in any event. The
@@ -222,6 +223,7 @@ views the frontends read do not carry them.
 {"type":"clear_context"}
 {"type":"resume","session_id":"…"}
 {"type":"approve","approval_id":"ap_…","decision":"allow_for_session"}
+{"type":"search","text":"needle","regex":false}
 ```
 
 Rules during a run:
@@ -232,6 +234,9 @@ Rules during a run:
 * `submit`, `resume`, `compact` and `clear_context` are refused
   (`command_rejected`). A second prompt never starts silently in
   parallel.
+* `search` is read-only and accepted at any time; it uses the workspace's
+  shared code engine (the one the agents' `CodeScout` uses) and never
+  starts a language server (see `docs/semantic.md`).
 
 Presentation gestures (opening a window, expanding a block) are not
 commands: they stay in the frontend.
@@ -323,7 +328,7 @@ When a call must be asked about:
 
 ### Commands
 
-`/model [p/m [profile]]` · `/memory` · `/context` · `/cost` · `/session` ·
+`/model [p/m [profile]]` · `/search <text>` (`re:<regex>`) · `/memory` · `/context` · `/cost` · `/session` ·
 `/resume [id]` · `/compact` · `/clear` · `/diff` · `/tools` · `/mcp` ·
 `/config` · `/file <path>` · `/folder <path>` · `/image <path>` · `/help` ·
 `/quit`.

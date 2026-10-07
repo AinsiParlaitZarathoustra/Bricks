@@ -676,6 +676,71 @@ impl Controller {
         Err(reason)
     }
 
+    /// The workspace's shared engine (the one the agents' CodeScout uses).
+    pub fn semantic_engine(&self) -> Arc<bricks_semantic::SemanticEngine> {
+        let wd = self.agent().working_dir().to_path_buf();
+        bricks_semantic::SemanticRegistry::global().engine_for(&wd, &self.inner.cfg.bricks.semantic)
+    }
+
+    /// Text search on the shared engine, answered by `search_results`. It
+    /// never starts a language server and runs beside an active run.
+    fn search(&self, text: String, regex: bool) {
+        use bricks_semantic::{CodeQuery, ContextPolicy, Detail, Intent, MatchMode, Requester};
+        let engine = self.semantic_engine();
+        let wd = self.agent().working_dir().to_path_buf();
+        let q = self.inner.queue.clone();
+        tokio::spawn(async move {
+            let mut query = CodeQuery::text(text.clone())
+                .intent(Intent::TextSearch)
+                .context(ContextPolicy::None)
+                .detail(Detail::Compact);
+            if regex {
+                query.mode = MatchMode::Regex;
+            }
+            query.limits.budget_tokens = Some(engine.config().max_budget_tokens);
+            let r = engine
+                .query(query, &Requester::new("frontend", &wd).without_lsp_start())
+                .await;
+            let hits = r
+                .items
+                .iter()
+                .map(|i| {
+                    let col = i
+                        .line_text
+                        .get(..i.range.start.col as usize)
+                        .map(|p| p.chars().count())
+                        .unwrap_or(0);
+                    SearchHit {
+                        path: i.path.clone(),
+                        line: i.range.start.line + 1,
+                        column: col as u32 + 1,
+                        text: i.line_text.clone(),
+                    }
+                })
+                .collect();
+            let mut omitted = 0;
+            let mut notes: Vec<String> = Vec::new();
+            for o in &r.omissions {
+                if let bricks_semantic::Omission::ItemsOmitted { count, .. } = o {
+                    omitted += count;
+                }
+                notes.push(bricks_semantic::render::omission_text(o));
+            }
+            if let bricks_semantic::ResultStatus::Error { message } = &r.status {
+                notes.push(message.clone());
+            }
+            let ev = Event::SearchResults {
+                query: text,
+                status: r.status.label().to_string(),
+                hits,
+                omitted,
+                notes,
+                elapsed_ms: r.metrics.elapsed_ms,
+            };
+            q.push(None, ev, None).await;
+        });
+    }
+
     fn set_activity(&self, a: Activity) {
         *self.inner.activity.lock() = a;
         self.inner.idle.notify_waiters();
@@ -696,6 +761,13 @@ impl Controller {
                     return Ok(());
                 }
                 self.reject(&cmd, "nothing to cancel".into())
+            }
+            Command::Search { ref text, regex } => {
+                if text.trim().is_empty() {
+                    return self.reject(&cmd, "nothing to search for".into());
+                }
+                self.search(text.clone(), regex);
+                Ok(())
             }
             Command::Approve {
                 ref approval_id,

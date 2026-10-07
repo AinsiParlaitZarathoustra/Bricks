@@ -76,6 +76,23 @@ pub const COMMANDS: &[SlashCommand] = &[
         },
     },
     SlashCommand {
+        name: "search",
+        aliases: &["s"],
+        args: "<text> | re:<regex>",
+        description: "search the workspace's text (shared engine; never starts a language server)",
+        build: |arg| {
+            let arg = arg.trim();
+            if arg.is_empty() {
+                return Err("give a text to search for".into());
+            }
+            let (text, regex) = match arg.strip_prefix("re:") {
+                Some(r) => (r.trim().to_string(), true),
+                None => (arg.to_string(), false),
+            };
+            Ok(Action::Engine(Command::Search { text, regex }))
+        },
+    },
+    SlashCommand {
         name: "memory",
         aliases: &[],
         args: "",

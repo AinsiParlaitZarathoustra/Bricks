@@ -174,9 +174,18 @@ impl Tool for LspTool {
                 Err(e) => ToolResult::error(format!("Symbol extraction failed: {e}")),
             },
 
-            "diagnostics" => match mgr.diagnostics(&path).await {
-                Ok(diags) => {
-                    ToolResult::success(LspManager::format_diagnostics(&diags))
+            "diagnostics" => match mgr.diagnostics_with_state(&path).await {
+                Ok((state, diags)) => {
+                    use cersei_lsp::DiagnosticsFreshness as F;
+                    let note = match state {
+                        F::Analyzed => "",
+                        F::Outdated => "\n(outdated: these diagnostics are for an earlier version of the file)",
+                        F::Pending => "\n(pending: the server has not analyzed this version yet; no diagnostics is not proof of no error)",
+                    };
+                    ToolResult::success(format!(
+                        "{}{note}",
+                        LspManager::format_diagnostics(&diags)
+                    ))
                 }
                 Err(e) => ToolResult::error(format!("Diagnostics failed: {e}")),
             },

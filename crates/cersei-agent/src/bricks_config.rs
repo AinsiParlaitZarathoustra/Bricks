@@ -31,6 +31,8 @@ pub struct BricksConfig {
     pub agent: crate::control::AgentSettings,
     /// `[permissions]`: the approval policy shared by every frontend.
     pub permissions: crate::control::ApprovalRules,
+    /// `[semantic]`: limits of the shared code understanding engine.
+    pub semantic: bricks_semantic::SemanticConfig,
 }
 
 impl Default for BricksConfig {
@@ -45,6 +47,7 @@ impl Default for BricksConfig {
             diagnostics: Vec::new(),
             agent: crate::control::AgentSettings::default(),
             permissions: crate::control::ApprovalRules::default(),
+            semantic: bricks_semantic::SemanticConfig::default(),
         }
     }
 }
@@ -123,6 +126,13 @@ impl BricksConfig {
                  writing or executing)"
             )),
         }
+        match semantic_from_bricks_toml(text) {
+            Ok(Some(sem)) => c.semantic = sem,
+            Ok(None) => {}
+            Err(e) => c
+                .diagnostics
+                .push(format!("{name}: [semantic]: {e} (semantic defaults used)")),
+        }
         match cersei_web::WebConfig::from_bricks_toml(text) {
             Ok(loaded) => {
                 c.web = loaded.config;
@@ -138,6 +148,21 @@ impl BricksConfig {
                 .push(format!("{name}: {e} (web defaults used)")),
         }
         c
+    }
+}
+
+/// The `[semantic]` table, when present.
+fn semantic_from_bricks_toml(
+    text: &str,
+) -> Result<Option<bricks_semantic::SemanticConfig>, String> {
+    let doc: toml::Value = toml::from_str(text).map_err(|e| e.to_string())?;
+    match doc.get("semantic") {
+        None => Ok(None),
+        Some(v) => v
+            .clone()
+            .try_into::<bricks_semantic::SemanticConfig>()
+            .map(Some)
+            .map_err(|e| e.to_string()),
     }
 }
 
@@ -229,5 +254,25 @@ per_host = 0
         );
         assert_eq!(c.web, cersei_web::WebConfig::default());
         assert!(c.diagnostics[0].contains("per_host"), "{:?}", c.diagnostics);
+    }
+
+    #[test]
+    fn semantic_section_sets_limits_and_bad_values_fall_back() {
+        let c = BricksConfig::from_texts(
+            Some("[semantic]\nmax_results = 7\n\n[semantic.lsp]\nenabled = false\n"),
+            &[],
+        );
+        assert_eq!(c.semantic.max_results, 7);
+        assert!(!c.semantic.lsp.enabled);
+        assert_eq!(
+            c.semantic.max_files,
+            bricks_semantic::SemanticConfig::default().max_files
+        );
+        let c = BricksConfig::from_texts(Some("[semantic]\nmax_results = \"many\"\n"), &[]);
+        assert_eq!(
+            c.semantic.max_results,
+            bricks_semantic::SemanticConfig::default().max_results
+        );
+        assert!(c.diagnostics.iter().any(|d| d.contains("[semantic]")));
     }
 }

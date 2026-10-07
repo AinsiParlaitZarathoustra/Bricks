@@ -12,6 +12,7 @@ readme = "../../README.md"
 cersei-types = { workspace = true }
 cersei-mcp = { workspace = true }
 cersei-lsp = { workspace = true }
+bricks-semantic = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

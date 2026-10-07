@@ -136,6 +136,40 @@ max_session_bytes = 67108864    # documents kept per session (oldest removed bey
 # Read by `cersei_memory::structured::MemoryConfig::from_bricks_toml` (feature
 # `structured`). The values below are the defaults, except `space`.
 
+[semantic]
+# The shared code understanding engine (CodeScout, /search). Every value is a
+# ceiling: a query can lower it, never lift it. See docs/semantic.md.
+# max_files = 20000
+# max_matches = 2000
+# max_results = 50
+# max_file_bytes = 2097152
+# max_parsed_files = 200
+# timeout_ms = 15000
+# default_budget_tokens = 4000
+# max_budget_tokens = 16000
+# tree_cache_entries = 512
+# result_cache_entries = 128
+# result_cache_ttl_ms = 30000
+# max_blocking_tasks = 4
+
+[semantic.lsp]
+# Language servers are optional, started on demand, never installed by Bricks.
+# enabled = true
+# request_timeout_ms = 10000
+# startup_timeout_ms = 60000
+# diagnostics_wait_ms = 5000
+# ready_wait_ms = 10000
+# startup_settle_ms = 2000
+# idle_shutdown_secs = 600
+# max_restarts = 2
+# max_open_documents = 64
+# max_concurrent_requests = 8
+# [[semantic.lsp.servers]]
+# name = "rust-analyzer"
+# command = "rust-analyzer"
+# file_patterns = ["*.rs"]
+# extension_to_language = { ".rs" = "rust" }
+
 [memory]
 enabled = false                 # the CLI attaches the long-term memory only when true
 # path = "/absolute/path/memory.grafeo"   # default: ~/.bricks/memory/memory.grafeo

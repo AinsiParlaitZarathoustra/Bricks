@@ -17,8 +17,8 @@ pub struct LspManager {
     clients: HashMap<String, Arc<LspClient>>,
     /// Extension -> server name mapping (built on registration).
     extension_map: HashMap<String, String>,
-    /// Files already opened on their server.
-    opened_files: std::collections::HashSet<String>,
+    /// Files opened on their server: version sent and content sent.
+    opened_files: HashMap<String, (i64, String)>,
     /// Working directory for server processes.
     working_dir: std::path::PathBuf,
 }
@@ -30,7 +30,7 @@ impl LspManager {
             configs: Vec::new(),
             clients: HashMap::new(),
             extension_map: HashMap::new(),
-            opened_files: std::collections::HashSet::new(),
+            opened_files: HashMap::new(),
             working_dir: working_dir.into(),
         }
     }
@@ -124,8 +124,14 @@ impl LspManager {
         Ok(client)
     }
 
-    /// Open a file on the appropriate server.
+    /// Open a file on the appropriate server, or send its new content
+    /// (`didChange`, next version) when it changed since it was sent.
+    /// Returns the client and the version the server now has.
     pub async fn open_file(&mut self, path: &Path) -> LspResult<()> {
+        self.sync_file(path).await.map(|_| ())
+    }
+
+    async fn sync_file(&mut self, path: &Path) -> LspResult<(Arc<LspClient>, i64, u64)> {
         let abs = if path.is_absolute() {
             path.to_path_buf()
         } else {
@@ -133,19 +139,29 @@ impl LspManager {
         };
         let abs_str = abs.display().to_string();
 
-        if self.opened_files.contains(&abs_str) {
-            return Ok(());
-        }
-
         let server_name = self
             .server_name_for_file(&abs)
             .map(String::from)
             .ok_or(LspError::NotStarted)?;
-
         let client = self.ensure_started(&server_name).await?;
-        client.open_document(&abs).await?;
-        self.opened_files.insert(abs_str);
-        Ok(())
+        let content = tokio::fs::read_to_string(&abs).await.unwrap_or_default();
+        let uri = client::path_to_uri(&abs);
+        let seq = client.diagnostics_seq();
+        let version = match self.opened_files.get(&abs_str) {
+            Some((v, sent)) if *sent == content => *v,
+            Some((v, _)) => {
+                let next = v + 1;
+                client.did_change_full(&uri, next, &content).await?;
+                next
+            }
+            None => {
+                let lang = client.language_id_for(&abs);
+                client.did_open(&uri, &lang, 1, &content).await?;
+                1
+            }
+        };
+        self.opened_files.insert(abs_str, (version, content));
+        Ok((client, version, seq))
     }
 
     /// Hover at position.
@@ -207,18 +223,46 @@ impl LspManager {
         client.document_symbols(path).await
     }
 
-    /// Get diagnostics for a file.
+    /// Get diagnostics for a file (see [`LspManager::diagnostics_with_state`]).
     pub async fn diagnostics(&mut self, path: &Path) -> LspResult<Vec<LspDiagnostic>> {
-        self.open_file(path).await?;
-        // Wait briefly for async diagnostics to arrive
-        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        Ok(self.diagnostics_with_state(path).await?.1)
+    }
 
-        let server = self
-            .server_name_for_file(path)
-            .map(String::from)
-            .ok_or(LspError::NotStarted)?;
-        let client = self.clients.get(&server).ok_or(LspError::NotStarted)?;
-        Ok(client.get_diagnostics(path))
+    /// Diagnostics for the file's current content, and whether the server
+    /// analyzed that content. Waits (up to [`DIAGNOSTICS_WAIT`]) for a
+    /// publication of this version — no fixed delay is taken as proof of
+    /// freshness. Pull diagnostics are used when the server offers them.
+    pub async fn diagnostics_with_state(
+        &mut self,
+        path: &Path,
+    ) -> LspResult<(DiagnosticsFreshness, Vec<LspDiagnostic>)> {
+        let (client, version, seq) = self.sync_file(path).await?;
+        let abs = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            self.working_dir.join(path)
+        };
+        let uri = client::path_to_uri(&abs);
+        if client.capabilities().is_some_and(|c| c.diagnostic_pull) {
+            if let Ok(raw) = client.pull_diagnostics(&uri, DIAGNOSTICS_WAIT).await {
+                let file = abs.display().to_string();
+                let items = raw
+                    .iter()
+                    .filter_map(|d| client::parse_diagnostic(d, &file))
+                    .collect();
+                return Ok((DiagnosticsFreshness::Analyzed, items));
+            }
+        }
+        let entry = client
+            .wait_diagnostics(&uri, DIAGNOSTICS_WAIT, |e| is_for_version(e, version, seq))
+            .await;
+        Ok(match entry {
+            Some(e) if is_for_version(&e, version, seq) => {
+                (DiagnosticsFreshness::Analyzed, e.items)
+            }
+            Some(e) => (DiagnosticsFreshness::Outdated, e.items),
+            None => (DiagnosticsFreshness::Pending, Vec::new()),
+        })
     }
 
     /// Get all diagnostics across all servers.
@@ -249,6 +293,39 @@ impl Drop for LspManager {
         for name in self.clients.keys() {
             tracing::debug!("Dropping LSP client '{}'", name);
         }
+    }
+}
+
+/// How long to wait for the diagnostics of a version just sent.
+pub const DIAGNOSTICS_WAIT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Whether diagnostics describe the content that was sent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiagnosticsFreshness {
+    /// Published for this version (or, unversioned, after it was sent).
+    Analyzed,
+    /// Only diagnostics of an earlier version are known.
+    Outdated,
+    /// Nothing published yet: no conclusion is possible.
+    Pending,
+}
+
+impl DiagnosticsFreshness {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Analyzed => "analyzed",
+            Self::Outdated => "outdated",
+            Self::Pending => "pending",
+        }
+    }
+}
+
+/// A publication describes `version`: its version says so, or it is
+/// unversioned and arrived after `sent_seq`.
+pub fn is_for_version(e: &client::DiagnosticsEntry, version: i64, sent_seq: u64) -> bool {
+    match e.version {
+        Some(v) => v == version,
+        None => e.seq > sent_seq,
     }
 }
 

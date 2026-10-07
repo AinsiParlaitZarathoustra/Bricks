@@ -16,3 +16,13 @@ dashmap = "6"
 which = "7"
 tracing = { workspace = true }
 thiserror = { workspace = true }
+tokio-util = { workspace = true }
+
+[features]
+# An in-process scripted language server, for tests.
+mock = []
+
+[dev-dependencies]
+cersei-lsp = { path = ".", features = ["mock"] }
+tokio = { workspace = true, features = ["full"] }
+tempfile = { workspace = true }

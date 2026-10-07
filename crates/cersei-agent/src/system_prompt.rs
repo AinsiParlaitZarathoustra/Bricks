@@ -197,6 +197,11 @@ pub fn build_system_prompt(opts: &SystemPromptOptions) -> String {
         SCOPE_AND_STOPPING.to_string(),
     ];
 
+    // 4b'. Code understanding: only when CodeScout is registered.
+    if opts.tools_available.iter().any(|t| t == "CodeScout") {
+        parts.push(CODE_SCOUT_GUIDANCE.to_string());
+    }
+
     // 4c. Task management: only when TodoWrite is registered.
     if opts.tools_available.iter().any(|t| t == "TodoWrite") {
         parts.push(TASK_MANAGEMENT.to_string());
@@ -384,6 +389,17 @@ const SCOPE_AND_STOPPING: &str = r#"
   and always run a check the user asked for.
 - Once the request is done and verified, give your final answer and stop. Mention
   further work that seems useful instead of doing it unasked.
+"#;
+
+const CODE_SCOUT_GUIDANCE: &str = r#"
+## Understanding code
+
+CodeScout answers "where is X defined", "who uses X", "what is at file:line" and "what
+are this file's errors" in one call, with exact locations, bounded context, and how each
+result was established (confirmed by a language server, syntactic, or textual only).
+It is a convenience, not an obligation: Read and Grep stay fine for simple cases. When
+CodeScout reports several symbols with the same name, choose with its `target_id`; a
+textual or syntactic result is not a confirmed reference.
 "#;
 
 const TOOL_USE_GUIDELINES: &str = r#"
