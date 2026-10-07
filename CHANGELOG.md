@@ -1,6 +1,47 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.6] — 2026-10-07
+
+### Added — concurrent, background and isolated sub-agents (Sprint 10.5)
+
+- **`Agents`**: several sub-agents in one call (`[agents] max_batch`), run concurrently within the session's `max_concurrent` slots; every entry validated before anything starts; results in the order asked; `fail_fast` cancels the siblings, otherwise one failure leaves the others' results; a full queue or an admission timeout is that child's own `failed` result (`AgentQueueFull`, `AgentAdmissionTimeout`). Each `agent_spawned` carries the parent's `tool_call_id` (per call, from the call's own context — no shared mutable state) and its `batch_index`.
+- **Bounded recursion**: sub-agents have `Agent`, `Agents` and `AgentControl` up to `max_depth`, with `max_total_per_run` descendants per top-level run; refusals (`AgentDepthExceeded`, `AgentTotalExceeded`) before any provider is built. An agent waiting for its children releases its slot and its writer admission (`ActivityLease`): a parent → child → grandchild chain completes with `max_concurrent = 1`.
+- **Background agents** (`background: true`): a handle at once; the child survives the parent's turn, its events reach the session stream, its result is kept without waking the parent. **`AgentControl`**: `list`, `status`, `result` (idempotent, no model call), `wait` (bounded; a timeout cancels nothing), `cancel` (with descendants), `inspect_changes`, `apply_changes`, `discard_changes`; per-action permission levels; a sub-agent sees only its descendants.
+- **Worktree isolation** (`isolation: auto` picks it when writers would coexist): `git worktree add -b bricks/<run>/<agent>` in the session's files, user hooks off, from a **snapshot of the parent's effective state** (tracked changes, deletions, modes, binary, untracked non-ignored files) taken without touching the parent's index or files — no stash, reset, checkout, commit, nor any commit required first. **ChangeSets** are diffed from the worktree's baseline (inherited changes are not the child's), applied only on request with `git apply --check` then `git apply` (all or nothing), a conflict writes nothing (`WorktreeConflict`), discard removes only what the manifest says the runtime created and deletes a branch only if it still points at its base. Clear refusals: not a repository, no commit, submodules, collisions, snapshot limits, git < 2.17.
+- **Jobs**: `Bash` with `background: true` returns a `job_id`; the **`Job`** tool (`list`, `status`, `output`, `wait`, `stop`) is scoped to the owning agent; quota `[background] max_jobs` checked before anything starts; stop is TERM to the group and tree, grace, KILL, idempotent; memory bounded per stream and per line (cut lines marked), raw logs capped and kept in the session's files; a sub-agent's jobs stop when it ends, none outlives the session. `[background]` in `bricks.toml`.
+- **Profile skills** loaded into the child's system prompt (every request; within `skills_max_bytes`) and reported in the result (`loaded`, `truncated`, `missing`, `invalid`, `skipped`, with source and revision).
+- **Usage**: `run_usage` (own, descendants, total; `final_total: false` with `pending_agents` while background descendants run, then final), each agent counted once.
+- **Headless drain**: after the answer, background children are waited for up to `[agents] background_drain_ms`, then cancelled; exit code **6** if any did not complete.
+- **Recovery**: instances recorded in `<session files>/agents/manifest.json`; on reopening, unfinished ones are marked `interrupted` — nothing replayed, no old pid touched.
+- **Events and commands** (additive, JSONL schema stays 4): `changes_ready`, `changes_updated`, `run_usage`, `agent_control_result`, `job_started`, `job_output`, `job_finished`; states `queued`, `interrupted`; new optional fields on `agent_spawned` / `agent_finished`; command `agent_control`. Terminal interface: `/agents running|status|result|cancel`, `/changes <id> [inspect|apply|discard]`, `/jobs [stop <id>]`.
+- The legacy `delegate` / `run_batch` paths count against the same slots and totals.
+
+### Fixed (Sprint 10.5)
+
+- `Write`, `Edit`, `MultiEdit` and `NotebookEdit` resolved a relative path against the process's current directory instead of the agent's working directory (`Read` already did): a sub-agent in a worktree would have written into the parent's tree.
+- `ExitWorktree` no longer forces the removal and refuses the runtime's own worktrees.
+- An unfinished output line of a shell command was buffered without bound; it is now cut at `max_line_bytes` (marked).
+
+### Added — native sub-agents and profiles (Sprint 10.1)
+
+- **`Agent` tool, native**: registered in the session agent of the CLI and the controller (`[agents] enabled`, default on), at the `execute` permission level. Delegates one self-contained task to a sub-agent in the **foreground**, with a fresh context (the task and an explicit, bounded `context`; never the parent's conversation, recalled memory or secrets), the parent's approval policy and broker (approvals carry the sub-agent's `agent_id`), the parent's tools rebuilt from its factory (never `tools::all()`, never a delegation tool), its own shell, and the workspace's CodeScout engine, web context and MCP connections. Returns a compact `AgentResult`: status (`completed`, `incomplete`, `failed`, `cancelled`), bounded answer, files changed by applied changes, commands actually run with their outcome, warnings, usage, duration, and a reference to the stored transcript. `AgentProfiles` lists and searches profiles (paged). See `docs/agents.md`.
+- **Profiles** in Markdown with a YAML frontmatter, parsed with `serde-saphyr` under a budget (depth, nodes, aliases, scalar bytes), unknown and duplicate keys refused, no tag execution or interpolation. Registry `<workspace>/.bricks/agents` > `~/.bricks/agents` > built-in, with shadowing shown, localized diagnostics, an invalid or duplicated profile never replaced silently, reload without changing running sub-agents. Seven built-in profiles (`orchestrateur`, `web_searcher`, `inspecteur`, `backend_coder`, `frontend_coder`, `testeur`, `redactor`), no business quota or whitelist; two documented examples, loaded by a test.
+- **`AgentSpawner`**: validation before any provider, shell or request (empty or invisible task, unknown profile, model, reasoning, limits, unknown fields, `background`/`worktree` → `not available yet` in 10.1, lifted in 10.5, depth, cancelled run); model and reasoning resolved request > profile > parent > default, with free reasoning ids, explicit aliases (`[agents.reasoning_aliases]`), `auto` only through `[agents] auto_model`, inconsistent explicit overrides refused, profile preferences degraded with a warning; instances with one terminal transition; writer admission per workspace (a sub-agent holds it for its run, other writing calls wait; the delegation call holds nothing, so no deadlock); the child runs in a task the parent's run supervises — a cancelled run waits (bounded) for the child's cleanup instead of dropping it.
+- **Events** `agent_spawned`, `agent_state`, `agent_tool_started` / `agent_tool_finished`, `agent_finished`, `agent_profiles`; `approval_requested.agent_id`; commands `list_agent_profiles`, `reload_agent_profiles`; `/agents` in the terminal interface, sub-agent cells with their tool lines; headless text lines. JSONL schema 4.
+- `[agents]` in `bricks.toml`.
+
+### Changed — durations in milliseconds
+
+- Durations shown to people are in milliseconds everywhere: tool lines (`Grep process_payment  12 ms`, even at `0 ms`), run summaries (`done in 12345 ms`, never switched to seconds), tool detail, headless text (`✓ Grep  12 ms`), tool report headers (`Succès (420 ms)` — a 3 ms call used to read `0.00s`), shell progress, readiness and background job status. `<1 ms` for a measured duration under a millisecond; a replayed call has no duration rather than an invented `0`; running calls show the elapsed time measured by the interface. `cersei_types::duration`. Stored `duration_ms` values and configured timeouts are unchanged.
+
+### Fixed
+
+- The runner's shell progress relay kept a strong reference to the run's event stream in the agent's extensions, so the stream could outlive its run; it is now weak.
+
+### Changed — contract
+
+- `cersei_tools::permissions::PermissionRequest` and `control::ApprovalRequest` gain `agent_id`. The system prompt's sub-agent section no longer claims sub-agents run in parallel.
+- `Agent::adopt_mcp` (share another agent's MCP connections without closing them).
 
 ## [0.3.6] — 2026-10-07
 

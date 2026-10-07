@@ -248,6 +248,7 @@ impl<'a> EvalCtx<'a> {
             description: format!("agentlang: {tool_name}"),
             id: uuid_like(span),
             preview: None,
+            agent_id: None,
         };
         match self.tools.permissions.check(&req).await {
             PermissionDecision::Allow
@@ -354,6 +355,7 @@ impl<'a> EvalCtx<'a> {
             description: format!("agentlang: permission.ask('{mode}')"),
             id: uuid_like(span),
             preview: None,
+            agent_id: None,
         };
         let granted = matches!(
             self.tools.permissions.check(&req).await,

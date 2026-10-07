@@ -127,6 +127,7 @@ run.
 | 3 | a step needed an approval and nobody could give it |
 | 4 | the answer was delivered, but the long-term memory maintenance failed |
 | 5 | the run stopped at a limit before a final answer (`outcome = incomplete`); the partial answer was printed |
+| 6 | the answer was delivered, but background sub-agents did not complete: still running after `[agents] background_drain_ms` (then cancelled), failed or cancelled; in text mode one line per agent is printed on stderr, with `--json` the `agent_finished` and `run_usage` events say it |
 | 130 | cancelled (Ctrl+C) |
 
 ### When a run stops
@@ -148,23 +149,28 @@ When the run stops at a limit, the history, partial answer and tool results are
 kept, every tool call has a result, and no tool is started afterwards. The
 memory maintenance that follows `run_finished` never restarts the task.
 
-Sub-agents (`Agent` and `delegate` tools, when a program registers them)
-refuse an empty task before anything is built, get their parent's permissions
-and at most its tools (never a delegation tool), are cancelled with the
-parent's run, and report `completed`, `incomplete`, `cancelled` or `failed`
-with their partial answer.
+Sub-agents (the native `Agent` tool, registered in the session agent unless
+`[agents] enabled = false`; see `docs/agents.md`) refuse an invalid request
+before anything is built, get their parent's permissions and at most its
+tools (never a delegation tool), are cancelled with the parent's run (which
+waits for their cleanup), and report `completed`, `incomplete`, `cancelled`
+or `failed` with their partial answer. In headless mode, delegating needs
+`Agent` / `Agents` allowed in `[permissions]` (`execute` tools); allowing
+them allows none of the children's own tools. Background sub-agents are
+drained after the answer (bounded by `[agents] background_drain_ms`), then
+cancelled: exit code 6 if any did not complete.
 
-## The JSONL schema (version 3)
+## The JSONL schema (version 4)
 
 Every line is one envelope:
 
 ```json
-{"schema":3,"session_id":"20261006-141502-a1b2c3","run_id":"run_5f…","seq":7,"at":1791300902123,"type":"tool_started","tool_call_id":"call_1","name":"Glob","input":{"pattern":"*.md"}}
+{"schema":4,"session_id":"20261006-141502-a1b2c3","run_id":"run_5f…","seq":7,"at":1791300902123,"type":"tool_started","tool_call_id":"call_1","name":"Glob","input":{"pattern":"*.md"}}
 ```
 
 | field | |
 |---|---|
-| `schema` | `3`; incremented on any change a consumer could notice (2: `run_finished` gained `incomplete` and `termination`; 3: the `search` command and its `search_results` event) |
+| `schema` | `4`; incremented on any change a consumer could notice (2: `run_finished` gained `incomplete` and `termination`; 3: the `search` command and its `search_results` event; 4: sub-agents — `agent_*` events, `agent_id` in `approval_requested`, `list_agent_profiles` and `reload_agent_profiles`). Additions a consumer can ignore — new event types, new optional fields, new commands, new states — keep the version (Sprint 10.5's runtime is such an addition); a removed or renamed field or event, or a changed meaning, increments it. Consumers ignore unknown types and fields |
 | `session_id` | the session |
 | `run_id` | the run (absent for session-level events) |
 | `seq` | 1, 2, 3, … contiguous: a gap never happens silently |
@@ -182,7 +188,7 @@ Events (`type`):
 | `tool_started` | `tool_call_id, name, input` | concurrent calls have distinct ids |
 | `tool_progress` | `tool_call_id?, name, message` | long calls (shell) |
 | `tool_finished` | `tool_call_id, name, is_error, duration_ms, output` | |
-| `approval_requested` | `approval{approval_id, tool_call_id, tool, level, description, input, preview?}` | `preview.files[{path, kind, before_sha256, diff, added, removed}]` |
+| `approval_requested` | `approval{approval_id, tool_call_id, tool, level, description, input, preview?, agent_id?}` | `preview.files[{path, kind, before_sha256, diff, added, removed}]` |
 | `approval_resolved` | `approval_id, tool_call_id, decision, by` | `decision`: `allow`, `allow_for_session`, `deny`; `by`: `user`, `session`, `non_interactive`, `cancelled` |
 | `edit_applied` | `tool_call_id, tool, files[{path, kind, added, removed}]` | an approved, previewed change was written |
 | `memory_recalled` | `items, tokens, omitted, budget` | what went into the system prompt |
@@ -197,17 +203,27 @@ Events (`type`):
 | `memory_maintenance_started` | | after `run_finished` |
 | `memory_maintenance_finished` | `outcome, report?, error?` | `outcome`: `completed`, `cancelled`, `failed` |
 | `search_results` | `query, status, hits[{path, line, column, text}], omitted, notes?, elapsed_ms` | answer to `search`; `line`/`column` 1-based, column in characters; `status`: `complete`, `partial` (a limit was reached: absence proves nothing), `cancelled`, `error` |
+| `agent_spawned` | `agent{agent_id, parent_id?, root_run_id, tool_call_id?, batch_index?, background, depth, profile, profile_source, profile_revision, model{requested, applied, reason?}, reasoning{…}, max_turns, workspace, isolation, branch?, task, created_at}` | a sub-agent was created (see `docs/agents.md`); `tool_call_id` is the parent's call |
+| `agent_state` | `agent_id, state, reason?` | `queued`, `waiting_admission`, `starting`, `running`, `cancelling`, then one of `completed`, `incomplete`, `failed`, `cancelled`, `interrupted` (found unfinished when the session reopened) |
+| `agent_tool_started` / `agent_tool_finished` | `agent_id, tool_call_id, name, input` / `…, is_error, duration_ms` | the sub-agent's tool calls (its text is never streamed) |
+| `agent_finished` | `result{agent_id, profile, status, termination?, error?, summary, files_changed, commands, warnings, turns, usage, duration_ms, model, reasoning?, workspace, transcript?, changeset?, branch?, skills?}` | the compact result; its usage is not in the run's `usage` events (see `run_usage`) |
+| `agent_profiles` | `profiles[{name, description, scope, source, valid, error?, shadows}], total, page, diagnostics?` | answer to `list_agent_profiles` / `reload_agent_profiles` |
+| `changes_ready` | `changeset{id, agent_id, task, workspace, branch, base_sha, snapshot_id, baseline_tree, final_tree, files[{path, status, from?, added?, removed?, binary}], patch, patch_bytes, state, validations, note?}` | an isolated sub-agent ended with changes; nothing applied |
+| `changes_updated` | `changeset_id, state, files, detail?` | `applied`, `conflict` (nothing written), `discarded` |
+| `run_usage` | `root_run_id, own, descendants, total, final_total, pending_agents` | after a run, then once more when its last background descendant ends (`final_total: true`); each agent counted once |
+| `agent_control_result` | `action, ok, text` | answer to `agent_control` |
+| `job_started` / `job_output` / `job_finished` | `job_id, agent_id, root_run_id, command, cwd, pid` / `job_id, stdout_bytes, stderr_bytes` / `job_id, state, code?, signal?, duration_ms, logs` | background commands; `job_output` carries counts, never the output |
 | `command_rejected` | `command, reason` | nothing changed |
 
 A short run:
 
 ```text
-{"schema":3,"session_id":"…","seq":1,"at":…,"type":"session_opened","working_dir":"/p","model":"demo/scripted","resumed":false,"message_count":0,"warnings":[]}
-{"schema":3,"session_id":"…","run_id":"run_…","seq":2,"at":…,"type":"run_started","prompt":"Find the README","attachments":[],"model":"demo/scripted"}
-{"schema":3,…,"seq":3,"type":"tool_started","tool_call_id":"call_0","name":"Glob","input":{"pattern":"*.md"}}
-{"schema":3,…,"seq":4,"type":"tool_finished","tool_call_id":"call_0","name":"Glob","is_error":false,"duration_ms":3,"output":"README.md"}
-{"schema":3,…,"seq":9,"type":"text_delta","text":"I listed the Markdown files. …"}
-{"schema":3,…,"seq":14,"type":"run_finished","outcome":"succeeded","termination":{"kind":"completed"},"text":"…","turns":3}
+{"schema":4,"session_id":"…","seq":1,"at":…,"type":"session_opened","working_dir":"/p","model":"demo/scripted","resumed":false,"message_count":0,"warnings":[]}
+{"schema":4,"session_id":"…","run_id":"run_…","seq":2,"at":…,"type":"run_started","prompt":"Find the README","attachments":[],"model":"demo/scripted"}
+{"schema":4,…,"seq":3,"type":"tool_started","tool_call_id":"call_0","name":"Glob","input":{"pattern":"*.md"}}
+{"schema":4,…,"seq":4,"type":"tool_finished","tool_call_id":"call_0","name":"Glob","is_error":false,"duration_ms":3,"output":"README.md"}
+{"schema":4,…,"seq":9,"type":"text_delta","text":"I listed the Markdown files. …"}
+{"schema":4,…,"seq":14,"type":"run_finished","outcome":"succeeded","termination":{"kind":"completed"},"text":"…","turns":3}
 ```
 
 No API key, authentication header or secret appears in any event. The
@@ -224,7 +240,16 @@ views the frontends read do not carry them.
 {"type":"resume","session_id":"…"}
 {"type":"approve","approval_id":"ap_…","decision":"allow_for_session"}
 {"type":"search","text":"needle","regex":false}
+{"type":"list_agent_profiles","query":"review","page":0}
+{"type":"reload_agent_profiles"}
+{"type":"agent_control","action":"apply_changes","changeset_id":"cs_…"}
+{"type":"agent_control","action":"stop_job","job_id":"job_…"}
 ```
+
+`agent_control.action`: `list`, `status`, `result`, `cancel` (`agent_id`),
+`inspect_changes`, `apply_changes`, `discard_changes` (`changeset_id`),
+`jobs`, `stop_job` (`job_id`). Frontends see every instance and job of the
+session.
 
 Rules during a run:
 
@@ -234,6 +259,9 @@ Rules during a run:
 * `submit`, `resume`, `compact` and `clear_context` are refused
   (`command_rejected`). A second prompt never starts silently in
   parallel.
+* `list_agent_profiles`, `reload_agent_profiles` and `agent_control` are
+  accepted at any time; a reload does not change a running sub-agent.
+  `cancel` while idle cancels pending background sub-agents.
 * `search` is read-only and accepted at any time; it uses the workspace's
   shared code engine (the one the agents' `CodeScout` uses) and never
   starts a language server (see `docs/semantic.md`).
@@ -328,7 +356,9 @@ When a call must be asked about:
 
 ### Commands
 
-`/model [p/m [profile]]` · `/search <text>` (`re:<regex>`) · `/memory` · `/context` · `/cost` · `/session` ·
+`/model [p/m [profile]]` · `/search <text>` (`re:<regex>`) ·
+`/agents [words | reload | running | status <id> | result <id> | cancel <id>]` ·
+`/changes <id> [inspect | apply | discard]` · `/jobs [stop <id>]` · `/memory` · `/context` · `/cost` · `/session` ·
 `/resume [id]` · `/compact` · `/clear` · `/diff` · `/tools` · `/mcp` ·
 `/config` · `/file <path>` · `/folder <path>` · `/image <path>` · `/help` ·
 `/quit`.
@@ -424,8 +454,8 @@ bricks --providers scripts/demo_providers.toml            # the interface
   engine behaviour, not a CLI choice.
 * Tool progress events carry the tool's name, not its call id (the
   engine's progress hook does not know the call).
-* Sub-agent events are not forwarded. A sub-agent is identified by the
-  `tool_call_id` of the call that started it.
+* A sub-agent's events carry its `agent_id`, parent, root run and the
+  parent's `tool_call_id` (and `batch_index` within `Agents`).
 * No MCP server is configured from `bricks.toml` yet: `/mcp` says so.
 * No syntax highlighting, clipboard access or in-terminal image preview.
   Images are attached by path.

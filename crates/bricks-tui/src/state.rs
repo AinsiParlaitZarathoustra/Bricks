@@ -11,7 +11,7 @@ use std::time::Instant;
 /// originals with the session).
 pub const KEPT_OUTPUT_BYTES: usize = 256 * 1024;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CallStatus {
     Running,
     Ok,
@@ -24,10 +24,26 @@ pub struct ToolCall {
     pub name: String,
     pub summary: String,
     pub status: CallStatus,
-    pub duration_ms: u64,
+    /// Final duration, from the engine (`duration_ms`); unknown for calls
+    /// replayed from a stored session.
+    pub duration_ms: Option<u64>,
+    /// When the interface saw the call start: the live elapsed time is
+    /// computed from it locally, never asked to the engine.
+    pub started: Option<std::time::Instant>,
     pub output: String,
     pub output_bytes: usize,
     pub progress: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentCell {
+    pub info: cersei_agent::agents::SpawnInfo,
+    pub state: cersei_agent::agents::InstanceState,
+    pub reason: Option<String>,
+    pub tools: Vec<ToolCall>,
+    pub result: Option<cersei_agent::agents::AgentResult>,
+    /// For the live elapsed time, measured here.
+    pub started: std::time::Instant,
 }
 
 #[derive(Debug, Clone)]
@@ -57,6 +73,8 @@ pub enum Cell {
     },
     Notice(String),
     Error(String),
+    /// A sub-agent: identity, state, its own tool calls, its result.
+    Agent(Box<AgentCell>),
     /// Results of `/search` (computed by the engine, shown as is).
     Search {
         query: String,
@@ -69,7 +87,8 @@ pub enum Cell {
     RunEnd {
         outcome: RunOutcome,
         error: Option<String>,
-        seconds: f64,
+        /// Wall time of the run as the interface saw it.
+        elapsed: std::time::Duration,
     },
 }
 
@@ -80,6 +99,7 @@ impl Cell {
             Cell::Assistant { open, .. } | Cell::Thinking { open, .. } => *open,
             Cell::Tools { calls } => calls.iter().any(|c| c.status == CallStatus::Running),
             Cell::Approval { resolution, .. } => resolution.is_none(),
+            Cell::Agent(a) => a.result.is_none(),
             _ => false,
         }
     }
@@ -165,6 +185,13 @@ impl App {
                 _ => {}
             }
         }
+    }
+
+    fn agent_mut(&mut self, id: &str) -> Option<&mut AgentCell> {
+        self.cells.iter_mut().rev().find_map(|c| match c {
+            Cell::Agent(a) if a.info.agent_id == id => Some(a.as_mut()),
+            _ => None,
+        })
     }
 
     fn calls_mut(&mut self, id: &str) -> Option<&mut ToolCall> {
@@ -283,7 +310,8 @@ impl App {
                     name: name.clone(),
                     summary: summary(input),
                     status: CallStatus::Running,
-                    duration_ms: 0,
+                    duration_ms: None,
+                    started: Some(std::time::Instant::now()),
                     output: String::new(),
                     output_bytes: 0,
                     progress: None,
@@ -325,7 +353,7 @@ impl App {
                     } else {
                         CallStatus::Ok
                     };
-                    t.duration_ms = *duration_ms;
+                    t.duration_ms = Some(*duration_ms);
                     t.output_bytes = output.len();
                     let mut cut = output.len().min(KEPT_OUTPUT_BYTES);
                     while !output.is_char_boundary(cut) {
@@ -446,10 +474,10 @@ impl App {
                     }
                 }
                 self.pending.clear();
-                let seconds = self
+                let elapsed = self
                     .run
                     .take()
-                    .map(|(_, t)| t.elapsed().as_secs_f64())
+                    .map(|(_, t)| t.elapsed())
                     .unwrap_or_default();
                 let mut error = error.clone();
                 if !approvals_unsatisfied.is_empty() {
@@ -466,7 +494,7 @@ impl App {
                 self.cells.push(Cell::RunEnd {
                     outcome: *outcome,
                     error,
-                    seconds,
+                    elapsed,
                 });
             }
             Event::MemoryMaintenanceStarted => self.maintenance = Some(Maintenance::Running),
@@ -505,6 +533,201 @@ impl App {
                 notes: notes.clone(),
                 elapsed_ms: *elapsed_ms,
             }),
+            Event::AgentSpawned { agent } => {
+                self.close_open_text();
+                self.cells.push(Cell::Agent(Box::new(AgentCell {
+                    info: (**agent).clone(),
+                    state: cersei_agent::agents::InstanceState::Created,
+                    reason: None,
+                    tools: Vec::new(),
+                    result: None,
+                    started: std::time::Instant::now(),
+                })));
+            }
+            Event::AgentState {
+                agent_id,
+                state,
+                reason,
+            } => {
+                if let Some(a) = self.agent_mut(agent_id) {
+                    if !a.state.is_terminal() {
+                        a.state = *state;
+                    }
+                    a.reason = reason.clone();
+                }
+            }
+            Event::AgentToolStarted {
+                agent_id,
+                tool_call_id,
+                name,
+                input,
+            } => {
+                if let Some(a) = self.agent_mut(agent_id) {
+                    a.tools.push(ToolCall {
+                        id: tool_call_id.clone(),
+                        name: name.clone(),
+                        summary: summary(input),
+                        status: CallStatus::Running,
+                        duration_ms: None,
+                        started: Some(std::time::Instant::now()),
+                        output: String::new(),
+                        output_bytes: 0,
+                        progress: None,
+                    });
+                }
+            }
+            Event::AgentToolFinished {
+                agent_id,
+                tool_call_id,
+                is_error,
+                duration_ms,
+                ..
+            } => {
+                if let Some(t) = self
+                    .agent_mut(agent_id)
+                    .and_then(|a| a.tools.iter_mut().find(|t| &t.id == tool_call_id))
+                {
+                    t.status = if *is_error {
+                        CallStatus::Failed
+                    } else {
+                        CallStatus::Ok
+                    };
+                    t.duration_ms = Some(*duration_ms);
+                }
+            }
+            Event::AgentFinished { result } => {
+                if let Some(a) = self.agent_mut(&result.agent_id) {
+                    a.result = Some((**result).clone());
+                    for t in a
+                        .tools
+                        .iter_mut()
+                        .filter(|t| t.status == CallStatus::Running)
+                    {
+                        t.status = CallStatus::Failed;
+                    }
+                }
+            }
+            Event::AgentProfiles {
+                profiles,
+                total,
+                page,
+                diagnostics,
+            } => {
+                self.note(format!("{total} sub-agent profile(s), page {page}:"));
+                for p in profiles {
+                    if p.valid {
+                        self.note(format!(
+                            "  {} [{}] {}",
+                            p.name,
+                            p.scope.as_str(),
+                            p.description
+                        ));
+                    } else {
+                        self.error(format!(
+                            "  {} [{}] invalid: {}",
+                            p.name,
+                            p.scope.as_str(),
+                            p.error.clone().unwrap_or_default()
+                        ));
+                    }
+                }
+                for d in diagnostics {
+                    self.error(format!("  {}: {}", d.source, d.message));
+                }
+            }
+            Event::ChangesReady { changeset } => self.note(format!(
+                "changes of {} ready: ChangeSet {} ({} file(s), branch {}) — /changes {} inspect | apply | discard",
+                changeset.agent_id,
+                changeset.id,
+                changeset.files.len(),
+                changeset.branch,
+                changeset.id
+            )),
+            Event::ChangesUpdated {
+                changeset_id,
+                state,
+                files,
+                detail,
+            } => {
+                let msg = format!(
+                    "ChangeSet {changeset_id}: {}{}{}",
+                    format!("{state:?}").to_lowercase(),
+                    if files.is_empty() { String::new() } else { format!(" ({})", files.join(", ")) },
+                    detail.as_deref().map(|d| format!(" — {d}")).unwrap_or_default()
+                );
+                if *state == cersei_agent::agents::ChangeSetState::Conflict {
+                    self.error(msg)
+                } else {
+                    self.note(msg)
+                }
+            }
+            Event::RunUsage {
+                total,
+                own,
+                descendants,
+                pending_agents,
+                final_total,
+                ..
+            } => {
+                if descendants.input_tokens + descendants.output_tokens > 0 || *pending_agents > 0 {
+                    self.note(format!(
+                        "run usage{}: total {} in / {} out (own {} / {}, sub-agents {} / {}){}",
+                        if *final_total { "" } else { " (partial)" },
+                        total.input_tokens,
+                        total.output_tokens,
+                        own.input_tokens,
+                        own.output_tokens,
+                        descendants.input_tokens,
+                        descendants.output_tokens,
+                        if *pending_agents > 0 {
+                            format!(", {pending_agents} sub-agent(s) still running")
+                        } else {
+                            String::new()
+                        }
+                    ));
+                }
+            }
+            Event::JobStarted {
+                job_id,
+                agent_id,
+                command,
+                cwd,
+                pid,
+                ..
+            } => self.note(format!(
+                "⚙ job {job_id} started by {agent_id} (pid {pid}, {cwd}): {command}"
+            )),
+            Event::JobOutput { .. } => {}
+            Event::JobFinished {
+                job_id,
+                state,
+                code,
+                signal,
+                duration_ms,
+                ..
+            } => {
+                let detail = match (code, signal) {
+                    (Some(c), _) => format!(" (code {c})"),
+                    (None, Some(s)) => format!(" (signal {s})"),
+                    _ => String::new(),
+                };
+                let msg = format!(
+                    "⚙ job {job_id} {state}{detail} after {}",
+                    cersei_types::duration::display_ms_u64(*duration_ms)
+                );
+                if state == "completed" || state == "stopped" {
+                    self.note(msg)
+                } else {
+                    self.error(msg)
+                }
+            }
+            Event::AgentControlResult { action, ok, text } => {
+                if *ok {
+                    self.note(format!("{action}: {text}"))
+                } else {
+                    self.error(format!("{action}: {text}"))
+                }
+            }
             Event::CommandRejected { reason, .. } => self.error(reason.clone()),
         }
     }
@@ -534,7 +757,8 @@ impl App {
                         name,
                         summary: summary(&input),
                         status: CallStatus::Ok,
-                        duration_ms: 0,
+                        duration_ms: None,
+                        started: None,
                         output: String::new(),
                         output_bytes: 0,
                         progress: None,

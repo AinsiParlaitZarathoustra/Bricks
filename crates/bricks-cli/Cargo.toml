@@ -11,6 +11,7 @@ path = "src/main.rs"
 
 [dependencies]
 cersei-agent = { workspace = true }
+cersei-types = { workspace = true }
 bricks-tui = { workspace = true }
 cersei-provider = { workspace = true }
 cersei-tools = { workspace = true }

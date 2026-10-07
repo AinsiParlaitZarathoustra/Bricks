@@ -136,6 +136,38 @@ max_session_bytes = 67108864    # documents kept per session (oldest removed bey
 # Read by `cersei_memory::structured::MemoryConfig::from_bricks_toml` (feature
 # `structured`). The values below are the defaults, except `space`.
 
+[agents]
+# Native sub-agents (the Agent tool). See docs/agents.md. Runtime limits, not
+# profile rules. Profiles: <workspace>/.bricks/agents/*.md > ~/.bricks/agents/*.md
+# > built-in.
+# enabled = true
+# default_max_turns = 30
+# max_turns_cap = 100
+# auto_model = "provider_id/model_id"   # what `model: auto` means; absent: inherit
+# max_context_chars = 16000
+# catalog_size = 30
+# summary_chars = 4000
+# max_concurrent = 8           # descendants working at once in the session
+# max_depth = 2                # generations below the session's agent
+# max_total_per_run = 32       # descendants per top-level run, cumulatively
+# max_batch = 8                # entries per Agents call
+# max_queued = 32              # children waiting for a slot (beyond: AgentQueueFull)
+# admission_timeout_ms = 600000
+# background_drain_ms = 600000 # headless: wait for background children, then cancel (exit 6)
+# default_isolation = "auto"   # auto (worktree when writers coexist) | shared | worktree
+# skills_max_bytes = 24000     # profile skills loaded into a child, in total
+# [agents.reasoning_aliases]
+# high = "deep"                          # a profile's `high` → this model's `deep`
+
+[background]
+# Background commands (Bash `background: true`, the Job tool). See docs/agents.md.
+# max_jobs = 16                # running at once in the session
+# output_buffer_bytes = 1048576  # kept in memory per stream
+# max_line_bytes = 65536       # a longer line is cut (marked)
+# raw_log_bytes = 52428800     # each raw log, and its copy in the session's files
+# stop_grace_ms = 2000         # TERM → KILL
+# max_page_bytes = 65536       # largest Job output page
+
 [semantic]
 # The shared code understanding engine (CodeScout, /search). Every value is a
 # ceiling: a query can lower it, never lift it. See docs/semantic.md.

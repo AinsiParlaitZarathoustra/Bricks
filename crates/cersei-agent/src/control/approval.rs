@@ -35,6 +35,9 @@ pub struct ApprovalRequest {
     /// The file changes, when the tool can compute them. Shell commands and
     /// MCP calls have none: a diff could not represent their effects.
     pub preview: Option<ChangePreview>,
+    /// The sub-agent asking (absent: the session's own agent).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
 }
 
 /// A decision on an approval.
@@ -253,6 +256,7 @@ impl PermissionPolicy for ApprovalGate {
                     description: request.description.clone(),
                     input: request.tool_input.clone(),
                     preview: request.preview.clone(),
+                    agent_id: request.agent_id.clone(),
                 };
                 let (approval_id, tool_call_id) =
                     (req.approval_id.clone(), req.tool_call_id.clone());

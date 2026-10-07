@@ -38,13 +38,14 @@ impl Tool for FileEditTool {
     async fn preview(
         &self,
         input: &Value,
-        _ctx: &ToolContext,
+        ctx: &ToolContext,
     ) -> Option<crate::preview::ChangePreview> {
         let input = match coerce_input(input) {
             Ok(i) => i,
             Err(e) => return Some(crate::preview::ChangePreview::refused(e)),
         };
-        let path = std::path::Path::new(&input.file_path);
+        let resolved = ctx.working_dir.join(&input.file_path);
+        let path = resolved.as_path();
         let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
         let before = match std::fs::read_to_string(&absolute) {
             Ok(c) => c,
@@ -77,7 +78,7 @@ impl Tool for FileEditTool {
         }
     }
 
-    async fn execute(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
+    async fn execute(&self, input: Value, ctx: &ToolContext) -> ToolResult {
         let input = match coerce_input(&input) {
             Ok(i) => i,
             // The coercion above is already alias-tolerant, so reaching here
@@ -87,7 +88,8 @@ impl Tool for FileEditTool {
             Err(e) => return crate::tool_feedback::invalid_input(self, &input, e),
         };
 
-        let path = std::path::Path::new(&input.file_path);
+        let resolved = ctx.working_dir.join(&input.file_path);
+        let path = resolved.as_path();
         let before_content = match tokio::fs::read_to_string(path).await {
             Ok(c) => c,
             Err(e) => return ToolResult::error(format!("Failed to read {}: {e}", input.file_path)),

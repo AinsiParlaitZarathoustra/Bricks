@@ -209,6 +209,11 @@ impl Tool for AgentTool {
             Ok(t) => t,
             Err(e) => return ToolResult::error(e),
         };
+        // The session's limits apply to this path too.
+        let _slot = match subagent::legacy_admission(&ctx.extensions, 1).await {
+            Ok(s) => s,
+            Err(e) => return ToolResult::error(e),
+        };
 
         tracing::info!(description = %input.description, "Spawning sub-agent");
 

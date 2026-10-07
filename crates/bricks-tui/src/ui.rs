@@ -566,8 +566,13 @@ impl Ui {
                     found = true;
                     for t in calls {
                         lines.push(Line::from(format!(
-                            "── {} {} ({:?}, {} ms)",
-                            t.name, t.summary, t.status, t.duration_ms
+                            "── {} {} ({:?}, {})",
+                            t.name,
+                            t.summary,
+                            t.status,
+                            t.duration_ms
+                                .map(cersei_types::duration::display_ms_u64)
+                                .unwrap_or_else(|| "duration unknown".into())
                         )));
                         lines.extend(t.output.lines().map(|l| Line::from(l.to_string())));
                         if t.output_bytes > t.output.len() {

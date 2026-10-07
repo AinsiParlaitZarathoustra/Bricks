@@ -292,6 +292,19 @@ async fn start_background(input: &Input, ctx: &ToolContext, config: &ShellConfig
         Ok(p) => p,
         Err(e) => return ToolResult::error(format!("Invalid `ready_pattern`: {e}")),
     };
+    // The session's jobs: quota checked before anything starts, limits
+    // applied to the task's logs.
+    let jobs = ctx.extensions.get::<crate::jobs::JobsHandle>();
+    let mut config = config.clone();
+    if let Some(j) = &jobs {
+        if let Err(e) = j.0.check_capacity() {
+            return ToolResult::error(e);
+        }
+        config.tasks.memory_bytes = j.0.settings.output_buffer_bytes;
+        config.tasks.max_line_bytes = j.0.settings.max_line_bytes;
+        config.tasks.raw_log_bytes = j.0.settings.raw_log_bytes;
+    }
+    let config = &config;
     let sessions = shell::session(&ctx.session_id, config);
     let reset = sessions.take_reset_notice();
     let task = match sessions
@@ -319,10 +332,22 @@ async fn start_background(input: &Input, ctx: &ToolContext, config: &ShellConfig
         task.wait_finished(Duration::from_millis(150)).await;
     }
     let st = task.status();
+    let job_id = match (&jobs, ctx.extensions.get::<crate::jobs::JobOwner>()) {
+        (Some(j), Some(owner)) => {
+            Some(j.0.register((*owner).clone(), Arc::clone(&task), &ctx.working_dir))
+        }
+        _ => None,
+    };
     let mut lines = vec![format!(
         "Tâche {} démarrée (pid {}) : {}",
         st.id, st.pid, st.command
     )];
+    if let Some(j) = &job_id {
+        lines.push(format!(
+            "job : {j} (Job status / output / wait / stop) · cwd {}",
+            ctx.working_dir.display()
+        ));
+    }
     let status = match &st.state {
         TaskState::Completed { .. } => ToolStatus::Success,
         TaskState::Failed { .. } => ToolStatus::Failure,
@@ -334,11 +359,14 @@ async fn start_background(input: &Input, ctx: &ToolContext, config: &ShellConfig
             "prête : non vérifié (aucun ready_pattern) — un processus lancé n'est pas forcément prêt".into(),
         ),
         Readiness::Waiting => lines.push(format!(
-            "prête : pas encore (motif non vu après {:.1}s)",
-            started.elapsed().as_secs_f64()
+            "prête : pas encore (motif non vu après {})",
+            cersei_types::duration::display_ms(started.elapsed())
         )),
         Readiness::Ready { after, line } => {
-            lines.push(format!("prête après {:.2}s : {line}", after.as_secs_f64()))
+            lines.push(format!(
+                "prête après {} : {line}",
+                cersei_types::duration::display_ms(*after)
+            ))
         }
     }
     lines.push(format!(
@@ -358,6 +386,8 @@ async fn start_background(input: &Input, ctx: &ToolContext, config: &ShellConfig
         report.notes.push(r);
     }
     report.data = Some(serde_json::json!({
+        "job_id": job_id,
+        "cwd": ctx.working_dir.display().to_string(),
         "task_id": st.id,
         "pid": st.pid,
         "state": st.state.label(),
@@ -452,15 +482,17 @@ fn describe_status(st: &shell::background::TaskStatus) -> String {
     let ready = match &st.readiness {
         Readiness::NotChecked => "non vérifiée".to_string(),
         Readiness::Waiting => "pas encore".to_string(),
-        Readiness::Ready { after, .. } => format!("oui (après {:.2}s)", after.as_secs_f64()),
+        Readiness::Ready { after, .. } => {
+            format!("oui (après {})", cersei_types::duration::display_ms(*after))
+        }
     };
     format!(
-        "{} [{}{}] pid {} — {:.1}s — prête : {} — lignes stdout {} / stderr {} — {}",
+        "{} [{}{}] pid {} — {} — prête : {} — lignes stdout {} / stderr {} — {}",
         st.id,
         st.state.label(),
         code,
         st.pid,
-        st.elapsed.as_secs_f64(),
+        cersei_types::duration::display_ms(st.elapsed),
         ready,
         st.stdout_lines,
         st.stderr_lines,

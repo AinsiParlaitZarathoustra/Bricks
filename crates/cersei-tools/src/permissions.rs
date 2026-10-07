@@ -20,6 +20,8 @@ pub struct PermissionRequest {
     pub id: String,
     /// The file changes the call would make, when the tool can preview them.
     pub preview: Option<crate::preview::ChangePreview>,
+    /// The sub-agent making the call (`None`: the top-level agent).
+    pub agent_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]

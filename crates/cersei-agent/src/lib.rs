@@ -2,6 +2,7 @@
 //! realtime event streaming, broadcast channels, and reporters.
 
 pub mod agent_tool;
+pub mod agents;
 pub mod auto_dream;
 pub mod bricks_config;
 pub mod compact;
@@ -479,9 +480,31 @@ impl Agent {
     /// awaited. Dropping the agent does the same synchronously (forced).
     pub async fn close(&self) {
         cersei_tools::shell::close_session(&self.shell_session_id).await;
-        if let Some(m) = self.mcp.get().and_then(|s| s.manager.clone()) {
+        if let Some(m) = self
+            .mcp
+            .get()
+            .filter(|s| !s.shared)
+            .and_then(|s| s.manager.clone())
+        {
             m.close().await;
         }
+    }
+
+    /// Use another agent's MCP connections (a sub-agent shares its
+    /// parent's): their tools are offered, they are not closed with this
+    /// agent. No effect once connections exist.
+    pub async fn adopt_mcp(&self, manager: Arc<cersei_mcp::McpManager>) {
+        let _ = self
+            .mcp
+            .get_or_init(|| async {
+                let tools = cersei_tools::mcp_tool::tools_of(&manager).await;
+                McpState {
+                    manager: Some(manager),
+                    tools,
+                    shared: true,
+                }
+            })
+            .await;
     }
 
     /// The MCP connections, once connected (after the first run starts).
@@ -503,6 +526,7 @@ impl Agent {
                 McpState {
                     manager: Some(manager),
                     tools,
+                    shared: false,
                 }
             })
             .await;
@@ -551,6 +575,9 @@ impl Agent {
 pub(crate) struct McpState {
     manager: Option<Arc<cersei_mcp::McpManager>>,
     tools: Vec<Box<dyn Tool>>,
+    /// Connections owned by another agent (a sub-agent uses its parent's):
+    /// not closed with this one.
+    shared: bool,
 }
 
 impl Drop for Agent {

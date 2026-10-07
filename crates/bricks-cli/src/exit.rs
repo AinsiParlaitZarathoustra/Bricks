@@ -14,5 +14,8 @@ pub const MEMORY: i32 = 4;
 /// no progress, content filter, empty response); the partial answer was
 /// printed.
 pub const INCOMPLETE: i32 = 5;
+/// The answer was delivered, but a background sub-agent did not complete
+/// (incomplete, failed, cancelled, or stopped at the drain deadline).
+pub const BACKGROUND: i32 = 6;
 /// Cancelled (Ctrl+C), like a shell's 128 + SIGINT.
 pub const CANCELLED: i32 = 130;

@@ -160,6 +160,11 @@ pub enum AgentEvent {
     },
 
     // Terminal
+    /// Lifecycle of a sub-agent started by this run (its own text is never
+    /// part of this run's answer).
+    SubAgent(crate::agents::SubAgentEvent),
+    /// A background job of the session (started, output so far, finished).
+    Job(cersei_tools::jobs::JobEvent),
     Status(String),
     Error(String),
     Complete(AgentOutput),

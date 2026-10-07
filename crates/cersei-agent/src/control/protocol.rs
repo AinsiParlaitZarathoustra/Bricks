@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 
 /// Version of the event and command schema. Incremented on any change a
 /// consumer could notice; documented in `docs/cli.md`.
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 /// One delivered event.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -242,6 +242,105 @@ pub enum Event {
         notes: Vec<String>,
         elapsed_ms: u64,
     },
+    /// A sub-agent was created (`agent` gives its identity, profile,
+    /// model and reasoning as requested and applied, workspace).
+    AgentSpawned {
+        agent: Box<crate::agents::SpawnInfo>,
+    },
+    /// A sub-agent changed state (`waiting_admission`, `starting`,
+    /// `running`, `cancelling`, then one terminal state).
+    AgentState {
+        agent_id: String,
+        state: crate::agents::InstanceState,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
+    /// A sub-agent's tool call started (its text is never streamed).
+    AgentToolStarted {
+        agent_id: String,
+        tool_call_id: String,
+        name: String,
+        input: serde_json::Value,
+    },
+    AgentToolFinished {
+        agent_id: String,
+        tool_call_id: String,
+        name: String,
+        is_error: bool,
+        duration_ms: u64,
+    },
+    /// The compact result of a sub-agent (its usage is its own: the run's
+    /// `usage` events do not include it).
+    AgentFinished {
+        result: Box<crate::agents::AgentResult>,
+    },
+    /// An isolated sub-agent's work, ready to inspect and apply.
+    ChangesReady {
+        changeset: Box<crate::agents::ChangeSet>,
+    },
+    /// A ChangeSet was applied, discarded, or hit a conflict (nothing
+    /// written on conflict).
+    ChangesUpdated {
+        changeset_id: String,
+        state: crate::agents::ChangeSetState,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        files: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    /// Usage of a root run: the session agent's own, its descendants' and
+    /// the total, each response counted once. Published when the run ends
+    /// (`final_total: false` while descendants still run), then once more
+    /// when the last descendant ends.
+    RunUsage {
+        root_run_id: String,
+        own: Box<Usage>,
+        descendants: Box<Usage>,
+        total: Box<Usage>,
+        pending_agents: usize,
+        final_total: bool,
+    },
+    /// A background job started (`Bash` with `background: true`).
+    JobStarted {
+        job_id: String,
+        agent_id: String,
+        root_run_id: String,
+        command: String,
+        cwd: String,
+        pid: u32,
+    },
+    /// Output so far (throttled; read the output with `Job output`).
+    JobOutput {
+        job_id: String,
+        stdout_bytes: u64,
+        stderr_bytes: u64,
+    },
+    /// A job ended: `completed`, `failed`, `stopped` (one per job).
+    JobFinished {
+        job_id: String,
+        state: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        code: Option<i32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        signal: Option<i32>,
+        duration_ms: u64,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        logs: Vec<String>,
+    },
+    /// Answer to `agent_control`.
+    AgentControlResult {
+        action: String,
+        ok: bool,
+        text: String,
+    },
+    /// Answer to `list_agent_profiles` / `reload_agent_profiles`.
+    AgentProfiles {
+        profiles: Vec<crate::agents::ProfileListing>,
+        total: usize,
+        page: usize,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        diagnostics: Vec<crate::agents::ProfileDiagnostic>,
+    },
     /// A command was refused; nothing changed.
     CommandRejected {
         command: String,
@@ -275,6 +374,19 @@ impl Event {
             Event::MemoryMaintenanceStarted => "memory_maintenance_started",
             Event::MemoryMaintenanceFinished { .. } => "memory_maintenance_finished",
             Event::SearchResults { .. } => "search_results",
+            Event::AgentSpawned { .. } => "agent_spawned",
+            Event::AgentState { .. } => "agent_state",
+            Event::AgentToolStarted { .. } => "agent_tool_started",
+            Event::AgentToolFinished { .. } => "agent_tool_finished",
+            Event::AgentFinished { .. } => "agent_finished",
+            Event::AgentProfiles { .. } => "agent_profiles",
+            Event::ChangesReady { .. } => "changes_ready",
+            Event::ChangesUpdated { .. } => "changes_updated",
+            Event::RunUsage { .. } => "run_usage",
+            Event::AgentControlResult { .. } => "agent_control_result",
+            Event::JobStarted { .. } => "job_started",
+            Event::JobOutput { .. } => "job_output",
+            Event::JobFinished { .. } => "job_finished",
             Event::CommandRejected { .. } => "command_rejected",
         }
     }
@@ -354,6 +466,30 @@ pub enum Command {
         #[serde(default)]
         regex: bool,
     },
+    /// List or search the sub-agent profiles (20 per page); answered by
+    /// `agent_profiles`. Accepted at any time.
+    ListAgentProfiles {
+        #[serde(default)]
+        query: String,
+        #[serde(default)]
+        page: usize,
+    },
+    /// Read the profile files again; running sub-agents keep theirs.
+    ReloadAgentProfiles,
+    /// Act on the session's sub-agents and ChangeSets (`list`, `status`,
+    /// `result`, `cancel`, `inspect_changes`, `apply_changes`,
+    /// `discard_changes`); answered by `agent_control_result`. A person's
+    /// command: the session's working tree is the destination of `apply`.
+    AgentControl {
+        action: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        changeset_id: Option<String>,
+        /// For `jobs` (list the session's jobs) and `stop_job`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        job_id: Option<String>,
+    },
     /// Answer an approval request.
     Approve {
         approval_id: String,
@@ -373,6 +509,9 @@ impl Command {
             Command::ClearContext => "clear_context",
             Command::Resume { .. } => "resume",
             Command::Search { .. } => "search",
+            Command::ListAgentProfiles { .. } => "list_agent_profiles",
+            Command::ReloadAgentProfiles => "reload_agent_profiles",
+            Command::AgentControl { .. } => "agent_control",
             Command::Approve { .. } => "approve",
         }
     }

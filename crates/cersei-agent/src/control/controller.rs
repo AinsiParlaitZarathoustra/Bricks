@@ -137,6 +137,9 @@ pub struct EngineConfig {
     pub mcp_servers: Vec<cersei_mcp::McpServerConfig>,
     pub queue_capacity: usize,
     pub attach_limits: AttachLimits,
+    /// Where sub-agent profiles are read (default: the session's
+    /// `.bricks/agents` and `~/.bricks/agents`).
+    pub agent_profile_sources: Option<crate::agents::ProfileSources>,
 }
 
 impl EngineConfig {
@@ -159,6 +162,7 @@ impl EngineConfig {
             mcp_servers: Vec::new(),
             queue_capacity: 256,
             attach_limits: AttachLimits::default(),
+            agent_profile_sources: None,
         }
     }
 }
@@ -233,6 +237,10 @@ struct Inner {
     activity: parking_lot::Mutex<Activity>,
     maintenance: parking_lot::Mutex<Option<CancellationToken>>,
     idle: tokio::sync::Notify,
+    /// Sub-agent profiles of the session's workspace.
+    profiles: parking_lot::RwLock<Arc<crate::agents::ProfileCatalog>>,
+    /// The session's sub-agent runtime (when `[agents] enabled`).
+    spawner: parking_lot::RwLock<Option<Arc<crate::agents::AgentSpawner>>>,
 }
 
 /// One session, driven by commands. Cheap to clone.
@@ -326,16 +334,78 @@ fn new_session_id() -> String {
     format!("{now}-{}", &rand[..6])
 }
 
+fn profile_catalog(cfg: &EngineConfig, meta: &SessionMeta) -> Arc<crate::agents::ProfileCatalog> {
+    let sources = cfg
+        .agent_profile_sources
+        .clone()
+        .unwrap_or_else(|| crate::agents::ProfileSources::standard(&meta.working_dir));
+    Arc::new(crate::agents::ProfileCatalog::new(sources))
+}
+
+/// The session agent's tools: the configured ones, plus the native `Agent`
+/// and `AgentProfiles` tools when `[agents] enabled` (never a second
+/// `Agent` next to one already configured).
+fn session_tools(
+    cfg: &EngineConfig,
+    meta: &SessionMeta,
+    profiles: &Arc<crate::agents::ProfileCatalog>,
+) -> (Vec<Box<dyn Tool>>, Option<Arc<crate::agents::AgentSpawner>>) {
+    let mut tools = (cfg.tools)();
+    let mut spawner_out = None;
+    if cfg.bricks.agents.enabled && !tools.iter().any(|t| t.name() == "Agent") {
+        let factory = Arc::clone(&cfg.tools);
+        let spawner = Arc::new(
+            crate::agents::AgentSpawner::new(
+                Arc::clone(&cfg.catalog),
+                Arc::clone(profiles),
+                Arc::new(move || factory()),
+                cfg.bricks.clone(),
+            )
+            .with_artifacts_dir(files_dir(cfg, &meta.id).join("agents"))
+            .with_session_id(meta.id.clone()),
+        );
+        tools.push(Box::new(crate::agents::NativeAgentTool::new(Arc::clone(
+            &spawner,
+        ))));
+        tools.push(Box::new(crate::agents::AgentsTool::new(Arc::clone(
+            &spawner,
+        ))));
+        tools.push(Box::new(crate::agents::AgentControlTool::new(Arc::clone(
+            &spawner,
+        ))));
+        tools.push(Box::new(crate::agents::AgentProfilesTool::new(Arc::clone(
+            &spawner,
+        ))));
+        spawner_out = Some(spawner);
+    }
+    (tools, spawner_out)
+}
+
 fn build_agent(
     cfg: &EngineConfig,
     meta: &SessionMeta,
     provider: Box<dyn Provider>,
     broker: &Arc<ApprovalBroker>,
-) -> Result<Agent, String> {
+    profiles: &Arc<crate::agents::ProfileCatalog>,
+) -> Result<(Agent, Option<Arc<crate::agents::AgentSpawner>>), String> {
     let settings = &cfg.bricks.agent;
+    let (tools, spawner) = session_tools(cfg, meta, profiles);
+    let ext = cersei_tools::Extensions::default();
+    // The session's background jobs (their logs kept with the session).
+    let jobs = cersei_tools::jobs::JobRegistry::new(
+        cfg.bricks.background.clone(),
+        Some(files_dir(cfg, &meta.id).join("jobs")),
+    );
+    ext.insert(cersei_tools::jobs::JobsHandle(jobs));
+    if let Some(sp) = &spawner {
+        // The session agent records its usage in its root runs' ledger and
+        // sees the session's sub-agents.
+        ext.insert(crate::agents::RuntimeHandle(Arc::clone(sp.runtime())));
+    }
     let mut b = Agent::builder()
         .provider_boxed(provider)
-        .tools((cfg.tools)())
+        .tools(tools)
+        .extensions(ext)
         .working_dir(&meta.working_dir)
         .model(meta.model.clone())
         .permission_policy(ApprovalGate::new(
@@ -361,7 +431,8 @@ fn build_agent(
     for s in &cfg.mcp_servers {
         b = b.mcp_server(s.clone());
     }
-    b.build().map_err(|e| e.to_string())
+    let agent = b.build().map_err(|e| e.to_string())?;
+    Ok((agent, spawner))
 }
 
 /// A session ready to open.
@@ -509,7 +580,9 @@ impl Controller {
             opts.reasoning.as_deref(),
         )?;
         let broker = ApprovalBroker::new(cfg.interactive);
-        let agent = Arc::new(build_agent(&cfg, &meta, provider, &broker)?);
+        let profiles = profile_catalog(&cfg, &meta);
+        let (agent, spawner) = build_agent(&cfg, &meta, provider, &broker, &profiles)?;
+        let agent = Arc::new(agent);
         meta.save(&files_dir(&cfg, &meta.id))?;
         let queue = Arc::new(EventQueue::new(&meta.id, cfg.queue_capacity));
         let message_count = if resumed {
@@ -523,6 +596,13 @@ impl Controller {
         };
         let mut all_warnings = cfg.bricks.diagnostics.clone();
         all_warnings.extend(warnings);
+        all_warnings.extend(
+            profiles
+                .snapshot()
+                .diagnostics
+                .iter()
+                .map(|d| format!("{}: {}", d.source, d.message)),
+        );
         let opened = Event::SessionOpened {
             working_dir: meta.working_dir.display().to_string(),
             model: meta.model.clone(),
@@ -540,7 +620,13 @@ impl Controller {
             activity: parking_lot::Mutex::new(Activity::Idle),
             maintenance: parking_lot::Mutex::new(None),
             idle: tokio::sync::Notify::new(),
+            profiles: parking_lot::RwLock::new(profiles),
+            spawner: parking_lot::RwLock::new(spawner.clone()),
         });
+        if let Some(sp) = &spawner {
+            install_session_sink(&queue, sp.runtime());
+        }
+        install_job_sink(&queue, &inner.agent.read());
         queue.push(None, opened, None).await;
         Ok((Controller { inner }, EventStream { queue }))
     }
@@ -676,6 +762,179 @@ impl Controller {
         Err(reason)
     }
 
+    /// A person's action on the session's sub-agents (the frontend's
+    /// equivalent of `AgentControl`; the session's tree is the destination
+    /// of `apply_changes`).
+    async fn agent_control(
+        &self,
+        sp: &Arc<crate::agents::AgentSpawner>,
+        action: &str,
+        agent_id: Option<String>,
+        changeset_id: Option<String>,
+    ) -> (bool, String) {
+        let rt = sp.runtime();
+        let wd = self.agent().working_dir().to_path_buf();
+        let rec = |id: &Option<String>| id.as_deref().and_then(|i| rt.record(i));
+        match action {
+            "list" => {
+                let recs = rt.records();
+                if recs.is_empty() {
+                    return (true, "No sub-agent in this session.".into());
+                }
+                (
+                    true,
+                    recs.iter()
+                        .map(crate::agents::tool::render_record)
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                )
+            }
+            "status" => match rec(&agent_id) {
+                Some(r) => (true, crate::agents::tool::render_record(&r)),
+                None => (false, "unknown sub-agent".into()),
+            },
+            "result" => match rec(&agent_id) {
+                Some(r) => match &r.result {
+                    Some(res) => (true, crate::agents::render_result(res)),
+                    None => (true, format!("no result yet ({})", r.state.as_str())),
+                },
+                None => (false, "unknown sub-agent".into()),
+            },
+            "cancel" => match rec(&agent_id) {
+                Some(r) => {
+                    let n = rt.cancel(&r.info.agent_id);
+                    (true, format!("cancellation requested ({n} running)"))
+                }
+                None => (false, "unknown sub-agent".into()),
+            },
+            "inspect_changes" | "apply_changes" | "discard_changes" => {
+                let cs = changeset_id.or_else(|| {
+                    agent_id
+                        .as_deref()
+                        .and_then(|a| rt.workspaces.changeset_of(a))
+                        .map(|c| c.id)
+                });
+                let Some(cs) = cs else {
+                    return (false, "no ChangeSet given or found".into());
+                };
+                match action {
+                    "inspect_changes" => match rt.workspaces.patch_text(&cs, 200_000) {
+                        Ok((p, cut)) => (true, if cut { format!("{p}\n[shortened]") } else { p }),
+                        Err(e) => (false, e.to_string()),
+                    },
+                    "apply_changes" => match rt.workspaces.apply(&cs, &wd).await {
+                        Ok(done) => {
+                            let files: Vec<String> =
+                                done.files.iter().map(|f| f.path.clone()).collect();
+                            rt.emit(AgentEvent::SubAgent(
+                                crate::agents::SubAgentEvent::ChangesUpdated {
+                                    changeset_id: cs.clone(),
+                                    state: crate::agents::ChangeSetState::Applied,
+                                    files: files.clone(),
+                                    detail: None,
+                                },
+                            ));
+                            (true, format!("applied: {}", files.join(", ")))
+                        }
+                        Err(e) => {
+                            if let crate::agents::workspace::WsError::Conflict { files, detail } =
+                                &e
+                            {
+                                rt.emit(AgentEvent::SubAgent(
+                                    crate::agents::SubAgentEvent::ChangesUpdated {
+                                        changeset_id: cs.clone(),
+                                        state: crate::agents::ChangeSetState::Conflict,
+                                        files: files.clone(),
+                                        detail: Some(detail.clone()),
+                                    },
+                                ));
+                            }
+                            (false, e.to_string())
+                        }
+                    },
+                    _ => match rt.workspaces.discard(&cs).await {
+                        Ok(_) => {
+                            rt.emit(AgentEvent::SubAgent(
+                                crate::agents::SubAgentEvent::ChangesUpdated {
+                                    changeset_id: cs.clone(),
+                                    state: crate::agents::ChangeSetState::Discarded,
+                                    files: Vec::new(),
+                                    detail: None,
+                                },
+                            ));
+                            (true, "discarded".into())
+                        }
+                        Err(e) => (false, e.to_string()),
+                    },
+                }
+            }
+            other => (false, format!("unknown action `{other}`")),
+        }
+    }
+
+    /// A person's view of the session's jobs (all of them) and stop.
+    async fn job_control(&self, action: &str, job_id: Option<String>) -> (bool, String) {
+        let Some(jobs) = self
+            .agent()
+            .extensions
+            .get::<cersei_tools::jobs::JobsHandle>()
+        else {
+            return (false, "no job registry".into());
+        };
+        match action {
+            "jobs" => {
+                let list = jobs.0.list(None);
+                if list.is_empty() {
+                    return (true, "No background job in this session.".into());
+                }
+                (
+                    true,
+                    list.iter()
+                        .map(|(id, owner, st)| {
+                            format!(
+                                "{id} [{}] pid {} · {} · {} · {}",
+                                st.state.label(),
+                                st.pid,
+                                owner.agent_id,
+                                cersei_types::duration::display_ms(st.elapsed),
+                                st.command
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                )
+            }
+            _ => match job_id {
+                Some(id) => match jobs.0.stop(&id, None).await {
+                    Some(st) => (true, format!("{id}: {}", st.label())),
+                    None => (false, format!("no job `{id}`")),
+                },
+                None => (false, "`stop_job` needs `job_id`".into()),
+            },
+        }
+    }
+
+    /// The session's sub-agent runtime.
+    pub fn agent_runtime(&self) -> Option<Arc<crate::agents::AgentRuntime>> {
+        self.inner
+            .spawner
+            .read()
+            .as_ref()
+            .map(|s| Arc::clone(s.runtime()))
+    }
+
+    fn emit_profiles(&self, reg: &crate::agents::ProfileRegistry, query: &str, page: usize) {
+        let (profiles, total) = reg.search(query, page, 20);
+        let ev = Event::AgentProfiles {
+            profiles,
+            total,
+            page,
+            diagnostics: reg.diagnostics.clone(),
+        };
+        let q = self.inner.queue.clone();
+        tokio::spawn(async move { q.push(None, ev, None).await });
+    }
+
     /// The workspace's shared engine (the one the agents' CodeScout uses).
     pub fn semantic_engine(&self) -> Arc<bricks_semantic::SemanticEngine> {
         let wd = self.agent().working_dir().to_path_buf();
@@ -760,7 +1019,63 @@ impl Controller {
                     t.cancel();
                     return Ok(());
                 }
+                // Idle, with background sub-agents still running: stop them.
+                let sp = self.inner.spawner.read().clone();
+                if let Some(sp) = sp {
+                    let pending = sp.runtime().pending(None);
+                    if !pending.is_empty() {
+                        for r in pending {
+                            sp.runtime().cancel(&r.info.agent_id);
+                        }
+                        return Ok(());
+                    }
+                }
                 self.reject(&cmd, "nothing to cancel".into())
+            }
+            Command::ListAgentProfiles { ref query, page } => {
+                let reg = self.inner.profiles.read().snapshot();
+                self.emit_profiles(&reg, query, page);
+                Ok(())
+            }
+            Command::AgentControl {
+                ref action,
+                ref agent_id,
+                ref changeset_id,
+                ref job_id,
+            } => {
+                if action == "jobs" || action == "stop_job" {
+                    let this = self.clone();
+                    let (action, job_id) = (action.clone(), job_id.clone());
+                    tokio::spawn(async move {
+                        let (ok, text) = this.job_control(&action, job_id).await;
+                        let ev = Event::AgentControlResult { action, ok, text };
+                        this.inner.queue.push(None, ev, None).await;
+                    });
+                    return Ok(());
+                }
+                let sp = self.inner.spawner.read().clone();
+                let Some(sp) = sp else {
+                    return self.reject(
+                        &cmd,
+                        "sub-agents are disabled ([agents] enabled = false)".into(),
+                    );
+                };
+                let this = self.clone();
+                let (action, agent_id, changeset_id) =
+                    (action.clone(), agent_id.clone(), changeset_id.clone());
+                tokio::spawn(async move {
+                    let (ok, text) = this
+                        .agent_control(&sp, &action, agent_id, changeset_id)
+                        .await;
+                    let ev = Event::AgentControlResult { action, ok, text };
+                    this.inner.queue.push(None, ev, None).await;
+                });
+                Ok(())
+            }
+            Command::ReloadAgentProfiles => {
+                let reg = self.inner.profiles.read().reload();
+                self.emit_profiles(&reg, "", 0);
+                Ok(())
             }
             Command::Search { ref text, regex } => {
                 if text.trim().is_empty() {
@@ -970,7 +1285,20 @@ impl Controller {
             None,
             None,
         )?;
-        let agent = Arc::new(build_agent(cfg, &meta, provider, &self.inner.broker)?);
+        let profiles = profile_catalog(cfg, &meta);
+        let (agent, spawner) = build_agent(cfg, &meta, provider, &self.inner.broker, &profiles)?;
+        let agent = Arc::new(agent);
+        *self.inner.profiles.write() = profiles;
+        let old_spawner = std::mem::replace(&mut *self.inner.spawner.write(), spawner.clone());
+        if let Some(old) = old_spawner {
+            old.runtime()
+                .shutdown(std::time::Duration::from_secs(10))
+                .await;
+        }
+        if let Some(sp) = &spawner {
+            install_session_sink(&self.inner.queue, sp.runtime());
+        }
+        install_job_sink(&self.inner.queue, &agent);
         let count = session_store(cfg)
             .load(&meta.id)
             .await
@@ -1082,6 +1410,18 @@ impl Controller {
                 approvals_unsatisfied: Vec::new(),
             },
         };
+        // The run's usage with its descendants, just before `run_finished`
+        // (a consumer that stops there still gets it): partial while
+        // background sub-agents still run, final again when the last ends.
+        let sp = self.inner.spawner.read().clone();
+        if let (Some(sp), Some(id)) = (sp, agent.extensions.get::<crate::agents::AgentIdentity>()) {
+            if matches!(&result, Err(CerseiError::Cancelled)) {
+                sp.runtime().cancel_root(&id.root_run_id);
+            }
+            if let AgentEvent::SubAgent(ev) = sp.runtime().root_finished(&id.root_run_id) {
+                q.push(rid, sub_agent_event(ev), Some(&token)).await;
+            }
+        }
         q.push(rid, finished, Some(&token)).await;
         {
             let mut m = self.inner.meta.lock();
@@ -1132,6 +1472,19 @@ impl Controller {
     /// connections. The session itself stays stored.
     pub async fn close(&self) {
         self.agent().cancel();
+        if let Some(j) = self
+            .agent()
+            .extensions
+            .get::<cersei_tools::jobs::JobsHandle>()
+        {
+            j.0.stop_all().await;
+        }
+        let sp = self.inner.spawner.read().clone();
+        if let Some(sp) = sp {
+            sp.runtime()
+                .shutdown(std::time::Duration::from_secs(10))
+                .await;
+        }
         if let Some(t) = self.inner.maintenance.lock().as_ref() {
             t.cancel();
         }
@@ -1239,6 +1592,8 @@ async fn translate(
                 message: format!("hook {hook_name} blocked: {reason}"),
             },
             AgentEvent::Status(s) => Event::Notice { message: s },
+            AgentEvent::SubAgent(e) => sub_agent_event(e),
+            AgentEvent::Job(e) => job_event(e),
             AgentEvent::MemoryRecalled {
                 items,
                 tokens,
@@ -1298,4 +1653,152 @@ async fn translate(
         q.push(rid, ev, Some(&token)).await;
     }
     (text, turns)
+}
+
+/// A sub-agent runtime event, as a protocol event.
+pub(crate) fn sub_agent_event(e: crate::agents::SubAgentEvent) -> Event {
+    use crate::agents::SubAgentEvent as S;
+    match e {
+        S::Spawned(info) => Event::AgentSpawned { agent: info },
+        S::State {
+            agent_id,
+            state,
+            reason,
+        } => Event::AgentState {
+            agent_id,
+            state,
+            reason,
+        },
+        S::ToolStarted {
+            agent_id,
+            tool_call_id,
+            name,
+            input,
+        } => Event::AgentToolStarted {
+            agent_id,
+            tool_call_id,
+            name,
+            input,
+        },
+        S::ToolFinished {
+            agent_id,
+            tool_call_id,
+            name,
+            is_error,
+            duration_ms,
+        } => Event::AgentToolFinished {
+            agent_id,
+            tool_call_id,
+            name,
+            is_error,
+            duration_ms,
+        },
+        S::Finished(result) => Event::AgentFinished { result },
+        S::ChangesReady(changeset) => Event::ChangesReady { changeset },
+        S::ChangesUpdated {
+            changeset_id,
+            state,
+            files,
+            detail,
+        } => Event::ChangesUpdated {
+            changeset_id,
+            state,
+            files,
+            detail,
+        },
+        S::RunUsage {
+            root_run_id,
+            own,
+            descendants,
+            total,
+            pending_agents,
+            final_total,
+        } => Event::RunUsage {
+            root_run_id,
+            own,
+            descendants,
+            total,
+            pending_agents,
+            final_total,
+        },
+    }
+}
+
+/// Events of the runtime outside runs (background sub-agents, final
+/// totals) reach the queue in order, through one forwarder.
+fn install_session_sink(q: &Arc<EventQueue>, rt: &Arc<crate::agents::AgentRuntime>) {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<AgentEvent>();
+    let q = q.clone();
+    tokio::spawn(async move {
+        while let Some(ev) = rx.recv().await {
+            if let AgentEvent::SubAgent(e) = ev {
+                q.push(None, sub_agent_event(e), None).await;
+            }
+        }
+    });
+    rt.set_session_sink(Arc::new(move |ev| {
+        let _ = tx.send(ev);
+    }));
+}
+
+/// Job events reach the queue in order, outside runs.
+fn install_job_sink(q: &Arc<EventQueue>, agent: &Agent) {
+    let Some(jobs) = agent.extensions.get::<cersei_tools::jobs::JobsHandle>() else {
+        return;
+    };
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<cersei_tools::jobs::JobEvent>();
+    let q = q.clone();
+    tokio::spawn(async move {
+        while let Some(ev) = rx.recv().await {
+            q.push(None, job_event(ev), None).await;
+        }
+    });
+    jobs.0.set_sink(Arc::new(move |ev| {
+        let _ = tx.send(ev);
+    }));
+}
+
+pub(crate) fn job_event(e: cersei_tools::jobs::JobEvent) -> Event {
+    use cersei_tools::jobs::JobEvent as J;
+    match e {
+        J::Started {
+            job_id,
+            agent_id,
+            root_run_id,
+            command,
+            cwd,
+            pid,
+        } => Event::JobStarted {
+            job_id,
+            agent_id,
+            root_run_id,
+            command,
+            cwd,
+            pid,
+        },
+        J::Output {
+            job_id,
+            stdout_bytes,
+            stderr_bytes,
+        } => Event::JobOutput {
+            job_id,
+            stdout_bytes,
+            stderr_bytes,
+        },
+        J::Finished {
+            job_id,
+            state,
+            code,
+            signal,
+            duration_ms,
+            logs,
+        } => Event::JobFinished {
+            job_id,
+            state,
+            code,
+            signal,
+            duration_ms,
+            logs,
+        },
+    }
 }

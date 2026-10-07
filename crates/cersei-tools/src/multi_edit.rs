@@ -60,7 +60,7 @@ impl Tool for MultiEditTool {
     async fn preview(
         &self,
         input: &Value,
-        _ctx: &ToolContext,
+        ctx: &ToolContext,
     ) -> Option<crate::preview::ChangePreview> {
         let (file_path, edits) = match coerce_input(input) {
             Ok(v) => v,
@@ -68,7 +68,8 @@ impl Tool for MultiEditTool {
                 return Some(crate::preview::ChangePreview::refused(e))
             }
         };
-        let path = std::path::Path::new(&file_path);
+        let resolved = ctx.working_dir.join(&file_path);
+        let path = resolved.as_path();
         let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
         let before = match std::fs::read_to_string(&absolute) {
             Ok(c) => c,
@@ -109,7 +110,7 @@ impl Tool for MultiEditTool {
         })
     }
 
-    async fn execute(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
+    async fn execute(&self, input: Value, ctx: &ToolContext) -> ToolResult {
         let (file_path, edits) = match coerce_input(&input) {
             Ok(v) => v,
             // A top-level shape problem: route through the shared builder for
@@ -128,7 +129,8 @@ impl Tool for MultiEditTool {
             return ToolResult::error("'edits' is empty — provide at least one edit.");
         }
 
-        let path = std::path::Path::new(&file_path);
+        let resolved = ctx.working_dir.join(&file_path);
+        let path = resolved.as_path();
         let before = match tokio::fs::read_to_string(path).await {
             Ok(c) => c,
             Err(e) => return ToolResult::error(format!("Failed to read {file_path}: {e}")),

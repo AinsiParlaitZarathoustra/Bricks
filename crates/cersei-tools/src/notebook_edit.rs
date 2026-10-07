@@ -33,7 +33,7 @@ impl Tool for NotebookEditTool {
         })
     }
 
-    async fn execute(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
+    async fn execute(&self, input: Value, ctx: &ToolContext) -> ToolResult {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Input {
@@ -48,7 +48,8 @@ impl Tool for NotebookEditTool {
             Err(e) => return e,
         };
 
-        let content = match tokio::fs::read_to_string(&input.file_path).await {
+        let content = match tokio::fs::read_to_string(ctx.working_dir.join(&input.file_path)).await
+        {
             Ok(c) => c,
             Err(e) => return ToolResult::error(format!("Failed to read notebook: {}", e)),
         };
@@ -98,7 +99,7 @@ impl Tool for NotebookEditTool {
         }
 
         let output = serde_json::to_string_pretty(&notebook).unwrap_or_default();
-        match tokio::fs::write(&input.file_path, output).await {
+        match tokio::fs::write(ctx.working_dir.join(&input.file_path), output).await {
             Ok(()) => ToolResult::success(format!(
                 "Updated cell {} in {}",
                 input.cell_index, input.file_path

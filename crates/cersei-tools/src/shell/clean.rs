@@ -40,7 +40,12 @@ pub struct TerminalCleaner {
     pending_cr: bool,
     /// Escape sequences removed so far.
     pub sequences_removed: u64,
+    /// Longest line held (an endless line is emitted in cut pieces).
+    max_line: usize,
 }
+
+/// Longest line the cleaner holds by default.
+pub const DEFAULT_MAX_LINE: usize = 1024 * 1024;
 
 impl Default for TerminalCleaner {
     fn default() -> Self {
@@ -56,7 +61,15 @@ impl TerminalCleaner {
             line: String::new(),
             pending_cr: false,
             sequences_removed: 0,
+            max_line: DEFAULT_MAX_LINE,
         }
+    }
+
+    /// Hold at most `n` bytes of an unfinished line: beyond, the piece is
+    /// emitted as a line ending with [`super::background::LINE_CUT`].
+    pub fn with_max_line(mut self, n: usize) -> Self {
+        self.max_line = n.max(64);
+        self
     }
 
     /// Feed a chunk; returns the text of the lines completed by it (each with
@@ -190,7 +203,15 @@ impl TerminalCleaner {
                 self.line.pop();
             }
             c if c.is_control() => {}
-            c => self.line.push(c),
+            c => {
+                self.line.push(c);
+                if self.line.len() >= self.max_line {
+                    out.push_str(&self.line);
+                    out.push_str(super::background::LINE_CUT);
+                    out.push('\n');
+                    self.line.clear();
+                }
+            }
         }
     }
 }

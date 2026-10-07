@@ -49,11 +49,18 @@ fn tool_line(t: &ToolCall) -> Line<'static> {
         ),
         Span::raw(format!(" {}", t.summary)),
     ];
-    if t.status != CallStatus::Running && t.duration_ms > 0 {
-        spans.push(Span::styled(
-            format!("  {:.1}s", t.duration_ms as f64 / 1000.0),
-            dim(),
-        ));
+    // Final duration (from the engine) once done, even at 0 ms; the
+    // elapsed time so far, measured here, while it runs.
+    let took = match (t.status, t.started, t.duration_ms) {
+        (CallStatus::Running, Some(s), _) => Some(format!(
+            "  {} so far",
+            cersei_types::duration::display_ms(s.elapsed())
+        )),
+        (CallStatus::Running, None, _) | (_, _, None) => None,
+        (_, _, Some(ms)) => Some(format!("  {}", cersei_types::duration::display_ms_u64(ms))),
+    };
+    if let Some(took) = took {
+        spans.push(Span::styled(took, dim()));
     }
     if let Some(p) = &t.progress {
         spans.push(Span::styled(
@@ -62,6 +69,76 @@ fn tool_line(t: &ToolCall) -> Line<'static> {
         ));
     }
     Line::from(spans)
+}
+
+fn agent_lines(a: &crate::state::AgentCell) -> Vec<Line<'static>> {
+    use cersei_agent::agents::InstanceState as S;
+    let style = match a.state {
+        S::Completed => Style::default().fg(Color::Green),
+        S::Failed => Style::default().fg(Color::Red),
+        S::Incomplete | S::Cancelled | S::Cancelling => Style::default().fg(Color::Yellow),
+        _ => Style::default().fg(Color::Cyan),
+    };
+    let reasoning = if a.info.reasoning.applied == "(none)" {
+        String::new()
+    } else {
+        format!(" · {}", a.info.reasoning.applied)
+    };
+    let mut head = vec![
+        Span::styled("  ⤷ agent ", style),
+        Span::styled(
+            a.info.profile.clone(),
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!(
+                " · {}{reasoning} · {}",
+                a.info.model.applied,
+                a.state.as_str()
+            ),
+            dim(),
+        ),
+    ];
+    if a.result.is_none() {
+        head.push(Span::styled(
+            format!(
+                "  {} so far",
+                cersei_types::duration::display_ms(a.started.elapsed())
+            ),
+            dim(),
+        ));
+    }
+    let mut v = vec![
+        Line::from(head),
+        Line::from(Span::styled(format!("    {}", a.info.task), dim())),
+    ];
+    if let Some(r) = &a.reason {
+        v.push(Line::from(Span::styled(format!("    {r}"), dim())));
+    }
+    for t in &a.tools {
+        let mut l = tool_line(t);
+        l.spans.insert(0, Span::raw("  "));
+        v.push(l);
+    }
+    if let Some(r) = &a.result {
+        let mut s = format!(
+            "    {} in {} · {} turn(s)",
+            r.status,
+            cersei_types::duration::display_ms_u64(r.duration_ms),
+            r.turns
+        );
+        if !r.files_changed.is_empty() {
+            s.push_str(&format!(" · files: {}", r.files_changed.join(", ")));
+        }
+        if let Some(e) = &r.error {
+            s.push_str(&format!(" · {e}"));
+        }
+        v.push(Line::from(Span::styled(s, style)));
+        for w in &r.warnings {
+            v.push(Line::from(Span::styled(format!("    ! {w}"), dim())));
+        }
+    }
+    v
 }
 
 /// Lines of a cell. `live`: the cell is in the live area (show progress,
@@ -212,6 +289,14 @@ pub fn cell_lines(cell: &Cell, show_thinking: bool) -> Vec<Line<'static>> {
                     format!("{} ", request.tool),
                     Style::default().add_modifier(Modifier::BOLD),
                 ),
+                Span::styled(
+                    request
+                        .agent_id
+                        .as_deref()
+                        .map(|a| format!("(sub-agent {a}) "))
+                        .unwrap_or_default(),
+                    dim(),
+                ),
                 what,
             ])];
             if let Some(p) = &request.preview {
@@ -235,6 +320,7 @@ pub fn cell_lines(cell: &Cell, show_thinking: bool) -> Vec<Line<'static>> {
             })
             .collect(),
         Cell::Notice(t) => vec![Line::from(Span::styled(format!("· {t}"), dim()))],
+        Cell::Agent(a) => agent_lines(a),
         Cell::Search {
             query,
             status,
@@ -282,19 +368,20 @@ pub fn cell_lines(cell: &Cell, show_thinking: bool) -> Vec<Line<'static>> {
         Cell::RunEnd {
             outcome,
             error,
-            seconds,
+            elapsed,
         } => {
+            let took = cersei_types::duration::display_ms(*elapsed);
             let (text, style) = match outcome {
-                RunOutcome::Succeeded => (format!("── done in {seconds:.1}s"), dim()),
+                RunOutcome::Succeeded => (format!("── done in {took}"), dim()),
                 RunOutcome::Incomplete => (
                     format!(
-                        "── incomplete after {seconds:.1}s: {}",
+                        "── incomplete after {took}: {}",
                         error.clone().unwrap_or_default()
                     ),
                     Style::default().fg(Color::Yellow),
                 ),
                 RunOutcome::Cancelled => (
-                    format!("── cancelled after {seconds:.1}s (effects already made remain)"),
+                    format!("── cancelled after {took} (effects already made remain)"),
                     Style::default().fg(Color::Yellow),
                 ),
                 RunOutcome::Failed => (

@@ -132,6 +132,12 @@ impl Tool for DelegateTool {
             Err(e) => return ToolResult::error(format!("{e} Nothing was started.")),
         };
 
+        // The session's limits apply to this path too (one slot for the
+        // batch; its own `max_concurrent` inside).
+        let _slot = match subagent::legacy_admission(&ctx.extensions, tasks.len() as u32).await {
+            Ok(s) => s,
+            Err(e) => return ToolResult::error(e),
+        };
         let cfg = DelegateConfig {
             tasks,
             provider_factory: self.provider_factory.clone(),

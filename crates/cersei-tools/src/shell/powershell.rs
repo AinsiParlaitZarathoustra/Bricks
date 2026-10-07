@@ -257,7 +257,10 @@ impl PwshSession {
                 }
                 _ = ticker.tick() => {
                     if let Some(p) = &progress {
-                        p(format!("still running after {:.0}s", started.elapsed().as_secs_f64()));
+                        p(format!(
+                            "still running after {}",
+                            cersei_types::duration::display_ms(started.elapsed())
+                        ));
                     }
                 }
             }

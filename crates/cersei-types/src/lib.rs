@@ -7,6 +7,7 @@ use std::time::Duration;
 
 mod media;
 pub use media::{detect_mime, MediaKind};
+pub mod duration;
 pub mod tokens;
 
 // ─── Roles ───────────────────────────────────────────────────────────────────

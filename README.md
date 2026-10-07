@@ -359,6 +359,7 @@ have not yet been validated in those runs.
 | [docs/shell.md](docs/shell.md) | shell, file tools, result format |
 | [docs/web.md](docs/web.md) | web search and reading |
 | [docs/semantic.md](docs/semantic.md) | code understanding engine, CodeScout, benchmark |
+| [docs/agents.md](docs/agents.md) | sub-agents, profiles, parallel and background runs, worktrees, jobs |
 | [docs/mcp.md](docs/mcp.md) | MCP client |
 | [docs/memory.md](docs/memory.md) | long-term memory and hybrid recall |
 | [docs/bricks.example.toml](docs/bricks.example.toml) | every `bricks.toml` section, annotated |

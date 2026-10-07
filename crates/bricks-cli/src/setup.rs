@@ -145,10 +145,16 @@ pub fn engine(global: &Global, interactive: bool) -> Result<EngineConfig, String
     let bricks = BricksConfig::load(&wd);
     let memory = long_term_memory(&wd, &registry)?;
     let tools = cersei_tools::coding();
+    let mut tools_available: Vec<String> = tools.iter().map(|t| t.name().to_string()).collect();
+    // The controller adds the native sub-agent tools to the session agent.
+    if bricks.agents.enabled {
+        tools_available.push("Agent".into());
+        tools_available.push("AgentProfiles".into());
+    }
     let system = build_system_prompt(&SystemPromptOptions {
         is_non_interactive: !interactive,
         working_directory: Some(wd.display().to_string()),
-        tools_available: tools.iter().map(|t| t.name().to_string()).collect(),
+        tools_available,
         has_memory: memory.is_some(),
         has_auto_compact: true,
         ..Default::default()

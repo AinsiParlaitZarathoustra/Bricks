@@ -19,7 +19,13 @@ use serde_json::json;
 use tokio_util::sync::CancellationToken;
 
 /// Tool names that start a sub-agent. A child never receives them.
-pub const DELEGATION_TOOLS: &[&str] = &["Agent", "delegate"];
+pub const DELEGATION_TOOLS: &[&str] = &[
+    "Agent",
+    "Agents",
+    "AgentControl",
+    "AgentProfiles",
+    "delegate",
+];
 
 /// The current run's cancellation, put in the tool context by the runner
 /// at the start of each run: children are cancelled with it.
@@ -53,6 +59,33 @@ pub fn depth_of(ext: &Extensions) -> u32 {
 /// put one there.
 pub fn run_token(ext: &Extensions) -> Option<CancellationToken> {
     ext.get::<RunCancellation>().map(|r| r.0.clone())
+}
+
+/// Admission of a legacy delegation (`AgentTool`, `delegate`) by the
+/// session's scheduler, when there is one: the same depth and cumulative
+/// total as the native tools, and one activity slot held while it runs.
+/// Without a runtime (embedders), nothing changes.
+pub async fn legacy_admission(
+    ext: &Extensions,
+    n: u32,
+) -> Result<Option<tokio::sync::OwnedSemaphorePermit>, String> {
+    let Some(rt) = ext.get::<crate::agents::RuntimeHandle>() else {
+        return Ok(None);
+    };
+    let root = ext
+        .get::<crate::agents::AgentIdentity>()
+        .map(|i| i.root_run_id.clone())
+        .unwrap_or_else(|| "detached".into());
+    rt.0.scheduler
+        .reserve(&root, depth_of(ext), n)
+        .map_err(|e| format!("{e}. Nothing was started."))?;
+    let cancel = run_token(ext).unwrap_or_default();
+    let permit =
+        rt.0.scheduler
+            .acquire(&cancel, || {})
+            .await
+            .map_err(|e| format!("{e}. Nothing was started."))?;
+    Ok(Some(permit))
 }
 
 /// The extensions a child starts with: its own map (a child never writes

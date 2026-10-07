@@ -2,6 +2,7 @@
 
 use super::*;
 use serde::Deserialize;
+use std::path::Path;
 use std::process::Stdio;
 
 pub struct EnterWorktreeTool;
@@ -80,7 +81,7 @@ impl Tool for ExitWorktreeTool {
         "ExitWorktree"
     }
     fn description(&self) -> &str {
-        "Remove a git worktree previously created with EnterWorktree, given its path."
+        "Remove a git worktree previously created with EnterWorktree, given its path. Refused          when it has uncommitted changes (nothing is forced), and for sub-agents' worktrees          (use AgentControl)."
     }
     fn permission_level(&self) -> PermissionLevel {
         PermissionLevel::Write
@@ -111,8 +112,25 @@ impl Tool for ExitWorktreeTool {
             Err(e) => return e,
         };
 
+        // Worktrees of sub-agents belong to the agent runtime (their work
+        // is a ChangeSet): released through AgentControl, never here.
+        if Path::new(&input.path)
+            .components()
+            .collect::<Vec<_>>()
+            .windows(3)
+            .any(|w| {
+                w[0].as_os_str() == "workspaces"
+                    && w[1].as_os_str() == "worktrees"
+                    && w[2].as_os_str().to_string_lossy().starts_with("agent_")
+            })
+        {
+            return ToolResult::error(
+                "this worktree belongs to a sub-agent managed by Bricks: use AgentControl                  (apply_changes or discard_changes) instead. Nothing was removed.",
+            );
+        }
+        // Without --force: git refuses to drop uncommitted work.
         let output = tokio::process::Command::new("git")
-            .args(["worktree", "remove", "--force", &input.path])
+            .args(["worktree", "remove", &input.path])
             .current_dir(&ctx.working_dir)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

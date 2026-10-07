@@ -606,8 +606,9 @@ async fn run_loop(
 
     // Build tool context
     // Progress of long tool calls (shell commands) reaches the event stream.
+    // Weak: the agent's extensions outlive the run, the stream must not.
     {
-        let tx = event_tx.clone();
+        let tx = event_tx.downgrade();
         let reporters_emit = agent.emit_handle();
         agent
             .extensions
@@ -617,7 +618,9 @@ async fn run_loop(
                         name: tool.to_string(),
                         message: message.to_string(),
                     };
-                    let _ = tx.try_send(event.clone());
+                    if let Some(tx) = tx.upgrade() {
+                        let _ = tx.try_send(event.clone());
+                    }
                     reporters_emit(event);
                 },
             )));
@@ -626,6 +629,60 @@ async fn run_loop(
     agent
         .extensions
         .insert(crate::subagent::RunCancellation(cancel.clone()));
+    // Who this agent is, its model as of this run (a sub-agent inherits
+    // it), and where its sub-agents report.
+    {
+        let current = agent.extensions.get::<crate::agents::AgentIdentity>();
+        let run_id = format!("run_{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
+        let identity = match current {
+            Some(i) if i.parent_id.is_some() => (*i).clone(),
+            Some(i) => crate::agents::AgentIdentity {
+                agent_id: i.agent_id.clone(),
+                parent_id: None,
+                root_run_id: run_id,
+            },
+            None => crate::agents::AgentIdentity {
+                agent_id: format!("main_{}", &uuid::Uuid::new_v4().simple().to_string()[..8]),
+                parent_id: None,
+                root_run_id: run_id,
+            },
+        };
+        agent.extensions.insert(cersei_tools::jobs::JobOwner {
+            agent_id: identity.agent_id.clone(),
+            root_run_id: identity.root_run_id.clone(),
+            workspace: agent.working_dir.clone(),
+        });
+        agent.extensions.insert(identity);
+        agent.extensions.insert(crate::agents::ParentModel {
+            selection: agent.model_label(),
+            reasoning: agent.reasoning_profile(),
+        });
+        // In order, through one forwarder; listeners see them too. The
+        // forwarder only holds a weak reference to this run's stream: it
+        // never keeps the stream open after the run.
+        let (sub_tx, mut sub_rx) = tokio::sync::mpsc::unbounded_channel::<AgentEvent>();
+        let tx = event_tx.downgrade();
+        let reporters_emit = agent.emit_handle();
+        tokio::spawn(async move {
+            while let Some(ev) = sub_rx.recv().await {
+                reporters_emit(ev.clone());
+                let Some(tx) = tx.upgrade() else { break };
+                if tx.send(ev).await.is_err() {
+                    break;
+                }
+            }
+        });
+        agent
+            .extensions
+            .insert(crate::agents::SubAgentSink(Arc::new(
+                move |ev: AgentEvent| {
+                    let _ = sub_tx.send(ev);
+                },
+            )));
+    }
+    agent
+        .extensions
+        .insert(crate::agents::spawn::LiveChildren::default());
     // So are code-understanding queries.
     agent
         .extensions
@@ -948,6 +1005,7 @@ async fn run_loop(
         // Update cumulative usage
         agent.cumulative_usage.lock().merge(&response.usage);
         agent.cost_tracker.add(&response.usage);
+        record_run_usage(agent, &response.usage);
 
         // Emit cost update
         let cumulative = agent.cumulative_usage.lock().clone();
@@ -1167,7 +1225,8 @@ async fn run_loop(
                     let refusal = refusals.get(tool_id).cloned();
                     let tool_id = tool_id.clone();
                     let tool_input = tool_input.clone();
-                    let tool_ctx = tool_ctx.clone();
+                    // Its own view: the call id never leaks to a sibling.
+                    let tool_ctx = tool_ctx.for_call(&tool_id);
                     let permission_policy = Arc::clone(&agent.permission_policy);
                     let hooks = agent.hooks.clone();
                     let cumulative_cost = cumulative.cost_usd.unwrap_or(0.0);
@@ -1211,10 +1270,11 @@ async fn run_loop(
                                 let perm_req = PermissionRequest {
                                     tool_name: tool_name.clone(),
                                     tool_input: tool_input.clone(),
-                                    permission_level: tool.permission_level(),
+                                    permission_level: tool.permission_level_for(&tool_input),
                                     description: description.clone(),
                                     id: tool_id.clone(),
                                     preview: preview.clone(),
+                                    agent_id: None,
                                 };
                                 let d = permission_policy.check(&perm_req).await;
                                 let allowed = matches!(
@@ -1266,9 +1326,12 @@ async fn run_loop(
                                             format!("Blocked by hook: {}", reason),
                                         ),
                                         HookAction::ModifyInput(new_input) => {
-                                            tool.execute(new_input, &tool_ctx).await
+                                            execute_admitted(tool, new_input, &tool_ctx).await
                                         }
-                                        _ => tool.execute(tool_input.clone(), &tool_ctx).await,
+                                        _ => {
+                                            execute_admitted(tool, tool_input.clone(), &tool_ctx)
+                                                .await
+                                        }
                                     }
                                 }
                                 PermissionDecision::Deny(reason) => {
@@ -1298,7 +1361,16 @@ async fn run_loop(
             // running to its timeout.
             let results = tokio::select! {
                 r = futures::future::join_all(exec_futures) => r,
-                _ = cancel.cancelled() => return Err(CerseiError::Cancelled),
+                _ = cancel.cancelled() => {
+                    // Sub-agents stop with the run's token; wait for their
+                    // cleanup (shells, terminal state) rather than drop them.
+                    crate::agents::spawn::settle_children(
+                        &agent.extensions,
+                        std::time::Duration::from_secs(10),
+                    )
+                    .await;
+                    return Err(CerseiError::Cancelled);
+                }
             };
 
             // Anything but a read may have changed files: cached
@@ -1734,6 +1806,7 @@ async fn run_compaction(
         agent.context.lock().record_compaction_usage(u);
         agent.cumulative_usage.lock().merge(u);
         agent.cost_tracker.add(u);
+        record_run_usage(agent, u);
     }
 
     match (&run.outcome, run.messages) {
@@ -2172,6 +2245,50 @@ fn benchmark_check_tests(tool_calls: &[ToolCallRecord]) -> BenchmarkVerification
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
+
+/// One response's usage, in its root run's ledger (once, as this agent's
+/// own: the session agent's or a descendant's).
+fn record_run_usage(agent: &Agent, usage: &cersei_types::Usage) {
+    if let (Some(rt), Some(id)) = (
+        agent.extensions.get::<crate::agents::RuntimeHandle>(),
+        agent.extensions.get::<crate::agents::AgentIdentity>(),
+    ) {
+        rt.0.add_usage(&id.root_run_id, id.parent_id.is_none(), usage);
+    }
+}
+
+/// Run a tool, admitted as a writer of the workspace when it may write
+/// (level `write`, `execute` or `dangerous`): while a sub-agent works in
+/// this checkout, another agent's writing call waits for it. A delegation
+/// call holds nothing for its parent (its child does), so a parent waiting
+/// for its child cannot deadlock.
+async fn execute_admitted(
+    tool: &dyn cersei_tools::Tool,
+    input: serde_json::Value,
+    ctx: &ToolContext,
+) -> ToolResult {
+    use cersei_tools::PermissionLevel as L;
+    let writes = matches!(
+        tool.permission_level_for(&input),
+        L::Write | L::Execute | L::Dangerous
+    ) && !crate::subagent::DELEGATION_TOOLS.contains(&tool.name());
+    if !writes {
+        return tool.execute(input, ctx).await;
+    }
+    let holder = ctx
+        .extensions
+        .get::<crate::agents::AgentIdentity>()
+        .map(|i| i.agent_id.clone())
+        .unwrap_or_else(|| "agent".into());
+    let cancel = crate::subagent::run_token(&ctx.extensions).unwrap_or_default();
+    let gate = crate::agents::admission::writers_for(&ctx.working_dir);
+    match gate.acquire(&holder, &cancel, |_| {}).await {
+        Some(_guard) => tool.execute(input, ctx).await,
+        None => {
+            ToolResult::error("cancelled while waiting for another agent writing in this workspace")
+        }
+    }
+}
 
 #[cfg(test)]
 mod guard_tests {

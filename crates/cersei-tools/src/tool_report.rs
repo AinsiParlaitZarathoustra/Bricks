@@ -9,7 +9,7 @@
 //! The agent renders every result the same way:
 //!
 //! ```text
-//! ✓ [Bash] Succès (0.42s) — code 0
+//! ✓ [Bash] Succès (420 ms) — code 0
 //! --- stdout ---
 //! …
 //! ```
@@ -124,7 +124,7 @@ impl ToolReport {
     /// Header line for `tool`, with `fallback` used when the tool did not
     /// measure its own duration.
     pub fn header(&self, tool: &str, fallback: Duration) -> String {
-        let secs = self.duration.unwrap_or(fallback).as_secs_f64();
+        let took = cersei_types::duration::display_ms(self.duration.unwrap_or(fallback));
         let (mark, label) = match self.status {
             ToolStatus::Success => ("✓", "Succès".to_string()),
             ToolStatus::Failure => ("✗", "Échec".to_string()),
@@ -138,7 +138,7 @@ impl ToolReport {
             ToolStatus::Cancelled => ("⊘", "Annulé".to_string()),
             ToolStatus::Running => ("…", "En cours".to_string()),
         };
-        let mut h = format!("{mark} [{tool}] {label} ({secs:.2}s)");
+        let mut h = format!("{mark} [{tool}] {label} ({took})");
         match (self.exit_code, &self.termination) {
             (Some(c), _) => h.push_str(&format!(" — code {c}")),
             (None, Some(t)) => h.push_str(&format!(" — {t}")),
@@ -244,7 +244,7 @@ mod tests {
         ok.duration = Some(Duration::from_millis(420));
         assert_eq!(
             ok.render("Bash", Duration::ZERO, None),
-            "✓ [Bash] Succès (0.42s) — code 0\n--- stdout ---\nhi"
+            "✓ [Bash] Succès (420 ms) — code 0\n--- stdout ---\nhi"
         );
 
         let mut ko = ToolReport::new(
@@ -256,7 +256,7 @@ mod tests {
         ko.suggestion = suggest(ko.status, ko.exit_code, "command not found: foobar");
         assert_eq!(
             ko.render("Bash", Duration::ZERO, None),
-            "✗ [Bash] Échec (1.15s) — code 127\n--- stderr ---\ncommand not found: foobar\n\
+            "✗ [Bash] Échec (1150 ms) — code 127\n--- stderr ---\ncommand not found: foobar\n\
              --- suggestion ---\nVérifiez que l'outil est installé ou disponible dans le PATH."
         );
     }
@@ -274,7 +274,7 @@ mod tests {
         t.termination = Some("aucun code de sortie (processus arrêtés)".into());
         let r = t.render("Bash", Duration::from_secs(121), None);
         assert!(
-            r.starts_with("⏱ [Bash] Interrompu après timeout de 120s (121.00s) — aucun code"),
+            r.starts_with("⏱ [Bash] Interrompu après timeout de 120s (121000 ms) — aucun code"),
             "{r}"
         );
         assert!(r.contains("[Interrompu après timeout de 120s — sortie partielle ci-dessous]\n--- stdout ---\npartial"));
@@ -284,7 +284,7 @@ mod tests {
         let f = ToolReport::new(ToolStatus::Success, ToolBody::Text("  1 | x".into()));
         assert_eq!(
             f.render("Read", Duration::from_millis(3), None),
-            "✓ [Read] Succès (0.00s)\n  1 | x"
+            "✓ [Read] Succès (3 ms)\n  1 | x"
         );
         assert!(suggest(ToolStatus::Failure, Some(1), "x").is_none());
     }

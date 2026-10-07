@@ -93,6 +93,92 @@ pub const COMMANDS: &[SlashCommand] = &[
         },
     },
     SlashCommand {
+        name: "agents",
+        aliases: &[],
+        args: "[search words] | reload",
+        description:
+            "sub-agent profiles: project, user and built-in (reload: read the files again)",
+        build: |arg| {
+            let arg = arg.trim();
+            if arg == "reload" {
+                return Ok(Action::Engine(Command::ReloadAgentProfiles));
+            }
+            // Instances: `/agents running`, `/agents status|result|cancel <id>`.
+            let mut words = arg.split_whitespace();
+            match (words.next(), words.next()) {
+                (Some("running"), None) => {
+                    return Ok(Action::Engine(Command::AgentControl {
+                        action: "list".into(),
+                        agent_id: None,
+                        changeset_id: None,
+                        job_id: None,
+                    }))
+                }
+                (Some(a @ ("status" | "result" | "cancel")), Some(id)) => {
+                    return Ok(Action::Engine(Command::AgentControl {
+                        action: a.into(),
+                        agent_id: Some(id.into()),
+                        changeset_id: None,
+                        job_id: None,
+                    }))
+                }
+                _ => {}
+            }
+            Ok(Action::Engine(Command::ListAgentProfiles {
+                query: arg.to_string(),
+                page: 0,
+            }))
+        },
+    },
+    SlashCommand {
+        name: "changes",
+        aliases: &[],
+        args: "<changeset id> inspect | apply | discard",
+        description: "a sub-agent's isolated changes: show the patch, apply it to your tree (a conflict writes nothing), or discard it",
+        build: |arg| {
+            let mut w = arg.split_whitespace();
+            let (Some(id), action) = (w.next(), w.next().unwrap_or("inspect")) else {
+                return Err("give a ChangeSet id (from `changes ready`)".into());
+            };
+            let action = match action {
+                "inspect" => "inspect_changes",
+                "apply" => "apply_changes",
+                "discard" => "discard_changes",
+                other => return Err(format!("unknown action `{other}`: inspect, apply, discard")),
+            };
+            Ok(Action::Engine(Command::AgentControl {
+                action: action.into(),
+                agent_id: None,
+                changeset_id: Some(id.into()),
+                job_id: None,
+            }))
+        },
+    },
+    SlashCommand {
+        name: "jobs",
+        aliases: &[],
+        args: "[stop <job id>]",
+        description: "background jobs of the session; stop one (graceful, then forced)",
+        build: |arg| {
+            let mut w = arg.split_whitespace();
+            match (w.next(), w.next()) {
+                (None, _) => Ok(Action::Engine(Command::AgentControl {
+                    action: "jobs".into(),
+                    agent_id: None,
+                    changeset_id: None,
+                    job_id: None,
+                })),
+                (Some("stop"), Some(id)) => Ok(Action::Engine(Command::AgentControl {
+                    action: "stop_job".into(),
+                    agent_id: None,
+                    changeset_id: None,
+                    job_id: Some(id.into()),
+                })),
+                _ => Err("`/jobs` or `/jobs stop <job id>`".into()),
+            }
+        },
+    },
+    SlashCommand {
         name: "memory",
         aliases: &[],
         args: "",

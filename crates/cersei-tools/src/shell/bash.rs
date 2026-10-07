@@ -485,15 +485,15 @@ impl BashSession {
                     if let Some(p) = &progress {
                         let quiet = quiet_since.elapsed();
                         let mut msg = format!(
-                            "still running after {:.0}s ({} bytes of output so far)",
-                            started.elapsed().as_secs_f64(),
+                            "still running after {} ({} bytes of output so far)",
+                            cersei_types::duration::display_ms(started.elapsed()),
                             bytes
                         );
                         if quiet >= self.config.progress_every {
                             msg.push_str(&format!(
-                                "; no output for {:.0}s — it may be computing, or waiting for input it \
+                                "; no output for {} — it may be computing, or waiting for input it \
                                  will not get (stdin is {})",
-                                quiet.as_secs_f64(),
+                                cersei_types::duration::display_ms(quiet),
                                 if stdin.is_some() { "the provided input" } else { "empty" }
                             ));
                         }

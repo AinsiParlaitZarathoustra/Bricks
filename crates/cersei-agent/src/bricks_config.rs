@@ -33,6 +33,11 @@ pub struct BricksConfig {
     pub permissions: crate::control::ApprovalRules,
     /// `[semantic]`: limits of the shared code understanding engine.
     pub semantic: bricks_semantic::SemanticConfig,
+    /// `[agents]`: sub-agents (the `Agent` tool) and their runtime limits.
+    pub agents: crate::agents::DelegationSettings,
+    /// `[background]`: background jobs (`Bash` with `background: true`,
+    /// the `Job` tool).
+    pub background: cersei_tools::jobs::JobSettings,
 }
 
 impl Default for BricksConfig {
@@ -48,6 +53,8 @@ impl Default for BricksConfig {
             agent: crate::control::AgentSettings::default(),
             permissions: crate::control::ApprovalRules::default(),
             semantic: bricks_semantic::SemanticConfig::default(),
+            agents: crate::agents::DelegationSettings::default(),
+            background: cersei_tools::jobs::JobSettings::default(),
         }
     }
 }
@@ -126,6 +133,20 @@ impl BricksConfig {
                  writing or executing)"
             )),
         }
+        match table_from_bricks_toml::<crate::agents::DelegationSettings>(text, "agents") {
+            Ok(Some(a)) => c.agents = a,
+            Ok(None) => {}
+            Err(e) => c
+                .diagnostics
+                .push(format!("{name}: [agents]: {e} (sub-agent defaults used)")),
+        }
+        match table_from_bricks_toml::<cersei_tools::jobs::JobSettings>(text, "background") {
+            Ok(Some(b)) => c.background = b,
+            Ok(None) => {}
+            Err(e) => c
+                .diagnostics
+                .push(format!("{name}: [background]: {e} (job defaults used)")),
+        }
         match semantic_from_bricks_toml(text) {
             Ok(Some(sem)) => c.semantic = sem,
             Ok(None) => {}
@@ -148,6 +169,22 @@ impl BricksConfig {
                 .push(format!("{name}: {e} (web defaults used)")),
         }
         c
+    }
+}
+
+/// A whole table, when present.
+fn table_from_bricks_toml<T: serde::de::DeserializeOwned>(
+    text: &str,
+    table: &str,
+) -> Result<Option<T>, String> {
+    let doc: toml::Value = toml::from_str(text).map_err(|e| e.to_string())?;
+    match doc.get(table) {
+        None => Ok(None),
+        Some(v) => v
+            .clone()
+            .try_into::<T>()
+            .map(Some)
+            .map_err(|e| e.to_string()),
     }
 }
 
@@ -240,6 +277,68 @@ mod tests {
             cersei_web::WebConfig::default(),
             "web defaults documented"
         );
+    }
+
+    /// The commented `[agents]` and `[background]` values of the example,
+    /// uncommented, are the defaults.
+    #[test]
+    fn the_documented_agent_and_job_limits_are_the_defaults() {
+        let text = include_str!("../../../docs/bricks.example.toml");
+        let mut out = String::new();
+        let mut section = "";
+        for line in text.lines() {
+            let t = line.trim();
+            if t.starts_with('[') {
+                section = if t == "[agents]" || t == "[background]" {
+                    t
+                } else {
+                    ""
+                };
+                if !section.is_empty() {
+                    out.push_str(t);
+                    out.push('\n');
+                }
+                continue;
+            }
+            let Some(rest) = t.strip_prefix("# ") else {
+                continue;
+            };
+            let key = rest.split('=').next().unwrap_or("").trim();
+            let known = [
+                "max_concurrent",
+                "max_depth",
+                "max_total_per_run",
+                "max_batch",
+                "max_queued",
+                "admission_timeout_ms",
+                "background_drain_ms",
+                "default_isolation",
+                "skills_max_bytes",
+                "max_jobs",
+                "output_buffer_bytes",
+                "max_line_bytes",
+                "raw_log_bytes",
+                "stop_grace_ms",
+                "max_page_bytes",
+            ];
+            if !section.is_empty() && known.contains(&key) {
+                out.push_str(rest.split(" #").next().unwrap_or(rest));
+                out.push('\n');
+            }
+        }
+        let c = BricksConfig::from_texts(Some(&out), &[]);
+        assert!(c.diagnostics.is_empty(), "{:#?}\n{out}", c.diagnostics);
+        assert_eq!(
+            c.agents,
+            crate::agents::DelegationSettings::default(),
+            "{out}"
+        );
+        assert_eq!(
+            c.background,
+            cersei_tools::jobs::JobSettings::default(),
+            "{out}"
+        );
+        assert_eq!(out.matches(" = ").count(), 15, "{out}");
     }
 
     #[test]

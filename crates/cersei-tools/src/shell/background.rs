@@ -8,9 +8,12 @@
 //! persistent shell. Non-exported shell variables are not inherited (a
 //! foreground `cmd &` would see them; a task does not).
 //!
-//! Output is read continuously into a bounded in-memory window of lines per
-//! stream (with absolute line numbers, so a reader can page with a cursor and
-//! is told what was dropped) and into a raw log file capped in size.
+//! Output is read continuously, whatever the limits (the pipes are always
+//! drained), into a bounded in-memory window of lines per stream — bounded
+//! in lines **and bytes**, a line without a newline is cut at
+//! `max_line_bytes` with a marker — (with absolute line numbers, so a reader
+//! can page with a cursor and is told what was dropped) and into a raw log
+//! file capped in size (a write error is kept and reported).
 
 use super::clean::TerminalCleaner;
 use super::procs;
@@ -88,6 +91,12 @@ impl Stream {
 pub struct TaskLimits {
     /// Lines kept in memory per stream.
     pub memory_lines: usize,
+    /// Bytes kept in memory per stream (lines beyond are dropped, oldest
+    /// first, and reported).
+    pub memory_bytes: usize,
+    /// Longest line kept whole; a longer one (or an endless one without a
+    /// newline) is cut into pieces marked as such.
+    pub max_line_bytes: usize,
     /// Size of each raw log file before writing stops.
     pub raw_log_bytes: u64,
 }
@@ -96,13 +105,22 @@ impl Default for TaskLimits {
     fn default() -> Self {
         Self {
             memory_lines: 5_000,
+            memory_bytes: 1024 * 1024,
+            max_line_bytes: 64 * 1024,
             raw_log_bytes: 50 * 1024 * 1024,
         }
     }
 }
 
+/// Marker appended to a piece of a line cut at `max_line_bytes`.
+pub const LINE_CUT: &str = " [line continues]";
+
 struct Log {
     lines: VecDeque<String>,
+    /// Bytes of `lines`.
+    bytes: usize,
+    /// Bytes received on the stream, in all.
+    received: u64,
     /// Absolute number (from 0) of `lines[0]`.
     first: u64,
     total: u64,
@@ -112,6 +130,7 @@ struct Log {
     raw_path: PathBuf,
     raw_written: u64,
     raw_capped: bool,
+    raw_error: Option<String>,
     limits: TaskLimits,
 }
 
@@ -120,23 +139,28 @@ impl Log {
         let raw = std::fs::File::create(&raw_path).ok();
         Self {
             lines: VecDeque::new(),
+            bytes: 0,
+            received: 0,
             first: 0,
             total: 0,
             partial: String::new(),
-            cleaner: TerminalCleaner::new(),
+            cleaner: TerminalCleaner::new().with_max_line(limits.max_line_bytes),
             raw,
             raw_path,
             raw_written: 0,
             raw_capped: false,
+            raw_error: None,
             limits,
         }
     }
 
     fn push(&mut self, bytes: &[u8]) -> Vec<String> {
+        self.received += bytes.len() as u64;
         if let Some(f) = &mut self.raw {
             let room = self.limits.raw_log_bytes.saturating_sub(self.raw_written) as usize;
             let n = room.min(bytes.len());
-            if f.write_all(&bytes[..n]).is_err() {
+            if let Err(e) = f.write_all(&bytes[..n]) {
+                self.raw_error = Some(e.to_string());
                 self.raw = None;
             }
             self.raw_written += n as u64;
@@ -168,16 +192,43 @@ impl Log {
                 self.add_line(line);
             } else {
                 self.partial.push_str(piece);
+                // A line without end is cut: memory stays bounded.
+                let max = self.limits.max_line_bytes.max(64);
+                while self.partial.len() > max {
+                    let mut cut = max;
+                    while !self.partial.is_char_boundary(cut) {
+                        cut -= 1;
+                    }
+                    let rest = self.partial.split_off(cut);
+                    let mut head = std::mem::replace(&mut self.partial, rest);
+                    head.push_str(LINE_CUT);
+                    new.push(head.clone());
+                    self.add_line(head);
+                }
             }
         }
         new
     }
 
-    fn add_line(&mut self, line: String) {
+    fn add_line(&mut self, mut line: String) {
+        let max = self.limits.max_line_bytes.max(64);
+        if line.len() > max {
+            let mut cut = max;
+            while !line.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            line.truncate(cut);
+            line.push_str(LINE_CUT);
+        }
+        self.bytes += line.len();
         self.lines.push_back(line);
         self.total += 1;
-        while self.lines.len() > self.limits.memory_lines {
-            self.lines.pop_front();
+        while self.lines.len() > self.limits.memory_lines
+            || (self.bytes > self.limits.memory_bytes && self.lines.len() > 1)
+        {
+            if let Some(l) = self.lines.pop_front() {
+                self.bytes -= l.len();
+            }
             self.first += 1;
         }
     }
@@ -200,6 +251,10 @@ pub struct Page {
     pub partial: Option<String>,
     pub raw_log: PathBuf,
     pub raw_log_capped: bool,
+    /// Why the raw log stopped, when writing it failed.
+    pub raw_log_error: Option<String>,
+    /// Bytes received on this stream, in all.
+    pub received_bytes: u64,
 }
 
 /// What to start: `command`, with the shell state written in `snapshot`.
@@ -243,6 +298,8 @@ pub struct TaskStatus {
     pub elapsed: Duration,
     pub stdout_lines: u64,
     pub stderr_lines: u64,
+    pub stdout_bytes: u64,
+    pub stderr_bytes: u64,
 }
 
 impl Task {
@@ -410,6 +467,16 @@ impl Task {
     }
 
     pub fn status(&self) -> TaskStatus {
+        // One lock per log at a time (a guard lives to the end of its
+        // statement: two `lock()` of one log in one expression deadlock).
+        let (stdout_lines, stdout_bytes) = {
+            let l = self.logs[0].lock();
+            (l.total, l.received)
+        };
+        let (stderr_lines, stderr_bytes) = {
+            let l = self.logs[1].lock();
+            (l.total, l.received)
+        };
         TaskStatus {
             id: self.id.clone(),
             command: self.command.clone(),
@@ -417,8 +484,10 @@ impl Task {
             state: self.state(),
             readiness: self.ready.lock().clone(),
             elapsed: self.started.elapsed(),
-            stdout_lines: self.logs[0].lock().total,
-            stderr_lines: self.logs[1].lock().total,
+            stdout_lines,
+            stderr_lines,
+            stdout_bytes,
+            stderr_bytes,
         }
     }
 
@@ -469,6 +538,8 @@ impl Task {
             partial: (!log.partial.is_empty() && next == log.total).then(|| log.partial.clone()),
             raw_log: log.raw_path.clone(),
             raw_log_capped: log.raw_capped,
+            raw_log_error: log.raw_error.clone(),
+            received_bytes: log.received,
             lines,
         }
     }
@@ -503,5 +574,65 @@ impl Task {
 
     pub fn dir(&self) -> &Path {
         &self.dir
+    }
+
+    /// Paths of the raw logs (stdout, stderr).
+    pub fn raw_logs(&self) -> (PathBuf, PathBuf) {
+        (
+            self.logs[0].lock().raw_path.clone(),
+            self.logs[1].lock().raw_path.clone(),
+        )
+    }
+
+    /// Duration since the start (monotonic).
+    pub fn elapsed(&self) -> Duration {
+        self.started.elapsed()
+    }
+}
+
+#[cfg(test)]
+mod log_limits {
+    use super::*;
+
+    fn log(memory_bytes: usize, max_line: usize) -> (Log, tempfile::TempDir) {
+        let d = tempfile::tempdir().unwrap();
+        let l = Log::new(
+            d.path().join("raw"),
+            TaskLimits {
+                memory_lines: 1_000,
+                memory_bytes,
+                max_line_bytes: max_line,
+                raw_log_bytes: 1_000,
+            },
+        );
+        (l, d)
+    }
+
+    #[test]
+    fn an_endless_line_is_cut_and_memory_stays_bounded() {
+        let (mut l, _d) = log(4_096, 256);
+        // 1 MiB without a newline, in chunks.
+        for _ in 0..256 {
+            l.push(&[b'x'; 4096]);
+        }
+        assert!(l.partial.len() <= 256);
+        assert!(l.bytes <= 4_096 + 256 + LINE_CUT.len());
+        assert!(l.lines.iter().all(|x| x.ends_with(LINE_CUT)));
+        assert_eq!(l.received, 1024 * 1024);
+        assert!(l.first > 0, "old pieces dropped and counted");
+        // The raw log stopped at its cap, said so.
+        assert!(l.raw_capped);
+        assert!(l.raw_written <= 1_000);
+    }
+
+    #[test]
+    fn unicode_is_never_split() {
+        let (mut l, _d) = log(4_096, 100);
+        let s = "é😀".repeat(200);
+        l.push(s.as_bytes());
+        l.push(b"\n");
+        for line in &l.lines {
+            assert!(std::str::from_utf8(line.as_bytes()).is_ok());
+        }
     }
 }

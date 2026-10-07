@@ -169,12 +169,18 @@ impl Human {
             }
             Event::ToolFinished {
                 name,
-                is_error: true,
+                is_error,
                 output,
+                duration_ms,
                 ..
             } => {
-                let first = output.lines().next().unwrap_or("");
-                let _ = writeln!(err, "  ✗ {name}: {first}");
+                let took = cersei_types::duration::display_ms_u64(*duration_ms);
+                if *is_error {
+                    let first = output.lines().next().unwrap_or("");
+                    let _ = writeln!(err, "  ✗ {name}  {took}: {first}");
+                } else {
+                    let _ = writeln!(err, "  ✓ {name}  {took}");
+                }
             }
             Event::EditApplied { files, .. } => {
                 for f in files {
@@ -183,6 +189,50 @@ impl Human {
             }
             Event::Notice { message } => {
                 let _ = writeln!(err, "· {message}");
+            }
+            Event::AgentSpawned { agent } => {
+                self.newline();
+                let _ = writeln!(
+                    err,
+                    "⤷ agent {} ({}, {}) {}: {}",
+                    agent.profile,
+                    agent.model.applied,
+                    agent.reasoning.applied,
+                    agent.agent_id,
+                    agent.task
+                );
+            }
+            Event::AgentState {
+                agent_id,
+                state,
+                reason: Some(reason),
+            } => {
+                let _ = writeln!(err, "  ⤷ {agent_id} {}: {reason}", state.as_str());
+            }
+            Event::AgentToolFinished {
+                name,
+                is_error,
+                duration_ms,
+                ..
+            } => {
+                let mark = if *is_error { "✗" } else { "✓" };
+                let took = cersei_types::duration::display_ms_u64(*duration_ms);
+                let _ = writeln!(err, "  ⤷ {mark} {name}  {took}");
+            }
+            Event::AgentFinished { result } => {
+                let took = cersei_types::duration::display_ms_u64(result.duration_ms);
+                let _ = writeln!(
+                    err,
+                    "⤷ agent {} {} in {took}, {} turn(s){}",
+                    result.agent_id,
+                    result.status,
+                    result.turns,
+                    result
+                        .error
+                        .as_deref()
+                        .map(|e| format!(": {e}"))
+                        .unwrap_or_default()
+                );
             }
             Event::CommandRejected { reason, .. } => {
                 let _ = writeln!(err, "bricks: {reason}");
@@ -367,6 +417,80 @@ pub async fn run(global: &Global, args: RunArgs) -> i32 {
                 break;
             }
             _ => {}
+        }
+    }
+    // Background sub-agents admitted during the run: no daemon. Wait for
+    // them (bounded), cancel what is left, report, then exit.
+    if let Some(rt) = ctl.agent_runtime() {
+        if !rt.pending(None).is_empty() {
+            let limit = rt.scheduler.limits.background_drain;
+            if !args.json {
+                eprintln!(
+                    "bricks: waiting for {} background sub-agent(s) (at most {})",
+                    rt.pending(None).len(),
+                    cersei_types::duration::display_ms(limit)
+                );
+            }
+            let deadline = tokio::time::Instant::now() + limit;
+            while !rt.pending(None).is_empty() && tokio::time::Instant::now() < deadline {
+                match tokio::time::timeout_at(
+                    deadline
+                        .min(tokio::time::Instant::now() + std::time::Duration::from_millis(200)),
+                    events.next(),
+                )
+                .await
+                {
+                    Ok(Some(env)) => {
+                        let _ = emit(&env);
+                    }
+                    Ok(None) => break,
+                    Err(_) => {}
+                }
+            }
+            let left: Vec<String> = rt
+                .pending(None)
+                .into_iter()
+                .map(|r| r.info.agent_id)
+                .collect();
+            if !left.is_empty() {
+                for id in &left {
+                    rt.cancel(id);
+                }
+                rt.settle(&left, std::time::Duration::from_secs(10)).await;
+            }
+            // The last events (terminal states, final usage).
+            while let Ok(Some(env)) =
+                tokio::time::timeout(std::time::Duration::from_millis(300), events.next()).await
+            {
+                let _ = emit(&env);
+            }
+            let bg: Vec<_> = rt.records().into_iter().filter(|r| r.background).collect();
+            let not_completed = bg
+                .iter()
+                .filter(|r| r.result.as_ref().is_none_or(|x| x.status != "completed"))
+                .count();
+            if !args.json {
+                eprintln!("bricks: background sub-agents:");
+                for r in &bg {
+                    eprintln!(
+                        "  {} ({}) {}{}",
+                        r.info.agent_id,
+                        r.info.profile,
+                        r.result
+                            .as_ref()
+                            .map(|x| x.status.as_str())
+                            .unwrap_or(r.state.as_str()),
+                        r.result
+                            .as_ref()
+                            .and_then(|x| x.changeset.as_deref())
+                            .map(|c| format!(", ChangeSet {c}"))
+                            .unwrap_or_default()
+                    );
+                }
+            }
+            if not_completed > 0 && code == exit::OK {
+                code = exit::BACKGROUND;
+            }
         }
     }
     ctl.close().await;

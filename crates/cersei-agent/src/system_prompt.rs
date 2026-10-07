@@ -473,11 +473,15 @@ follow-up work. Use TaskCreate/TaskUpdate to track parallel work.
 const SESSION_AGENT_GUIDANCE: &str = r#"
 ## Sub-agents
 
-The Agent tool runs a sub-agent on one substantial, well-defined sub-task, with its own
-context window. Most requests need none: do small tasks yourself.
-- Only start a sub-agent with a precise, self-contained task; never with an empty or vague one
-- Independent sub-tasks can run in parallel
-- The agent's output is not visible to the user — summarize results yourself
+The Agent tool delegates one self-contained task to a sub-agent that starts from a fresh
+context (it does not see this conversation) with your permissions and tools; you wait for
+its compact result. A profile (AgentProfiles lists them) specialises it, never restricts it.
+- Delegate when a task is substantial and separable or deserves a specialist's focus; do
+  small tasks yourself. Delegating is never required.
+- Put everything it needs in `task` (and `context`): it knows nothing else.
+- Its result is not shown to the user: check it (status, files changed, commands run) and
+  write the synthesis yourself.
+- One sub-agent works at a time in this workspace, and a sub-agent cannot start another.
 "#;
 
 const SESSION_TASK_GUIDANCE: &str = r#"

@@ -17,6 +17,7 @@ pub mod file_write;
 pub mod git_utils;
 pub mod glob_tool;
 pub mod grep_tool;
+pub mod jobs;
 pub mod lsp_tool;
 pub mod mcp_tool;
 pub mod multi_edit;
@@ -68,6 +69,13 @@ pub trait Tool: Send + Sync {
     /// Permission level required for this tool.
     fn permission_level(&self) -> PermissionLevel {
         PermissionLevel::None
+    }
+
+    /// Permission level of one call, for tools whose actions differ (a
+    /// read-only status next to a writing apply). Defaults to
+    /// [`Tool::permission_level`].
+    fn permission_level_for(&self, _input: &Value) -> PermissionLevel {
+        self.permission_level()
     }
 
     /// Category for grouping in tool listings.
@@ -224,10 +232,18 @@ pub struct ToolContext {
     pub extensions: Extensions,
 }
 
+type ExtMap = dashmap::DashMap<std::any::TypeId, Arc<dyn std::any::Any + Send + Sync>>;
+
 /// Type-map for injecting custom data into the tool context.
+///
+/// Clones share their values. [`Extensions::with_local`] makes a view with
+/// values of its own on top (for one tool call: concurrent calls never see
+/// each other's), reads fall through to the shared values, writes with
+/// `insert` still go to the shared ones.
 #[derive(Clone, Default)]
 pub struct Extensions {
-    data: Arc<dashmap::DashMap<std::any::TypeId, Arc<dyn std::any::Any + Send + Sync>>>,
+    data: Arc<ExtMap>,
+    local: Option<Arc<ExtMap>>,
 }
 
 impl Extensions {
@@ -236,9 +252,46 @@ impl Extensions {
     }
 
     pub fn get<T: Send + Sync + 'static>(&self) -> Option<Arc<T>> {
+        let id = std::any::TypeId::of::<T>();
+        if let Some(local) = &self.local {
+            if let Some(v) = local.get(&id) {
+                return Arc::clone(v.value()).downcast::<T>().ok();
+            }
+        }
         self.data
-            .get(&std::any::TypeId::of::<T>())
+            .get(&id)
             .and_then(|v| Arc::clone(v.value()).downcast::<T>().ok())
+    }
+
+    /// A view sharing these values, with `val` visible only through it.
+    pub fn with_local<T: Send + Sync + 'static>(&self, val: T) -> Extensions {
+        let local: Arc<ExtMap> = Arc::new(dashmap::DashMap::new());
+        if let Some(existing) = &self.local {
+            for e in existing.iter() {
+                local.insert(*e.key(), Arc::clone(e.value()));
+            }
+        }
+        local.insert(std::any::TypeId::of::<T>(), Arc::new(val));
+        Extensions {
+            data: Arc::clone(&self.data),
+            local: Some(local),
+        }
+    }
+}
+
+/// The id of the tool call a context was made for (set by the runner on a
+/// per-call view of the extensions).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CurrentToolCall(pub String);
+
+impl ToolContext {
+    /// The context of one tool call: same services, plus its call id.
+    pub fn for_call(&self, tool_call_id: &str) -> ToolContext {
+        let mut c = self.clone();
+        c.extensions = self
+            .extensions
+            .with_local(CurrentToolCall(tool_call_id.to_string()));
+        c
     }
 }
 
@@ -395,6 +448,7 @@ pub fn shell() -> Vec<Box<dyn Tool>> {
         Box::new(bash::BashTaskStatusTool),
         Box::new(bash::BashTaskOutputTool),
         Box::new(bash::BashTaskStopTool),
+        Box::new(jobs::JobTool),
         Box::new(powershell::PowerShellTool),
     ]
 }
