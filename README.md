@@ -1,22 +1,66 @@
+<div align="center">
+
 # Bricks
 
-A coding agent written in Rust: an embeddable engine (the `cersei-*` crates)
-and the `bricks` command, with a headless mode for scripts and CI and an
-interactive terminal interface.
+**An engine for agentic development. Built in Rust. At home in your terminal.**
 
-Bricks is a fork of [Cersei](https://github.com/pacifio/cersei) by Adib
-Mohsin (Pacifio), released under the MIT license. The crates keep their
-`cersei-*` names.
+![Version](https://img.shields.io/badge/version-0.3.6-blue)
+![Rust](https://img.shields.io/badge/built_with-Rust-orange)
+
+[Quick start](#quick-start) · [What it does](#what-it-does) · [Configuration](#configuration) · [Documentation](#documentation) · [License](#license)
+
+</div>
+
+Bricks is a new tool for coding with AI. Built on the technology behind
+[Cersei](https://github.com/pacifio/cersei), it brings new capabilities and
+a redesigned, more robust architecture to the terminal, with one goal:
+give AI agents the means to do their best work.
+
+It combines an interactive terminal interface, a headless command for scripts
+and CI, and an embeddable Rust engine for building your own applications.
+
+### Two ideas behind Bricks
+
+Bricks brings together two concepts developed by AinsiParlaitZarathoustra:
+
+- **ADK — Agentic Development Kit.** A broad set of purpose-built, optimised
+  tools that help AI agents inspect code, make changes, run commands and
+  work effectively across a project.
+- **ADE — Agentic Development Engine.** An engine designed to enhance the
+  capabilities of any agent by providing the tools, context and execution
+  infrastructure it needs to perform well.
+
+**Engine** is the defining word. Where a *harness* suggests restraint,
+reduced agility and dependence on whoever holds it, an engine supplies the
+means to act. Bricks is built around that ambition: empower the agent and
+make its work more effective.
+
+### Project status
+
+**Bricks 0.3.6** has a substantial, stable foundation. Development continues,
+with further features and code optimisations still ahead.
+
+Bricks is a fork of Cersei, created by **Adib Mohsin (Pacifio)**. The inherited
+Rust crates retain their `cersei-*` names; Bricks extends that foundation
+with its own architecture and capabilities.
+
+## Quick start
+
+From a checkout of this repository:
 
 ```bash
 cargo install --path crates/bricks-cli
-bricks                                                     # interactive terminal interface
-bricks run "Explain the failing test in src/parser.rs"     # one prompt, answer on stdout
-bricks run --json --non-interactive "Analyse the build errors"   # scripts and CI: JSONL events
-bricks resume                                              # pick a stored session
 ```
 
----
+Configure a provider and model using the [configuration example](#configuration),
+then choose how to work:
+
+```bash
+bricks                                                        # interactive terminal interface
+bricks run "Explain the failing test in src/parser.rs"          # one prompt, answer on stdout
+bricks run --json --non-interactive "Analyse the build errors"  # scripts and CI: JSONL events
+bricks resume                                                 # pick a stored session
+```
 
 ## What it does
 
@@ -164,7 +208,11 @@ Pacifio's figures were published with Cersei 0.1.6 on Apple Silicon, on a
 different machine. The comparison shows orders of magnitude and
 regressions, not a controlled A/B test.
 
-### Tool I/O (`cargo run --release -p cersei --example benchmark_io`)
+### Tool I/O
+
+```bash
+cargo run --release -p cersei --example benchmark_io
+```
 
 50 iterations per tool, in-process dispatch, average and range.
 
@@ -185,12 +233,12 @@ Why some tools got slower:
   whole process tree and spills large outputs to disk. Each command
   therefore pays a request/response round-trip and a short output-settling
   window (15 ms).
-* **Bash fix.** While re-running this benchmark, a 1 s penalty per command
-  on macOS was found and fixed: the kernel never reports the end of the
-  output FIFOs, and each command waited two 500 ms windows (1 051 ms
-  measured before the fix).
 
-### Memory I/O (`cargo run --release -p cersei-memory --features graph --example memory_bench`)
+### Memory I/O
+
+```bash
+cargo run --release -p cersei-memory --features graph --example memory_bench
+```
 
 | Operation | Now (mean) | Cersei 0.1.6 (Pacifio) |
 |---|---|---|
@@ -230,19 +278,21 @@ echo tool (`cargo run --release -p cersei-agent --example general_agent_bench --
 | Graph recall under load, 10 000 nodes (p50) | 90.2 ms | 94.0 ms |
 | Semantic search under load, 10 000 chunks (p50) | 65.6 µs | 50.7 µs |
 
-Each agent now carries a context manager, a tool-output compressor with its
-store, a web context and an approval-ready permission path, which explains
-the heavier instantiation and footprint. This re-run also found and fixed a
-much larger regression from that work: the built-in compression rules were
-re-parsed from TOML for every agent. Instantiation had reached 28.9 ms and
-2.3 MB per agent; the rules are now parsed once per process and shared.
+Each agent carries a context manager, a tool-output compressor with its
+store, a web context and an approval-ready permission path. These additional
+capabilities explain the higher instantiation cost and memory footprint.
+Built-in compression rules are parsed once per process and shared.
 
-The Python frameworks (Agno, LangGraph, PydanticAI, CrewAI) were **not
+The Python frameworks (Agno, LangGraph, PydanticAI, CrewAI) have **not yet been
 re-run**: their published results in `bench/general-agents/results/` date
 from Pacifio's run. Re-running them downloads those frameworks from PyPI:
 `./bench/general-agents/run.sh`.
 
-### CLI startup (`python3 scripts/bench_cli.py --bricks <path> --iterations 50`)
+### CLI startup
+
+```bash
+python3 scripts/bench_cli.py --bricks <path> --iterations 50
+```
 
 The command is `--version`, with no model call: 50 runs after warm-up.
 
@@ -256,34 +306,34 @@ Pacifio's earlier comparison (269 ms for Claude Code) measured the former
 Node.js Claude Code; the current one is a native binary. The "Abstract CLI"
 it compared against no longer exists; `bricks` replaces it.
 
-### Not re-run (paid or external services)
+### Not re-run yet
 
-| Suite | Why | Command |
+The following evaluations have not yet been re-run for Bricks. The priority
+is reliable validation of real-model behaviour and reproducible results;
+API cost is not the reason these evaluations remain pending.
+
+| Evaluation | Requirements | Entry point |
 |---|---|---|
-| LongMemEval | Needs the dataset (download), an answerer, a judge and embeddings: paid calls | `bench/long-mem` — evidence recall is free with local embeddings: `cargo run --release -p longmem-bench --bin longmem-recall -- --dataset oracle` |
-| Terminal-Bench 2.0 | Daytona sandboxes and a model: paid | `./bench/term-bench/run.sh` |
-| Compression savings with a real model | One paid call | `BRICKS_LIVE_MODEL=provider_id/model_id cargo test -p cersei-agent --test e2e_live_compression -- --ignored --nocapture` |
-| Memory recall vs Claude Code / Codex (LLM-based recall) | Runs those agents with their models | — |
+| LongMemEval | Dataset, answerer, judge and embeddings | `bench/long-mem` |
+| Terminal-Bench 2.0 | Daytona sandboxes and a configured model | `./bench/term-bench/run.sh` |
+| Compression savings with a real model | A configured live model | Command below |
+| Memory recall vs Claude Code / Codex | Each agent running with its configured model | Comparative evaluation pending |
 
-No figure from these suites is claimed here.
+LongMemEval evidence recall can also run with local embeddings:
 
-### Stress checks
+```bash
+cargo run --release -p longmem-bench --bin longmem-recall -- --dataset oracle
+```
 
-All five stress suites pass (`cargo run --release -p cersei --example stress_<name>`):
+To evaluate compression with a live model:
 
-| Suite | Checks |
-|---|---|
-| core infrastructure | 46 / 46 |
-| tools | 47 / 47 |
-| orchestration | 33 / 33 |
-| skills | 47 / 47 |
-| memory | 85 / 85 |
+```bash
+BRICKS_LIVE_MODEL=provider_id/model_id cargo test -p cersei-agent --test e2e_live_compression -- --ignored --nocapture
+```
 
-Before this run, 8 checks failed. Most had expectations outdated by later
-changes: tool counts, the compaction prompt's wording, the message of a
-removed tool result, and a stub model too small for the current tool
-definitions. One check (`orchestration() = 3 tools`) already failed in
-Cersei 0.1.6, which had 9 orchestration tools.
+No results are claimed for these pending evaluations. The measurements above
+cover local tools and engine overhead; they do not measure coding quality
+with a live model.
 
 ## Tests
 
@@ -293,14 +343,14 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
 ```
 
-The workspace has 930+ tests. The model-facing paths are tested against
-scripted models and local test servers; no test makes a paid call (the
-live ones are `#[ignore]`). Tests ran on macOS (arm64); Linux and Windows
-were not run.
+The published validation snapshot covers 930+ workspace tests. The model-facing paths are tested against
+scripted models and local test servers. Live API tests are opt-in
+(`#[ignore]`). The reported test runs used macOS (arm64); Linux and Windows
+have not yet been validated in those runs.
 
 ## Documentation
 
-| | |
+| Guide | Contents |
 |---|---|
 | [docs/cli.md](docs/cli.md) | the `bricks` command, JSONL schema, keys, approvals, sessions |
 | [docs/providers.md](docs/providers.md) | providers configuration |
@@ -316,11 +366,24 @@ were not run.
 
 ## License
 
-MIT. Copyright (c) 2025-2026 Adib Mohsin (Cersei), and the Bricks
-contributors.
+Bricks combines code under **MPL 2.0** and inherited code under **MIT**.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+- **New Bricks contributions after the 107th commit**,
+  [`fa7af2b8 — Bricks release`](https://github.com/AinsiParlaitZarathoustra/Bricks/commit/fa7af2b8e7d6d6fb89f25dab2f6f4a1d0cf2885e),
+  are licensed under the [Mozilla Public License 2.0](https://www.mozilla.org/en-US/MPL/2.0/).
+  Copyright © 2026 AinsiParlaitZarathoustra, for their contributions to Bricks.
+- **Code already present at that commit**, including Cersei code by
+  Adib Mohsin (Pacifio) and other contributors, retains its MIT license
+  and the applicable original copyright and permission notices.
 
-The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+The transition does not retroactively change the license of earlier code
+or transfer ownership of other contributors' work. Original MIT notices
+must be preserved when that code is reused or modified.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+MPL 2.0 applies at the file level: distributed files containing MPL-covered
+code, including modifications to that code, remain subject to MPL 2.0.
+Inherited MIT notices remain applicable to the original portions of mixed
+files. See the [MPL 2.0 FAQ](https://www.mozilla.org/en-US/MPL/2.0/FAQ/)
+for details.
+
+Cersei's original notice: **Copyright (c) 2025 Adib Mohsin**.
