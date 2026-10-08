@@ -557,6 +557,40 @@ async fn http_statuses_are_typed_and_retryable_from_complete_itself() {
             }
             other => panic!("{sel}: {other:?}"),
         }
+        // A 503's delay reaches the error too, in seconds or as a date.
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(600);
+        let date: &'static str = Box::leak(httpdate::fmt_http_date(later).into_boxed_str());
+        for value in ["12", date] {
+            let (_, reg) = setup(vec![Reply::Json {
+                status: "503 Service Unavailable",
+                headers: vec![("Retry-After", value)],
+                body: r#"{"error":"busy"}"#.into(),
+            }]);
+            let e = error_of(&reg, sel).await;
+            assert!(
+                e.is_retryable() && e.http_status() == Some(503),
+                "{sel}: {e:?}"
+            );
+            let d = e
+                .retry_after()
+                .unwrap_or_else(|| panic!("{sel} {value}: {e:?}"));
+            if value == "12" {
+                assert_eq!(d, std::time::Duration::from_secs(12));
+            } else {
+                assert!(d > std::time::Duration::from_secs(590), "{d:?}");
+            }
+        }
+        // A definitive error keeps its delay and stays definitive.
+        let (_, reg) = setup(vec![Reply::Json {
+            status: "400 Bad Request",
+            headers: vec![("Retry-After", "5")],
+            body: "{}".into(),
+        }]);
+        let e = error_of(&reg, sel).await;
+        assert!(
+            !e.is_retryable() && e.retry_after().is_some(),
+            "{sel}: {e:?}"
+        );
         let (_, reg) = setup(vec![Reply::Json {
             status: "529 Overloaded",
             headers: vec![],

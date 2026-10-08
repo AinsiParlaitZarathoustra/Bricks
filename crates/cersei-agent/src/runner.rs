@@ -25,6 +25,61 @@ fn rand_jitter() -> u64 {
     seed ^ (seed >> 16) ^ (seed << 7)
 }
 
+// ─── Retry delay and notice ──────────────────────────────────────────────────
+
+/// The local backoff of retry `retry` (1-based): 1000 × 2^(retry−1) ms,
+/// capped at 30000 ms, plus `jitter % max(base / 4, 1)` ms.
+fn local_backoff(retry: u32, jitter: u64) -> std::time::Duration {
+    let factor = 1u64
+        .checked_shl(retry.saturating_sub(1))
+        .unwrap_or(u64::MAX);
+    let base = 1000u64.saturating_mul(factor).min(30_000);
+    std::time::Duration::from_millis(base + jitter % (base / 4).max(1))
+}
+
+/// The delay before retry `retry`: the local backoff, or the server's
+/// `Retry-After` when that is longer (never shorter: a zero or past value
+/// keeps the backoff; a long one is not capped). Computed once per retry;
+/// the wait, the notice and the log all use it.
+pub(crate) fn retry_delay(
+    retry: u32,
+    jitter: u64,
+    server: Option<std::time::Duration>,
+) -> std::time::Duration {
+    let local = local_backoff(retry, jitter);
+    server.map_or(local, |s| s.max(local))
+}
+
+/// What kind of transient failure this is, for people: "Rate limited" only
+/// for HTTP 429; the status when there is one, none for a transport error.
+/// Built from the status and the error class only — never from the error's
+/// text, headers or body.
+pub(crate) fn retry_label(e: &CerseiError) -> String {
+    match e.http_status() {
+        Some(429) => "Rate limited (HTTP 429)".into(),
+        Some(503) => "Service unavailable (HTTP 503)".into(),
+        Some(529) => "Provider overloaded (HTTP 529)".into(),
+        Some(504) => "Gateway timeout (HTTP 504)".into(),
+        Some(s) => format!("Temporary provider error (HTTP {s})"),
+        None if e.is_timeout() => "Temporary connection error (timeout)".into(),
+        None => "Temporary connection error".into(),
+    }
+}
+
+/// The one notice of a retry, sent on every existing channel.
+pub(crate) fn retry_notice(
+    e: &CerseiError,
+    retry: u32,
+    max: u32,
+    delay: std::time::Duration,
+) -> String {
+    format!(
+        "{}. Retrying in {} ms... (retry {retry}/{max})",
+        retry_label(e),
+        delay.as_millis()
+    )
+}
+
 // ─── Read-before-edit guard (F-11) ───────────────────────────────────────────
 
 /// Paths a call would write to, as the model named them.
@@ -898,37 +953,27 @@ async fn run_loop(
                     continue;
                 }
                 Err(e) if e.is_retryable() && retry_count < MAX_RETRIES => {
+                    // MAX_RETRIES retries after the first call: six calls at
+                    // most. The delay is chosen once (local backoff 1, 2, 4,
+                    // 8, 16 s + jitter, or the server's longer Retry-After).
                     retry_count += 1;
-                    let delay_ms = (1000 * 2u64.pow(retry_count - 1)).min(30_000); // 1s, 2s, 4s, 8s, 16s
-                    let jitter = delay_ms / 4;
-                    let actual_delay = delay_ms + (rand_jitter() % jitter.max(1));
+                    let delay = retry_delay(retry_count, rand_jitter(), e.retry_after());
+                    let notice = retry_notice(&e, retry_count, MAX_RETRIES, delay);
                     tracing::warn!(
-                        "Provider error (retryable, attempt {}/{}): {}. Retrying in {}ms...",
+                        "{}: retry {}/{} in {} ms",
+                        retry_label(&e),
                         retry_count,
                         MAX_RETRIES,
-                        e,
-                        actual_delay
+                        delay.as_millis()
                     );
-                    let _ = event_tx
-                        .send(AgentEvent::Status(format!(
-                            "Rate limited. Retrying in {:.1}s... ({}/{})",
-                            actual_delay as f64 / 1000.0,
-                            retry_count,
-                            MAX_RETRIES
-                        )))
-                        .await;
-                    agent.emit(AgentEvent::Status(format!(
-                        "Retrying in {:.1}s ({}/{})",
-                        actual_delay as f64 / 1000.0,
-                        retry_count,
-                        MAX_RETRIES
-                    )));
+                    let _ = event_tx.send(AgentEvent::Status(notice.clone())).await;
+                    agent.emit(AgentEvent::Status(notice));
                     // Same reasoning as the `complete()` await above, and newly
                     // load-bearing: until F-02 this sleep was unreachable, so
-                    // its uncancellability never showed. Five retries is up to
-                    // ~31s of it.
+                    // its uncancellability never showed. Five local retries
+                    // are up to ~39 s of it; a server's Retry-After may be more.
                     tokio::select! {
-                        _ = tokio::time::sleep(std::time::Duration::from_millis(actual_delay)) => {}
+                        _ = tokio::time::sleep(delay) => {}
                         _ = cancel.cancelled() => return Err(CerseiError::Cancelled),
                     }
                     continue;
@@ -2630,5 +2675,80 @@ mod guard_tests {
             1_000_000,
             |_, _| unreachable!()
         ));
+    }
+}
+
+#[cfg(test)]
+mod retry_delay_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn the_local_backoff_is_unchanged() {
+        // Without jitter: 1, 2, 4, 8, 16 s, then capped at 30 s.
+        let nominal: Vec<u128> = (1..=7).map(|n| local_backoff(n, 0).as_millis()).collect();
+        assert_eq!(nominal, vec![1000, 2000, 4000, 8000, 16000, 30000, 30000]);
+        // Jitter below a quarter of the base.
+        assert_eq!(local_backoff(1, 249).as_millis(), 1249);
+        assert_eq!(local_backoff(1, 250).as_millis(), 1000);
+        assert_eq!(local_backoff(3, 1999).as_millis(), 4999);
+        // Never overflows.
+        let far = local_backoff(200, u64::MAX).as_millis();
+        assert!((30_000..37_500).contains(&far), "{far}");
+    }
+
+    #[test]
+    fn the_longer_of_local_and_server_delays_wins() {
+        assert_eq!(retry_delay(1, 100, None), Duration::from_millis(1100));
+        assert_eq!(
+            retry_delay(1, 100, Some(Duration::from_secs(12))),
+            Duration::from_secs(12),
+            "server longer"
+        );
+        assert_eq!(
+            retry_delay(3, 100, Some(Duration::from_secs(1))),
+            Duration::from_millis(4100),
+            "server shorter: local kept"
+        );
+        assert_eq!(
+            retry_delay(2, 0, Some(Duration::ZERO)),
+            Duration::from_secs(2)
+        );
+        // A long server delay is not capped at the backoff's ceiling.
+        assert_eq!(
+            retry_delay(5, 0, Some(Duration::from_secs(120))),
+            Duration::from_secs(120)
+        );
+    }
+
+    #[test]
+    fn notices_say_what_happened_and_nothing_secret() {
+        let d = Duration::from_millis(12000);
+        let e = |code| CerseiError::from_http_status(code, None, "Authorization: Bearer sk-SECRET");
+        assert_eq!(
+            retry_notice(&e(429), 1, 5, d),
+            "Rate limited (HTTP 429). Retrying in 12000 ms... (retry 1/5)"
+        );
+        assert_eq!(
+            retry_notice(&e(503), 1, 5, d),
+            "Service unavailable (HTTP 503). Retrying in 12000 ms... (retry 1/5)"
+        );
+        assert_eq!(
+            retry_notice(&e(502), 2, 5, d),
+            "Temporary provider error (HTTP 502). Retrying in 12000 ms... (retry 2/5)"
+        );
+        // 429 sent as a plain status is still a rate limit; nothing else is.
+        let as_status = CerseiError::ProviderStatus {
+            status: 429,
+            message: "x".into(),
+            retry_after: None,
+        };
+        assert!(retry_notice(&as_status, 1, 5, d).starts_with("Rate limited (HTTP 429)"));
+        for code in [500, 502, 503, 504, 529] {
+            let n = retry_notice(&e(code), 1, 5, d);
+            assert!(!n.contains("Rate limited"), "{n}");
+            assert!(n.contains(&format!("HTTP {code}")), "{n}");
+            assert!(!n.contains("SECRET") && !n.contains("Bearer"), "{n}");
+        }
     }
 }

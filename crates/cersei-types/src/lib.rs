@@ -579,7 +579,13 @@ pub enum CerseiError {
     Provider(String),
 
     #[error("Provider error {status}: {message}")]
-    ProviderStatus { status: u16, message: String },
+    ProviderStatus {
+        status: u16,
+        message: String,
+        /// The server's `Retry-After`, when it sent a valid one (a 503
+        /// often does). It never makes an error retryable by itself.
+        retry_after: Option<Duration>,
+    },
 
     #[error("Authentication error: {0}")]
     Auth(String),
@@ -651,8 +657,35 @@ impl CerseiError {
             _ => CerseiError::ProviderStatus {
                 status,
                 message: message.into(),
+                retry_after,
             },
         }
+    }
+
+    /// The delay the server asked for (`Retry-After`), kept from the HTTP
+    /// response. Whether to retry at all is [`Self::is_retryable`]'s call.
+    pub fn retry_after(&self) -> Option<Duration> {
+        match self {
+            CerseiError::RateLimit { retry_after, .. }
+            | CerseiError::ProviderStatus { retry_after, .. } => *retry_after,
+            _ => None,
+        }
+    }
+
+    /// The HTTP status of the provider's answer, when there was one (a
+    /// transport error that never got a response has none).
+    pub fn http_status(&self) -> Option<u16> {
+        match self {
+            CerseiError::RateLimit { .. } => Some(429),
+            CerseiError::ProviderStatus { status, .. } => Some(*status),
+            CerseiError::Http(e) => e.status().map(|s| s.as_u16()),
+            _ => None,
+        }
+    }
+
+    /// A transport failure that timed out (no HTTP status).
+    pub fn is_timeout(&self) -> bool {
+        matches!(self, CerseiError::Http(e) if e.is_timeout())
     }
 
     /// The server refused the request because the prompt does not fit the
@@ -663,7 +696,9 @@ impl CerseiError {
     pub fn is_context_overflow(&self) -> bool {
         let message = match self {
             CerseiError::ContextOverflow { .. } => return true,
-            CerseiError::ProviderStatus { status, message } => {
+            CerseiError::ProviderStatus {
+                status, message, ..
+            } => {
                 if !matches!(status, 400 | 413 | 422) {
                     return false;
                 }
@@ -815,12 +850,18 @@ mod retry_tests {
             CerseiError::ProviderStatus {
                 status: 400,
                 message: r#"{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 210000 tokens > 200000 maximum"}}"#.into(),
+                retry_after: None,
             },
             CerseiError::ProviderStatus {
                 status: 400,
                 message: r#"{"error":{"code":"context_length_exceeded","message":"This model's maximum context length is 128000 tokens."}}"#.into(),
+                retry_after: None,
             },
-            CerseiError::ProviderStatus { status: 413, message: "request_too_large".into() },
+            CerseiError::ProviderStatus {
+                status: 413,
+                message: "request_too_large".into(),
+                retry_after: None,
+            },
             CerseiError::Provider("stream error: context_length_exceeded".into()),
             CerseiError::ContextOverflow { used: 10, limit: 5 },
         ];
@@ -832,10 +873,12 @@ mod retry_tests {
             CerseiError::ProviderStatus {
                 status: 400,
                 message: "invalid tool schema".into(),
+                retry_after: None,
             },
             CerseiError::ProviderStatus {
                 status: 500,
                 message: "context length".into(),
+                retry_after: None,
             },
             CerseiError::Auth("bad key".into()),
         ];
@@ -864,6 +907,33 @@ mod retry_tests {
         for code in [400, 401, 403, 404, 413, 422] {
             assert!(!status(code).is_retryable(), "{code} must not be retried");
         }
+    }
+
+    #[test]
+    fn the_servers_delay_is_kept_and_decides_nothing() {
+        let d = Some(Duration::from_secs(12));
+        let e429 = CerseiError::from_http_status(429, d, "slow down");
+        let e503 = CerseiError::from_http_status(503, d, "unavailable");
+        for e in [&e429, &e503] {
+            assert_eq!(e.retry_after(), d, "{e}");
+            assert!(e.is_retryable(), "{e}");
+        }
+        assert_eq!(
+            (e429.http_status(), e503.http_status()),
+            (Some(429), Some(503))
+        );
+        // The display is unchanged by the delay.
+        assert_eq!(e503.to_string(), "Provider error 503: unavailable");
+        // A definitive error stays definitive whatever the header says.
+        for code in [400, 401, 403, 404, 422] {
+            let e = CerseiError::from_http_status(code, d, "no");
+            assert_eq!(e.retry_after(), d);
+            assert!(!e.is_retryable(), "{code}");
+        }
+        let quota = CerseiError::from_http_status(429, d, "insufficient_quota");
+        assert!(!quota.is_retryable());
+        assert_eq!(CerseiError::Auth("x".into()).retry_after(), None);
+        assert_eq!(CerseiError::Auth("x".into()).http_status(), None);
     }
 
     #[test]

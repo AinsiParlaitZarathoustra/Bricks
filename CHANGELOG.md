@@ -1,6 +1,17 @@
 # Changelog
 
-## [Unreleased]
+## [0.4.7] — 2026-10-08
+
+### Fixed — retries honour `Retry-After` (Sprint 11.0.1)
+
+- **The server's delay reaches the retry loop.** `Retry-After` was kept for a 429 but never read by the runner, and dropped for every other status (a 503's included). `CerseiError::ProviderStatus` now keeps it too (`retry_after` field), with `CerseiError::retry_after()` and `http_status()`. Whether an error is retried is unchanged: the header never makes an error retryable (quota exhausted, 4xx, authentication stay definitive).
+- **HTTP dates are understood.** `parse_retry_after` reads delta-seconds (digits only; `0` is a valid zero) and HTTP dates (via `httpdate`, already in the lock file), measured from one reference time (`retry_after_at` takes it explicitly); a past date is a zero delay, an invalid value is absent.
+- **One delay, used everywhere.** Each retry waits `max(local backoff, Retry-After)`: the backoff is unchanged (1, 2, 4, 8, 16 s, capped at 30 s, plus its jitter); a shorter, zero or past server delay keeps it, a longer one is honoured without a cap. The wait (cancellable), the notice and the log use that same value. Five retries after the first call (six calls at most), as before.
+- **Notices say what happened, in milliseconds.** One message on every channel: `Rate limited (HTTP 429)` only for 429, `Service unavailable (HTTP 503)`, `Provider overloaded (HTTP 529)`, `Gateway timeout (HTTP 504)`, `Temporary provider error (HTTP 502)`, `Temporary connection error` (no status invented) — then `Retrying in 12000 ms... (retry 1/5)`. The retry log carries the class, the retry number and the delay, no longer the error's text.
+
+### Changed — contract (Sprint 11.0.1)
+
+- `CerseiError::ProviderStatus` gains `retry_after: Option<Duration>`: code that builds the variant literally adds it (`None`), or uses `CerseiError::from_http_status`; patterns without `..` add it. Its display is unchanged.
 
 ### Added — projects, history by project, terminal links (Sprint 11)
 

@@ -61,21 +61,104 @@ pub fn provider_from_config(
         .build_provider()
 }
 
-/// Seconds from a `Retry-After` header, if the provider sent a usable one.
-///
-/// Only the delta-seconds form is honoured. The HTTP-date form is legal but no
-/// major provider emits it, and guessing wrong here would mean sleeping for
-/// hours, so an unparsable value is treated as absent and the caller falls back
-/// to its own backoff.
+/// The delay a `Retry-After` header asks for (RFC 9110 §10.2.3), if the
+/// provider sent a usable one: delta-seconds, or an HTTP date measured from
+/// now. `None` for an absent, empty or invalid value — the caller then keeps
+/// its own backoff. The value only says how long to wait; whether to retry
+/// is decided elsewhere.
 pub fn parse_retry_after(headers: &reqwest::header::HeaderMap) -> Option<std::time::Duration> {
-    headers
-        .get(reqwest::header::RETRY_AFTER)?
-        .to_str()
-        .ok()?
-        .trim()
-        .parse::<u64>()
-        .ok()
-        .map(std::time::Duration::from_secs)
+    let value = headers.get(reqwest::header::RETRY_AFTER)?.to_str().ok()?;
+    retry_after_at(value, std::time::SystemTime::now())
+}
+
+/// [`parse_retry_after`] for one header value, against the reference time
+/// `now` (read once by the caller):
+///
+/// * delta-seconds: decimal digits only (no sign, fraction or exponent);
+///   `0` is a valid zero delay; a number too large to represent is invalid;
+/// * an HTTP date (IMF-fixdate, RFC 850 or asctime, via `httpdate`): the
+///   time left until it, zero when it is now or past;
+/// * anything else: `None` (an invalid value is never a zero delay).
+pub fn retry_after_at(value: &str, now: std::time::SystemTime) -> Option<std::time::Duration> {
+    let v = value.trim_matches(|c| c == ' ' || c == '\t');
+    if v.is_empty() {
+        return None;
+    }
+    if v.bytes().all(|b| b.is_ascii_digit()) {
+        return v.parse::<u64>().ok().map(std::time::Duration::from_secs);
+    }
+    let date = httpdate::parse_http_date(v).ok()?;
+    Some(
+        date.duration_since(now)
+            .unwrap_or(std::time::Duration::ZERO),
+    )
+}
+
+#[cfg(test)]
+mod retry_after_tests {
+    use super::*;
+    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn seconds_and_http_dates_are_read_against_one_reference_time() {
+        // Sun, 06 Nov 1994 08:49:37 GMT
+        let now = UNIX_EPOCH + Duration::from_secs(784_111_777);
+        let at = |v: &str| retry_after_at(v, now);
+        assert_eq!(at("12"), Some(Duration::from_secs(12)));
+        assert_eq!(at("  0\t"), Some(Duration::ZERO));
+        assert_eq!(at("007"), Some(Duration::from_secs(7)));
+        // Future dates, in the three HTTP forms: exactly the time left.
+        assert_eq!(
+            at("Sun, 06 Nov 1994 08:50:07 GMT"),
+            Some(Duration::from_secs(30))
+        );
+        assert_eq!(
+            at("Sunday, 06-Nov-94 08:51:37 GMT"),
+            Some(Duration::from_secs(120))
+        );
+        assert_eq!(
+            at("Sun Nov  6 09:49:37 1994"),
+            Some(Duration::from_secs(3600))
+        );
+        // Now or past: a valid zero delay, not an invalid value.
+        assert_eq!(at("Sun, 06 Nov 1994 08:49:37 GMT"), Some(Duration::ZERO));
+        assert_eq!(at("Sat, 05 Nov 1994 08:49:37 GMT"), Some(Duration::ZERO));
+        // Invalid: never a zero delay.
+        for bad in [
+            "",
+            "   ",
+            "-1",
+            "+5",
+            "1.5",
+            "1e3",
+            "12s",
+            "soon",
+            "0x10",
+            "99999999999999999999999",
+            "Sun, 32 Nov 1994 08:49:37 GMT",
+            "06 Nov 1994",
+        ] {
+            assert_eq!(at(bad), None, "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn the_header_is_read_from_a_response() {
+        let mut h = reqwest::header::HeaderMap::new();
+        assert_eq!(parse_retry_after(&h), None);
+        h.insert(reqwest::header::RETRY_AFTER, "3".parse().unwrap());
+        assert_eq!(parse_retry_after(&h), Some(Duration::from_secs(3)));
+        let later = SystemTime::now() + Duration::from_secs(3600);
+        h.insert(
+            reqwest::header::RETRY_AFTER,
+            httpdate::fmt_http_date(later).parse().unwrap(),
+        );
+        let d = parse_retry_after(&h).unwrap();
+        assert!(
+            d > Duration::from_secs(3590) && d <= Duration::from_secs(3600),
+            "{d:?}"
+        );
+    }
 }
 
 // ─── Provider trait ──────────────────────────────────────────────────────────
