@@ -641,10 +641,10 @@ async fn run_loop(
 
     let mut tool_calls: Vec<ToolCallRecord> = Vec::new();
     let mut turn: u32 = 0;
-    let mut last_stop_reason = StopReason::EndTurn;
+    let mut last_stop_reason: StopReason;
     let mut _last_usage = Usage::default();
-    // Continuations after an answer cut by the output-token limit. Each one
-    // is also a turn: they never get past `max_turns`.
+    // Continuations after an answer cut by the output-token limit (each one
+    // is a turn of its own).
     let mut max_tokens_retries: u32 = 0;
     const MAX_TOKENS_RETRY_LIMIT: u32 = 3;
     // Why the loop stopped: every `break` sets it.
@@ -755,16 +755,12 @@ async fn run_loop(
 
     // Agentic loop
     loop {
-        // `max_turns = N` allows N generation turns. Reaching this point
-        // again means the last turn asked to go on (tool results to read,
-        // a continuation): the run stops here, incomplete.
-        if turn >= agent.max_turns {
-            termination = crate::Termination::MaxTurns {
-                limit: agent.max_turns,
-            };
-            break;
-        }
-        turn += 1;
+        // No limit on the number of turns: the run goes on while the model
+        // asks to (tool results to read, a continuation) and stops by the
+        // engine's other rules — a final answer, a cancellation, a definitive
+        // error, no progress, a refusal, an empty or truncated answer. The
+        // counter is statistics only: it saturates, it never stops a run.
+        turn = turn.saturating_add(1);
 
         // Check cancellation
         if cancel.is_cancelled() {
@@ -1034,7 +1030,7 @@ async fn run_loop(
                         .await;
                 if outcome.is_compacted() {
                     // The same turn again: it produced nothing.
-                    turn -= 1;
+                    turn = turn.saturating_sub(1);
                     continue;
                 }
             }
@@ -1371,6 +1367,15 @@ async fn run_loop(
                                             format!("Blocked by hook: {}", reason),
                                         ),
                                         HookAction::ModifyInput(new_input) => {
+                                            // What is written is the new
+                                            // input's change, not the one
+                                            // previewed for the old input.
+                                            if approved_change.is_some() {
+                                                approved_change = tool
+                                                    .preview(&new_input, &tool_ctx)
+                                                    .await
+                                                    .filter(|p| p.refusal.is_none());
+                                            }
                                             execute_admitted(tool, new_input, &tool_ctx).await
                                         }
                                         _ => {

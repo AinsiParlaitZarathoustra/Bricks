@@ -165,7 +165,6 @@ async fn anthropic_429_is_retried_through_the_runner() {
         .provider(
             common::provider(&url, "anthropic_messages", 128_000), // appends /messages
         )
-        .max_turns(2)
         .max_tokens(64)
         .build()
         .expect("build agent");
@@ -192,7 +191,6 @@ async fn responses_429_is_retried_through_the_runner() {
         .provider(
             common::provider(&url, "responses", 128_000), // appends /responses
         )
-        .max_turns(2)
         .max_tokens(64)
         .build()
         .expect("build agent");

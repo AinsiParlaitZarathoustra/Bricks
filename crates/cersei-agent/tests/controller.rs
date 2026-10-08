@@ -675,18 +675,24 @@ async fn a_new_session_needs_a_configured_model() {
     assert!(err.contains("no reasoning profile `turbo`"), "{err}");
 }
 
-/// The same stop contract for every frontend: a run at its turn limit ends
-/// once, as incomplete, with the turns it ran and no extra request.
+/// No turn limit for the session agent either (the CLI's default was 50):
+/// 60 turns of distinct work, then the answer; one `run_finished`.
 #[tokio::test]
-async fn a_run_at_its_turn_limit_ends_once_as_incomplete() {
+async fn a_session_run_goes_past_the_former_limit() {
     let dir = tempfile::tempdir().unwrap();
-    let script = Script::new(vec![
-        Reply::tool("c1", "Glob", json!({"pattern": "*"})),
-        Reply::text("jamais demandé"),
-    ]);
+    let mut replies: Vec<Reply> = (0..60)
+        .map(|n| {
+            Reply::tool(
+                &format!("c{n}"),
+                "Glob",
+                json!({"pattern": format!("*.x{n}")}),
+            )
+        })
+        .collect();
+    replies.push(Reply::text("fini"));
+    let script = Script::new(replies);
     let mut bricks = BricksConfig::default();
     bricks.agent.model = Some("test/a".into());
-    bricks.agent.max_turns = Some(1);
     let cfg = EngineConfig::new(
         dir.path(),
         ScriptedCatalog::new(&["a"], script.clone()),
@@ -707,7 +713,9 @@ async fn a_run_at_its_turn_limit_ends_once_as_incomplete() {
         prompt: Prompt::text("liste"),
     })
     .unwrap();
-    let evs = until_finished(&mut events).await;
+    let evs = tokio::time::timeout(Duration::from_secs(60), until_finished(&mut events))
+        .await
+        .expect("the test harness's own timeout");
     assert_eq!(
         kinds(&evs).iter().filter(|k| **k == "run_finished").count(),
         1
@@ -716,21 +724,16 @@ async fn a_run_at_its_turn_limit_ends_once_as_incomplete() {
         outcome,
         termination,
         turns,
-        error,
         ..
     } = &evs.last().unwrap().event
     else {
         unreachable!()
     };
-    assert_eq!(*outcome, RunOutcome::Incomplete);
-    assert_eq!(
-        *termination,
-        Some(cersei_agent::Termination::MaxTurns { limit: 1 })
-    );
-    assert_eq!(*turns, 1);
-    assert!(error.as_deref().unwrap().contains("turn limit"));
+    assert_eq!(*outcome, RunOutcome::Succeeded);
+    assert_eq!(*termination, Some(cersei_agent::Termination::Completed));
+    assert_eq!(*turns, 61);
     ctl.wait_idle().await;
-    assert_eq!(script.requests().len(), 1);
+    assert_eq!(script.requests().len(), 61);
 }
 
 mod maintenance {

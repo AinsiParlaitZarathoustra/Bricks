@@ -58,7 +58,7 @@ cargo run
 3. **The LLM responds** — either with text (done) or with tool calls
 4. **Tools execute locally** — Bash commands, file reads, grep searches, etc.
 5. **Results feed back** to the LLM for the next turn
-6. **Loop repeats** until the LLM says "end_turn" or `max_turns` is reached
+6. **Loop repeats** until the LLM says "end_turn" (there is no turn limit; cancellation, errors and the no-progress guard also stop it)
 7. **You get `AgentOutput`** with the final message, usage stats, and tool call history
 
 ## Next Steps

@@ -7,7 +7,7 @@ use crate::state::{App, Maintenance};
 use crate::ui::Ui;
 use crate::view::diff_line;
 use cersei_agent::control::{Controller, SessionSummary, Snapshot};
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use std::path::Path;
 
 fn l(s: impl Into<String>) -> Line<'static> {
@@ -266,10 +266,10 @@ pub fn diff(ui: &Ui) -> Overlay {
         match &p.preview {
             Some(prev) => {
                 for f in &prev.files {
-                    v.push(l(format!(
-                        "  {} {} (+{} −{})",
-                        p.tool, f.path, f.added, f.removed
-                    )));
+                    let mut spans = vec![Span::raw(format!("  {} {} (", p.tool, f.path))];
+                    spans.extend(crate::view::counts(f.added, f.removed));
+                    spans.push(Span::raw(")"));
+                    v.push(Line::from(spans));
                     v.extend(f.diff.lines().map(diff_line));
                 }
             }
@@ -286,10 +286,10 @@ pub fn diff(ui: &Ui) -> Overlay {
     }
     for (tool, files) in &ui.app.applied {
         for f in files {
-            v.push(l(format!(
-                "  {tool}: {} ({:?}, +{} −{})",
-                f.path, f.kind, f.added, f.removed
-            )));
+            let mut spans = vec![Span::raw(format!("  {tool}: {} ({:?}, ", f.path, f.kind))];
+            spans.extend(crate::view::counts(f.added, f.removed));
+            spans.push(Span::raw(")"));
+            v.push(Line::from(spans));
         }
     }
     v.push(l(

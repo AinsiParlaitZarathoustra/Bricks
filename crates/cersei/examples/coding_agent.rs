@@ -617,7 +617,6 @@ Then verify the Python file is valid by running `python3 -c "import ast; ast.par
             "You are an expert Python developer. Write clean, well-structured code. \
              Be concise in your explanations. Always verify your work.",
         )
-        .max_turns(10)
         .max_tokens(16384)
         .permission_policy(AllowAll)
         .working_dir(&ws_path)

@@ -105,7 +105,6 @@ async fn a_request_carrying_an_unanswered_tool_use_is_reported_before_send() {
     let agent = Agent::builder()
         .provider(common::provider(&url, "chat_completions", 128_000))
         .model("gpt-4o")
-        .max_turns(2)
         .max_tokens(64)
         // A history whose assistant tool_use was never answered — what a
         // compaction slice that severed the *following* user message produces.

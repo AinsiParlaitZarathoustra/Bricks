@@ -25,7 +25,6 @@ pub struct DelegateTool {
     provider_factory: ProviderFactory,
     toolset_factory: ToolsetFactory,
     model: Option<String>,
-    max_turns: u32,
     max_concurrent: usize,
 }
 
@@ -35,18 +34,12 @@ impl DelegateTool {
             provider_factory,
             toolset_factory,
             model: None,
-            max_turns: 30,
             max_concurrent: DEFAULT_MAX_CONCURRENT,
         }
     }
 
     pub fn with_model(mut self, m: impl Into<String>) -> Self {
         self.model = Some(m.into());
-        self
-    }
-
-    pub fn with_max_turns(mut self, n: u32) -> Self {
-        self.max_turns = n.max(1);
         self
     }
 
@@ -143,7 +136,6 @@ impl Tool for DelegateTool {
             provider_factory: self.provider_factory.clone(),
             toolset_factory: self.toolset_factory.clone(),
             model: self.model.clone(),
-            max_turns: self.max_turns,
             max_concurrent: self.max_concurrent,
             depth: subagent::depth_of(&ctx.extensions) + 1,
             extra_blocked: Vec::new(),
@@ -355,7 +347,7 @@ mod tests {
     #[tokio::test]
     async fn single_goal_runs_one_child() {
         let (pf, tf) = factories();
-        let tool = DelegateTool::new(pf, tf).with_max_turns(2);
+        let tool = DelegateTool::new(pf, tf);
         let r = tool.execute(json!({ "goal": "ping" }), &ctx()).await;
         assert!(!r.is_error, "{}", r.content);
         assert!(r.content.contains("Task 1/1"));
@@ -365,9 +357,7 @@ mod tests {
     #[tokio::test]
     async fn batch_mode_runs_all_tasks() {
         let (pf, tf) = factories();
-        let tool = DelegateTool::new(pf, tf)
-            .with_max_turns(2)
-            .with_max_concurrent(2);
+        let tool = DelegateTool::new(pf, tf).with_max_concurrent(2);
         let r = tool
             .execute(
                 json!({ "tasks": [{"goal": "a"}, {"goal": "b"}, {"goal": "c"}] }),

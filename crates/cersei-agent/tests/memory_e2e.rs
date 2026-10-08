@@ -142,7 +142,6 @@ async fn a_remembered_fact_is_recalled_into_the_next_session_within_budget() {
                 _ => {}
             }
         })
-        .max_turns(2)
         .build()
         .unwrap();
     a.run("Le projet Bricks utilise Axum pour son serveur HTTP.")
@@ -172,7 +171,6 @@ async fn a_remembered_fact_is_recalled_into_the_next_session_within_budget() {
                 n2.lock().unwrap().push((*items, *tokens));
             }
         })
-        .max_turns(2)
         .build()
         .unwrap();
     b.run("Quel framework web utilise le projet Bricks ?")
@@ -201,7 +199,6 @@ async fn a_remembered_fact_is_recalled_into_the_next_session_within_budget() {
         .session_id("s3")
         .long_term_memory(ltm)
         .memory_recall_tokens(60)
-        .max_turns(2)
         .build()
         .unwrap();
     c.run("Quel framework web utilise le projet Bricks ?")

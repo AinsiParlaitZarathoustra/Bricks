@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 
 /// Version of the event and command schema. Incremented on any change a
 /// consumer could notice; documented in `docs/cli.md`.
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 /// One delivered event.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -91,13 +91,16 @@ pub struct AttachmentInfo {
     pub note: Option<String>,
 }
 
-/// A file written by an approved change.
+/// A file written by an applied change. `added` / `removed` count lines
+/// of the complete diff; a binary file has none (`binary`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WrittenFile {
     pub path: String,
     pub kind: ChangeKind,
     pub added: usize,
     pub removed: usize,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub binary: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -157,11 +160,19 @@ pub enum Event {
         decision: Decision,
         by: DecidedBy,
     },
-    /// An approved, previewed change was written.
+    /// A change was applied to the session's workspace: a tool call of the
+    /// session agent or of a sub-agent working in that workspace
+    /// (`agent_id`) succeeded, or a ChangeSet was applied (`changeset_id`).
+    /// One event per change; `(agent_id, tool_call_id)` or `changeset_id`
+    /// identifies it.
     EditApplied {
         tool_call_id: String,
         tool: String,
         files: Vec<WrittenFile>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        changeset_id: Option<String>,
     },
     MemoryRecalled {
         items: usize,

@@ -377,7 +377,6 @@ async fn main() -> anyhow::Result<()> {
         .provider(SimulatedClaude::new(active_model))
         .tools(cersei::tools::filesystem())
         .system_prompt("You are a code analyst. Examine the project and summarize it.")
-        .max_turns(5)
         .permission_policy(AllowAll)
         .working_dir(fixture.path())
         .reporter(tracker_ref)

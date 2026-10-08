@@ -10,7 +10,6 @@
 //! tools: inherit          # only `inherit`
 //! isolation: auto         # auto | shared | worktree (worktree: 10.5)
 //! background: false       # true: 10.5
-//! max_turns: 40
 //! skills: []
 //! ---
 //! Instructions (the Markdown body, kept verbatim).
@@ -30,8 +29,6 @@ use std::path::PathBuf;
 pub const MAX_PROFILE_BYTES: usize = 64 * 1024;
 /// Largest frontmatter.
 pub const MAX_FRONTMATTER_BYTES: usize = 8 * 1024;
-/// Largest `max_turns` a profile may state (the runtime cap applies too).
-pub const MAX_PROFILE_TURNS: u32 = 1_000;
 
 /// Where a profile comes from, by decreasing priority.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -189,11 +186,14 @@ pub struct AgentProfile {
     pub tools: String,
     pub isolation: Isolation,
     pub background: bool,
-    pub max_turns: Option<u32>,
     pub skills: Vec<String>,
     /// The Markdown body, verbatim.
     pub instructions: String,
     pub source: ProfileSource,
+    /// Things worth saying about a valid profile (a former key that is
+    /// ignored), reported as diagnostics by the registry.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub notes: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -213,8 +213,9 @@ struct Frontmatter {
     isolation: Option<String>,
     #[serde(default)]
     background: Option<bool>,
+    /// Former turn limit (removed in 0.4.8): accepted, ignored, reported.
     #[serde(default)]
-    max_turns: Option<i64>,
+    max_turns: Option<serde_json::Value>,
     #[serde(default)]
     skills: Option<Vec<String>>,
 }
@@ -317,15 +318,12 @@ pub fn parse_profile(text: &str, source: ProfileSource) -> Result<AgentProfile, 
         }
     }
     let isolation = Isolation::parse(f.isolation.as_deref().unwrap_or("auto"))?;
-    let max_turns = match f.max_turns {
-        None => None,
-        Some(n) if n >= 1 && n <= MAX_PROFILE_TURNS as i64 => Some(n as u32),
-        Some(n) => {
-            return Err(format!(
-                "max_turns {n}: must be between 1 and {MAX_PROFILE_TURNS}"
-            ))
-        }
-    };
+    let mut notes = Vec::new();
+    if f.max_turns.is_some() {
+        notes.push(
+            "max_turns: turn limits were removed in 0.4.8; this key is ignored — remove it".into(),
+        );
+    }
     let skills = f.skills.unwrap_or_default();
     if skills.len() > 32 {
         return Err("more than 32 skills".into());
@@ -342,10 +340,10 @@ pub fn parse_profile(text: &str, source: ProfileSource) -> Result<AgentProfile, 
         tools: "inherit".into(),
         isolation,
         background: f.background.unwrap_or(false),
-        max_turns,
         skills,
         instructions: body.to_string(),
         source,
+        notes,
     })
 }
 
@@ -378,7 +376,7 @@ mod tests {
         }
     }
 
-    const GOOD: &str = "---\nname: inspecteur\ndescription: >\n  Finds things.\nmodel: inherit\nreasoning: high\npermissions: inherit\ntools: inherit\nisolation: auto\nbackground: false\nmax_turns: 40\nskills: []\n---\n\n# Inspecteur\n\nBody with --- inside a line.\n";
+    const GOOD: &str = "---\nname: inspecteur\ndescription: >\n  Finds things.\nmodel: inherit\nreasoning: high\npermissions: inherit\ntools: inherit\nisolation: auto\nbackground: false\nskills: []\n---\n\n# Inspecteur\n\nBody with --- inside a line.\n";
 
     #[test]
     fn parses_a_complete_profile_and_keeps_the_body() {
@@ -386,7 +384,7 @@ mod tests {
         assert_eq!(p.name, "inspecteur");
         assert_eq!(p.description, "Finds things.");
         assert_eq!(p.reasoning, ReasoningPref::Id("high".into()));
-        assert_eq!(p.max_turns, Some(40));
+        assert!(p.notes.is_empty());
         assert_eq!(
             p.instructions,
             "\n# Inspecteur\n\nBody with --- inside a line.\n"
@@ -397,6 +395,21 @@ mod tests {
     }
 
     #[test]
+    fn a_former_turn_limit_is_ignored_and_reported() {
+        let with = |extra: &str| format!("---\nname: a\ndescription: d\n{extra}---\nbody\n");
+        for v in ["40", "0", "100000", "\"many\""] {
+            let p = parse_profile(&with(&format!("max_turns: {v}\n")), src()).unwrap();
+            assert_eq!(p.notes.len(), 1, "{v}");
+            assert!(p.notes[0].contains("removed") && p.notes[0].contains("remove it"));
+        }
+        // Only that key: the others are checked as before.
+        let e = parse_profile(&with("max_turns: 40\ncolour: red\n"), src()).unwrap_err();
+        assert!(e.contains("unknown field"), "{e}");
+        let e = parse_profile(&with("max_turns: 4\nmax_turns: 5\n"), src()).unwrap_err();
+        assert!(e.to_lowercase().contains("duplicate"), "{e}");
+    }
+
+    #[test]
     fn refuses_what_is_not_implemented_or_inconsistent() {
         let with = |extra: &str| format!("---\nname: a\ndescription: d\n{extra}---\nbody\n");
         for (extra, needle) in [
@@ -404,7 +417,6 @@ mod tests {
             ("tools: [Read]\n", "frontmatter"),
             ("model: gpt\n", "provider_id/model_id"),
             ("reasoning: \"very high\"\n", "reasoning"),
-            ("max_turns: 0\n", "max_turns"),
             ("isolation: vm\n", "isolation"),
             ("colour: red\n", "unknown field"),
             ("name: b\n", "duplicate"),

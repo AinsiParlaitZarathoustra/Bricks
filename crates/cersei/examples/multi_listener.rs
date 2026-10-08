@@ -29,7 +29,6 @@ async fn main() -> anyhow::Result<()> {
         )?)
         .tools(cersei::tools::coding())
         .system_prompt("You are a helpful coding assistant. Be concise.")
-        .max_turns(5)
         .permission_policy(AllowAll)
         .working_dir(".")
         .enable_broadcast(512)

@@ -134,6 +134,35 @@ pub enum Maintenance {
     },
 }
 
+/// Lines added and removed by the changes applied to the open session's
+/// workspace since it was opened: a sum of operations (two edits of one
+/// file both count), not a `git diff`. Only structured changes the engine
+/// reports (`edit_applied`) count; each once.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EditTotals {
+    /// The session these totals belong to.
+    pub session_id: String,
+    pub added: u64,
+    pub removed: u64,
+    /// The changes already counted.
+    seen: std::collections::HashSet<String>,
+}
+
+impl EditTotals {
+    /// Count a change of `session_id` once; `false` when it was not counted
+    /// (another session, or already counted).
+    pub fn add(&mut self, session_id: &str, key: String, files: &[WrittenFile]) -> bool {
+        if session_id != self.session_id || !self.seen.insert(key) {
+            return false;
+        }
+        for f in files.iter().filter(|f| !f.binary) {
+            self.added += f.added as u64;
+            self.removed += f.removed as u64;
+        }
+        true
+    }
+}
+
 #[derive(Default)]
 pub struct App {
     pub cells: Vec<Cell>,
@@ -150,6 +179,8 @@ pub struct App {
     /// The agent wrote files: the mention index must be refreshed.
     pub files_changed: bool,
     pub last_seq: u64,
+    /// `+N −N` of the open session.
+    pub totals: EditTotals,
 }
 
 fn summary(input: &serde_json::Value) -> String {
@@ -238,6 +269,12 @@ impl App {
                 resumed,
                 message_count,
             } => {
+                // Totals start again for every session opened (new or
+                // resumed): nothing is rebuilt from an old transcript.
+                self.totals = EditTotals {
+                    session_id: env.session_id.clone(),
+                    ..Default::default()
+                };
                 self.status.working_dir = working_dir.clone();
                 self.status.model = model.clone();
                 self.status.reasoning = reasoning.clone();
@@ -390,12 +427,25 @@ impl App {
                     }
                 }
             }
-            Event::EditApplied { tool, files, .. } => {
-                self.applied.push((tool.clone(), files.clone()));
-                self.files_changed = true;
-                self.cells.push(Cell::Edits {
-                    files: files.clone(),
-                });
+            Event::EditApplied {
+                tool,
+                files,
+                tool_call_id,
+                agent_id,
+                changeset_id,
+            } => {
+                let key = match (changeset_id, agent_id) {
+                    (Some(cs), _) => format!("changeset:{cs}"),
+                    (None, Some(a)) => format!("agent:{a}:{tool_call_id}"),
+                    (None, None) => format!("session:{tool_call_id}"),
+                };
+                if self.totals.add(&env.session_id, key, files) {
+                    self.applied.push((tool.clone(), files.clone()));
+                    self.files_changed = true;
+                    self.cells.push(Cell::Edits {
+                        files: files.clone(),
+                    });
+                }
             }
             Event::MemoryRecalled {
                 items,

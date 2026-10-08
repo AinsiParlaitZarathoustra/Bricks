@@ -112,7 +112,6 @@ fn agent(url: &str, work: &std::path::Path) -> cersei_agent::AgentBuilder {
         .tools(cersei_tools::shell())
         .working_dir(work)
         .raw_output_dir(work.join(".raw"))
-        .max_turns(8)
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
@@ -395,7 +394,6 @@ async fn a_reduced_bash_output_is_readable_after_restore() {
             .memory(JsonlMemory::new(mem.path()))
             .session_id("rs")
             .compression_level(CompressionLevel::Minimal)
-            .max_turns(3)
             .build()
             .unwrap();
         a.run("build").await.unwrap();

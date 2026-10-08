@@ -550,7 +550,6 @@ async fn a_skeleton_view_does_not_count_as_having_read_the_file() {
         .compression_level(CompressionLevel::Aggressive)
         .working_dir(work.path())
         .raw_output_dir(dir.path())
-        .max_turns(4)
         .build()
         .unwrap();
     agent.run("edit the file").await.unwrap();
@@ -656,7 +655,6 @@ async fn a_reduced_tool_output_can_be_read_back_from_the_store() {
         .tool(Fake(log.clone()))
         .compression_level(CompressionLevel::Minimal)
         .raw_output_dir(dir.path())
-        .max_turns(3)
         .build()
         .unwrap();
     agent.run("build").await.unwrap();
@@ -810,7 +808,6 @@ async fn originals_raw_history_and_snapshots_survive_a_restore() {
             .with_messages(long_history())
             .tool(LongFailingBash(log.clone()))
             .compression_level(CompressionLevel::Minimal)
-            .max_turns(4)
             .build()
             .unwrap();
         a.run("build it").await.unwrap();

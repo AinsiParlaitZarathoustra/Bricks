@@ -68,7 +68,6 @@ async fn handle(Json(req): Json<AgentRequest>) -> Json<AgentResponse> {
         .provider(Anthropic::from_env().unwrap())
         .tools(cersei::tools::coding())
         .permission_policy(AllowReadOnly)
-        .max_turns(5)
         .run_with(&req.prompt)
         .await
         .unwrap();
@@ -129,7 +128,6 @@ loop {
         .provider(Anthropic::from_env()?)
         .tools(cersei::tools::coding())
         .working_dir("./my-project")
-        .max_turns(10)
         .permission_policy(AllowAll)
         .run_with("Check for new issues and fix any simple bugs")
         .await?;

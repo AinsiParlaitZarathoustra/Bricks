@@ -5,8 +5,9 @@
 //! * An empty task builds no provider and sends nothing.
 //! * A final answer ends the run; tools being available is no obligation.
 //! * Real multi-step work goes on until its answer.
-//! * Limits (turns, cut answers, no progress) end the run explicitly, with
-//!   a coherent history.
+//! * There is no turn limit: a run goes on until its answer. The other
+//!   stops (cut answers, no progress) end the run explicitly, with a
+//!   coherent history.
 //! * Repeating calls is told apart from progress by arguments and results.
 //! * A child never has more permissions or tools than its parent, never a
 //!   delegation tool, and is cancelled with its parent.
@@ -240,11 +241,10 @@ impl Tool for Named {
     }
 }
 
-fn agent(spy: &Arc<Spy>, max_turns: u32) -> Agent {
+fn agent(spy: &Arc<Spy>) -> Agent {
     Agent::builder()
         .provider(spy.provider())
         .tool(Probe)
-        .max_turns(max_turns)
         .working_dir(std::env::temp_dir())
         .build()
         .unwrap()
@@ -344,7 +344,12 @@ async fn empty_tasks_build_no_provider_and_send_nothing() {
             &c,
         )
         .await;
-    assert!(r.is_error, "{}", r.content);
+    // Turn limits were removed: the former argument is refused, explained.
+    assert!(
+        r.is_error && r.content.contains("was removed"),
+        "{}",
+        r.content
+    );
     // A model change would be silently ignored: refused instead.
     let r = agent_tool
         .execute(
@@ -364,10 +369,6 @@ async fn empty_tasks_build_no_provider_and_send_nothing() {
     let mut cfg = DelegateConfig::new(pf.clone(), no_tools());
     cfg.tasks = vec![DelegateTask::new("ok")];
     cfg.max_concurrent = 0;
-    assert!(run_batch(cfg).await.is_err());
-    let mut cfg = DelegateConfig::new(pf.clone(), no_tools());
-    cfg.tasks = vec![DelegateTask::new("ok")];
-    cfg.max_turns = 0;
     assert!(run_batch(cfg).await.is_err());
     // The documented no-op stays one.
     let cfg = DelegateConfig::new(pf, no_tools());
@@ -394,7 +395,7 @@ async fn empty_tasks_build_no_provider_and_send_nothing() {
 #[tokio::test]
 async fn an_image_only_prompt_is_sent() {
     let spy = Spy::new(vec![say("Un carré rouge.")]);
-    let a = agent(&spy, 4);
+    let a = agent(&spy);
     let input = UserInput {
         text: "  ".into(),
         attachments: vec![ContentBlock::Image {
@@ -421,7 +422,7 @@ async fn an_image_only_prompt_is_sent() {
 #[tokio::test]
 async fn a_simple_request_is_one_request_without_forced_tools() {
     let spy = Spy::new(vec![say("4")]);
-    let out = agent(&spy, 10).run("2+2 ?").await.unwrap();
+    let out = agent(&spy).run("2+2 ?").await.unwrap();
     assert_eq!(out.termination, Termination::Completed);
     assert_eq!((out.turns, spy.sent()), (1, 1));
     let req = &spy.requests.lock()[0];
@@ -432,7 +433,7 @@ async fn a_simple_request_is_one_request_without_forced_tools() {
 #[tokio::test]
 async fn one_read_then_the_answer_stops_there() {
     let spy = Spy::new(vec![call("c1", "Probe", json!({"n": 1})), say("Lu : 1.")]);
-    let a = agent(&spy, 10);
+    let a = agent(&spy);
     let out = a.run("lis 1").await.unwrap();
     assert_eq!(out.termination, Termination::Completed);
     assert_eq!((out.turns, spy.sent()), (2, 2));
@@ -456,30 +457,32 @@ async fn multi_step_work_goes_on_until_its_answer() {
         call("c4", "Probe", json!({"n": 3})),
         say("Trois valeurs lues."),
     ]);
-    let out = agent(&spy, 10).run("lis tout").await.unwrap();
+    let out = agent(&spy).run("lis tout").await.unwrap();
     assert_eq!(out.termination, Termination::Completed);
     assert_eq!((out.turns, spy.sent()), (5, 5));
     assert_eq!(out.tool_calls.len(), 4);
 }
 
-// ─── 6. Limits ───────────────────────────────────────────────────────────────
+// ─── 6. Stops ────────────────────────────────────────────────────────────────
 
+/// No turn limit (removed in 0.4.8): 150 turns of real progress, far past
+/// the former defaults (10 for the SDK, 50 for the CLI, 30/100 for
+/// sub-agents), then the answer ends the run.
 #[tokio::test]
-async fn the_turn_limit_is_exact_and_explicit() {
-    let spy = Spy::new(
-        (1..=10)
-            .map(|n| call(&format!("c{n}"), "Probe", json!({"n": n})))
-            .collect(),
-    );
-    let a = agent(&spy, 3);
-    let out = a.run("boucle").await.unwrap();
-    assert_eq!(out.termination, Termination::MaxTurns { limit: 3 });
-    assert!(!out.is_complete());
-    assert_eq!(
-        (out.turns, spy.sent()),
-        (3, 3),
-        "max_turns = 3 allows 3 turns"
-    );
+async fn there_is_no_turn_limit() {
+    let mut steps: Vec<Step> = (1..=150)
+        .map(|n| call(&format!("c{n}"), "Probe", json!({"n": n})))
+        .collect();
+    steps.push(say("Fini."));
+    let spy = Spy::new(steps);
+    let a = agent(&spy);
+    let out = tokio::time::timeout(Duration::from_secs(60), a.run("longue tâche"))
+        .await
+        .expect("the test harness's own timeout")
+        .unwrap();
+    assert_eq!(out.termination, Termination::Completed);
+    assert_eq!((out.turns, spy.sent()), (151, 151));
+    assert_eq!(out.tool_calls.len(), 150);
     assert!(coherent(&a), "every call has its result");
 }
 
@@ -497,7 +500,7 @@ async fn cut_answers_are_continued_a_bounded_number_of_times() {
         ..Default::default()
     };
     let spy = Spy::new(vec![cut_call, cut("b"), cut("c"), cut("d"), say("jamais")]);
-    let a = agent(&spy, 20);
+    let a = agent(&spy);
     let out = a.run("long").await.unwrap();
     assert_eq!(
         out.termination,
@@ -509,23 +512,10 @@ async fn cut_answers_are_continued_a_bounded_number_of_times() {
 }
 
 #[tokio::test]
-async fn continuations_cannot_pass_the_turn_limit() {
-    let cut = Step {
-        text: Some("…".into()),
-        stop: Some(StopReason::MaxTokens),
-        ..Default::default()
-    };
-    let spy = Spy::new(vec![cut.clone(), cut.clone(), cut]);
-    let out = agent(&spy, 2).run("long").await.unwrap();
-    assert_eq!(out.termination, Termination::MaxTurns { limit: 2 });
-    assert_eq!(spy.sent(), 2);
-}
-
-#[tokio::test]
 async fn repeated_failures_end_without_endless_retries() {
     let spy = Spy::new(vec![]);
     *spy.fallback.lock() = Some(call("c", "Probe", json!({"fail": true})));
-    let a = agent(&spy, 50);
+    let a = agent(&spy);
     let out = a.run("cherche").await.unwrap();
     assert_eq!(out.termination, Termination::NoProgress { repeats: 5 });
     assert_eq!(
@@ -553,7 +543,7 @@ async fn different_calls_of_one_tool_are_progress() {
         .collect();
     steps.push(say("Douze valeurs."));
     let spy = Spy::new(steps);
-    let a = agent(&spy, 30);
+    let a = agent(&spy);
     let out = a.run("lis douze").await.unwrap();
     assert_eq!(out.termination, Termination::Completed);
     assert_eq!(spy.sent(), 13);
@@ -573,7 +563,7 @@ async fn an_alternating_cycle_with_the_same_results_is_a_loop() {
         spy.steps.lock().push_back(a_call.clone());
         spy.steps.lock().push_back(b_call.clone());
     }
-    let out = agent(&spy, 50).run("cycle").await.unwrap();
+    let out = agent(&spy).run("cycle").await.unwrap();
     assert_eq!(out.termination, Termination::NoProgress { repeats: 5 });
     assert_eq!(
         spy.sent(),
@@ -690,23 +680,19 @@ async fn a_child_cannot_delegate_on_either_path() {
 }
 
 #[tokio::test]
-async fn a_child_stopped_at_its_limit_is_not_a_success() {
+async fn a_child_that_stops_without_an_answer_is_not_a_success() {
     let dir = tempfile::tempdir().unwrap();
     let c = ctx(Arc::new(AllowAll), dir.path());
-    let spy = Spy::new(vec![
-        Step {
-            text: Some("Je commence…".into()),
-            calls: vec![("c1".into(), "Probe".into(), json!({"n": 1}))],
-            ..Default::default()
-        },
-        call("c2", "Probe", json!({"n": 2})),
-    ]);
+    // The child keeps failing the same way: stopped for no progress.
+    let spy = Spy::new(vec![Step {
+        text: Some("Je commence…".into()),
+        calls: vec![("c1".into(), "Probe".into(), json!({"fail": true}))],
+        ..Default::default()
+    }]);
+    *spy.fallback.lock() = Some(call("c", "Probe", json!({"fail": true})));
     let tf: ToolsetFactory = Arc::new(|| vec![Box::new(Probe) as Box<dyn Tool>]);
     let r = AgentTool::with_toolset(spy.factory(), tf.clone())
-        .execute(
-            json!({"description": "x", "prompt": "fais", "max_turns": 2}),
-            &c,
-        )
+        .execute(json!({"description": "x", "prompt": "fais"}), &c)
         .await;
     assert!(r.is_error);
     assert!(r.content.contains("incomplete"), "{}", r.content);
@@ -738,7 +724,6 @@ async fn cancelling_the_parent_stops_its_child_and_starts_nothing_more() {
         Agent::builder()
             .provider(spy.provider())
             .tool(tool)
-            .max_turns(5)
             .build()
             .unwrap(),
     );
@@ -815,4 +800,58 @@ async fn a_cancelled_batch_starts_no_further_child() {
         .await;
     assert!(r.is_error);
     assert_eq!(spy2.built(), 0);
+}
+
+/// The historical delegation paths pass no turn budget either: each child
+/// works past its former default (10 for `AgentTool`, 30 for `delegate`)
+/// and gives its answer.
+#[tokio::test]
+async fn historical_delegation_paths_have_no_turn_limit() {
+    let dir = tempfile::tempdir().unwrap();
+    let c = ctx(Arc::new(AllowAll), dir.path());
+    let work = |n: usize| {
+        let mut v: Vec<Step> = (1..=n)
+            .map(|i| call(&format!("c{i}"), "Probe", json!({"n": i})))
+            .collect();
+        v.push(say("Fini."));
+        v
+    };
+    let tf: ToolsetFactory = Arc::new(|| vec![Box::new(Probe) as Box<dyn Tool>]);
+    let limit = Duration::from_secs(60);
+
+    let spy = Spy::new(work(40));
+    let tool = AgentTool::with_toolset(spy.factory(), tf.clone());
+    let r = tokio::time::timeout(
+        limit,
+        tool.execute(json!({"description": "x", "prompt": "fais"}), &c),
+    )
+    .await
+    .unwrap();
+    assert!(!r.is_error, "{}", r.content);
+    assert_eq!(spy.sent(), 41, "AgentTool: past its former default of 10");
+
+    let spy = Spy::new(work(45));
+    let pf = spy.factory();
+    let pf: cersei_agent::delegate::ProviderFactory = Arc::new(move || pf());
+    let tool = DelegateTool::new(pf.clone(), tf.clone());
+    let r = tokio::time::timeout(limit, tool.execute(json!({"goal": "fais"}), &c))
+        .await
+        .unwrap();
+    assert!(!r.is_error, "{}", r.content);
+    assert_eq!(
+        spy.sent(),
+        46,
+        "DelegateTool: past its former default of 30"
+    );
+
+    let spy = Spy::new(work(35));
+    let pf = spy.factory();
+    let pf: cersei_agent::delegate::ProviderFactory = Arc::new(move || pf());
+    let mut cfg = DelegateConfig::new(pf, tf);
+    cfg.tasks = vec![DelegateTask::new("fais")];
+    let out = tokio::time::timeout(limit, run_batch(cfg))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(out[0].turns, 36, "run_batch: past its former default of 30");
 }

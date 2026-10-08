@@ -53,7 +53,6 @@ fn item_schema(spawner: &AgentSpawner) -> Value {
         "model": { "type": "string", "description": "`inherit` (default), `auto`, or `provider_id/model_id`." },
         "reasoning": { "type": "string", "description": "`inherit` (default) or a reasoning profile id of that model." },
         "context": { "type": "string", "description": "Extra context passed explicitly (bounded); the sub-agent sees nothing else of this conversation." },
-        "max_turns": { "type": "integer", "minimum": 1, "maximum": spawner.settings().max_turns_cap },
         "isolation": { "type": "string", "enum": ["auto", "shared", "worktree"], "description": "`auto` (default): the shared workspace for one foreground sub-agent, a git worktree for background or parallel ones." }
     })
 }
@@ -510,14 +509,7 @@ impl Tool for AgentControlTool {
                     }
                     "apply_changes" => match rt.workspaces.apply(&cs_id, &ctx.working_dir).await {
                         Ok(done) => {
-                            rt.emit(crate::events::AgentEvent::SubAgent(
-                                super::spawn::SubAgentEvent::ChangesUpdated {
-                                    changeset_id: cs_id.clone(),
-                                    state: ChangeSetState::Applied,
-                                    files: done.files.iter().map(|f| f.path.clone()).collect(),
-                                    detail: None,
-                                },
-                            ));
+                            rt.changeset_applied(&done);
                             ToolResult::success(format!(
                                 "ChangeSet {cs_id} applied to your working tree ({} file(s)): {}. Nothing was committed.",
                                 done.files.len(),

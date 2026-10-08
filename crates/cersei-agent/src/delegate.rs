@@ -129,8 +129,6 @@ pub struct DelegateConfig {
     /// Model for child agents. Defaults to whatever the provider's default
     /// model is when `None`.
     pub model: Option<String>,
-    /// Upper bound on child turns.
-    pub max_turns: u32,
     /// In-flight concurrency cap. Defaults to `DEFAULT_MAX_CONCURRENT`.
     pub max_concurrent: usize,
     /// Current recursion depth. Parent sets this to 1; `run_batch` refuses
@@ -153,7 +151,6 @@ impl DelegateConfig {
             provider_factory,
             toolset_factory,
             model: None,
-            max_turns: 30,
             max_concurrent: DEFAULT_MAX_CONCURRENT,
             depth: 1,
             extra_blocked: Vec::new(),
@@ -170,11 +167,6 @@ fn validate(cfg: &DelegateConfig) -> Result<()> {
             "delegation depth {} exceeds MAX_DEPTH={}: a sub-agent cannot delegate",
             cfg.depth, MAX_DEPTH
         )));
-    }
-    if cfg.max_turns == 0 {
-        return Err(CerseiError::InvalidInput(
-            "max_turns must be at least 1".into(),
-        ));
     }
     if cfg.max_concurrent == 0 {
         return Err(CerseiError::InvalidInput(
@@ -221,7 +213,6 @@ pub async fn run_batch(cfg: DelegateConfig) -> Result<Vec<DelegateResult>> {
     let sem = Arc::new(tokio::sync::Semaphore::new(cfg.max_concurrent));
     let mut set = tokio::task::JoinSet::new();
 
-    let max_turns = cfg.max_turns;
     let model = cfg.model.clone();
     let provider_factory = cfg.provider_factory.clone();
     let toolset_factory = cfg.toolset_factory.clone();
@@ -258,7 +249,7 @@ pub async fn run_batch(cfg: DelegateConfig) -> Result<Vec<DelegateResult>> {
 
         set.spawn(async move {
             let _permit = permit;
-            let res = run_single(&task, provider, model, tools, max_turns, child).await;
+            let res = run_single(&task, provider, model, tools, child).await;
             (i, res)
         });
     }
@@ -300,7 +291,6 @@ async fn run_single(
     provider: Box<dyn Provider + Send + Sync>,
     model: Option<String>,
     tools: Vec<Box<dyn Tool>>,
-    max_turns: u32,
     child: Child,
 ) -> DelegateResult {
     let system = build_child_system_prompt(task);
@@ -312,7 +302,6 @@ async fn run_single(
     let mut builder = Agent::builder()
         .provider_boxed(provider_boxed)
         .system_prompt(system)
-        .max_turns(max_turns)
         .tools(tools)
         .permission_policy_arc(child.permissions)
         .extensions(subagent::child_extensions(child.depth.saturating_sub(1)))

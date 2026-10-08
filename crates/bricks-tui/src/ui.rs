@@ -26,7 +26,7 @@ use crate::state::{App, Cell};
 use cersei_agent::control::{ApprovalRequest, Command, Decision, Envelope, Event};
 use cersei_tools::preview::ChangePreview;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -207,10 +207,10 @@ impl Ui {
         match &req.preview {
             Some(p) => {
                 for f in &p.files {
-                    lines.push(Line::from(format!(
-                        "{} ({:?}, +{} −{})",
-                        f.path, f.kind, f.added, f.removed
-                    )));
+                    let mut spans = vec![Span::raw(format!("{} ({:?}, ", f.path, f.kind))];
+                    spans.extend(crate::view::counts(f.added, f.removed));
+                    spans.push(Span::raw(")"));
+                    lines.push(Line::from(spans));
                     lines.extend(f.diff.lines().map(crate::view::diff_line));
                     lines.push(Line::default());
                 }

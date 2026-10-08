@@ -51,8 +51,6 @@ pub struct CerseiRunner {
     registry: Arc<ToolRegistry>,
     verifier: Arc<dyn Verifier>,
     proposal_verifier: Option<Arc<dyn Verifier>>,
-    max_turns: u32,
-    general_max_turns: Option<u32>,
     general_tools_factory: Option<ToolsFactory>,
     general_system_prompt: Option<String>,
     /// Explicit level; when `None`, the `bricks.toml` level, else `off`.
@@ -75,8 +73,6 @@ impl CerseiRunner {
             registry,
             verifier,
             proposal_verifier: None,
-            max_turns: 20,
-            general_max_turns: None,
             general_tools_factory: None,
             general_system_prompt: None,
             compression: None,
@@ -86,17 +82,6 @@ impl CerseiRunner {
 
     pub fn with_model(mut self, model: impl Into<String>) -> Self {
         self.model = Some(model.into());
-        self
-    }
-
-    pub fn with_max_turns(mut self, n: u32) -> Self {
-        self.max_turns = n;
-        self
-    }
-
-    /// Override the turn budget for the GeneralAgent only (proposals keep `max_turns`).
-    pub fn with_general_max_turns(mut self, n: u32) -> Self {
-        self.general_max_turns = Some(n);
         self
     }
 
@@ -147,7 +132,6 @@ impl CerseiRunner {
         Arc::new(SubAgentReplayer {
             provider_factory: self.provider_factory.clone(),
             model: self.model.clone(),
-            max_turns: self.max_turns,
             bricks: self.bricks.clone(),
         })
     }
@@ -171,14 +155,12 @@ impl CerseiRunner {
         workdir: &Path,
         system_prompt: &str,
         reporter: Option<GraphReporter>,
-        max_turns: u32,
     ) -> cersei_types::Result<Agent> {
         let mut b = Agent::builder()
             .provider_boxed((self.provider_factory)())
             .tools(tools)
             .working_dir(workdir.to_path_buf())
             .permission_policy(AllowAll)
-            .max_turns(max_turns)
             .system_prompt(system_prompt);
         if let Some(cfg) = &self.bricks {
             b = b.bricks_config(cfg.clone());
@@ -201,9 +183,8 @@ impl AgentRlRunner for CerseiRunner {
     async fn run_general(&self, task: &str, available: &[RegistryEntry]) -> GeneralResult {
         let gr = GraphReporter::new();
         let tools = self.general_tools(available);
-        let turns = self.general_max_turns.unwrap_or(self.max_turns);
         let sys = self.general_system_prompt.as_deref().unwrap_or(GENERAL_SYS);
-        let agent = match self.build_agent(tools, &self.workdir, sys, Some(gr.clone()), turns) {
+        let agent = match self.build_agent(tools, &self.workdir, sys, Some(gr.clone())) {
             Ok(a) => a,
             Err(e) => {
                 let mut graph = gr.graph();
@@ -249,7 +230,7 @@ impl AgentRlRunner for CerseiRunner {
     }
 
     async fn plan(&self, trace: &FailureTrace, n: usize) -> Vec<Proposal> {
-        let agent = match self.build_agent(vec![], &self.workdir, PLANNER_SYS, None, 2) {
+        let agent = match self.build_agent(vec![], &self.workdir, PLANNER_SYS, None) {
             Ok(a) => a,
             Err(_) => return proposals_from_trace(trace, n),
         };
@@ -285,13 +266,7 @@ impl AgentRlRunner for CerseiRunner {
             };
         }
 
-        let agent = match self.build_agent(
-            cersei_tools::coding(),
-            &dir,
-            PROPOSAL_SYS,
-            None,
-            self.max_turns,
-        ) {
+        let agent = match self.build_agent(cersei_tools::coding(), &dir, PROPOSAL_SYS, None) {
             Ok(a) => a,
             Err(e) => {
                 return ProposalOutcome {
@@ -352,7 +327,6 @@ impl AgentRlRunner for CerseiRunner {
 struct SubAgentReplayer {
     provider_factory: ProviderFactory,
     model: Option<String>,
-    max_turns: u32,
     bricks: Option<cersei_agent::BricksConfig>,
 }
 
@@ -364,7 +338,6 @@ impl SolutionReplayer for SubAgentReplayer {
             .tools(cersei_tools::coding())
             .working_dir(ctx.working_dir.clone())
             .permission_policy(AllowAll)
-            .max_turns(self.max_turns)
             .system_prompt(&entry.solution.system_prompt);
         if let Some(cfg) = &self.bricks {
             b = b.bricks_config(cfg.clone());
@@ -552,6 +525,102 @@ mod bricks_config_tests {
         }
     }
 
+    /// `n` distinct tool calls (one per request), then a final answer.
+    struct ManyCalls(Arc<AtomicUsize>, usize);
+
+    #[async_trait]
+    impl Provider for ManyCalls {
+        fn name(&self) -> &str {
+            "many"
+        }
+        fn context_window(&self, _: &str) -> u64 {
+            128_000
+        }
+        async fn complete(&self, _req: CompletionRequest) -> Result<CompletionStream> {
+            let i = self.0.fetch_add(1, Ordering::SeqCst);
+            let call = i < self.1;
+            let (tx, rx) = tokio::sync::mpsc::channel(16);
+            tokio::spawn(async move {
+                let _ = tx
+                    .send(StreamEvent::MessageStart {
+                        id: "m".into(),
+                        model: "x".into(),
+                        usage: None,
+                    })
+                    .await;
+                let stop = if call {
+                    let _ = tx
+                        .send(StreamEvent::ContentBlockStart {
+                            index: 0,
+                            block_type: "tool_use".into(),
+                            id: Some(format!("t{i}")),
+                            name: Some("Bash".into()),
+                        })
+                        .await;
+                    let _ = tx
+                        .send(StreamEvent::InputJsonDelta {
+                            index: 0,
+                            partial_json: format!(r#"{{"command":"step {i}"}}"#),
+                        })
+                        .await;
+                    StopReason::ToolUse
+                } else {
+                    let _ = tx
+                        .send(StreamEvent::ContentBlockStart {
+                            index: 0,
+                            block_type: "text".into(),
+                            id: None,
+                            name: None,
+                        })
+                        .await;
+                    let _ = tx
+                        .send(StreamEvent::TextDelta {
+                            index: 0,
+                            text: "done".into(),
+                        })
+                        .await;
+                    StopReason::EndTurn
+                };
+                let _ = tx.send(StreamEvent::ContentBlockStop { index: 0 }).await;
+                let _ = tx
+                    .send(StreamEvent::MessageDelta {
+                        stop_reason: Some(stop),
+                        usage: None,
+                    })
+                    .await;
+                let _ = tx.send(StreamEvent::MessageStop).await;
+            });
+            Ok(CompletionStream::new(rx))
+        }
+    }
+
+    /// The runner's agents (general, proposals, replays share
+    /// `build_agent` / the replayer) have no turn budget: past the former
+    /// default of 20, then the answer.
+    #[tokio::test]
+    async fn the_runners_agents_have_no_turn_limit() {
+        let work = tempfile::tempdir().unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let c = calls.clone();
+        let factory: ProviderFactory = Arc::new(move || Box::new(ManyCalls(c.clone(), 25)));
+        let runner = CerseiRunner::new(
+            factory,
+            work.path(),
+            ToolRegistry::in_memory(),
+            Arc::new(crate::verify::AcceptVerifier),
+        );
+        let agent = runner
+            .build_agent(vec![Box::new(NoisyTool)], work.path(), "test", None)
+            .unwrap();
+        let out = tokio::time::timeout(std::time::Duration::from_secs(60), agent.run("go"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(out.turns, 26);
+        assert_eq!(calls.load(Ordering::SeqCst), 26);
+        assert!(out.is_complete());
+    }
+
     struct NoisyTool;
 
     #[async_trait]
@@ -580,7 +649,7 @@ mod bricks_config_tests {
 
     async fn tool_result(runner: &CerseiRunner, work: &Path) -> String {
         let agent = runner
-            .build_agent(vec![Box::new(NoisyTool)], work, "test", None, 3)
+            .build_agent(vec![Box::new(NoisyTool)], work, "test", None)
             .unwrap();
         agent.run("go").await.unwrap();
         agent

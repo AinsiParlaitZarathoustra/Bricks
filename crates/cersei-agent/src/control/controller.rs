@@ -475,8 +475,7 @@ fn build_agent(
         ))
         .memory(session_store(cfg))
         .session_id(meta.id.clone())
-        .bricks_config(project.bricks.clone())
-        .max_turns(settings.max_turns.unwrap_or(50));
+        .bricks_config(project.bricks.clone());
     if let Some(r) = &meta.reasoning {
         b = b.reasoning_profile(r.clone());
     }
@@ -923,14 +922,7 @@ impl Controller {
                         Ok(done) => {
                             let files: Vec<String> =
                                 done.files.iter().map(|f| f.path.clone()).collect();
-                            rt.emit(AgentEvent::SubAgent(
-                                crate::agents::SubAgentEvent::ChangesUpdated {
-                                    changeset_id: cs.clone(),
-                                    state: crate::agents::ChangeSetState::Applied,
-                                    files: files.clone(),
-                                    detail: None,
-                                },
-                            ));
+                            rt.changeset_applied(&done);
                             (true, format!("applied: {}", files.join(", ")))
                         }
                         Err(e) => {
@@ -1763,8 +1755,11 @@ async fn translate(
                         kind: f.kind,
                         added: f.added,
                         removed: f.removed,
+                        binary: false,
                     })
                     .collect(),
+                agent_id: None,
+                changeset_id: None,
             },
             // Internal or reported otherwise (`run_finished`, `usage`).
             AgentEvent::ToolPermissionCheck { .. }
@@ -1827,6 +1822,19 @@ pub(crate) fn sub_agent_event(e: crate::agents::SubAgentEvent) -> Event {
         },
         S::Finished(result) => Event::AgentFinished { result },
         S::ChangesReady(changeset) => Event::ChangesReady { changeset },
+        S::EditApplied {
+            agent_id,
+            tool_call_id,
+            tool,
+            changeset_id,
+            files,
+        } => Event::EditApplied {
+            tool_call_id,
+            tool,
+            files,
+            agent_id: Some(agent_id),
+            changeset_id,
+        },
         S::ChangesUpdated {
             changeset_id,
             state,

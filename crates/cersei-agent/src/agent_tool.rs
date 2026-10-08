@@ -17,11 +17,6 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-/// Default turn limit of a sub-agent.
-pub const DEFAULT_SUBAGENT_TURNS: u32 = 10;
-/// Default largest turn limit a call may ask for.
-pub const DEFAULT_SUBAGENT_TURNS_CAP: u32 = 50;
-
 /// The AgentTool — spawns independent sub-agents.
 pub struct AgentTool {
     provider_factory: Arc<dyn Fn() -> Box<dyn Provider> + Send + Sync>,
@@ -29,8 +24,6 @@ pub struct AgentTool {
     /// Tools named at construction that cannot be rebuilt for a child:
     /// refused at execution rather than silently dropped.
     unavailable: Vec<String>,
-    max_turns: u32,
-    max_turns_cap: u32,
 }
 
 impl AgentTool {
@@ -67,8 +60,6 @@ impl AgentTool {
             provider_factory: Arc::new(provider_factory),
             toolset_factory: factory,
             unavailable,
-            max_turns: DEFAULT_SUBAGENT_TURNS,
-            max_turns_cap: DEFAULT_SUBAGENT_TURNS_CAP,
         }
     }
 
@@ -82,21 +73,7 @@ impl AgentTool {
             provider_factory: Arc::new(provider_factory),
             toolset_factory,
             unavailable: Vec::new(),
-            max_turns: DEFAULT_SUBAGENT_TURNS,
-            max_turns_cap: DEFAULT_SUBAGENT_TURNS_CAP,
         }
-    }
-
-    /// Turn limit when the call gives none.
-    pub fn with_max_turns(mut self, n: u32) -> Self {
-        self.max_turns = n.max(1);
-        self
-    }
-
-    /// Largest turn limit a call may ask for.
-    pub fn with_max_turns_cap(mut self, n: u32) -> Self {
-        self.max_turns_cap = n.max(1);
-        self
     }
 }
 
@@ -106,8 +83,9 @@ struct AgentInput {
     prompt: String,
     #[serde(default)]
     system_prompt: Option<String>,
+    /// Former turn limit (removed in 0.4.8): refused with a migration message.
     #[serde(default)]
-    max_turns: Option<u32>,
+    max_turns: Option<Value>,
     #[serde(default)]
     model: Option<String>,
 }
@@ -119,7 +97,7 @@ and anything left undone. Stop as soon as the task is done; do not widen it.";
 
 impl AgentTool {
     /// Everything that can be refused without building anything.
-    fn check(&self, input: &AgentInput, ctx: &ToolContext) -> Result<u32, String> {
+    fn check(&self, input: &AgentInput, ctx: &ToolContext) -> Result<(), String> {
         if subagent::is_blank(&input.prompt) {
             return Err(
                 "`prompt` is empty: give the sub-agent a precise task. Nothing was started.".into(),
@@ -132,12 +110,12 @@ impl AgentTool {
         {
             return Err("`model` cannot be chosen here: a sub-agent uses its parent's model. Nothing was started.".into());
         }
-        let turns = input.max_turns.unwrap_or(self.max_turns);
-        if turns == 0 || turns > self.max_turns_cap {
-            return Err(format!(
-                "`max_turns` must be between 1 and {}; got {turns}. Nothing was started.",
-                self.max_turns_cap
-            ));
+        if input.max_turns.is_some() {
+            return Err(
+                "`max_turns` was removed in 0.4.8: sub-agents have no turn limit. \
+                 Nothing was started; call again without it."
+                    .into(),
+            );
         }
         let depth = subagent::depth_of(&ctx.extensions);
         if depth + 1 >= MAX_DEPTH {
@@ -152,7 +130,7 @@ impl AgentTool {
                 self.unavailable.join(", ")
             ));
         }
-        Ok(turns)
+        Ok(())
     }
 }
 
@@ -188,12 +166,6 @@ impl Tool for AgentTool {
                 "system_prompt": {
                     "type": "string",
                     "description": "Optional system prompt override for the sub-agent"
-                },
-                "max_turns": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": self.max_turns_cap,
-                    "description": format!("Max turns for the sub-agent (default {})", self.max_turns)
                 }
             },
             "required": ["description", "prompt"]
@@ -205,10 +177,9 @@ impl Tool for AgentTool {
             Ok(i) => i,
             Err(e) => return ToolResult::error(format!("Invalid input: {}", e)),
         };
-        let max_turns = match self.check(&input, ctx) {
-            Ok(t) => t,
-            Err(e) => return ToolResult::error(e),
-        };
+        if let Err(e) = self.check(&input, ctx) {
+            return ToolResult::error(e);
+        }
         // The session's limits apply to this path too.
         let _slot = match subagent::legacy_admission(&ctx.extensions, 1).await {
             Ok(s) => s,
@@ -222,7 +193,6 @@ impl Tool for AgentTool {
         let mut builder = Agent::builder()
             .provider_boxed((self.provider_factory)())
             .tools(tools)
-            .max_turns(max_turns)
             .permission_policy_arc(Arc::clone(&ctx.permissions))
             .working_dir(&ctx.working_dir)
             .extensions(subagent::child_extensions(depth))

@@ -175,7 +175,6 @@ async fn run_once_with<P: Provider + 'static>(
              tests passed. Never skip the tool call. Never quote the tool output.",
         )
         .model(model)
-        .max_turns(4)
         .max_tokens(128)
         .compression_level(level)
         .build()?;

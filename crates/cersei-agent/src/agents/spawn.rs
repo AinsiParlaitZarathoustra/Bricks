@@ -35,10 +35,6 @@ use tokio_util::sync::CancellationToken;
 pub struct DelegationSettings {
     /// Register the `Agent` tool in the agents of the CLI and controller.
     pub enabled: bool,
-    /// Turns of a child when neither the request nor its profile says.
-    pub default_max_turns: u32,
-    /// Highest turn limit of a child, whoever asks.
-    pub max_turns_cap: u32,
     /// The model `model: auto` means. Without it, `auto` inherits.
     pub auto_model: Option<String>,
     /// A profile's reasoning preference → an id of the model's catalogue
@@ -78,8 +74,6 @@ impl Default for DelegationSettings {
     fn default() -> Self {
         Self {
             enabled: true,
-            default_max_turns: 30,
-            max_turns_cap: 100,
             auto_model: None,
             reasoning_aliases: BTreeMap::new(),
             max_context_chars: 16_000,
@@ -145,8 +139,11 @@ pub struct AgentSpawnRequest {
     /// Extra context passed explicitly (bounded).
     #[serde(default)]
     pub context: Option<String>,
-    #[serde(default)]
-    pub max_turns: Option<u32>,
+    /// Former turn limit (removed in 0.4.8). Never used: a request that
+    /// still sends it is refused with a migration message.
+    #[doc(hidden)]
+    #[serde(default, rename = "max_turns", skip_serializing)]
+    pub legacy_max_turns: Option<serde_json::Value>,
     /// Run in the background (a handle is returned at once).
     #[serde(default)]
     pub background: Option<bool>,
@@ -223,7 +220,6 @@ pub struct SpawnInfo {
     pub profile_revision: String,
     pub model: Choice,
     pub reasoning: Choice,
-    pub max_turns: u32,
     pub workspace: String,
     /// `shared` in this phase.
     pub isolation: String,
@@ -353,6 +349,16 @@ pub enum SubAgentEvent {
         duration_ms: u64,
     },
     Finished(Box<AgentResult>),
+    /// A change was applied to the session's workspace by a child working
+    /// in it (`changeset_id: None`), or by applying a ChangeSet.
+    EditApplied {
+        agent_id: String,
+        tool_call_id: String,
+        tool: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        changeset_id: Option<String>,
+        files: Vec<crate::control::WrittenFile>,
+    },
     /// An isolated child's work is ready for review.
     ChangesReady(Box<super::workspace::ChangeSet>),
     /// A ChangeSet was applied, discarded, or hit a conflict.
@@ -427,7 +433,6 @@ pub fn neutral_profile() -> Arc<AgentProfile> {
         tools: "inherit".into(),
         isolation: Isolation::Auto,
         background: false,
-        max_turns: None,
         skills: Vec::new(),
         instructions: String::new(),
         source: ProfileSource {
@@ -436,6 +441,7 @@ pub fn neutral_profile() -> Arc<AgentProfile> {
             label: "builtin:general (internal default)".into(),
             revision: "internal".into(),
         },
+        notes: Vec::new(),
     })
 }
 
@@ -444,7 +450,6 @@ pub fn neutral_profile() -> Arc<AgentProfile> {
 pub struct Resolved {
     pub model: Choice,
     pub reasoning: Choice,
-    pub max_turns: u32,
     pub warnings: Vec<String>,
 }
 
@@ -625,26 +630,6 @@ pub fn resolve(
         },
     };
 
-    // Turns.
-    let cap = settings.max_turns_cap.max(1);
-    let max_turns = match req.max_turns {
-        Some(n) if n == 0 || n > cap => {
-            return Err(format!("max_turns must be between 1 and {cap}; got {n}."));
-        }
-        Some(n) => n,
-        None => match profile.max_turns {
-            Some(n) if n > cap => {
-                warnings.push(format!(
-                    "profile `{}` suggests {n} turns; the runtime cap is {cap}",
-                    profile.name
-                ));
-                cap
-            }
-            Some(n) => n,
-            None => settings.default_max_turns.clamp(1, cap),
-        },
-    };
-
     Ok(Resolved {
         model: Choice {
             requested: model_requested,
@@ -656,7 +641,6 @@ pub fn resolve(
             applied: reasoning.clone().unwrap_or_else(|| "(none)".into()),
             reason: Some(reasoning_reason),
         },
-        max_turns,
         warnings,
     })
 }
@@ -883,6 +867,13 @@ impl AgentSpawner {
         ext: &cersei_tools::Extensions,
         batch_background: Option<bool>,
     ) -> Result<Prepared, SpawnError> {
+        if req.legacy_max_turns.is_some() {
+            return Err(SpawnError::Invalid(
+                "`max_turns` was removed in 0.4.8: sub-agents have no turn limit. Send the \
+                 request again without it."
+                    .into(),
+            ));
+        }
         if subagent::is_blank(&req.task) {
             return Err(SpawnError::Invalid(
                 "`task` is empty: give the sub-agent a precise, self-contained task.".into(),
@@ -1080,7 +1071,6 @@ impl AgentSpawner {
                 profile_revision: p.profile.source.revision.clone(),
                 model: p.resolved.model.clone(),
                 reasoning: p.resolved.reasoning.clone(),
-                max_turns: p.resolved.max_turns,
                 workspace: ctx.working_dir.display().to_string(),
                 isolation: match iso {
                     Isolation::Worktree => "worktree".into(),
@@ -1431,6 +1421,9 @@ impl AgentSpawner {
         self.set_state(&sink, &agent_id, InstanceState::Running, None);
         let (tx, mut rx) = tokio::sync::mpsc::channel::<AgentEvent>(256);
         let fwd_id = agent_id.clone();
+        // Writes of a child in the session's workspace are changes of that
+        // workspace; a worktree's count only once applied (its ChangeSet).
+        let shared = info.isolation == "shared";
         let rt = Arc::clone(&self.runtime);
         let fwd_sink = sink.clone();
         let forward = tokio::spawn(async move {
@@ -1456,13 +1449,32 @@ impl AgentSpawner {
                         is_error,
                         duration_ms: duration.as_millis() as u64,
                     }),
-                    AgentEvent::EditApplied { files: f, .. } => {
-                        for w in f {
+                    AgentEvent::EditApplied {
+                        tool_call_id,
+                        tool,
+                        files: f,
+                    } => {
+                        for w in &f {
                             if !files.contains(&w.path) {
-                                files.push(w.path);
+                                files.push(w.path.clone());
                             }
                         }
-                        None
+                        shared.then(|| SubAgentEvent::EditApplied {
+                            agent_id: fwd_id.clone(),
+                            tool_call_id,
+                            tool,
+                            changeset_id: None,
+                            files: f
+                                .into_iter()
+                                .map(|w| crate::control::WrittenFile {
+                                    path: w.path,
+                                    kind: w.kind,
+                                    added: w.added,
+                                    removed: w.removed,
+                                    binary: false,
+                                })
+                                .collect(),
+                        })
                     }
                     _ => None,
                 };
@@ -1585,7 +1597,6 @@ impl AgentSpawner {
         let mut b = Agent::builder()
             .provider_boxed(provider)
             .tools(tools)
-            .max_turns(resolved.max_turns)
             .model(resolved.model.applied.clone())
             .permission_policy_arc(Arc::new(ChildPolicy {
                 inner: Arc::clone(&pc.permissions),
@@ -2018,18 +2029,12 @@ mod tests {
         };
         let e = resolve(&bad_reasoning, &p, &parent(None), &models(), &s).unwrap_err();
         assert!(e.contains("quick, deep"), "{e}");
-        let turns = AgentSpawnRequest {
-            max_turns: Some(1_000),
-            ..Default::default()
-        };
-        assert!(resolve(&turns, &p, &parent(None), &models(), &s).is_err());
     }
 
     #[test]
-    fn auto_needs_a_rule_and_turns_are_capped() {
+    fn auto_needs_a_rule() {
         let mut s = DelegationSettings::default();
-        let mut p = prof(ModelPref::Auto, ReasoningPref::Inherit);
-        p.max_turns = Some(500);
+        let p = prof(ModelPref::Auto, ReasoningPref::Inherit);
         let r = resolve(
             &AgentSpawnRequest::default(),
             &p,
@@ -2040,7 +2045,6 @@ mod tests {
         .unwrap();
         assert_eq!(r.model.applied, "p/fast");
         assert!(r.warnings.iter().any(|w| w.contains("auto_model")));
-        assert_eq!(r.max_turns, s.max_turns_cap);
         s.auto_model = Some("p/plain".into());
         let r = resolve(
             &AgentSpawnRequest::default(),

@@ -9,7 +9,6 @@ permissions: inherit
 tools: inherit
 isolation: auto
 background: false
-max_turns: 40
 skills: []
 ---
 

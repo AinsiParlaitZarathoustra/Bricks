@@ -54,7 +54,6 @@ async fn main() -> anyhow::Result<()> {
         .provider(provider)
         .tools(tools)
         .model(&model)
-        .max_turns(50)
         .max_tokens(16384)
         .auto_compact(true)
         .enable_broadcast(512)

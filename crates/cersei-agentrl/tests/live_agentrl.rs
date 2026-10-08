@@ -76,8 +76,7 @@ async fn agentrl_solves_a_real_coding_task() {
             registry.clone(),
             verifier.clone(),
         )
-        .with_model(&selection)
-        .with_max_turns(16),
+        .with_model(&selection),
     );
 
     let orch = Orchestrator::new(runner, registry.clone()).with_config(OrchestratorConfig {
@@ -169,7 +168,6 @@ async fn agentrl_recovery_loop_registers_a_tool() {
             verifier.clone(),
         )
         .with_model(&selection)
-        .with_max_turns(12)
         .with_general_tools(readonly),
     );
 

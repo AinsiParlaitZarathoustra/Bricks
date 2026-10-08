@@ -96,16 +96,12 @@ let runner = CerseiRunner::new(
         verifier,          // Arc<dyn Verifier>
     )
     .with_model("gemini-3.1-pro-preview")
-    .with_max_turns(16)
-    .with_general_max_turns(4)   // optional: cheaper first pass
     .with_general_tools(factory); // optional: restrict the GeneralAgent's toolset
 ```
 
 | Method | Purpose |
 |---|---|
 | `with_model(s)` | Set the model (**required** for non-Anthropic providers). |
-| `with_max_turns(n)` | Turn budget for proposals + replays (default 20). |
-| `with_general_max_turns(n)` | Separate turn budget for the GeneralAgent. |
 | `with_general_tools(ToolsFactory)` | Override the GeneralAgent's base toolset. Registry tools are always added on top. Useful to force escalation into the recovery loop. |
 
 What it does per method:

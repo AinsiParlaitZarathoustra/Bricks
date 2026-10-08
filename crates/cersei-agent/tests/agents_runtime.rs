@@ -29,9 +29,18 @@ struct Shared {
     active: AtomicUsize,
     peak: AtomicUsize,
     child_requests: parking_lot::Mutex<Vec<CompletionRequest>>,
+    /// The parent's script, to add replies for a later run.
+    parent: parking_lot::Mutex<Option<Arc<Script>>>,
 }
 
 impl Shared {
+    fn push_parent(&self, replies: Vec<Reply>) {
+        let s = self.parent.lock().clone().unwrap();
+        for r in replies {
+            s.push(r);
+        }
+    }
+
     /// Let every `[hold]` child (present or future) go on.
     fn release(&self) {
         self.released.store(true, Ordering::SeqCst);
@@ -66,6 +75,19 @@ fn has_tool_result(r: &CompletionRequest) -> bool {
             .any(|x| matches!(x, cersei_types::ContentBlock::ToolResult { .. })),
         _ => false,
     })
+}
+
+fn tool_results(r: &CompletionRequest) -> usize {
+    r.messages
+        .iter()
+        .map(|m| match &m.content {
+            MessageContent::Blocks(b) => b
+                .iter()
+                .filter(|x| matches!(x, cersei_types::ContentBlock::ToolResult { .. }))
+                .count(),
+            _ => 0,
+        })
+        .sum()
 }
 
 fn marker<'a>(task: &'a str, name: &str) -> Option<&'a str> {
@@ -129,10 +151,23 @@ impl Provider for TestProvider {
                 woken.await;
             }
         }
-        let mut reply = if has_tool_result(&req) {
+        let looped = marker(&task, "loop").and_then(|n| n.parse::<usize>().ok());
+        let done = tool_results(&req);
+        let mut reply = if looped.is_some_and(|n| done < n) {
+            // `[loop:N]`: N turns of distinct work, then the answer.
+            Reply::tool(
+                &format!("l{done}"),
+                "Glob",
+                json!({ "pattern": format!("*.z{done}") }),
+            )
+        } else if has_tool_result(&req) {
             Reply::text(&format!("done: {}", task.lines().next().unwrap_or("")))
         } else if let Some(inner) = marker(&task, "delegate") {
-            Reply::tool("d1", "Agent", json!({ "task": inner.replace('|', ":") }))
+            Reply::tool(
+                "d1",
+                "Agent",
+                json!({ "task": inner.replace('|', ":").replace('{', "[").replace('}', "]") }),
+            )
         } else if let Some(w) = marker(&task, "write") {
             let (file, content) = w.split_once('=').unwrap_or((w, "x"));
             Reply::tool(
@@ -229,6 +264,7 @@ async fn open(
     git(dir.path(), &["commit", "-q", "-m", "init"]);
     let script = Script::new(replies);
     let shared = Arc::new(Shared::default());
+    *shared.parent.lock() = Some(script.clone());
     let catalog = Arc::new(TestCatalog {
         inner: cersei_agent::control::scripted::ScriptedCatalog::new(&["a", "b"], script),
         shared: Arc::clone(&shared),
@@ -633,6 +669,58 @@ async fn a_full_queue_is_an_explicit_individual_result() {
     let all: Vec<_> = results(&evs).into_iter().chain(results(&rest)).collect();
     assert_eq!(all.len(), 3);
     assert_eq!(all.iter().filter(|r| r.status == "completed").count(), 2);
+}
+
+// ─── No turn limit on any path ───────────────────────────────────────────────
+
+/// Fan-out, background, worktree isolation and a grandchild: every child
+/// works past the former limits (30 by default, 100 at most) and answers.
+#[tokio::test]
+async fn no_path_builds_a_child_with_a_turn_limit() {
+    let mut env = open(
+        vec![
+            Reply::tool(
+                "c1",
+                "Agents",
+                json!({ "background": true, "agents": [
+                    { "task": "first [loop:105]" },
+                    { "task": "second [delegate:grandchild {loop|40}]" }
+                ]}),
+            ),
+            Reply::text("started"),
+        ],
+        allow(&["Agents", "Agent"]),
+        true,
+        |_| {},
+    )
+    .await;
+    let evs = submit(&mut env, "go").await;
+    let sp = spawned(&evs);
+    assert!(sp.iter().all(|s| s.background && s.isolation == "worktree"));
+    let fin = tokio::time::timeout(
+        Duration::from_secs(120),
+        until(&mut env.events, |e| {
+            matches!(
+                e,
+                Event::RunUsage {
+                    final_total: true,
+                    ..
+                }
+            )
+        }),
+    )
+    .await
+    .expect("the test harness's own timeout");
+    let rs = results(&fin);
+    assert_eq!(rs.len(), 3, "two children and a grandchild");
+    for r in &rs {
+        assert_eq!(r.status, "completed", "{r:?}");
+        assert_eq!(r.termination, Some(cersei_agent::Termination::Completed));
+    }
+    let mut turns: Vec<u32> = rs.iter().map(|r| r.turns).collect();
+    turns.sort();
+    // The grandchild (depth 2) ran 40 turns of work, the first child 105.
+    assert_eq!(turns, vec![2, 41, 106]);
 }
 
 // ─── Background ──────────────────────────────────────────────────────────────
@@ -1071,4 +1159,229 @@ async fn background_jobs_are_owned_scoped_and_stopped_as_a_tree() {
 #[allow(dead_code)]
 fn _msg(m: &Message) -> Option<&str> {
     m.get_text()
+}
+
+// ─── Applied changes (`edit_applied`) ────────────────────────────────────────
+
+/// `(agent_id, changeset_id, first path, added, removed)`.
+type Edit = (Option<String>, Option<String>, String, usize, usize);
+
+fn edits(evs: &[Envelope]) -> Vec<Edit> {
+    evs.iter()
+        .filter_map(|e| match &e.event {
+            Event::EditApplied {
+                agent_id,
+                changeset_id,
+                files,
+                ..
+            } => Some((
+                agent_id.clone(),
+                changeset_id.clone(),
+                files[0].path.clone(),
+                files[0].added,
+                files[0].removed,
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn shared_children_report_their_writes_and_isolated_ones_only_when_applied() {
+    let mut env = open(
+        vec![
+            Reply::tools(vec![(
+                "c1",
+                "Agent",
+                json!({ "task": "fg [write:fg.txt=a]", "isolation": "shared" }),
+            )]),
+            Reply::tool(
+                "c2",
+                "Agent",
+                json!({ "task": "bg [write:bg.txt=b]", "isolation": "shared", "background": true }),
+            ),
+            Reply::tool(
+                "c3",
+                "Agents",
+                json!({ "agents": [
+                    { "task": "iso one [write:same.txt=one]" },
+                    { "task": "iso two [write:same.txt=two]" }
+                ]}),
+            ),
+            Reply::text("done"),
+        ],
+        allow(&["Agent", "Agents", "Write", "AgentControl"]),
+        true,
+        |_| {},
+    )
+    .await;
+    let mut evs = submit(&mut env, "go").await;
+    // The background child may finish after the answer.
+    if !edits(&evs).iter().any(|e| e.2 == "bg.txt") {
+        evs.extend(
+            until(
+                &mut env.events,
+                |e| matches!(e, Event::EditApplied { files, .. } if files[0].path == "bg.txt"),
+            )
+            .await,
+        );
+    }
+    let sp = spawned(&evs);
+    let id_of = |t: &str| {
+        sp.iter()
+            .find(|s| s.task.starts_with(t))
+            .unwrap()
+            .agent_id
+            .clone()
+    };
+    let e = edits(&evs);
+    // Shared children: their writes, once each, with their identity.
+    assert_eq!(
+        e,
+        vec![
+            (Some(id_of("fg")), None, "fg.txt".into(), 1, 0),
+            (Some(id_of("bg")), None, "bg.txt".into(), 1, 0),
+        ],
+        "worktree writes are not changes of the session's workspace yet"
+    );
+    let ready: Vec<_> = evs
+        .iter()
+        .filter_map(|e| match &e.event {
+            Event::ChangesReady { changeset } => Some((**changeset).clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ready.len(), 2);
+
+    // Applied by a person: one change, the ChangeSet's lines.
+    let control = |action: &str, id: &str| Command::AgentControl {
+        action: action.into(),
+        agent_id: None,
+        changeset_id: Some(id.into()),
+        job_id: None,
+    };
+    env.ctl
+        .send(control("apply_changes", &ready[0].id))
+        .unwrap();
+    // The result and the change arrive by two routes, in either order.
+    let mut got = Vec::new();
+    while !(got
+        .iter()
+        .any(|e: &Envelope| matches!(e.event, Event::EditApplied { .. }))
+        && got
+            .iter()
+            .any(|e: &Envelope| matches!(e.event, Event::AgentControlResult { .. })))
+    {
+        got.push(next(&mut env.events).await);
+    }
+    assert_eq!(
+        edits(&got),
+        vec![(
+            Some(ready[0].agent_id.clone()),
+            Some(ready[0].id.clone()),
+            "same.txt".into(),
+            1,
+            0
+        )]
+    );
+    // Again: refused, nothing more.
+    env.ctl
+        .send(control("apply_changes", &ready[0].id))
+        .unwrap();
+    let again = until(&mut env.events, |e| {
+        matches!(e, Event::AgentControlResult { .. })
+    })
+    .await;
+    assert!(edits(&again).is_empty());
+    assert!(matches!(
+        &again.last().unwrap().event,
+        Event::AgentControlResult { ok: false, .. }
+    ));
+    // The other one conflicts (same file): nothing.
+    env.ctl
+        .send(control("apply_changes", &ready[1].id))
+        .unwrap();
+    let conflict = until(&mut env.events, |e| {
+        matches!(e, Event::AgentControlResult { .. })
+    })
+    .await;
+    assert!(matches!(
+        &conflict.last().unwrap().event,
+        Event::AgentControlResult { ok: false, .. }
+    ));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    while let Some(e) = env.events.try_next() {
+        assert!(
+            !matches!(e.event, Event::EditApplied { .. }),
+            "{:?}",
+            e.event
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_changeset_applied_by_the_agent_counts_once_too() {
+    let mut env = open(
+        vec![
+            Reply::tool(
+                "c1",
+                "Agent",
+                json!({ "task": "iso [write:tool.txt=x]", "isolation": "worktree" }),
+            ),
+            Reply::text("ready"),
+        ],
+        allow(&["Agent", "Write", "AgentControl"]),
+        true,
+        |_| {},
+    )
+    .await;
+    let evs = submit(&mut env, "go").await;
+    let cs = evs
+        .iter()
+        .find_map(|e| match &e.event {
+            Event::ChangesReady { changeset } => Some((**changeset).clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert!(edits(&evs).is_empty());
+    // The session agent applies it with AgentControl.
+    env.shared.push_parent(vec![
+        Reply::tool(
+            "a1",
+            "AgentControl",
+            json!({ "action": "apply_changes", "changeset_id": cs.id }),
+        ),
+        Reply::tool(
+            "a2",
+            "AgentControl",
+            json!({ "action": "apply_changes", "changeset_id": cs.id }),
+        ),
+        Reply::text("applied"),
+    ]);
+    let evs = submit(&mut env, "apply it").await;
+    let mut e = edits(&evs);
+    if e.is_empty() {
+        e = edits(&until(&mut env.events, |e| matches!(e, Event::EditApplied { .. })).await);
+    }
+    assert_eq!(
+        e,
+        vec![(
+            Some(cs.agent_id.clone()),
+            Some(cs.id.clone()),
+            "tool.txt".into(),
+            1,
+            0
+        )]
+    );
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    while let Some(x) = env.events.try_next() {
+        assert!(
+            !matches!(x.event, Event::EditApplied { .. }),
+            "applied once"
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(env.dir.path().join("tool.txt")).unwrap(),
+        "x\n"
+    );
 }

@@ -104,7 +104,6 @@ async fn a_request_carrying_an_orphaned_tool_result_is_reported_before_send() {
     let agent = Agent::builder()
         .provider(common::provider(&url, "chat_completions", 128_000))
         .model("gpt-4o")
-        .max_turns(2)
         .max_tokens(64)
         // A history whose tool_result answers a tool_use that no longer
         // exists — what a bad compaction slice produces.

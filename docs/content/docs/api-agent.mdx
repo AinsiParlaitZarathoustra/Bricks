@@ -27,7 +27,6 @@ let agent = Agent::builder()
     .tools(cersei::tools::coding())
     .system_prompt("You are a coding assistant.")
     .model("claude-sonnet-4-6")
-    .max_turns(10)
     .max_tokens(16384)
     .permission_policy(AllowAll)
     .build()?;
@@ -62,11 +61,6 @@ let agent = Agent::builder()
       type: '&str',
       description: 'Model identifier. "claude-sonnet-4-6", "gpt-4o", etc.',
       default: 'provider default',
-    },
-    '.max_turns(n)': {
-      type: 'u32',
-      description: 'Maximum agentic loop iterations before stopping.',
-      default: '5',
     },
     '.max_tokens(n)': {
       type: 'u32',

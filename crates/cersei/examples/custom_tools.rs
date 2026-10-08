@@ -142,7 +142,6 @@ async fn main() -> anyhow::Result<()> {
         })
         .tools(cersei::tools::filesystem()) // also add file tools
         .system_prompt("You are a helpful assistant. Use tools when needed.")
-        .max_turns(5)
         .permission_policy(AllowAll)
         .build()?;
 

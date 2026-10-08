@@ -144,8 +144,7 @@ async fn run() {
                 serde_json::json!({
                     "description": "custom system",
                     "prompt": "Do something",
-                    "system_prompt": "You are a Rust expert.",
-                    "max_turns": 3
+                    "system_prompt": "You are a Rust expert."
                 }),
                 &ctx,
             )

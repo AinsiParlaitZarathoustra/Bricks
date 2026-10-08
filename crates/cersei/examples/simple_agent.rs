@@ -22,7 +22,6 @@ async fn main() -> anyhow::Result<()> {
         )?)
         .tools(cersei::tools::coding()) // filesystem + shell tools
         .system_prompt("You are a helpful coding assistant. Be concise.")
-        .max_turns(5)
         .permission_policy(AllowAll)
         .working_dir(".")
         .run_with("List all Rust source files in the current directory and count them.")

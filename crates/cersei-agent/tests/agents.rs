@@ -452,12 +452,50 @@ async fn allowing_agent_once_does_not_allow_the_childs_commands() {
         .starts_with("agent_"));
 }
 
+/// No turn limit for sub-agents (formerly 30 by default, 100 at most):
+/// 110 turns of distinct work, then the child's answer.
 #[tokio::test]
-async fn a_child_at_its_turn_limit_is_incomplete() {
+async fn a_child_goes_past_the_former_cap() {
+    let mut replies = vec![Reply::tool(
+        "c1",
+        "Agent",
+        json!({"task": "read everything"}),
+    )];
+    replies.extend((0..110).map(|n| {
+        Reply::tool(
+            &format!("g{n}"),
+            "Glob",
+            json!({"pattern": format!("*.y{n}")}),
+        )
+    }));
+    replies.push(Reply::text("child done"));
+    replies.push(Reply::text("parent done"));
+    let mut env = open(replies, allow(&["Agent"])).await;
+    env.ctl
+        .send(Command::Submit {
+            prompt: Prompt::text("go"),
+        })
+        .unwrap();
+    let evs = tokio::time::timeout(
+        std::time::Duration::from_secs(120),
+        until_finished(&mut env.events),
+    )
+    .await
+    .expect("the test harness's own timeout");
+    let r = &finished(&evs)[0];
+    assert_eq!(r.status, "completed", "{r:?}");
+    assert_eq!(r.turns, 111);
+    assert_eq!(r.termination, Some(cersei_agent::Termination::Completed));
+    assert_eq!(run_outcome(&evs).0, RunOutcome::Succeeded);
+}
+
+/// The former `max_turns` argument is refused with a migration message;
+/// nothing is started.
+#[tokio::test]
+async fn a_former_turn_limit_argument_is_refused() {
     let mut env = open(
         vec![
             Reply::tool("c1", "Agent", json!({"task": "read", "max_turns": 1})),
-            Reply::tool("g1", "Glob", json!({"pattern": "*"})),
             Reply::text("parent done"),
         ],
         allow(&["Agent"]),
@@ -469,13 +507,12 @@ async fn a_child_at_its_turn_limit_is_incomplete() {
         })
         .unwrap();
     let evs = until_finished(&mut env.events).await;
-    let r = &finished(&evs)[0];
-    assert_eq!(r.status, "incomplete");
-    assert_eq!(r.turns, 1, "exact turn count");
-    assert!(r.error.as_deref().unwrap().contains("turn"));
+    assert!(finished(&evs).is_empty(), "no child");
     let (err, out) = tool_output(&evs, "Agent");
-    assert!(err && out.contains("incomplete"), "{out}");
-    assert_eq!(run_outcome(&evs).0, RunOutcome::Succeeded);
+    assert!(
+        err && out.contains("was removed") && out.contains("Nothing was started"),
+        "{out}"
+    );
 }
 
 #[tokio::test]

@@ -48,7 +48,6 @@ Two files are read, both through the existing loaders. Nothing is built in.
 [agent]
 model = "my-provider/my-model"   # default model (otherwise --model is required)
 reasoning = "deep"               # one of that model's reasoning profiles
-max_turns = 50
 
 [permissions]                    # the approval policy (below)
 write = "ask"
@@ -179,11 +178,17 @@ continue has a visible cause and a bound:
 
 | continuation | cause shown | bound |
 |---|---|---|
-| tool calls | `tool_started` / `tool_finished` | `max_turns` (`[agent]`, default 50): `N` allows at most `N` generation turns; reaching it ends the run `incomplete` (`max_turns`) |
+| tool calls | `tool_started` / `tool_finished` | no turn limit (removed in 0.4.8): the run goes on until its answer or one of the stops below, or a cancellation (Ctrl+C) |
 | answer cut by the output-token limit | `notice` "continuing (n/3)"; calls in the cut answer are answered as not run | 3 continuations, each one a turn; then `incomplete` (`output_truncated`) |
 | the same calls returning the same results | `notice` "No progress…" once, after 3 repeated rounds | 5 repeated rounds: `incomplete` (`no_progress`). Different arguments or results (another file, a test run again after an edit) are progress |
 | transport errors (429, 5xx, network) | `notice` "Retrying in …" | 5 retries of one request with backoff; not turns; then `failed` |
 | request refused as too long | `compaction` | the context policy's `max_overflow_recoveries` per turn |
+
+A former `max_turns` (`[agent]`, `[agents] default_max_turns`,
+`max_turns_cap`, a profile's `max_turns`) is ignored and reported as a
+diagnostic when the session opens; nothing is rewritten in your files.
+A result stored before 0.4.8 may still say `max_turns`: it is read as
+such; no run produces it any more.
 
 When the run stops at a limit, the history, partial answer and tool results are
 kept, every tool call has a result, and no tool is started afterwards. The
@@ -200,17 +205,17 @@ them allows none of the children's own tools. Background sub-agents are
 drained after the answer (bounded by `[agents] background_drain_ms`), then
 cancelled: exit code 6 if any did not complete.
 
-## The JSONL schema (version 4)
+## The JSONL schema (version 5)
 
 Every line is one envelope:
 
 ```json
-{"schema":4,"session_id":"20261006-141502-a1b2c3","run_id":"run_5f…","seq":7,"at":1791300902123,"type":"tool_started","tool_call_id":"call_1","name":"Glob","input":{"pattern":"*.md"}}
+{"schema":5,"session_id":"20261006-141502-a1b2c3","run_id":"run_5f…","seq":7,"at":1791300902123,"type":"tool_started","tool_call_id":"call_1","name":"Glob","input":{"pattern":"*.md"}}
 ```
 
 | field | |
 |---|---|
-| `schema` | `4`; incremented on any change a consumer could notice (2: `run_finished` gained `incomplete` and `termination`; 3: the `search` command and its `search_results` event; 4: sub-agents — `agent_*` events, `agent_id` in `approval_requested`, `list_agent_profiles` and `reload_agent_profiles`). Additions a consumer can ignore — new event types, new optional fields, new commands, new states — keep the version (Sprint 10.5's runtime is such an addition); a removed or renamed field or event, or a changed meaning, increments it. Consumers ignore unknown types and fields |
+| `schema` | `5`; incremented on any change a consumer could notice (2: `run_finished` gained `incomplete` and `termination`; 3: the `search` command and its `search_results` event; 4: sub-agents — `agent_*` events, `agent_id` in `approval_requested`, `list_agent_profiles` and `reload_agent_profiles`; 5: turn limits removed — `agent_spawned` no longer has `max_turns`, `edit_applied` gains `agent_id` and `changeset_id`, `binary` in its files). Additions a consumer can ignore — new event types, new optional fields, new commands, new states — keep the version (Sprint 10.5's runtime is such an addition); a removed or renamed field or event, or a changed meaning, increments it. Consumers ignore unknown types and fields |
 | `session_id` | the session |
 | `run_id` | the run (absent for session-level events) |
 | `seq` | 1, 2, 3, … contiguous: a gap never happens silently |
@@ -230,7 +235,7 @@ Events (`type`):
 | `tool_finished` | `tool_call_id, name, is_error, duration_ms, output` | |
 | `approval_requested` | `approval{approval_id, tool_call_id, tool, level, description, input, preview?, agent_id?}` | `preview.files[{path, kind, before_sha256, diff, added, removed}]` |
 | `approval_resolved` | `approval_id, tool_call_id, decision, by` | `decision`: `allow`, `allow_for_session`, `deny`; `by`: `user`, `session`, `non_interactive`, `cancelled` |
-| `edit_applied` | `tool_call_id, tool, files[{path, kind, added, removed}]` | an approved, previewed change was written |
+| `edit_applied` | `tool_call_id, tool, files[{path, kind, added, removed, binary?}], agent_id?, changeset_id?` | a change was applied to the session's workspace: a successful `Write`, `Edit`, `MultiEdit` or `ApplyPatch` of the session agent, or of a sub-agent working in that workspace (`agent_id`), or a ChangeSet applied (`changeset_id`); never for a denial, a refusal or a failure. Counts are those of the complete diff; one event per change |
 | `memory_recalled` | `items, tokens, omitted, budget` | what went into the system prompt |
 | `context` | `status{context_used{tokens, provenance, …}, context_window, input_limit, totals, …}` | `provenance`: `measured`, `counted`, `mixed`, `estimated` |
 | `usage` | `turn{…}, total{…}` | observed token usage; `cost_usd` absent = unknown, not zero |
@@ -239,11 +244,11 @@ Events (`type`):
 | `context_cleared` | `messages_removed` | |
 | `session_saved` | | |
 | `notice` | `message` | retries, configuration diagnostics, continuations after a cut answer, no-progress warnings |
-| `run_finished` | `outcome, failure?, error?, termination?, text, turns, approvals_unsatisfied?` | **exactly one per run**; `outcome`: `succeeded`, `incomplete`, `failed`, `cancelled`; `failure`: `approval_required`, `error`; `termination.kind`: `completed`, `max_turns` (`limit`), `output_truncated` (`continuations`), `no_progress` (`repeats`), `content_filtered`, `empty_response`; `turns`: generation turns that got a response |
+| `run_finished` | `outcome, failure?, error?, termination?, text, turns, approvals_unsatisfied?` | **exactly one per run**; `outcome`: `succeeded`, `incomplete`, `failed`, `cancelled`; `failure`: `approval_required`, `error`; `termination.kind`: `completed`, `output_truncated` (`continuations`), `no_progress` (`repeats`), `content_filtered`, `empty_response` (`max_turns` only in results stored before 0.4.8); `turns`: generation turns that got a response |
 | `memory_maintenance_started` | | after `run_finished` |
 | `memory_maintenance_finished` | `outcome, report?, error?` | `outcome`: `completed`, `cancelled`, `failed` |
 | `search_results` | `query, status, hits[{path, line, column, text}], omitted, notes?, elapsed_ms` | answer to `search`; `line`/`column` 1-based, column in characters; `status`: `complete`, `partial` (a limit was reached: absence proves nothing), `cancelled`, `error` |
-| `agent_spawned` | `agent{agent_id, parent_id?, root_run_id, tool_call_id?, batch_index?, background, depth, profile, profile_source, profile_revision, model{requested, applied, reason?}, reasoning{…}, max_turns, workspace, isolation, branch?, task, created_at}` | a sub-agent was created (see `docs/agents.md`); `tool_call_id` is the parent's call |
+| `agent_spawned` | `agent{agent_id, parent_id?, root_run_id, tool_call_id?, batch_index?, background, depth, profile, profile_source, profile_revision, model{requested, applied, reason?}, reasoning{…}, workspace, isolation, branch?, task, created_at}` | a sub-agent was created (see `docs/agents.md`); `tool_call_id` is the parent's call |
 | `agent_state` | `agent_id, state, reason?` | `queued`, `waiting_admission`, `starting`, `running`, `cancelling`, then one of `completed`, `incomplete`, `failed`, `cancelled`, `interrupted` (found unfinished when the session reopened) |
 | `agent_tool_started` / `agent_tool_finished` | `agent_id, tool_call_id, name, input` / `…, is_error, duration_ms` | the sub-agent's tool calls (its text is never streamed) |
 | `agent_finished` | `result{agent_id, profile, status, termination?, error?, summary, files_changed, commands, warnings, turns, usage, duration_ms, model, reasoning?, workspace, transcript?, changeset?, branch?, skills?}` | the compact result; its usage is not in the run's `usage` events (see `run_usage`) |
@@ -258,12 +263,12 @@ Events (`type`):
 A short run:
 
 ```text
-{"schema":4,"session_id":"…","seq":1,"at":…,"type":"session_opened","working_dir":"/p","model":"demo/scripted","resumed":false,"message_count":0,"warnings":[]}
-{"schema":4,"session_id":"…","run_id":"run_…","seq":2,"at":…,"type":"run_started","prompt":"Find the README","attachments":[],"model":"demo/scripted"}
-{"schema":4,…,"seq":3,"type":"tool_started","tool_call_id":"call_0","name":"Glob","input":{"pattern":"*.md"}}
-{"schema":4,…,"seq":4,"type":"tool_finished","tool_call_id":"call_0","name":"Glob","is_error":false,"duration_ms":3,"output":"README.md"}
-{"schema":4,…,"seq":9,"type":"text_delta","text":"I listed the Markdown files. …"}
-{"schema":4,…,"seq":14,"type":"run_finished","outcome":"succeeded","termination":{"kind":"completed"},"text":"…","turns":3}
+{"schema":5,"session_id":"…","seq":1,"at":…,"type":"session_opened","working_dir":"/p","model":"demo/scripted","resumed":false,"message_count":0,"warnings":[]}
+{"schema":5,"session_id":"…","run_id":"run_…","seq":2,"at":…,"type":"run_started","prompt":"Find the README","attachments":[],"model":"demo/scripted"}
+{"schema":5,…,"seq":3,"type":"tool_started","tool_call_id":"call_0","name":"Glob","input":{"pattern":"*.md"}}
+{"schema":5,…,"seq":4,"type":"tool_finished","tool_call_id":"call_0","name":"Glob","is_error":false,"duration_ms":3,"output":"README.md"}
+{"schema":5,…,"seq":9,"type":"text_delta","text":"I listed the Markdown files. …"}
+{"schema":5,…,"seq":14,"type":"run_finished","outcome":"succeeded","termination":{"kind":"completed"},"text":"…","turns":3}
 ```
 
 No API key, authentication header or secret appears in any event. The
@@ -371,8 +376,22 @@ When a call must be asked about:
   some. Ctrl+T shows it live; Ctrl+O shows it after the fact.
 * **Status bar.** It shows the model, the profile, the context used and the
   prompt budget, with the provenance (`est.`, `~`, `counted`, or nothing for
-  measured), then the project folder. The cost is "unknown (no price)" when
-  the model has no price.
+  measured), then the project folder. The cost reads `Not priced` when the
+  model has no price (nothing before the first response).
+* **Totals.** The line just above the status bar shows `+N −N`: the lines
+  added and removed by the changes applied to the session's workspace
+  since the session was opened — a sum of operations (two edits of one
+  file both count; an edit undone by another counts twice), not a
+  `git diff`. They come from `edit_applied` only: `Write`, `Edit`,
+  `MultiEdit`, `ApplyPatch` that succeeded, a sub-agent's in the same
+  workspace, a ChangeSet applied (once). Not counted: denied, refused or
+  failed calls, previews, files changed by `Bash`, MCP tools,
+  `NotebookEdit` (no preview) or by hand, a worktree's writes before their
+  ChangeSet is applied, binary files' lines. A new or resumed session
+  starts from `+0 −0`; the totals stay after the run, at rest.
+* **Colours.** Added lines and `+N` are pale green, removed lines and
+  `−N` pale red — in diffs, edit results, approval previews and the
+  totals; the signs carry the meaning without colours.
   The full context and cost inspectors separate the current context from
   the cumulative consumption.
 

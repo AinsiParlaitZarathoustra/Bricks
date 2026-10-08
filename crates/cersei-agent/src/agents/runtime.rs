@@ -381,6 +381,41 @@ impl AgentRuntime {
         self.session_sink.lock().is_some()
     }
 
+    /// A ChangeSet was applied to the session's workspace: say so, and
+    /// report its lines as one applied change (its id identifies it, so a
+    /// repeat never counts twice). Called only after a successful apply.
+    pub fn changeset_applied(&self, done: &super::workspace::ChangeSet) {
+        use super::spawn::SubAgentEvent;
+        use cersei_tools::preview::ChangeKind;
+        self.emit(AgentEvent::SubAgent(SubAgentEvent::ChangesUpdated {
+            changeset_id: done.id.clone(),
+            state: super::workspace::ChangeSetState::Applied,
+            files: done.files.iter().map(|f| f.path.clone()).collect(),
+            detail: None,
+        }));
+        self.emit(AgentEvent::SubAgent(SubAgentEvent::EditApplied {
+            agent_id: done.agent_id.clone(),
+            tool_call_id: done.id.clone(),
+            tool: "apply_changes".into(),
+            changeset_id: Some(done.id.clone()),
+            files: done
+                .files
+                .iter()
+                .map(|f| crate::control::WrittenFile {
+                    path: f.path.clone(),
+                    kind: match f.status.chars().next() {
+                        Some('A') => ChangeKind::Create,
+                        Some('D') => ChangeKind::Delete,
+                        _ => ChangeKind::Modify,
+                    },
+                    added: f.added.unwrap_or(0) as usize,
+                    removed: f.removed.unwrap_or(0) as usize,
+                    binary: f.binary,
+                })
+                .collect(),
+        }));
+    }
+
     pub fn emit(&self, ev: AgentEvent) {
         if let Some(s) = self.session_sink.lock().clone() {
             s(ev);
@@ -848,6 +883,7 @@ mod tests {
             Default::default(),
         ));
         let rt = AgentRuntime::new(limits(2, 2, 10, 4), Arc::clone(&ws), Some(manifest.clone()));
+        // A record written before 0.4.8 (with `max_turns`) still loads.
         let info: SpawnInfo = serde_json::from_value(serde_json::json!({
             "agent_id": "agent_x", "root_run_id": "run_1", "profile": "p", "profile_source": "s",
             "profile_revision": "r", "model": {"requested": "inherit", "applied": "m"},

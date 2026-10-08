@@ -72,7 +72,9 @@ impl UserInput {
 pub enum Termination {
     /// The model gave its final answer with no tool call left to run.
     Completed,
-    /// `limit` generation turns ran and the model still wanted to continue.
+    /// Historical: a run stopped by a turn limit. Turn limits were removed
+    /// in 0.4.8; this is kept only so that results and events stored before
+    /// can still be read. No run produces it any more.
     MaxTurns { limit: u32 },
     /// The answer was cut by the output-token limit, and the `continuations`
     /// allowed after a cut ran out.
@@ -118,7 +120,7 @@ pub struct AgentOutput {
     /// The provider's reason for its last response. How the run ended is
     /// [`AgentOutput::termination`].
     pub stop_reason: StopReason,
-    /// Generation turns actually run (never more than `max_turns`).
+    /// Generation turns actually run.
     pub turns: u32,
     pub tool_calls: Vec<ToolCallRecord>,
     pub termination: Termination,
@@ -171,7 +173,6 @@ pub struct Agent {
     system_prompt: Option<String>,
     append_system_prompt: Option<String>,
     model: parking_lot::Mutex<Option<String>>,
-    max_turns: u32,
     max_tokens: u32,
     temperature: Option<f32>,
     reasoning_profile: parking_lot::Mutex<Option<String>>,
@@ -594,7 +595,6 @@ pub struct AgentBuilder {
     system_prompt: Option<String>,
     append_system_prompt: Option<String>,
     model: Option<String>,
-    max_turns: u32,
     max_tokens: u32,
     temperature: Option<f32>,
     reasoning_profile: Option<String>,
@@ -636,7 +636,6 @@ impl Default for AgentBuilder {
             system_prompt: None,
             append_system_prompt: None,
             model: None,
-            max_turns: 10,
             max_tokens: 16384,
             temperature: None,
             reasoning_profile: None,
@@ -708,11 +707,6 @@ impl AgentBuilder {
 
     pub fn model(mut self, m: impl Into<String>) -> Self {
         self.model = Some(m.into());
-        self
-    }
-
-    pub fn max_turns(mut self, n: u32) -> Self {
-        self.max_turns = n;
         self
     }
 
@@ -999,7 +993,6 @@ impl AgentBuilder {
             system_prompt: self.system_prompt,
             append_system_prompt: self.append_system_prompt,
             model: parking_lot::Mutex::new(self.model),
-            max_turns: self.max_turns,
             max_tokens: self.max_tokens,
             temperature: self.temperature,
             reasoning_profile: parking_lot::Mutex::new(self.reasoning_profile),
@@ -1102,5 +1095,20 @@ mod tests {
         assert_eq!(restored.input_tokens, 1234);
         assert_eq!(restored.output_tokens, 567);
         assert_eq!(restored.total_tokens, 1801);
+    }
+}
+
+#[cfg(test)]
+mod termination_history_tests {
+    use super::Termination;
+
+    /// Results stored before 0.4.8 may say a run stopped at its turn
+    /// limit: they are still read (no run produces it any more).
+    #[test]
+    fn a_stored_turn_limit_termination_is_still_read() {
+        let t: Termination = serde_json::from_str(r#"{"kind":"max_turns","limit":50}"#).unwrap();
+        assert_eq!(t, Termination::MaxTurns { limit: 50 });
+        assert!(!t.is_completed());
+        assert!(t.describe().contains("turn limit"));
     }
 }

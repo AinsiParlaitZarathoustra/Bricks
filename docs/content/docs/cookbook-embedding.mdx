@@ -17,7 +17,6 @@ async fn ask_agent(prompt: String) -> Result<String, String> {
         .provider(Anthropic::from_env().map_err(|e| e.to_string())?)
         .tools(cersei::tools::filesystem())
         .permission_policy(AllowReadOnly)
-        .max_turns(3)
         .run_with(&prompt)
         .await
         .map_err(|e| e.to_string())?;

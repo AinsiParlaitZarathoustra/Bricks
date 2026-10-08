@@ -125,6 +125,54 @@ impl Tty {
         }
     }
 
+    /// The output without escape sequences (CSI and OSC).
+    fn plain(&self) -> String {
+        let t = self.text();
+        let mut out = String::new();
+        let mut it = t.chars().peekable();
+        while let Some(c) = it.next() {
+            if c == '\x1b' {
+                match it.next() {
+                    Some('[') => {
+                        for d in it.by_ref() {
+                            if d.is_ascii_alphabetic() || d == '~' {
+                                // A cursor move stands for the cells the
+                                // redraw skipped (unchanged blanks).
+                                if d == 'H' {
+                                    out.push(' ');
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    Some(']') => {
+                        while let Some(d) = it.next() {
+                            if d == '\x07' || (d == '\x1b' && it.next_if_eq(&'\\').is_some()) {
+                                break;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            } else {
+                out.push(c);
+            }
+        }
+        out
+    }
+
+    fn wait_for_plain(&self, needle: &str, secs: u64) {
+        let start = Instant::now();
+        while !self.plain().contains(needle) {
+            assert!(
+                start.elapsed() < Duration::from_secs(secs),
+                "`{needle}` not seen; output:\n{}",
+                self.plain()
+            );
+            std::thread::sleep(Duration::from_millis(30));
+        }
+    }
+
     fn wait_exit(&mut self, secs: u64) -> u32 {
         let start = Instant::now();
         loop {
@@ -315,4 +363,67 @@ fn resuming_another_projects_session_moves_the_interface_there() {
     tty.send(b"\x15");
     quit(&mut tty);
     assert!(tty.text().contains(&format!("bricks resume {id}")));
+}
+
+/// The `+N −N` line in the real interface: a write counts, a refused
+/// change and a cancelled run do not; the totals stay at rest, in their
+/// colours.
+#[test]
+fn applied_changes_add_up_in_the_totals_line() {
+    let m = model(vec![
+        tool(
+            "w1",
+            "Write",
+            serde_json::json!({"file_path": "new.txt", "content": "a\nb\nc\n"}),
+        ),
+        text("écrit"),
+        tool("r1", "Read", serde_json::json!({"file_path": "new.txt"})),
+        tool(
+            "e1",
+            "Edit",
+            serde_json::json!({"file_path": "new.txt", "old_string": "b\n", "new_string": "B\nBB\n"}),
+        ),
+        text("refusé"),
+        HANG.to_string(),
+    ]);
+    let p = Project::new(
+        &m.url,
+        "[permissions]\nwrite = \"ask\"\n\n[permissions.tools]\nWrite = \"allow\"\n",
+    );
+    let mut tty = Tty::start(&p, &[]);
+    tty.wait_for_plain("+0 −0", 20);
+    tty.send(b"ecris\r");
+    tty.wait_for_plain("+3 −0", 20);
+    tty.wait_for("écrit", 20);
+    // Pale green for `+3`.
+    assert!(
+        tty.text().contains("38;2;152;205;170;49m+3")
+            && tty.text().contains("38;2;224;153;153;49m−0"),
+        "{}",
+        tty.text().escape_debug()
+    );
+    // A change awaiting approval, refused: nothing counted.
+    tty.send(b"modifie\r");
+    tty.wait_for("[y] allow", 20);
+    std::thread::sleep(Duration::from_millis(300));
+    tty.send(b"n");
+    tty.wait_for("refusé", 20);
+    // A run cancelled: the totals stay.
+    tty.send(b"attends\r");
+    tty.wait_for("Ctrl+C to cancel", 20);
+    std::thread::sleep(Duration::from_millis(300));
+    tty.send(b"\x03");
+    tty.wait_for("cancelled", 20);
+    std::thread::sleep(Duration::from_millis(500));
+    let out = tty.plain();
+    let last = out.rfind("+3 −0").expect("still shown at rest");
+    assert!(
+        !out[last..].contains("+4") && !out.contains("+5 −1"),
+        "the refused edit never counted"
+    );
+    assert_eq!(
+        std::fs::read_to_string(p.path().join("new.txt")).unwrap(),
+        "a\nb\nc\n"
+    );
+    quit(&mut tty);
 }

@@ -31,7 +31,6 @@ async fn main() -> anyhow::Result<()> {
         .system_prompt("You are a helpful assistant. Remember context across messages.")
         .memory(JsonlMemory::new(tmp.path()))
         .session_id("demo-session")
-        .max_turns(3)
         .permission_policy(AllowAll)
         .working_dir(".")
         .build()?;
@@ -56,7 +55,6 @@ async fn main() -> anyhow::Result<()> {
         .system_prompt("You are a helpful assistant. Remember context across messages.")
         .memory(JsonlMemory::new(tmp.path()))
         .session_id("demo-session")
-        .max_turns(3)
         .permission_policy(AllowAll)
         .working_dir(".")
         .build()?;

@@ -165,7 +165,6 @@ async fn search_then_read_in_order_without_downloading_twice_and_after_a_restore
         .session_id("web-session")
         .compression_level(CompressionLevel::Aggressive)
         .web_config(web_config(&site))
-        .max_turns(6)
         .build()
         .unwrap();
     agent.run("find the retry option").await.unwrap();
@@ -233,7 +232,6 @@ async fn search_then_read_in_order_without_downloading_twice_and_after_a_restore
         .working_dir(work.path())
         .raw_output_dir(work.path().join(".raw"))
         .session_id("web-session")
-        .max_turns(4)
         .build()
         .unwrap();
     restored.run("again").await.unwrap();
@@ -257,7 +255,6 @@ async fn a_failed_search_is_a_failure_with_its_reason() {
         .tools(cersei_tools::web())
         .working_dir(work.path())
         .web_config(web_config(&site))
-        .max_turns(3)
         .build()
         .unwrap();
     agent.run("search").await.unwrap();
@@ -320,7 +317,6 @@ async fn mcp_tools_are_agent_tools_with_structured_results_and_progress() {
                 p2.lock().unwrap().push(format!("{name}: {message}"));
             }
         })
-        .max_turns(5)
         .build()
         .unwrap();
     agent.run("look it up").await.unwrap();
@@ -369,7 +365,6 @@ async fn an_unreachable_mcp_server_is_reported_not_fatal() {
                 s2.lock().unwrap().push(s.clone());
             }
         })
-        .max_turns(2)
         .build()
         .unwrap();
     agent.run("hello").await.unwrap();

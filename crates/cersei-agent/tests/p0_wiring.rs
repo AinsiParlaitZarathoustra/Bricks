@@ -173,7 +173,6 @@ async fn edit_of_unread_file_is_refused_and_the_file_is_untouched() {
         .tools(cersei_tools::coding())
         .working_dir(dir.path())
         .model("gpt-4o")
-        .max_turns(4)
         .max_tokens(64)
         .build()
         .expect("build agent");
@@ -254,7 +253,6 @@ async fn oversized_error_result_is_capped_before_entering_history() {
         .provider(provider_against(&url, "gpt-4o"))
         .tool(HugeFailureTool)
         .model("gpt-4o")
-        .max_turns(4)
         .max_tokens(64)
         .build()
         .expect("build agent");
@@ -409,7 +407,6 @@ async fn compaction_through_the_runner_never_orphans_tool_results() {
         .provider(provider_against(&url, "gpt-4"))
         .tool(PingTool)
         .model("gpt-4")
-        .max_turns(4)
         .max_tokens(64)
         .auto_compact(true)
         .with_messages(history_with_split_landing_mid_pair())

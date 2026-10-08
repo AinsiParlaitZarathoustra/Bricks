@@ -102,6 +102,16 @@ impl BricksConfig {
         let Some((name, text)) = toml else {
             return c;
         };
+        // Turn limits were removed (0.4.8): their old keys are ignored and
+        // reported, never passed on; every other key is checked as before.
+        let (cleaned, removed) = without_removed_turn_keys(text);
+        for key in removed {
+            c.diagnostics.push(format!(
+                "{name}: {key}: turn limits were removed in 0.4.8; this setting is ignored — \
+                 remove it"
+            ));
+        }
+        let text = cleaned.as_ref();
         match policy_from_bricks_toml(text) {
             Ok(p) => c.context = p,
             Err(e) => c
@@ -173,6 +183,37 @@ impl BricksConfig {
 }
 
 /// A whole table, when present.
+/// The keys of the former turn limits, by table.
+const REMOVED_TURN_KEYS: &[(&str, &str)] = &[
+    ("agent", "max_turns"),
+    ("agents", "default_max_turns"),
+    ("agents", "max_turns_cap"),
+];
+
+/// `text` without the former turn-limit keys, and the keys found
+/// (`[table] key`). A text that does not parse is returned as it is (its
+/// error is reported by the section parsers).
+fn without_removed_turn_keys(text: &str) -> (std::borrow::Cow<'_, str>, Vec<String>) {
+    let Ok(mut doc) = toml::from_str::<toml::Value>(text) else {
+        return (text.into(), Vec::new());
+    };
+    let mut found = Vec::new();
+    for (table, key) in REMOVED_TURN_KEYS {
+        if let Some(t) = doc.get_mut(*table).and_then(|t| t.as_table_mut()) {
+            if t.remove(*key).is_some() {
+                found.push(format!("[{table}] {key}"));
+            }
+        }
+    }
+    if found.is_empty() {
+        return (text.into(), found);
+    }
+    match toml::to_string(&doc) {
+        Ok(t) => (t.into(), found),
+        Err(_) => (text.into(), found),
+    }
+}
+
 fn table_from_bricks_toml<T: serde::de::DeserializeOwned>(
     text: &str,
     table: &str,
@@ -276,6 +317,58 @@ mod tests {
             c.web,
             cersei_web::WebConfig::default(),
             "web defaults documented"
+        );
+    }
+
+    /// Turn limits were removed (0.4.8): their former keys are ignored and
+    /// reported; nothing else is relaxed.
+    #[test]
+    fn former_turn_limits_are_ignored_with_a_diagnostic() {
+        let c = BricksConfig::from_texts(
+            Some(
+                "[agent]\nmodel = \"p/m\"\nmax_turns = 1\n\n\
+                 [agents]\ndefault_max_turns = 0\nmax_turns_cap = 3\nmax_depth = 3\n",
+            ),
+            &[],
+        );
+        assert_eq!(
+            c.agent.model.as_deref(),
+            Some("p/m"),
+            "the rest of [agent] is read"
+        );
+        assert_eq!(c.agents.max_depth, 3, "the rest of [agents] is read");
+        assert_eq!(c.diagnostics.len(), 3, "{:#?}", c.diagnostics);
+        for key in [
+            "[agent] max_turns",
+            "[agents] default_max_turns",
+            "[agents] max_turns_cap",
+        ] {
+            assert!(
+                c.diagnostics
+                    .iter()
+                    .any(|d| d.contains(key) && d.contains("removed") && d.contains("remove it")),
+                "{key}: {:#?}",
+                c.diagnostics
+            );
+        }
+        // Other keys are still checked.
+        let c = BricksConfig::from_texts(Some("[agent]\nmax_turns = 5\nbogus = 1\n"), &[]);
+        assert!(
+            c.diagnostics.iter().any(|d| d.contains("unknown field")),
+            "{:#?}",
+            c.diagnostics
+        );
+        let c = BricksConfig::from_texts(Some("[agents]\nmax_turns_cap = 5\nbogus = 1\n"), &[]);
+        assert!(
+            c.diagnostics.iter().any(|d| d.contains("unknown field")),
+            "{:#?}",
+            c.diagnostics
+        );
+        // A file without them says nothing.
+        assert!(
+            BricksConfig::from_texts(Some("[agent]\nmodel = \"p/m\"\n"), &[])
+                .diagnostics
+                .is_empty()
         );
     }
 

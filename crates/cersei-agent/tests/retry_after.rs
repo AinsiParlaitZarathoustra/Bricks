@@ -108,7 +108,6 @@ fn run_with(steps: Vec<Step>) -> Run {
             calls: calls.clone(),
         })
         .model("spy")
-        .max_turns(2)
         .cancel_token(cancel.clone())
         .on_event(move |e| {
             if let AgentEvent::Status(s) = e {
@@ -309,7 +308,6 @@ max_output_tokens = 1000
         Agent::builder()
             .provider(provider)
             .model("m")
-            .max_turns(1)
             .cancel_token(cancel.clone())
             .build()
             .unwrap(),

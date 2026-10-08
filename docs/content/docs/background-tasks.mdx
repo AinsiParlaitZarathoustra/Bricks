@@ -453,7 +453,6 @@ loop {
         .provider(Anthropic::from_env()?)
         .tools(cersei::tools::coding())
         .system_prompt("You maintain project memory. Scan for new files and patterns.")
-        .max_turns(5)
         .permission_policy(AllowReadOnly)
         .run_with("Check src/ for new files since last scan. Update memory if needed.")
         .await?;

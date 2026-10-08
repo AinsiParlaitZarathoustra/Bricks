@@ -103,10 +103,7 @@ parameters = {{ effort_knob = "low" }}
 async fn body_for(agent_profile: Option<&str>) -> serde_json::Value {
     let bodies = Arc::new(Mutex::new(Vec::new()));
     let url = serve_once(bodies.clone());
-    let mut builder = Agent::builder()
-        .provider(provider(&url))
-        .max_turns(1)
-        .max_tokens(32);
+    let mut builder = Agent::builder().provider(provider(&url)).max_tokens(32);
     if let Some(id) = agent_profile {
         builder = builder.reasoning_profile(id);
     }

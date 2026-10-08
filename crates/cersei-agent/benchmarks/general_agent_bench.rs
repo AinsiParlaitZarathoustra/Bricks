@@ -351,7 +351,6 @@ fn build_agent() -> Agent {
         .provider(StubProvider)
         .tools(vec![Box::new(EchoTool) as Box<dyn Tool>])
         .permission_policy(AllowAll)
-        .max_turns(1)
         .build()
         .expect("agent build")
 }

@@ -102,7 +102,6 @@ async fn main() -> anyhow::Result<()> {
         .provider(EchoProvider)
         .tools(cersei::tools::filesystem())
         .system_prompt("You are a test assistant.")
-        .max_turns(1)
         .permission_policy(AllowAll)
         .run_with("Hello from the custom provider example!")
         .await?;

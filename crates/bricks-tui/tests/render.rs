@@ -106,10 +106,8 @@ fn the_live_area_shows_progress_status_and_composer() {
     let s = live(&app, &composer, 70, 12, None);
     assert!(s.contains("Grep fn main"), "{s}");
     assert!(s.contains("local/m · deep"), "{s}");
-    assert!(
-        s.contains("cost unknown (no price)"),
-        "unknown, not zero: {s}"
-    );
+    assert!(s.contains("Not priced"), "unknown, not zero: {s}");
+    assert!(!s.contains("cost unknown") && !s.contains("$0.0000"), "{s}");
     assert!(s.contains("Ctrl+C to cancel"), "{s}");
     assert!(s.contains("prochain prompt é漢"), "{s}");
 
@@ -275,7 +273,6 @@ fn durations_are_milliseconds_and_a_sub_agent_has_its_own_cell() {
             applied: "high".into(),
             reason: None,
         },
-        max_turns: 30,
         workspace: "/w".into(),
         isolation: "shared".into(),
         task: "Find parse".into(),

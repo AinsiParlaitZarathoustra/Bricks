@@ -42,7 +42,6 @@ async fn main() -> anyhow::Result<()> {
         .provider(provider)
         .tools(tools)
         .system_prompt(RESEARCH_PROMPT)
-        .max_turns(40) // Research needs many rounds
         .auto_compact(true)
         .session_id("research-session-1")
         .memory(memory)

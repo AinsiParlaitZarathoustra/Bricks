@@ -24,7 +24,7 @@ When you call `agent.run("prompt")`, this happens:
 2. APPEND USER MESSAGE
    Add Message::user(prompt) to conversation
 
-3. LOOP (up to max_turns):
+3. LOOP (no turn limit; until a final answer or another stop):
    a. BUILD REQUEST
       - Collect conversation messages
       - Attach system prompt

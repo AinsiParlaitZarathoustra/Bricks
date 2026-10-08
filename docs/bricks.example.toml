@@ -16,7 +16,6 @@
 # `bricks` needs --model (no model is ever chosen silently).
 # model = "my-provider/my-model"
 # reasoning = "deep"             # one of that model's reasoning profiles
-max_turns = 50
 
 [permissions]
 # The approval policy of every frontend (interface and headless):
@@ -141,8 +140,6 @@ max_session_bytes = 67108864    # documents kept per session (oldest removed bey
 # profile rules. Profiles: <workspace>/.bricks/agents/*.md > ~/.bricks/agents/*.md
 # > built-in.
 # enabled = true
-# default_max_turns = 30
-# max_turns_cap = 100
 # auto_model = "provider_id/model_id"   # what `model: auto` means; absent: inherit
 # max_context_chars = 16000
 # catalog_size = 30

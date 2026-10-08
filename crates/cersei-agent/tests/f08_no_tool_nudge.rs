@@ -142,7 +142,6 @@ fn agent_with_ping(url: &str) -> Agent {
         .provider(provider_against(url, "gpt-4o"))
         .tool(PingTool)
         .model("gpt-4o")
-        .max_turns(6)
         .max_tokens(64)
         .build()
         .expect("build agent")
@@ -174,7 +173,6 @@ async fn prose_answer_without_tools_is_final() {
     let agent = Agent::builder()
         .provider(provider_against(&url, "gpt-4o"))
         .model("gpt-4o")
-        .max_turns(6)
         .max_tokens(64)
         .build()
         .expect("build agent");

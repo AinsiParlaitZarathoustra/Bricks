@@ -21,13 +21,36 @@ pub fn dim() -> Style {
 }
 
 /// One line of a unified diff, coloured.
+/// Added lines and their counts: pale green.
+pub fn added_style() -> Style {
+    Style::default().fg(Color::Rgb(152, 205, 170))
+}
+
+/// Removed lines and their counts: pale red.
+pub fn removed_style() -> Style {
+    Style::default().fg(Color::Rgb(224, 153, 153))
+}
+
+/// `+N −N` as two spans, each in its colour (the signs carry the meaning
+/// without colours).
+pub fn counts(
+    added: impl std::fmt::Display,
+    removed: impl std::fmt::Display,
+) -> Vec<Span<'static>> {
+    vec![
+        Span::styled(format!("+{added}"), added_style()),
+        Span::raw(" "),
+        Span::styled(format!("−{removed}"), removed_style()),
+    ]
+}
+
 pub fn diff_line(l: &str) -> Line<'static> {
     let style = if l.starts_with("+++") || l.starts_with("---") {
         Style::default().add_modifier(Modifier::BOLD)
     } else if l.starts_with('+') {
-        Style::default().fg(Color::Green)
+        added_style()
     } else if l.starts_with('-') {
-        Style::default().fg(Color::Red)
+        removed_style()
     } else if l.starts_with("@@") {
         Style::default().fg(Color::Cyan)
     } else {
@@ -320,11 +343,12 @@ fn plain_cell_lines(cell: &Cell, show_thinking: bool) -> Vec<Line<'static>> {
                 what,
             ])];
             if let Some(p) = &request.preview {
+                // A preview: nothing is written yet (not in the totals).
                 for f in &p.files {
-                    v.push(Line::from(Span::styled(
-                        format!("      {} (+{} −{})", f.path, f.added, f.removed),
-                        dim(),
-                    )));
+                    let mut spans = vec![Span::styled(format!("      {} (", f.path), dim())];
+                    spans.extend(counts(f.added, f.removed));
+                    spans.push(Span::styled(", preview)", dim()));
+                    v.push(Line::from(spans));
                 }
             }
             v
@@ -332,11 +356,16 @@ fn plain_cell_lines(cell: &Cell, show_thinking: bool) -> Vec<Line<'static>> {
         Cell::Edits { files } => files
             .iter()
             .map(|f| {
-                Line::from(vec![
+                let mut spans = vec![
                     Span::styled("  ✎ ", Style::default().fg(Color::Green)),
                     Span::raw(format!("{} written ", f.path)),
-                    Span::styled(format!("+{} −{}", f.added, f.removed), dim()),
-                ])
+                ];
+                if f.binary {
+                    spans.push(Span::styled("(binary)", dim()));
+                } else {
+                    spans.extend(counts(f.added, f.removed));
+                }
+                Line::from(spans)
             })
             .collect(),
         Cell::Notice(t) => vec![Line::from(Span::styled(format!("· {t}"), dim()))],
@@ -485,7 +514,7 @@ pub fn status_line(app: &App, spinner: &str, maintenance: bool) -> Line<'static>
     }
     match s.total.as_ref().map(|u| u.cost_usd) {
         Some(Some(c)) => spans.push(Span::styled(format!("  ${c:.4}"), dim())),
-        Some(None) => spans.push(Span::styled("  cost unknown (no price)", dim())),
+        Some(None) => spans.push(Span::styled("  Not priced", dim())),
         None => {}
     }
     if app.running() {
@@ -525,7 +554,7 @@ pub struct Overlay<'a> {
 pub fn draw_live(f: &mut Frame, app: &App, composer: &Composer, o: &Overlay) {
     let area = f.area();
     f.render_widget(Clear, area);
-    if area.height < 4 || area.width < 20 {
+    if area.height < 5 || area.width < 20 {
         f.render_widget(Paragraph::new("terminal too small"), area);
         return;
     }
@@ -538,7 +567,8 @@ pub fn draw_live(f: &mut Frame, app: &App, composer: &Composer, o: &Overlay) {
         .min(rows.len().saturating_sub(shown_rows));
     let chips = !composer.attachments().is_empty();
     let composer_h = shown_rows + usize::from(chips) + 1; // + separator
-    let status_h = 1usize;
+                                                          // The totals line, then the status line.
+    let status_h = 2usize;
     let popup_h = o
         .popup
         .map(|(items, _, _)| items.len().min(8) + 1)
@@ -556,24 +586,27 @@ pub fn draw_live(f: &mut Frame, app: &App, composer: &Composer, o: &Overlay) {
     }
     if !app.pending.is_empty() {
         let req = &app.pending[0];
-        body.push(markdown::RichLine::from(Line::from(Span::styled(
+        let hint = Style::default()
+            .fg(Color::Yellow)
+            .add_modifier(Modifier::BOLD);
+        let mut spans = vec![Span::styled(format!("  {} ", req.tool), hint)];
+        if let Some(p) = &req.preview {
+            spans.push(Span::styled("(", hint));
+            spans.extend(counts(p.added(), p.removed()));
+            spans.push(Span::styled(")", hint));
+        }
+        spans.push(Span::styled(
             format!(
-                "  {} {} — [y] allow  [a] allow for the session  [n] reject  [d] diff/details{}",
-                req.tool,
-                req.preview
-                    .as_ref()
-                    .map(|p| format!("(+{} −{})", p.added(), p.removed()))
-                    .unwrap_or_default(),
+                " — [y] allow  [a] allow for the session  [n] reject  [d] diff/details{}",
                 if o.focus_approval {
                     ""
                 } else {
                     "  (Tab: focus)"
                 }
             ),
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::BOLD),
-        ))));
+            hint,
+        ));
+        body.push(markdown::RichLine::from(Line::from(spans)));
     }
     if let Some(m) = o.message {
         body.push(markdown::RichLine::from(Line::from(Span::styled(
@@ -660,12 +693,29 @@ pub fn draw_live(f: &mut Frame, app: &App, composer: &Composer, o: &Overlay) {
     }
     y += shown_rows as u16;
     f.render_widget(
-        Paragraph::new(status_line(app, o.spinner, o.maintenance)),
+        Paragraph::new(totals_line(app)),
         Rect::new(
             area.x,
-            y.min(area.bottom().saturating_sub(1)),
+            y.min(area.bottom().saturating_sub(2)),
             area.width,
             1,
         ),
     );
+    f.render_widget(
+        Paragraph::new(status_line(app, o.spinner, o.maintenance)),
+        Rect::new(
+            area.x,
+            (y + 1).min(area.bottom().saturating_sub(1)),
+            area.width,
+            1,
+        ),
+    );
+}
+
+/// `+N −N`: lines added and removed by the changes applied to the open
+/// session's workspace (shown from `+0 −0`, at rest too).
+pub fn totals_line(app: &App) -> Line<'static> {
+    let mut spans = vec![Span::raw("  ")];
+    spans.extend(counts(app.totals.added, app.totals.removed));
+    Line::from(spans)
 }

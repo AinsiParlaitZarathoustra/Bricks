@@ -4,7 +4,6 @@
 //! [agent]
 //! model = "my-provider/my-model"   # a `provider_id/model_id` of providers.toml
 //! reasoning = "deep"               # one of that model's reasoning profiles
-//! max_turns = 50
 //!
 //! [permissions]
 //! default = "ask"                  # when no rule below matches
@@ -105,7 +104,6 @@ pub struct AgentSettings {
     pub model: Option<String>,
     /// Default reasoning profile of that model.
     pub reasoning: Option<String>,
-    pub max_turns: Option<u32>,
     pub max_tokens: Option<u32>,
 }
 
@@ -114,7 +112,6 @@ pub struct AgentSettings {
 struct FileAgent {
     model: Option<String>,
     reasoning: Option<String>,
-    max_turns: Option<u32>,
     max_tokens: Option<u32>,
 }
 
@@ -148,13 +145,9 @@ pub fn from_bricks_toml(text: &str) -> Result<(AgentSettings, ApprovalRules), St
                 ));
             }
         }
-        if f.max_turns == Some(0) {
-            return Err("[agent]: max_turns must be at least 1".into());
-        }
         agent = AgentSettings {
             model: f.model,
             reasoning: f.reasoning,
-            max_turns: f.max_turns,
             max_tokens: f.max_tokens,
         };
     }
@@ -236,7 +229,7 @@ mod tests {
     fn the_documented_example_loads_cleanly() {
         let text = include_str!("../../../../docs/bricks.example.toml");
         let (agent, rules) = from_bricks_toml(text).unwrap();
-        assert_eq!(agent.max_turns, Some(50));
+        assert_eq!(agent.max_tokens, None);
         assert_eq!(
             rules,
             ApprovalRules::default(),
@@ -250,7 +243,6 @@ mod tests {
     fn invalid_sections_are_errors() {
         for (text, needle) in [
             ("[agent]\nmodel = \"no-slash\"\n", "provider_id/model_id"),
-            ("[agent]\nmax_turns = 0\n", "max_turns"),
             ("[agent]\nbogus = 1\n", "unknown field"),
             ("[permissions]\nwrite = \"maybe\"\n", "[permissions]"),
         ] {

@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.4.8] — 2026-10-08
+
+### Removed — turn limits (Sprint 11.02)
+
+- **No agent has a turn limit any more**: the SDK (`Agent::builder`, formerly 10), the session agent of the CLI and controller (formerly 50), native sub-agents (`Agent` / `Agents`, foreground, background, descendants, shared or worktree; formerly 30 by default, 100 at most), and the historical paths (`AgentTool`, `DelegateTool`, `delegate::run_batch`, `cersei-agentrl`'s general, proposal and replay agents, `tbench-agent`). A run goes on until its answer and stops otherwise only by the engine's other rules: cancellation (and its propagation to children), definitive errors, no progress, refusals, empty or cut answers. Depth, concurrency, per-run totals, admission, jobs, tool timeouts, context checks and the 0.4.7 network retries are unchanged. No hidden budget replaces the limit; the turn counter saturates and never stops a run.
+- **API removed**: `AgentBuilder::max_turns`, `AgentTool::with_max_turns` / `with_max_turns_cap` and `DEFAULT_SUBAGENT_TURNS(_CAP)`, `DelegateTool::with_max_turns`, `DelegateConfig::max_turns`, `CerseiRunner::with_max_turns` / `with_general_max_turns`, `AgentSettings::max_turns`, `DelegationSettings::{default_max_turns, max_turns_cap}`, `AgentProfile::max_turns` and `MAX_PROFILE_TURNS`, `Resolved::max_turns`, `SpawnInfo::max_turns`; the `max_turns` argument of the `Agent` / `Agents` tool schemas and of the legacy `Agent` tool; `tbench-agent --max-turns`.
+- **Migration**: `[agent] max_turns`, `[agents] default_max_turns` / `max_turns_cap` and a profile's `max_turns` are accepted, ignored and reported as diagnostics ("remove it"); every other key is checked as before; files are never rewritten. A tool call or `tbench-agent` run that still passes `max_turns` is refused with a migration message, before anything starts. `Termination::MaxTurns` is kept only to read results stored before; no run produces it. Old instance manifests with `max_turns` still load.
+- **JSONL schema 5**: `agent_spawned` no longer has `max_turns`; `edit_applied` gains `agent_id`, `changeset_id`, and `binary` in its files.
+
+### Added — terminal totals, colours (Sprint 11.02)
+
+- **`+N −N` above the status bar**: lines added and removed by the changes applied to the session's workspace since it was opened — a sum of operations, not a `git diff`; `+0 −0` at first, kept at rest, across runs, compactions and cancellations; reset when a session is opened or resumed. Fed by `edit_applied` only, each change counted once (`agent_id` + call, or ChangeSet): successful `Write`, `Edit`, `MultiEdit`, `ApplyPatch` of the session agent; a sub-agent's in the same workspace (foreground or background); a ChangeSet once applied (from `/changes … apply` or the `AgentControl` tool), never its worktree writes, nor a conflicting, refused, repeated or discarded apply. Denials, refusals, failed writes and previews never count; binary files add no lines; events of another session are ignored. Counts are those of the complete diff. A hook that rewrites a call's input counts the change actually written.
+- **Colours**: pale green (152, 205, 170) for added lines and `+N`, pale red (224, 153, 153) for removed lines and `−N`, shared by diffs, edit results, approval previews and the totals (separate spans; headers, hunks and context keep their style; the signs stay without colours).
+
+### Changed (Sprint 11.02)
+
+- `cost unknown (no price)` reads `Not priced`.
+
 ## [0.4.7] — 2026-10-08
 
 ### Fixed — retries honour `Retry-After` (Sprint 11.0.1)

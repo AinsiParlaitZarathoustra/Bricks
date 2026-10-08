@@ -224,7 +224,15 @@ impl ProfileRegistry {
                         revision: revision_of(&text),
                     };
                     match parse_profile(&text, source) {
-                        Ok(p) => (label, p.name.clone(), Entry::Valid(Arc::new(p))),
+                        Ok(p) => {
+                            for n in &p.notes {
+                                self.diagnostics.push(ProfileDiagnostic {
+                                    source: label.clone(),
+                                    message: format!("profile `{}`: {n}", p.name),
+                                });
+                            }
+                            (label, p.name.clone(), Entry::Valid(Arc::new(p)))
+                        }
                         Err(e) => (
                             label.clone(),
                             intended_name(&text, &stem),
@@ -457,7 +465,6 @@ mod tests {
             assert_eq!(p.tools, "inherit");
             assert!(!p.background);
             assert_eq!(p.isolation, super::super::profile::Isolation::Auto);
-            assert!(p.max_turns.is_none(), "no business quota in {n}");
             assert!(p.skills.is_empty(), "no hypothetical skill in {n}");
             // No made-up tool: CodeScout is a real tool, named as such.
             for word in ["codescout", "Codescout"] {
@@ -602,8 +609,7 @@ mod tests {
             reg.get("reviewer").unwrap().source.scope,
             ProfileScope::Project
         );
-        let m = reg.get("migration_planner").unwrap();
-        assert_eq!(m.max_turns, Some(40));
+        assert!(reg.get("migration_planner").unwrap().notes.is_empty());
         assert_eq!(reg.len(), 9);
     }
 }

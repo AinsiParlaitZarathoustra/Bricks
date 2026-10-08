@@ -95,8 +95,7 @@ async fn main() -> anyhow::Result<()> {
     // The production runner: real agents + provider + sandboxed proposals.
     let runner = Arc::new(
         CerseiRunner::new(provider_factory, "./work", registry.clone(), verifier)
-            .with_model("gemini-3.1-pro-preview") // required for non-Anthropic providers
-            .with_max_turns(16),
+            .with_model("gemini-3.1-pro-preview"), // required for non-Anthropic providers
     );
 
     let orchestrator = Orchestrator::new(runner, registry);

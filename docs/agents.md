@@ -17,7 +17,7 @@ commands become **jobs** (`Bash` with `background: true`, then `Job`).
 | concept | what it is |
 |---|---|
 | tool | `Agent` (one child), `Agents` (several at once), `AgentControl` (handles and ChangeSets), `AgentProfiles`, `Job` (background commands) |
-| profile | a specialisation: instructions and preferences (model, reasoning, turns) |
+| profile | a specialisation: instructions and preferences (model, reasoning) |
 | task | the goal of this one sub-agent |
 | permissions | the parent's approval policy (`[permissions]`), unchanged |
 | workspace | `shared` (the parent's directory) or `worktree` (isolated) |
@@ -39,7 +39,7 @@ The model calls:
 Only `task` is required. Optional: `description` (a short label), `profile`,
 `model` (`inherit`, `auto`, `provider_id/model_id`), `reasoning` (`inherit`
 or an id of that model's profiles), `context` (extra context passed
-explicitly, at most `[agents] max_context_chars`), `max_turns`, `isolation`
+explicitly, at most `[agents] max_context_chars`), `isolation`
 (`auto`, `shared`, `worktree`), `background` (`true`: return a handle at
 once). `prompt` is
 accepted as an alias of `task` (the former `Agent` tool's field);
@@ -57,7 +57,7 @@ Commands run: `cargo test payment` (ok, 2310 ms)
 Transcript: <session files>/agents/agent_5f3a….json
 ```
 
-`status` is `completed`, `incomplete` (a limit stopped it: turns, output, no
+`status` is `completed`, `incomplete` (a stop before the answer: output, no
 progress — not a success), `failed` or `cancelled`; a partial answer is kept.
 Files changed come from applied, approved changes; commands from the shell
 calls the sub-agent actually made, with their outcome — never from what the
@@ -101,7 +101,6 @@ permissions: inherit
 tools: inherit
 isolation: auto
 background: false
-max_turns: 40
 skills: []
 ---
 
@@ -123,7 +122,9 @@ Instructions (the Markdown body, kept verbatim).
 * `isolation`: `auto` (default), `shared`, `worktree`. `background`:
   `false` (default), `true`. The request's own value wins over the
   profile's (see *Isolation* and *Background agents* below).
-* `max_turns`: 1–1000, capped by `[agents] max_turns_cap`.
+* `max_turns` (former): turn limits were removed in 0.4.8. The key is still
+  accepted, ignored, and reported as a diagnostic (remove it); nothing
+  limits the child's turns.
 * `skills`: skills loaded into the sub-agent's system prompt (see *Skills
   of profiles*); a missing skill is reported and takes no tool away.
 * Parsing: `serde-saphyr` with a budget (depth 8, 256 nodes, 16 aliases,
@@ -149,7 +150,7 @@ Instructions (the Markdown body, kept verbatim).
 Without a profile, a neutral internal one is used. Examples of custom
 profiles: [`docs/agents/examples/`](agents/examples/).
 
-## Model, reasoning and turns
+## Model and reasoning
 
 Resolved when the sub-agent starts, and reported (`requested`, `applied`,
 `reason`):
@@ -170,16 +171,20 @@ request > profile > parent's current choice > model / Bricks default
   `[agents.reasoning_aliases]` (`high = "deep"`) when one is configured,
   else the parent's profile if the model has it, else the model's default —
   with a warning. There is no "closest level" between free identifiers.
-* **Turns.** request > profile > `[agents] default_max_turns`, capped by
-  `max_turns_cap`. A request above the cap is refused; a profile above it is
-  capped with a warning.
+* **Turns.** No limit (0.4.8): a sub-agent works until its answer, like
+  every agent. What still stops it: its answer, a cancellation (its
+  parent's run, `AgentControl cancel`, the session), a definitive error, no
+  progress (the same calls returning the same results), a refusal, an
+  empty or cut answer. Depth, concurrency, per-run totals, admission and
+  job rules are unchanged. A request with `max_turns` is refused with a
+  migration message; nothing is started.
 
 ## Validation: before anything is built
 
 Refused, with `Nothing was started.`, before any provider, shell, workspace
 or request: an empty or invisible task (Unicode spaces and zero-width
 characters included), an unknown or invalid profile, an unknown model or
-reasoning id, an impossible `max_turns`, a `context` above the limit, an unknown
+reasoning id, a `max_turns` (removed), a `context` above the limit, an unknown
 isolation, a depth or per-run total beyond the limits (`AgentDepthExceeded`,
 `AgentTotalExceeded`), a cancelled run, an unknown field (`system_prompt`).
 For `Agents`, every entry is validated first: one invalid entry starts
@@ -306,6 +311,13 @@ single foreground child and `worktree` for background children and for
   (2 000 untracked files, 5 MiB per file, 200 MiB in all), git older than
   2.17.
 
+**Counted changes.** A child working in the session's workspace reports
+each change it applies (`edit_applied` with its `agent_id`); the
+interface adds them to its `+N −N`. A worktree's writes are not changes of
+the session's workspace: they count once, when the ChangeSet is applied
+(`edit_applied` with its `changeset_id`); `changes_ready`, inspecting,
+a refused, conflicting or repeated apply, and discarding count nothing.
+
 **ChangeSets.** When an isolated child ends with changes, they become a
 ChangeSet (`changes_ready`): the diff from the worktree's **baseline**
 (the snapshot applied), so what it inherited from the parent is never
@@ -378,7 +390,7 @@ An unknown price stays unknown (no cost invented).
   is restarted, no old pid is touched; its worktree and ChangeSet stay
   inspectable.
 
-## Events (JSONL schema 4)
+## Events (JSONL schema 5)
 
 `agent_spawned` (identity, parent, root run, profile and its revision,
 model and reasoning requested/applied, turns, workspace, task),
@@ -387,7 +399,10 @@ then one of `completed`, `incomplete`, `failed`, `cancelled`, with a reason),
 `agent_tool_started` / `agent_tool_finished` (the sub-agent's tool calls,
 `duration_ms`), `agent_finished` (the compact result, the sub-agent's own
 usage), `agent_profiles` (answer to `list_agent_profiles` and
-`reload_agent_profiles`). Since 10.5 (additive, still schema 4):
+`reload_agent_profiles`). Schema 5 (0.4.8): `agent_spawned` no longer has
+`max_turns`; `edit_applied` gains `agent_id` (a child's change in the
+session's workspace) and `changeset_id` (a ChangeSet applied). Since 10.5
+(additive, then schema 4):
 `agent_spawned` gains `tool_call_id`, `batch_index`, `background`, `depth`,
 `isolation`, `branch`; `agent_state` gains `queued` and `interrupted`;
 `agent_finished.result` gains `changeset`, `branch`, `skills`; new
@@ -413,8 +428,6 @@ in seconds) are unchanged.
 ```toml
 [agents]
 enabled = true              # register Agent and AgentProfiles
-default_max_turns = 30
-max_turns_cap = 100
 # auto_model = "provider/model"
 max_context_chars = 16000
 catalog_size = 30           # profiles described in the tool schema

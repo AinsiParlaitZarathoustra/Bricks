@@ -124,7 +124,6 @@ class CerseiTBenchAgent(BaseInstalledAgent):
                 f"{model_flag}"
                 f"--samples {shlex.quote(samples)} "
                 f"--rounds {shlex.quote(rounds)} "
-                f"--max-turns 80 "
                 f"--json "
                 f"2>&1 | tee {output_path}"
             ),
