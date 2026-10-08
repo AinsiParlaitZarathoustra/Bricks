@@ -125,6 +125,12 @@ impl ApprovalBroker {
     }
 
     /// Tools allowed for the rest of the session.
+    /// Another session takes over: approvals given "for the session"
+    /// belonged to the previous one.
+    pub fn reset_session(&self) {
+        self.session_allowed.lock().clear();
+    }
+
     pub fn session_allowed(&self) -> Vec<String> {
         let mut v: Vec<String> = self.session_allowed.lock().iter().cloned().collect();
         v.sort();

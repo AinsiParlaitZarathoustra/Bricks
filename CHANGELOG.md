@@ -1,5 +1,19 @@
 # Changelog
 
+## [Unreleased]
+
+### Added — projects, history by project, terminal links (Sprint 11)
+
+- **`--workspace <dir>`** (alias `--cd`, global, before or after the command) opens a project folder. Resolved without a shell: `~` and `~/…` expanded (also quoted, spaces kept; not `~user` nor variables), relative to the launch folder, canonical, a readable folder — a missing folder or a file is refused before any session, provider or request. Given twice it is refused. Bricks no longer changes its process's current folder; `--providers` is relative to the launch folder. The status bar ends with the project (`⌂ ~/…`, shortened with a mark of the full path when long).
+- **The session's project follows the session.** `ProjectContext` and `ProjectLoader` (engine): a session opens with the project of its own folder — `bricks.toml`, rules, system prompt, long-term memory, profiles, CodeScout settings — read after the session is resolved (a broken `bricks.toml` in the launch folder does not block resuming another project's session). `resume <id>`, `/resume` and `run --session` prepare everything before switching; on error the open session is untouched. Approvals "for the session" do not carry over; the previous session's background jobs stop and never report as the new session. The interface follows `session_opened`: folder, completion index, previews. Embedders without a loader keep their injected configuration.
+- **History by project.** `bricks sessions [--json]` lists the project's sessions (same selection in text and JSON; no prose on stdout in JSON); `--all` lists every one. Matching by canonical path identity (a symbolic alias matches; not a string prefix; a sub-folder or a worktree is another project). Older sessions and deleted folders appear with `--all`, said so. Listing needs no provider or key and changes nothing. Engine: `SessionScope`, `list_sessions_in`, `Controller::sessions_in`, `same_workspace`.
+- **Session picker** (`bricks resume`, `/sessions`, `/resume`): this project's sessions, **Tab** for all projects; distinct empty states.
+- **Clickable web links (OSC 8)** in the interface, `--hyperlinks auto|always|never` (default `auto`: recognised terminals only, off under tmux/screen). The destination is carried through Markdown parsing, styling and wrapping; Ratatui places the text, then each run of link cells becomes one forced-width cell, cut at style changes. Only `http`/`https` URLs with a host, serialised to printable ASCII, are activated; other destinations stay text, control characters neutralised. The address stays written next to the text. Nothing is stored or sent as JSONL; `bricks run` never writes OSC 8.
+
+### Changed (Sprint 11)
+
+- `bricks sessions --json` now lists the project's sessions; `bricks sessions --all --json` gives the former global listing.
+
 ## [0.4.6] — 2026-10-07
 
 ### Added — concurrent, background and isolated sub-agents (Sprint 10.5)

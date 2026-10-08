@@ -106,6 +106,40 @@ pub struct SessionSummary {
     pub reasoning: Option<String>,
 }
 
+/// Which stored sessions a listing shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionScope {
+    /// Every stored session (older ones without a folder included).
+    All,
+    /// The sessions of one workspace folder.
+    Workspace(PathBuf),
+}
+
+impl SessionScope {
+    pub fn includes(&self, s: &SessionSummary) -> bool {
+        match self {
+            SessionScope::All => true,
+            SessionScope::Workspace(w) => s
+                .working_dir
+                .as_deref()
+                .is_some_and(|d| same_workspace(d, w)),
+        }
+    }
+}
+
+/// Whether a recorded folder is the workspace `workspace`: the same folder
+/// once both are canonical (a symbolic alias of it matches), never a mere
+/// string prefix (`atlas` is not `atlas-old`), and neither a sub-folder nor
+/// a parent. A folder that no longer resolves matches nothing. Case is
+/// left to the file system.
+pub fn same_workspace(recorded: &Path, workspace: &Path) -> bool {
+    let canon = |p: &Path| std::fs::canonicalize(p).ok();
+    match (canon(recorded), canon(workspace)) {
+        (Some(a), Some(b)) => a == b,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

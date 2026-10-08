@@ -14,6 +14,7 @@
 pub mod commands;
 pub mod composer;
 pub mod inspect;
+pub mod links;
 pub mod markdown;
 pub mod mentions;
 pub mod overlay;
@@ -27,14 +28,17 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event::Event as TermEvent;
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen};
-use ratatui::widgets::{Paragraph, Widget};
 use ratatui::{Terminal, TerminalOptions, Viewport};
 use std::io::Stdout;
 use ui::{Effect, Ui};
 
+pub use links::HyperlinkMode;
+
 pub struct TuiOptions {
     /// Open the session picker first (`bricks resume` without an id).
     pub pick_session: bool,
+    /// Clickable web links (`--hyperlinks`).
+    pub hyperlinks: HyperlinkMode,
 }
 
 type Term = Terminal<CrosstermBackend<Stdout>>;
@@ -65,16 +69,20 @@ fn commit(term: &mut Term, ui: &mut Ui) -> std::io::Result<()> {
     let width = term.size()?.width as usize;
     let mut lines = Vec::new();
     for cell in &ui.app.cells[ui.app.committed..ready] {
-        lines.extend(markdown::wrap_all(
-            &view::cell_lines(cell, false),
+        lines.extend(markdown::wrap_rich_all(
+            &view::cell_rich_lines(cell, false),
             width.max(1),
         ));
     }
     ui.app.committed = ready;
+    let hyperlinks = ui.hyperlinks;
     for chunk in lines.chunks(200) {
-        let chunk = chunk.to_vec();
         term.insert_before(chunk.len() as u16, |buf| {
-            Paragraph::new(chunk).render(buf.area, buf);
+            let area = buf.area;
+            let placed = links::draw_rich(buf, area, chunk);
+            if hyperlinks {
+                links::apply(buf, &placed);
+            }
         })?;
     }
     Ok(())
@@ -148,10 +156,7 @@ async fn run_effects(ui: &mut Ui, ctl: &Controller, effects: Vec<Effect>) -> boo
                 let snapshot = ctl.snapshot();
                 ui.overlay = Some(match p {
                     Present::ModelPicker => Ui::model_picker(&ctl.models(), &snapshot.model),
-                    Present::SessionPicker => match ctl.sessions().await {
-                        Ok(list) => inspect::sessions(list, &snapshot.session_id),
-                        Err(e) => overlay::Overlay::plain("sessions", &e),
-                    },
+                    Present::SessionPicker => session_picker(ctl).await,
                     Present::Memory => inspect::memory(&snapshot, &ui.app),
                     Present::Context => inspect::context(&snapshot),
                     Present::Cost => inspect::costs(&snapshot, &ui.app),
@@ -169,11 +174,31 @@ async fn run_effects(ui: &mut Ui, ctl: &Controller, effects: Vec<Effect>) -> boo
     false
 }
 
+/// The session picker, for the open session's project (not the folder
+/// Bricks started in: a resume may have changed it).
+async fn session_picker(ctl: &Controller) -> overlay::Overlay {
+    use cersei_agent::control::SessionScope;
+    let snapshot = ctl.snapshot();
+    let workspace = snapshot.working_dir.clone();
+    let project = ctl
+        .sessions_in(&SessionScope::Workspace(workspace.clone()))
+        .await;
+    match (project, ctl.sessions().await) {
+        (Ok(p), Ok(all)) => inspect::sessions(p, all, &snapshot.session_id, &workspace),
+        (Err(e), _) | (_, Err(e)) => overlay::Overlay::plain("sessions", &e),
+    }
+}
+
 /// Run the interface until the user quits. The terminal is restored on
 /// every exit path, including errors and panics.
 pub async fn run(ctl: Controller, mut events: EventStream, opts: TuiOptions) -> Result<(), String> {
     let working_dir = ctl.snapshot().working_dir;
     let mut ui = Ui::new(&working_dir);
+    ui.hyperlinks = links::enabled(
+        opts.hyperlinks,
+        std::io::IsTerminal::is_terminal(&std::io::stdout()),
+        |k| std::env::var(k).ok(),
+    );
     let guard = term::TermGuard::enter().map_err(|e| format!("cannot set up the terminal: {e}"))?;
     let mut term = inline_terminal().map_err(|e| e.to_string())?;
     let mut full: Option<Term> = None;
@@ -181,9 +206,7 @@ pub async fn run(ctl: Controller, mut events: EventStream, opts: TuiOptions) -> 
     let mut tick = tokio::time::interval(std::time::Duration::from_millis(120));
     let mut spin = 0usize;
     if opts.pick_session {
-        if let Ok(list) = ctl.sessions().await {
-            ui.overlay = Some(inspect::sessions(list, &ctl.session_id()));
-        }
+        ui.overlay = Some(session_picker(&ctl).await);
     }
     let result: Result<(), String> = loop {
         // Draw: the overlay on the alternate screen, or the live area.
@@ -214,6 +237,7 @@ pub async fn run(ctl: Controller, mut events: EventStream, opts: TuiOptions) -> 
                     show_thinking: ui.show_thinking,
                     focus_approval: ui.focus_approval,
                     message: ui.message.as_deref(),
+                    hyperlinks: ui.hyperlinks,
                 };
                 term.draw(|f| view::draw_live(f, &ui.app, &ui.composer, &o))
                     .map(|_| ())
@@ -242,9 +266,12 @@ pub async fn run(ctl: Controller, mut events: EventStream, opts: TuiOptions) -> 
             env = events.next() => match env {
                 Some(env) => {
                     ui.on_event(&env);
-                    if let Event::SessionOpened { resumed: true, .. } = &env.event {
-                        let history = ctl.history().await;
-                        ui.app.load_history(&history);
+                    if let Event::SessionOpened { working_dir, resumed, .. } = &env.event {
+                        ui.set_workspace(std::path::Path::new(working_dir));
+                        if *resumed {
+                            let history = ctl.history().await;
+                            ui.app.load_history(&history);
+                        }
                     }
                     Vec::new()
                 }

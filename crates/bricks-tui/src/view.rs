@@ -11,6 +11,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
 use ratatui::Frame;
+use std::path::Path;
 
 /// Hits listed in the transcript; the rest are counted.
 const SEARCH_SHOWN: usize = 20;
@@ -141,9 +142,28 @@ fn agent_lines(a: &crate::state::AgentCell) -> Vec<Line<'static>> {
     v
 }
 
-/// Lines of a cell. `live`: the cell is in the live area (show progress,
-/// the tail of long texts); otherwise it goes to the scrollback.
+/// Lines of a cell, without link destinations.
 pub fn cell_lines(cell: &Cell, show_thinking: bool) -> Vec<Line<'static>> {
+    cell_rich_lines(cell, show_thinking)
+        .into_iter()
+        .map(|r| r.line)
+        .collect()
+}
+
+/// Lines of a cell, with the web destinations of an answer's links.
+pub fn cell_rich_lines(cell: &Cell, show_thinking: bool) -> Vec<markdown::RichLine> {
+    if let Cell::Assistant { text, .. } = cell {
+        let mut v = vec![markdown::RichLine::default()];
+        v.extend(markdown::render_rich(text));
+        return v;
+    }
+    plain_cell_lines(cell, show_thinking)
+        .into_iter()
+        .map(markdown::RichLine::from)
+        .collect()
+}
+
+fn plain_cell_lines(cell: &Cell, show_thinking: bool) -> Vec<Line<'static>> {
     match cell {
         Cell::User { text, attachments } => {
             let mut v = vec![Line::default()];
@@ -394,7 +414,43 @@ pub fn cell_lines(cell: &Cell, show_thinking: bool) -> Vec<Line<'static>> {
     }
 }
 
-/// The status bar: model, profile, context, cost, activity.
+/// A project folder in a few columns: the home folder as `~`, then, when
+/// too long, its last components behind `…/` (at least the folder and its
+/// parent) and a short mark of the full path, so two projects whose
+/// shortened names coincide still differ. The full path is in `/session`
+/// and the session picker.
+pub fn short_path(path: &str, home: Option<&Path>, max: usize) -> String {
+    let p = Path::new(path);
+    let shown = match home.and_then(|h| p.strip_prefix(h).ok()) {
+        Some(rest) if rest.as_os_str().is_empty() => "~".to_string(),
+        Some(rest) => format!("~/{}", rest.display()),
+        None => path.to_string(),
+    };
+    if shown.chars().count() <= max {
+        return shown;
+    }
+    let parts: Vec<&str> = shown.split('/').filter(|c| !c.is_empty()).collect();
+    let mut keep = parts.len().min(2);
+    while keep < parts.len() {
+        let candidate = format!("…/{}", parts[parts.len() - keep - 1..].join("/"));
+        if candidate.chars().count() > max {
+            break;
+        }
+        keep += 1;
+    }
+    let mut h: u32 = 0x811c9dc5;
+    for byte in path.bytes() {
+        h ^= u32::from(byte);
+        h = h.wrapping_mul(0x01000193);
+    }
+    format!(
+        "…/{} #{:04x}",
+        parts[parts.len() - keep..].join("/"),
+        h & 0xffff
+    )
+}
+
+/// The status bar: model, profile, context, cost, activity, project.
 pub fn status_line(app: &App, spinner: &str, maintenance: bool) -> Line<'static> {
     let s = &app.status;
     let mut spans = vec![Span::styled(
@@ -440,6 +496,14 @@ pub fn status_line(app: &App, spinner: &str, maintenance: bool) -> Line<'static>
     } else if maintenance {
         spans.push(Span::styled(format!("  {spinner} updating memory"), dim()));
     }
+    // The project last: what is happening comes first on a narrow terminal.
+    if !s.working_dir.is_empty() {
+        let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+        spans.push(Span::styled(
+            format!("  ⌂ {}", short_path(&s.working_dir, home.as_deref(), 32)),
+            dim(),
+        ));
+    }
     Line::from(spans)
 }
 
@@ -452,6 +516,8 @@ pub struct Overlay<'a> {
     pub show_thinking: bool,
     pub focus_approval: bool,
     pub message: Option<&'a str>,
+    /// Activate web links (OSC 8).
+    pub hyperlinks: bool,
 }
 
 /// Draw the live area: uncommitted cells (tail), then popup, composer and
@@ -481,13 +547,16 @@ pub fn draw_live(f: &mut Frame, app: &App, composer: &Composer, o: &Overlay) {
     let body_h = total.saturating_sub(composer_h + status_h + popup_h);
 
     // Body: the tail of the live cells (and an approval hint).
-    let mut body: Vec<Line<'static>> = Vec::new();
+    let mut body: Vec<markdown::RichLine> = Vec::new();
     for c in &app.cells[app.committed..] {
-        body.extend(markdown::wrap_all(&cell_lines(c, o.show_thinking), width));
+        body.extend(markdown::wrap_rich_all(
+            &cell_rich_lines(c, o.show_thinking),
+            width,
+        ));
     }
     if !app.pending.is_empty() {
         let req = &app.pending[0];
-        body.push(Line::from(Span::styled(
+        body.push(markdown::RichLine::from(Line::from(Span::styled(
             format!(
                 "  {} {} — [y] allow  [a] allow for the session  [n] reject  [d] diff/details{}",
                 req.tool,
@@ -504,24 +573,23 @@ pub fn draw_live(f: &mut Frame, app: &App, composer: &Composer, o: &Overlay) {
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
-        )));
+        ))));
     }
     if let Some(m) = o.message {
-        body.push(Line::from(Span::styled(
+        body.push(markdown::RichLine::from(Line::from(Span::styled(
             m.to_string(),
             Style::default().fg(Color::Yellow),
-        )));
+        ))));
     }
     let skip = body.len().saturating_sub(body_h);
-    let body: Vec<Line> = body.into_iter().skip(skip).collect();
+    let body: Vec<markdown::RichLine> = body.into_iter().skip(skip).collect();
     let mut y = area.y;
-    let body_len = body.len() as u16;
-    f.render_widget(
-        Paragraph::new(body),
-        Rect::new(area.x, y, area.width, body_h as u16),
-    );
+    let body_area = Rect::new(area.x, y, area.width, body_h as u16);
+    let placed = crate::links::draw_rich(f.buffer_mut(), body_area, &body);
+    if o.hyperlinks {
+        crate::links::apply(f.buffer_mut(), &placed);
+    }
     y += body_h as u16;
-    let _ = body_len;
 
     if let Some((items, sel, title)) = o.popup {
         let mut lines = vec![Line::from(Span::styled(title.to_string(), dim()))];

@@ -38,8 +38,8 @@ Two files are read, both through the existing loaders. Nothing is built in.
   `$BRICKS_HOME/providers.toml` when `BRICKS_HOME` is set (see
   `docs/providers.md`). A model is named `provider_id/model_id`; its
   reasoning profiles, capabilities and prices come from this file.
-* **Project**: `./bricks.toml` in the working directory (`--cd <dir>`
-  changes it). Sections: `[agent]`, `[permissions]`, `[memory]`,
+* **Project**: `bricks.toml` in the project folder (the current folder, or
+  `--workspace <dir>`; see *Projects* below). Sections: `[agent]`, `[permissions]`, `[memory]`,
   `[context]`, `[compression]`, `[web]` (see `docs/bricks.example.toml`).
   An invalid section falls back to its defaults with a diagnostic, shown
   as a warning when the session opens.
@@ -63,6 +63,45 @@ Sessions are stored in `~/.bricks/sessions` (`$BRICKS_HOME/sessions`).
 No model is ever chosen silently: without `--model` or `[agent] model`,
 `bricks` stops and lists the configured models.
 
+## Projects (`--workspace`)
+
+```bash
+bricks                                          # the current folder
+bricks --workspace /Users/me/Documents/atlas
+bricks --workspace ~/Documents/atlas
+bricks --workspace "~/Documents/My project"     # quoted: Bricks expands `~` itself
+bricks --workspace ./my-project
+bricks --cd ./my-project                        # alias of --workspace
+bricks --workspace ./my-project sessions        # global: before or after the command
+bricks sessions --workspace ./my-project
+bricks --workspace ./my-project run "Describe this project."
+```
+
+* **One option.** `--workspace` (alias `--cd`) is global. Given twice —
+  under either name — it is refused (exit code 2), with no hidden
+  priority.
+* **Resolution**, without any shell: a leading `~` or `~/` is the home
+  folder (also when quoted, with spaces kept); `~user` and variables are
+  not expanded; a relative path starts from the folder Bricks was started
+  in. The result is made canonical (symbolic links resolved) and must be a
+  readable folder. A missing folder or a file is refused before anything
+  is created, stored or sent. Bricks never creates the folder.
+* **Where it applies.** The folder of a new session: its `bricks.toml`,
+  rules, system prompt, long-term memory, sub-agent profiles, the tools'
+  relative paths, CodeScout and the completion list. Bricks itself never
+  changes its process's current folder: tools resolve paths against their
+  agent's folder (a sub-agent's worktree has its own).
+* **Other paths** on the command line (`--providers`, `--file`,
+  `--image`): `--providers` starts from the folder Bricks was started in;
+  attachments are resolved against the session's folder, as before.
+* **Shown.** The status bar ends with the project (`⌂ ~/Documents/atlas`,
+  shortened with `…/` and a short mark of the full path when long);
+  `/session` and the session picker show the full path.
+* **Not a sandbox.** A workspace chooses settings and CodeScout's scope;
+  the other tools follow the approval policy, as everywhere. A workspace
+  is a folder; a worktree (`docs/agents.md`) is another folder, hence
+  another workspace; neither is an isolation of the system.
+
 ## Commands
 
 | command | what it does |
@@ -72,12 +111,13 @@ No model is ever chosen silently: without `--model` or `[agent] model`,
 | `bricks run --model <p/m> --reasoning <profile> "…"` | with another model / profile |
 | `bricks run --json --non-interactive "…"` | JSONL on stdout, no human interaction |
 | `bricks run --session <id> "…"` | continue a stored session headless |
-| `bricks sessions [--json]` | list stored sessions, most recent first |
-| `bricks resume` | open the interface on the session picker |
-| `bricks resume <id>` | open the interface on that session |
+| `bricks sessions [--json]` | the project's stored sessions, most recent first |
+| `bricks sessions --all [--json]` | every stored session, whatever the project |
+| `bricks resume` | open the interface on the session picker (this project; Tab: all) |
+| `bricks resume <id>` | open the interface on that session (any project) |
 
-Global options: `--cd <dir>`, `--providers <file>`, `--model <p/m>`,
-`--reasoning <profile>`.
+Global options: `--workspace <dir>` (alias `--cd`), `--providers <file>`,
+`--model <p/m>`, `--reasoning <profile>`, `--hyperlinks auto|always|never`.
 
 ## Headless mode (`bricks run`)
 
@@ -331,7 +371,8 @@ When a call must be asked about:
   some. Ctrl+T shows it live; Ctrl+O shows it after the fact.
 * **Status bar.** It shows the model, the profile, the context used and the
   prompt budget, with the provenance (`est.`, `~`, `counted`, or nothing for
-  measured). The cost is "unknown (no price)" when the model has no price.
+  measured), then the project folder. The cost is "unknown (no price)" when
+  the model has no price.
   The full context and cost inspectors separate the current context from
   the cumulative consumption.
 
@@ -371,6 +412,32 @@ When a call must be asked about:
   working tree's own `git diff`, which includes your changes.
 * **`/config`** never shows keys or authentication headers.
 
+### Web links
+
+Links in answers keep their text and their address, written next to it
+(`la doc <https://example.com/doc>`): what a click opens is always
+visible. `--hyperlinks` decides whether they are clickable (OSC 8):
+
+| mode | |
+|---|---|
+| `auto` (default) | clickable when the terminal is recognised: iTerm2, WezTerm, Ghostty, VS Code (`TERM_PROGRAM`), kitty, Windows Terminal, VTE ≥ 0.50, Konsole. Off inside tmux or screen, and in any other terminal (`TERM=xterm-256color` alone proves nothing; Apple's Terminal is not recognised) |
+| `always` | clickable in any terminal (an emulator without OSC 8 support shows the text only) |
+| `never` | never |
+
+* The terminal opens a link with its own gesture (⌘-click in iTerm2);
+  Bricks never opens a browser and never fetches an address to check it.
+* Only `http`/`https` addresses with a host are activated, in their
+  percent-encoded, printable form: nothing in an address can end the
+  sequence or start another one. Local paths, `file:`, `javascript:` and
+  invalid addresses stay plain text; control characters in an address are
+  shown as `�`.
+* A wrapped link opens the same address from every piece; links survive
+  resizing, scrolling into the scrollback and resuming (a restored answer
+  is rendered like a new one); text drawn over a former link is plain.
+* Nothing of this is stored: the conversation and the JSONL events keep
+  the Markdown. `bricks run` (text or `--json`) never writes OSC 8; its
+  text output prints the answer as written, without a Markdown renderer.
+
 ### Attachments
 
 * **What.** Files, folders and images come from `@` or `/file`,
@@ -388,6 +455,38 @@ When a call must be asked about:
 
 ## Sessions and resume
 
+**History by project.** `bricks sessions` lists the sessions of the
+project (the current folder, or `--workspace`); `--all` lists every one.
+`--json` writes the same selection as one `SessionSummary` object per line
+and nothing else (no session: no line, exit code 0). Before Sprint 11,
+`sessions --json` listed every session: scripts that want that keep it
+with `sessions --all --json`. A project's sessions are those whose
+recorded folder is the same folder (canonical path: a symbolic alias
+matches; `atlas` is not `atlas-old`; a sub-folder or another worktree is
+another project). Older sessions without a recorded folder, and sessions
+whose folder was deleted, appear only with `--all`, said so. Listing reads
+only: no provider, model or key is needed, and nothing is created, moved
+or changed. The session store is unchanged (one store, no copy per
+project).
+
+**Picker.** `bricks resume`, `/sessions` and `/resume` without an id open
+one picker: the sessions of the open session's project (after a resume,
+that session's project). **Tab** switches between *this project* and *all
+projects* (shown at the bottom); typing filters either list. An empty
+project list says so and points to Tab.
+
+**Resuming another project's session** is allowed: `resume <id>`,
+`run --session <id>` and the picker take any id. It opens session B in
+B's recorded folder with B's project — its `bricks.toml`, rules, system
+prompt, long-term memory, profiles, CodeScout settings. It does not turn
+the session you were in into a session of B, and `--workspace` does not
+override B's folder. The session is read first: the settings of the
+folder you started from are not loaded for it (a broken `bricks.toml`
+there does not prevent resuming B). Everything B needs is prepared before
+anything is switched: when that fails, the open session stays as it was
+and the reason is shown. Approvals "for the session" stay with the
+session they were given in; the previous session's background jobs stop.
+
 `bricks resume` (picker) or `bricks resume <id>`, `/resume`, and
 `bricks run --session <id>` restore:
 
@@ -399,8 +498,10 @@ When a call must be asked about:
   current space is reported as a warning).
 
 A working directory that disappeared, or a model no longer in
-`providers.toml`, is reported and nothing is resumed. No replacement is
-chosen silently; `--model` picks one explicitly.
+`providers.toml`, is reported and nothing is resumed: there is no fallback
+to the current folder. No replacement is chosen silently; `--model` picks
+one explicitly. An older session without recorded settings resumes in the
+current project folder with the selected model, and a warning says which.
 
 The persistent shell has its own life cycle. A resumed session starts a
 new shell: processes, background tasks and shell variables of the old one
@@ -442,6 +543,13 @@ bricks --providers scripts/demo_providers.toml            # the interface
   checks ran on: a Ctrl+C in headless mode, and the interface's modes,
   paste, resize, Ctrl+C and quit. The `/dev/tty` approvals and the PTY
   tests are Unix-only.
+* **Web links (Sprint 11).** Checked on the bytes the interface writes in
+  a pseudo-terminal (modes `auto`/`always`/`never`, a recognised terminal,
+  an unknown one, tmux) and replayed cell by cell by a test emulator. Not
+  yet checked by clicking in a real emulator: the only terminal on the
+  test machine is Apple's Terminal, which `auto` does not recognise (text
+  and address shown); clickability in iTerm2 and the others listed above is
+  expected from their documented OSC 8 support, not verified here.
 * **Linux.** Not run.
 * **Windows.** Not run: the headless mode builds without `/dev/tty`
   approvals (no prompt is offered), and the interface was not exercised.
@@ -461,3 +569,7 @@ bricks --providers scripts/demo_providers.toml            # the interface
   Images are attached by path.
 * A panic restores the terminal through a panic hook. This is not covered
   by an automated test.
+* Two Bricks processes may open the same project or resume the same
+  session at once; nothing locks between processes.
+* A session's project cannot be changed while it is open (no
+  `/workspace`); a workspace is one folder.

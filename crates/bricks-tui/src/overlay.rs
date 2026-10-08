@@ -28,6 +28,16 @@ pub struct PickItem {
     pub value: Option<String>,
 }
 
+/// The other list of a two-view picker (the sessions of this project /
+/// of every project), swapped in with Tab.
+#[derive(Debug, Clone)]
+pub struct PickerView {
+    pub title: String,
+    pub items: Vec<PickItem>,
+    /// Said when the list is empty.
+    pub empty: String,
+}
+
 #[derive(Debug, Clone)]
 pub enum Overlay {
     Text {
@@ -41,6 +51,10 @@ pub enum Overlay {
         filter: String,
         selected: usize,
         action: PickAction,
+        /// Said when the list is empty.
+        empty: String,
+        /// Another view, shown with Tab.
+        other: Option<Box<PickerView>>,
     },
 }
 
@@ -76,6 +90,39 @@ impl Overlay {
             }
             _ => Vec::new(),
         }
+    }
+
+    /// A picker with one list.
+    pub fn picker(title: impl Into<String>, items: Vec<PickItem>, action: PickAction) -> Self {
+        Overlay::Picker {
+            title: title.into(),
+            items,
+            filter: String::new(),
+            selected: 0,
+            action,
+            empty: "(nothing to choose)".into(),
+            other: None,
+        }
+    }
+
+    /// Swap a two-view picker's views (Tab). The filter is kept.
+    pub fn toggle_view(&mut self) -> bool {
+        if let Overlay::Picker {
+            title,
+            items,
+            selected,
+            empty,
+            other: Some(other),
+            ..
+        } = self
+        {
+            std::mem::swap(title, &mut other.title);
+            std::mem::swap(items, &mut other.items);
+            std::mem::swap(empty, &mut other.empty);
+            *selected = 0;
+            return true;
+        }
+        false
     }
 
     pub fn scroll_by(&mut self, delta: isize, page: usize) {
@@ -127,6 +174,9 @@ pub fn draw(f: &mut Frame, o: &Overlay) {
             title,
             filter,
             selected,
+            items,
+            empty,
+            other,
             ..
         } => {
             let visible = o.visible();
@@ -136,7 +186,9 @@ pub fn draw(f: &mut Frame, o: &Overlay) {
                 Span::styled(" filter: ", dim()),
                 Span::raw(filter.clone()),
             ])];
-            if visible.is_empty() {
+            if items.is_empty() {
+                lines.push(Line::from(Span::styled(format!("  {empty}"), dim())));
+            } else if visible.is_empty() {
                 lines.push(Line::from(Span::styled("  (nothing matches)", dim())));
             }
             for (i, it) in visible.iter().enumerate().skip(start).take(page) {
@@ -164,9 +216,13 @@ pub fn draw(f: &mut Frame, o: &Overlay) {
                 ),
                 inner,
             );
+            let switch = other
+                .as_ref()
+                .map(|o| format!(" · Tab: {}", o.title))
+                .unwrap_or_default();
             f.render_widget(
                 Paragraph::new(Line::from(Span::styled(
-                    " type to filter · ↑↓ choose · Enter select · Esc close",
+                    format!(" type to filter · ↑↓ choose · Enter select · Esc close{switch}"),
                     dim(),
                 ))),
                 Rect::new(area.x, area.bottom().saturating_sub(1), area.width, 1),

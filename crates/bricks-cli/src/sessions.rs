@@ -1,11 +1,26 @@
-//! `bricks sessions`.
+//! `bricks sessions`: the project's stored sessions (`--all`: every one).
+//! Reading only: no provider, model or key is needed, and nothing stored
+//! is changed.
 
+use crate::args::Global;
 use crate::exit;
-use cersei_agent::control::list_sessions;
+use cersei_agent::control::{list_sessions_in, SessionScope};
+use std::path::Path;
 
-pub async fn run(json: bool) -> i32 {
+pub async fn run(global: &Global, launch: &Path, json: bool, all: bool) -> i32 {
+    let scope = if all {
+        SessionScope::All
+    } else {
+        match crate::setup::workspace(global, launch) {
+            Ok(w) => SessionScope::Workspace(w),
+            Err(e) => {
+                eprintln!("bricks: {e}");
+                return exit::USAGE;
+            }
+        }
+    };
     let dir = crate::setup::sessions_dir();
-    let sessions = match list_sessions(&dir).await {
+    let sessions = match list_sessions_in(&dir, &scope).await {
         Ok(s) => s,
         Err(e) => {
             eprintln!("bricks: sessions in {}: {e}", dir.display());
@@ -19,8 +34,17 @@ pub async fn run(json: bool) -> i32 {
         return exit::OK;
     }
     if sessions.is_empty() {
-        println!("No stored session in {}.", dir.display());
+        match &scope {
+            SessionScope::Workspace(w) => println!(
+                "No stored session for {}. `bricks sessions --all` lists every project's.",
+                w.display()
+            ),
+            SessionScope::All => println!("No stored session in {}.", dir.display()),
+        }
         return exit::OK;
+    }
+    if let SessionScope::Workspace(w) = &scope {
+        println!("Sessions of {} (`--all`: every project)", w.display());
     }
     for s in &sessions {
         let when = chrono::DateTime::from_timestamp_millis(s.updated_at)
@@ -41,8 +65,10 @@ pub async fn run(json: bool) -> i32 {
                 &s.title
             }
         );
-        if let Some(wd) = &s.working_dir {
-            println!("    {}", wd.display());
+        match &s.working_dir {
+            Some(wd) if wd.is_dir() => println!("    {}", wd.display()),
+            Some(wd) => println!("    {} (folder no longer found)", wd.display()),
+            None => println!("    (no folder recorded: older session)"),
         }
     }
     exit::OK

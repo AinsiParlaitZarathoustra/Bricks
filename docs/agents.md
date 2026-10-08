@@ -199,6 +199,15 @@ nothing.
   it does for the parent. `forbidden` stays forbidden.
 * A profile cannot widen anything.
 
+## Project of a session
+
+A session's sub-agents use the project of the session's own folder (its
+profiles, skills, `[agents]` settings), including after resuming a
+session of another project (`docs/cli.md`, *Sessions and resume*). A
+project folder (workspace) and a sub-agent's worktree are both folders:
+a worktree is another workspace, and neither is an isolation of the
+system.
+
 ## Context and services
 
 The sub-agent receives: the engine's system prompt for its tools, its role

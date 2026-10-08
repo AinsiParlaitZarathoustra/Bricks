@@ -7,6 +7,7 @@
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use std::sync::Arc;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -14,39 +15,71 @@ pub fn code_style() -> Style {
     Style::default().fg(Color::Cyan)
 }
 
+/// A line with the web destination of each of its spans (`links[i]` is the
+/// destination of `line.spans[i]`; `None`: not a link, or a destination
+/// that is never activated).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RichLine {
+    pub line: Line<'static>,
+    pub links: Vec<Option<Arc<str>>>,
+}
+
+impl From<Line<'static>> for RichLine {
+    fn from(line: Line<'static>) -> Self {
+        let links = vec![None; line.spans.len()];
+        RichLine { line, links }
+    }
+}
+
 /// Render Markdown to logical lines (not wrapped).
 pub fn render(text: &str) -> Vec<Line<'static>> {
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    let mut cur: Vec<Span<'static>> = Vec::new();
+    render_rich(text).into_iter().map(|r| r.line).collect()
+}
+
+/// Render Markdown to logical lines with their links (not wrapped). A link
+/// shows its text, then its destination in brackets; both carry the
+/// destination when it is a web address ([`crate::links::web_target`]).
+pub fn render_rich(text: &str) -> Vec<RichLine> {
+    let mut lines: Vec<RichLine> = Vec::new();
+    let mut cur: Vec<(Span<'static>, Option<Arc<str>>)> = Vec::new();
     let mut styles: Vec<Style> = vec![Style::default()];
     let mut list_stack: Vec<Option<u64>> = Vec::new();
     let mut in_code = false;
     let mut quote = 0usize;
-    let mut link: Option<String> = None;
+    // The open link: its destination as written, its web target, its text.
+    let mut link: Option<(String, Option<Arc<str>>, String)> = None;
 
-    let flush = |cur: &mut Vec<Span<'static>>, lines: &mut Vec<Line<'static>>, quote: usize| {
+    let flush = |cur: &mut Vec<(Span<'static>, Option<Arc<str>>)>,
+                 lines: &mut Vec<RichLine>,
+                 quote: usize| {
         if cur.is_empty() {
             return;
         }
-        let mut spans = Vec::new();
+        let mut rl = RichLine::default();
         if quote > 0 {
-            spans.push(Span::styled(
+            rl.line.spans.push(Span::styled(
                 "│ ".repeat(quote),
                 Style::default().fg(Color::DarkGray),
             ));
+            rl.links.push(None);
         }
-        spans.append(cur);
-        lines.push(Line::from(spans));
+        for (span, l) in cur.drain(..) {
+            rl.line.spans.push(span);
+            rl.links.push(l);
+        }
+        lines.push(rl);
     };
-    let blank = |lines: &mut Vec<Line<'static>>| {
-        if lines.last().is_some_and(|l| !l.spans.is_empty()) {
-            lines.push(Line::default());
+    let blank = |lines: &mut Vec<RichLine>| {
+        if lines.last().is_some_and(|l| !l.line.spans.is_empty()) {
+            lines.push(RichLine::default());
         }
     };
+    let plain = |l: Line<'static>| RichLine::from(l);
 
     let opts = Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TABLES | Options::ENABLE_TASKLISTS;
     for ev in Parser::new_ext(text, opts) {
         let style = *styles.last().unwrap_or(&Style::default());
+        let target = link.as_ref().and_then(|l| l.1.clone());
         match ev {
             Event::Start(tag) => match tag {
                 Tag::Heading { level, .. } => {
@@ -74,10 +107,10 @@ pub fn render(text: &str) -> Vec<Line<'static>> {
                         CodeBlockKind::Fenced(l) => l.to_string(),
                         CodeBlockKind::Indented => String::new(),
                     };
-                    lines.push(Line::from(Span::styled(
+                    lines.push(plain(Line::from(Span::styled(
                         format!("┌─ {lang}"),
                         Style::default().fg(Color::DarkGray),
-                    )));
+                    ))));
                 }
                 Tag::List(start) => {
                     flush(&mut cur, &mut lines, quote);
@@ -94,10 +127,12 @@ pub fn render(text: &str) -> Vec<Line<'static>> {
                         }
                         _ => "• ".to_string(),
                     };
-                    cur.push(Span::raw(format!("{}{marker}", "  ".repeat(depth))));
+                    cur.push((Span::raw(format!("{}{marker}", "  ".repeat(depth))), None));
                 }
                 Tag::Link { dest_url, .. } => {
-                    link = Some(dest_url.to_string());
+                    let dest = dest_url.to_string();
+                    let web = crate::links::web_target(&dest);
+                    link = Some((dest, web, String::new()));
                     styles.push(style.add_modifier(Modifier::UNDERLINED));
                 }
                 _ => {}
@@ -110,7 +145,7 @@ pub fn render(text: &str) -> Vec<Line<'static>> {
                 TagEnd::Paragraph => {
                     flush(&mut cur, &mut lines, quote);
                     if list_stack.is_empty() {
-                        lines.push(Line::default());
+                        lines.push(RichLine::default());
                     }
                 }
                 TagEnd::Emphasis | TagEnd::Strong | TagEnd::Strikethrough => {
@@ -122,26 +157,33 @@ pub fn render(text: &str) -> Vec<Line<'static>> {
                 }
                 TagEnd::CodeBlock => {
                     in_code = false;
-                    lines.push(Line::from(Span::styled(
+                    lines.push(plain(Line::from(Span::styled(
                         "└─",
                         Style::default().fg(Color::DarkGray),
-                    )));
+                    ))));
                 }
                 TagEnd::List(_) => {
                     flush(&mut cur, &mut lines, quote);
                     list_stack.pop();
                     if list_stack.is_empty() {
-                        lines.push(Line::default());
+                        lines.push(RichLine::default());
                     }
                 }
                 TagEnd::Item => flush(&mut cur, &mut lines, quote),
                 TagEnd::Link => {
                     styles.pop();
-                    if let Some(url) = link.take() {
-                        cur.push(Span::styled(
-                            format!(" <{url}>"),
-                            Style::default().fg(Color::DarkGray),
-                        ));
+                    if let Some((dest, web, shown)) = link.take() {
+                        // The destination stays written (an autolink shows
+                        // it once): what is clicked is always visible.
+                        if shown.trim() != dest.trim() {
+                            cur.push((
+                                Span::styled(
+                                    format!(" <{}>", crate::links::visible(&dest)),
+                                    Style::default().fg(Color::DarkGray),
+                                ),
+                                web,
+                            ));
+                        }
                     }
                 }
                 _ => {}
@@ -149,32 +191,44 @@ pub fn render(text: &str) -> Vec<Line<'static>> {
             Event::Text(t) => {
                 if in_code {
                     for l in t.lines() {
-                        lines.push(Line::from(vec![
+                        lines.push(plain(Line::from(vec![
                             Span::styled("│ ", Style::default().fg(Color::DarkGray)),
                             Span::styled(l.to_string(), code_style()),
-                        ]));
+                        ])));
                     }
                 } else {
-                    cur.push(Span::styled(t.to_string(), style));
+                    if let Some(l) = link.as_mut() {
+                        l.2.push_str(&t);
+                    }
+                    cur.push((Span::styled(t.to_string(), style), target));
                 }
             }
-            Event::Code(t) => cur.push(Span::styled(t.to_string(), code_style())),
-            Event::SoftBreak => cur.push(Span::styled(" ", style)),
+            Event::Code(t) => {
+                if let Some(l) = link.as_mut() {
+                    l.2.push_str(&t);
+                }
+                cur.push((Span::styled(t.to_string(), code_style()), target))
+            }
+            Event::SoftBreak => cur.push((Span::styled(" ", style), target)),
             Event::HardBreak => flush(&mut cur, &mut lines, quote),
             Event::Rule => {
                 flush(&mut cur, &mut lines, quote);
-                lines.push(Line::from(Span::styled(
+                lines.push(plain(Line::from(Span::styled(
                     "───",
                     Style::default().fg(Color::DarkGray),
-                )));
+                ))));
             }
-            Event::TaskListMarker(done) => cur.push(Span::raw(if done { "[x] " } else { "[ ] " })),
-            Event::Html(t) | Event::InlineHtml(t) => cur.push(Span::styled(t.to_string(), style)),
+            Event::TaskListMarker(done) => {
+                cur.push((Span::raw(if done { "[x] " } else { "[ ] " }), None))
+            }
+            Event::Html(t) | Event::InlineHtml(t) => {
+                cur.push((Span::styled(t.to_string(), style), target))
+            }
             _ => {}
         }
     }
     flush(&mut cur, &mut lines, quote);
-    while lines.last().is_some_and(|l| l.spans.is_empty()) {
+    while lines.last().is_some_and(|l| l.line.spans.is_empty()) {
         lines.pop();
     }
     lines
@@ -183,17 +237,30 @@ pub fn render(text: &str) -> Vec<Line<'static>> {
 /// Wrap one line to `width` display columns: at spaces when possible,
 /// never inside a grapheme; styles are kept.
 pub fn wrap(line: &Line<'static>, width: usize) -> Vec<Line<'static>> {
+    wrap_rich(&RichLine::from(line.clone()), width)
+        .into_iter()
+        .map(|r| r.line)
+        .collect()
+}
+
+/// [`wrap`], every piece of a link span keeping its destination.
+pub fn wrap_rich(line: &RichLine, width: usize) -> Vec<RichLine> {
     let width = width.max(1);
-    let mut out: Vec<Line<'static>> = Vec::new();
-    let mut row: Vec<Span<'static>> = Vec::new();
+    let mut out: Vec<RichLine> = Vec::new();
+    let mut row = RichLine::default();
     let mut row_w = 0usize;
-    for span in &line.spans {
+    let push = |row: &mut RichLine, text: String, style: Style, link: &Option<Arc<str>>| {
+        row.line.spans.push(Span::styled(text, style));
+        row.links.push(link.clone());
+    };
+    for (i, span) in line.line.spans.iter().enumerate() {
         let style = span.style;
+        let link = line.links.get(i).cloned().flatten();
         // Split into words with their trailing spaces.
         for word in span.content.split_word_bounds() {
             let w = word.width();
             if row_w + w > width && row_w > 0 {
-                out.push(Line::from(std::mem::take(&mut row)));
+                out.push(std::mem::take(&mut row));
                 row_w = 0;
                 if word.trim().is_empty() {
                     continue;
@@ -205,26 +272,30 @@ pub fn wrap(line: &Line<'static>, width: usize) -> Vec<Line<'static>> {
                 for g in word.graphemes(true) {
                     let gw = g.width();
                     if row_w + gw > width && row_w > 0 {
-                        row.push(Span::styled(std::mem::take(&mut piece), style));
-                        out.push(Line::from(std::mem::take(&mut row)));
+                        push(&mut row, std::mem::take(&mut piece), style, &link);
+                        out.push(std::mem::take(&mut row));
                         row_w = 0;
                     }
                     piece.push_str(g);
                     row_w += gw;
                 }
-                row.push(Span::styled(piece, style));
+                push(&mut row, piece, style, &link);
             } else {
-                row.push(Span::styled(word.to_string(), style));
+                push(&mut row, word.to_string(), style, &link);
                 row_w += w;
             }
         }
     }
-    out.push(Line::from(row));
+    out.push(row);
     out
 }
 
 pub fn wrap_all(lines: &[Line<'static>], width: usize) -> Vec<Line<'static>> {
     lines.iter().flat_map(|l| wrap(l, width)).collect()
+}
+
+pub fn wrap_rich_all(lines: &[RichLine], width: usize) -> Vec<RichLine> {
+    lines.iter().flat_map(|l| wrap_rich(l, width)).collect()
 }
 
 #[cfg(test)]

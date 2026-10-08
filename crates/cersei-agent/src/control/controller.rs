@@ -16,7 +16,7 @@ use super::approval::{ApprovalBroker, ApprovalGate, ApprovalRequest};
 use super::attach::{self, AttachLimits};
 use super::protocol::*;
 use super::queue::EventQueue;
-use super::session::{SessionMeta, SessionSummary};
+use super::session::{SessionMeta, SessionScope, SessionSummary};
 use crate::events::AgentEvent;
 use crate::{Agent, BricksConfig, CompactReason};
 use cersei_memory::{JsonlMemory, LongTermMemory, Memory};
@@ -140,6 +140,48 @@ pub struct EngineConfig {
     /// Where sub-agent profiles are read (default: the session's
     /// `.bricks/agents` and `~/.bricks/agents`).
     pub agent_profile_sources: Option<crate::agents::ProfileSources>,
+    /// Reads the project of the session being opened (its own
+    /// `bricks.toml`, system prompt, memory...). Without one, the values
+    /// above apply to every session, whatever its folder.
+    pub project_loader: Option<Arc<dyn ProjectLoader>>,
+}
+
+/// What belongs to a session's project (its workspace): read for the
+/// folder of the session actually opened — a new one, or a resumed one with
+/// its recorded folder — never inherited from the folder Bricks started in.
+#[derive(Clone)]
+pub struct ProjectContext {
+    /// Canonical folder of the project.
+    pub working_dir: PathBuf,
+    pub bricks: BricksConfig,
+    pub system_prompt: Option<String>,
+    pub long_term_memory: Option<Arc<dyn LongTermMemory>>,
+    pub memory_space: Option<String>,
+    pub mcp_servers: Vec<cersei_mcp::McpServerConfig>,
+    pub agent_profile_sources: Option<crate::agents::ProfileSources>,
+}
+
+/// Loads a project's context from its folder, with the frontend's loaders.
+/// Errors are complete messages; a failed load opens nothing.
+pub trait ProjectLoader: Send + Sync {
+    fn load(&self, working_dir: &Path) -> Result<ProjectContext, String>;
+}
+
+/// The project of `working_dir`: from the loader, or the configuration's
+/// own values (an embedder that injects them).
+fn load_project(cfg: &EngineConfig, working_dir: &Path) -> Result<ProjectContext, String> {
+    if let Some(l) = &cfg.project_loader {
+        return l.load(working_dir);
+    }
+    Ok(ProjectContext {
+        working_dir: working_dir.to_path_buf(),
+        bricks: cfg.bricks.clone(),
+        system_prompt: cfg.system_prompt.clone(),
+        long_term_memory: cfg.long_term_memory.clone(),
+        memory_space: cfg.memory_space.clone(),
+        mcp_servers: cfg.mcp_servers.clone(),
+        agent_profile_sources: cfg.agent_profile_sources.clone(),
+    })
 }
 
 impl EngineConfig {
@@ -163,6 +205,7 @@ impl EngineConfig {
             queue_capacity: 256,
             attach_limits: AttachLimits::default(),
             agent_profile_sources: None,
+            project_loader: None,
         }
     }
 }
@@ -230,6 +273,8 @@ pub struct ToolInfo {
 
 struct Inner {
     cfg: EngineConfig,
+    /// The open session's project (config, prompt, memory, profiles).
+    project: parking_lot::RwLock<Arc<ProjectContext>>,
     agent: parking_lot::RwLock<Arc<Agent>>,
     meta: parking_lot::Mutex<SessionMeta>,
     queue: Arc<EventQueue>,
@@ -295,7 +340,18 @@ fn model_list(cfg: &EngineConfig) -> String {
     }
 }
 
-/// Stored sessions, most recently updated first.
+/// Stored sessions of `scope`, most recently updated first. Reading only:
+/// nothing is created, moved or attributed.
+pub async fn list_sessions_in(
+    sessions_dir: &Path,
+    scope: &SessionScope,
+) -> Result<Vec<SessionSummary>, String> {
+    let mut all = list_sessions(sessions_dir).await?;
+    all.retain(|s| scope.includes(s));
+    Ok(all)
+}
+
+/// Every stored session, most recently updated first.
 pub async fn list_sessions(sessions_dir: &Path) -> Result<Vec<SessionSummary>, String> {
     let store = JsonlMemory::new(sessions_dir);
     let mut out = Vec::new();
@@ -334,8 +390,11 @@ fn new_session_id() -> String {
     format!("{now}-{}", &rand[..6])
 }
 
-fn profile_catalog(cfg: &EngineConfig, meta: &SessionMeta) -> Arc<crate::agents::ProfileCatalog> {
-    let sources = cfg
+fn profile_catalog(
+    project: &ProjectContext,
+    meta: &SessionMeta,
+) -> Arc<crate::agents::ProfileCatalog> {
+    let sources = project
         .agent_profile_sources
         .clone()
         .unwrap_or_else(|| crate::agents::ProfileSources::standard(&meta.working_dir));
@@ -347,19 +406,20 @@ fn profile_catalog(cfg: &EngineConfig, meta: &SessionMeta) -> Arc<crate::agents:
 /// `Agent` next to one already configured).
 fn session_tools(
     cfg: &EngineConfig,
+    project: &ProjectContext,
     meta: &SessionMeta,
     profiles: &Arc<crate::agents::ProfileCatalog>,
 ) -> (Vec<Box<dyn Tool>>, Option<Arc<crate::agents::AgentSpawner>>) {
     let mut tools = (cfg.tools)();
     let mut spawner_out = None;
-    if cfg.bricks.agents.enabled && !tools.iter().any(|t| t.name() == "Agent") {
+    if project.bricks.agents.enabled && !tools.iter().any(|t| t.name() == "Agent") {
         let factory = Arc::clone(&cfg.tools);
         let spawner = Arc::new(
             crate::agents::AgentSpawner::new(
                 Arc::clone(&cfg.catalog),
                 Arc::clone(profiles),
                 Arc::new(move || factory()),
-                cfg.bricks.clone(),
+                project.bricks.clone(),
             )
             .with_artifacts_dir(files_dir(cfg, &meta.id).join("agents"))
             .with_session_id(meta.id.clone()),
@@ -383,17 +443,18 @@ fn session_tools(
 
 fn build_agent(
     cfg: &EngineConfig,
+    project: &ProjectContext,
     meta: &SessionMeta,
     provider: Box<dyn Provider>,
     broker: &Arc<ApprovalBroker>,
     profiles: &Arc<crate::agents::ProfileCatalog>,
 ) -> Result<(Agent, Option<Arc<crate::agents::AgentSpawner>>), String> {
-    let settings = &cfg.bricks.agent;
-    let (tools, spawner) = session_tools(cfg, meta, profiles);
+    let settings = &project.bricks.agent;
+    let (tools, spawner) = session_tools(cfg, project, meta, profiles);
     let ext = cersei_tools::Extensions::default();
     // The session's background jobs (their logs kept with the session).
     let jobs = cersei_tools::jobs::JobRegistry::new(
-        cfg.bricks.background.clone(),
+        project.bricks.background.clone(),
         Some(files_dir(cfg, &meta.id).join("jobs")),
     );
     ext.insert(cersei_tools::jobs::JobsHandle(jobs));
@@ -409,12 +470,12 @@ fn build_agent(
         .working_dir(&meta.working_dir)
         .model(meta.model.clone())
         .permission_policy(ApprovalGate::new(
-            cfg.bricks.permissions.clone(),
+            project.bricks.permissions.clone(),
             broker.clone(),
         ))
         .memory(session_store(cfg))
         .session_id(meta.id.clone())
-        .bricks_config(cfg.bricks.clone())
+        .bricks_config(project.bricks.clone())
         .max_turns(settings.max_turns.unwrap_or(50));
     if let Some(r) = &meta.reasoning {
         b = b.reasoning_profile(r.clone());
@@ -422,13 +483,13 @@ fn build_agent(
     if let Some(t) = settings.max_tokens {
         b = b.max_tokens(t);
     }
-    if let Some(s) = &cfg.system_prompt {
+    if let Some(s) = &project.system_prompt {
         b = b.system_prompt(s.clone());
     }
-    if let Some(m) = &cfg.long_term_memory {
+    if let Some(m) = &project.long_term_memory {
         b = b.long_term_memory(m.clone());
     }
-    for s in &cfg.mcp_servers {
+    for s in &project.mcp_servers {
         b = b.mcp_server(s.clone());
     }
     let agent = b.build().map_err(|e| e.to_string())?;
@@ -439,21 +500,28 @@ fn build_agent(
 struct Prepared {
     meta: SessionMeta,
     provider: Box<dyn Provider>,
+    project: ProjectContext,
     resumed: bool,
     warnings: Vec<String>,
 }
 
-/// Resolve the session to open: its metadata (checked) and provider.
+/// Resolve the session to open: first the session itself (its metadata,
+/// its recorded folder), then the project of that folder, then the
+/// provider. Nothing is opened, saved or published here: an error leaves
+/// everything as it was. `base_dir`: the folder of a new session, and of
+/// an older session that recorded none.
 fn prepare(
     cfg: &EngineConfig,
+    base_dir: &Path,
     session: &SessionChoice,
     model: Option<&str>,
     reasoning: Option<&str>,
 ) -> Result<Prepared, String> {
     let mut warnings = Vec::new();
-    let settings = &cfg.bricks.agent;
     match session {
         SessionChoice::New => {
+            let project = load_project(cfg, base_dir)?;
+            let settings = &project.bricks.agent;
             let model = model
                 .map(str::to_string)
                 .or_else(|| settings.model.clone())
@@ -472,11 +540,12 @@ fn prepare(
                 .catalog
                 .build(&model, reasoning.as_deref())
                 .map_err(|e| format!("{e} ({})", model_list(cfg)))?;
-            let mut meta = SessionMeta::new(&new_session_id(), &cfg.working_dir, &model, reasoning);
-            meta.memory_space = cfg.memory_space.clone();
+            let mut meta = SessionMeta::new(&new_session_id(), base_dir, &model, reasoning);
+            meta.memory_space = project.memory_space.clone();
             Ok(Prepared {
                 meta,
                 provider,
+                project,
                 resumed: false,
                 warnings,
             })
@@ -489,32 +558,45 @@ fn prepare(
                     cfg.sessions_dir.display()
                 ));
             }
-            let mut meta = match SessionMeta::load(&files_dir(cfg, id))? {
+            let recorded = SessionMeta::load(&files_dir(cfg, id))?;
+            // The session's own folder decides its project; an older
+            // session without one resumes in `base_dir`, said explicitly.
+            let dir = match &recorded {
+                Some(m) => {
+                    if !m.working_dir.is_dir() {
+                        return Err(format!(
+                            "the session's working directory {} no longer exists; nothing was \
+                             resumed",
+                            m.working_dir.display()
+                        ));
+                    }
+                    std::fs::canonicalize(&m.working_dir).unwrap_or_else(|_| m.working_dir.clone())
+                }
+                None => base_dir.to_path_buf(),
+            };
+            let project = load_project(cfg, &dir)?;
+            let settings = &project.bricks.agent;
+            let mut meta = match recorded {
                 Some(m) => m,
                 None => {
-                    warnings.push(
-                        "this session has no stored settings (older session): it resumes in the \
-                         current directory with the selected model"
-                            .into(),
-                    );
                     let model = model
                         .map(str::to_string)
                         .or_else(|| settings.model.clone())
                         .ok_or_else(|| {
                             format!("pass --model to resume this session ({})", model_list(cfg))
                         })?;
-                    SessionMeta::new(id, &cfg.working_dir, &model, None)
+                    warnings.push(format!(
+                        "this session has no stored settings (older session): it resumes in {} \
+                         with the model `{model}`",
+                        dir.display()
+                    ));
+                    SessionMeta::new(id, &dir, &model, None)
                 }
             };
-            if !meta.working_dir.is_dir() {
-                return Err(format!(
-                    "the session's working directory {} no longer exists; nothing was resumed",
-                    meta.working_dir.display()
-                ));
-            }
-            if meta.working_dir != cfg.working_dir {
+            if meta.working_dir != base_dir {
                 warnings.push(format!(
-                    "the session works in {}, not in the current directory",
+                    "the session works in {}, not in the current directory; that project's \
+                     settings apply",
                     meta.working_dir.display()
                 ));
             }
@@ -540,11 +622,12 @@ fn prepare(
             if let Some(r) = reasoning {
                 meta.reasoning = Some(r.to_string());
             }
-            if meta.memory_space.is_some() && meta.memory_space != cfg.memory_space {
+            if meta.memory_space.is_some() && meta.memory_space != project.memory_space {
                 warnings.push(format!(
-                    "the session used the long-term memory space `{}`; the current one is {}",
+                    "the session used the long-term memory space `{}`; its project's is now {}",
                     meta.memory_space.clone().unwrap_or_default(),
-                    cfg.memory_space
+                    project
+                        .memory_space
                         .as_deref()
                         .map(|s| format!("`{s}`"))
                         .unwrap_or_else(|| "none".into())
@@ -554,6 +637,7 @@ fn prepare(
             Ok(Prepared {
                 meta,
                 provider,
+                project,
                 resumed: true,
                 warnings,
             })
@@ -571,17 +655,19 @@ impl Controller {
         let Prepared {
             meta,
             provider,
+            project,
             resumed,
             warnings,
         } = prepare(
             &cfg,
+            &cfg.working_dir,
             &opts.session,
             opts.model.as_deref(),
             opts.reasoning.as_deref(),
         )?;
         let broker = ApprovalBroker::new(cfg.interactive);
-        let profiles = profile_catalog(&cfg, &meta);
-        let (agent, spawner) = build_agent(&cfg, &meta, provider, &broker, &profiles)?;
+        let profiles = profile_catalog(&project, &meta);
+        let (agent, spawner) = build_agent(&cfg, &project, &meta, provider, &broker, &profiles)?;
         let agent = Arc::new(agent);
         meta.save(&files_dir(&cfg, &meta.id))?;
         let queue = Arc::new(EventQueue::new(&meta.id, cfg.queue_capacity));
@@ -594,7 +680,7 @@ impl Controller {
         } else {
             0
         };
-        let mut all_warnings = cfg.bricks.diagnostics.clone();
+        let mut all_warnings = project.bricks.diagnostics.clone();
         all_warnings.extend(warnings);
         all_warnings.extend(
             profiles
@@ -613,6 +699,7 @@ impl Controller {
         };
         let inner = Arc::new(Inner {
             cfg,
+            project: parking_lot::RwLock::new(Arc::new(project)),
             agent: parking_lot::RwLock::new(agent),
             meta: parking_lot::Mutex::new(meta),
             queue: queue.clone(),
@@ -629,6 +716,11 @@ impl Controller {
         install_job_sink(&queue, &inner.agent.read());
         queue.push(None, opened, None).await;
         Ok((Controller { inner }, EventStream { queue }))
+    }
+
+    /// The open session's project.
+    pub fn project(&self) -> Arc<ProjectContext> {
+        self.inner.project.read().clone()
     }
 
     pub fn session_id(&self) -> String {
@@ -660,8 +752,7 @@ impl Controller {
     pub async fn mcp_statuses(&self) -> Vec<(String, String)> {
         let Some(m) = self.agent().mcp_manager() else {
             return self
-                .inner
-                .cfg
+                .project()
                 .mcp_servers
                 .iter()
                 .map(|s| {
@@ -694,8 +785,14 @@ impl Controller {
             .unwrap_or_default()
     }
 
+    /// Every stored session.
     pub async fn sessions(&self) -> Result<Vec<SessionSummary>, String> {
         list_sessions(&self.inner.cfg.sessions_dir).await
+    }
+
+    /// The stored sessions of `scope`.
+    pub async fn sessions_in(&self, scope: &SessionScope) -> Result<Vec<SessionSummary>, String> {
+        list_sessions_in(&self.inner.cfg.sessions_dir, scope).await
     }
 
     pub fn snapshot(&self) -> Snapshot {
@@ -715,7 +812,7 @@ impl Controller {
             pending_approvals: self.inner.broker.pending(),
             allowed_for_session: self.inner.broker.session_allowed(),
             memory_space: meta.memory_space.clone(),
-            approval_rules: self.inner.cfg.bricks.permissions.clone(),
+            approval_rules: self.project().bricks.permissions.clone(),
         }
     }
 
@@ -938,7 +1035,7 @@ impl Controller {
     /// The workspace's shared engine (the one the agents' CodeScout uses).
     pub fn semantic_engine(&self) -> Arc<bricks_semantic::SemanticEngine> {
         let wd = self.agent().working_dir().to_path_buf();
-        bricks_semantic::SemanticRegistry::global().engine_for(&wd, &self.inner.cfg.bricks.semantic)
+        bricks_semantic::SemanticRegistry::global().engine_for(&wd, &self.project().bricks.semantic)
     }
 
     /// Text search on the shared engine, answered by `search_results`. It
@@ -1272,22 +1369,39 @@ impl Controller {
         }
     }
 
+    /// Open another stored session in place of this one. Everything the
+    /// target needs (its project, provider, agent) is prepared first; on
+    /// error the current session stays as it was.
     async fn resume(&self, session_id: &str) -> Result<(), String> {
         let cfg = &self.inner.cfg;
+        let base = self.project().working_dir.clone();
         let Prepared {
             meta,
             provider,
+            project,
             warnings,
             ..
         } = prepare(
             cfg,
+            &base,
             &SessionChoice::Resume(session_id.to_string()),
             None,
             None,
         )?;
-        let profiles = profile_catalog(cfg, &meta);
-        let (agent, spawner) = build_agent(cfg, &meta, provider, &self.inner.broker, &profiles)?;
+        let profiles = profile_catalog(&project, &meta);
+        let (agent, spawner) = build_agent(
+            cfg,
+            &project,
+            &meta,
+            provider,
+            &self.inner.broker,
+            &profiles,
+        )?;
         let agent = Arc::new(agent);
+        meta.save(&files_dir(cfg, &meta.id))?;
+        // From here the target replaces the current session. Approvals
+        // "for the session" belonged to the previous one.
+        self.inner.broker.reset_session();
         *self.inner.profiles.write() = profiles;
         let old_spawner = std::mem::replace(&mut *self.inner.spawner.write(), spawner.clone());
         if let Some(old) = old_spawner {
@@ -1305,7 +1419,25 @@ impl Controller {
             .map(|m| m.len())
             .unwrap_or(0);
         let old = std::mem::replace(&mut *self.inner.agent.write(), agent);
+        // The previous session's background jobs end with it: none is left
+        // running without an owner, and none reports as the new session.
+        if let Some(j) = old.extensions.get::<cersei_tools::jobs::JobsHandle>() {
+            j.0.set_sink(Arc::new(|_| {}));
+            j.0.stop_all().await;
+        }
         old.close().await;
+        let mut all_warnings = project.bricks.diagnostics.clone();
+        all_warnings.extend(warnings);
+        all_warnings.extend(
+            self.inner
+                .profiles
+                .read()
+                .snapshot()
+                .diagnostics
+                .iter()
+                .map(|d| format!("{}: {}", d.source, d.message)),
+        );
+        *self.inner.project.write() = Arc::new(project);
         self.inner.queue.set_session(&meta.id);
         let ev = Event::SessionOpened {
             working_dir: meta.working_dir.display().to_string(),
@@ -1313,7 +1445,7 @@ impl Controller {
             reasoning: meta.reasoning.clone(),
             resumed: true,
             message_count: count,
-            warnings,
+            warnings: all_warnings,
         };
         *self.inner.meta.lock() = meta;
         self.inner.queue.push(None, ev, None).await;

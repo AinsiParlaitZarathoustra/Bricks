@@ -61,6 +61,8 @@ pub struct Ui {
     pub working_dir: PathBuf,
     /// Change previews by tool call, for /diff.
     pub previews: HashMap<String, ChangePreview>,
+    /// Web links are activated (OSC 8).
+    pub hyperlinks: bool,
     last_ctrl_c: Option<Instant>,
 }
 
@@ -79,8 +81,24 @@ impl Ui {
             maintenance_running: false,
             working_dir: working_dir.to_path_buf(),
             previews: HashMap::new(),
+            hyperlinks: false,
             last_ctrl_c: None,
         }
+    }
+
+    /// Another session opened (perhaps of another project): the folder,
+    /// its completion index and what belonged to the previous folder
+    /// follow it. Driven by `session_opened`, never by displayed text.
+    pub fn set_workspace(&mut self, working_dir: &Path) {
+        if self.working_dir != working_dir {
+            self.working_dir = working_dir.to_path_buf();
+            self.index = FileIndex::new(working_dir);
+            self.previews.clear();
+        } else {
+            self.index.invalidate();
+        }
+        self.popup = None;
+        self.popup_sel = 0;
     }
 
     pub fn popup_labels(&self) -> Option<(Vec<String>, &'static str)> {
@@ -494,6 +512,9 @@ impl Ui {
         match (o, key.code) {
             (_, KeyCode::Esc) => self.overlay = None,
             (Overlay::Text { .. }, KeyCode::Char('q')) => self.overlay = None,
+            (o @ Overlay::Picker { .. }, KeyCode::Tab) => {
+                o.toggle_view();
+            }
             (o, KeyCode::Up) => o.scroll_by(-1, 20),
             (o, KeyCode::Down) => o.scroll_by(1, 20),
             (o, KeyCode::PageUp) => o.scroll_by(-20, 20),
@@ -635,13 +656,7 @@ impl Ui {
                 value: Some(m.selection.clone()),
             })
             .collect();
-        Overlay::Picker {
-            title: "model (from the configuration)".into(),
-            items,
-            filter: String::new(),
-            selected: 0,
-            action: PickAction::Model,
-        }
+        Overlay::picker("model (from the configuration)", items, PickAction::Model)
     }
 
     /// Profile picker for a model.
@@ -660,14 +675,12 @@ impl Ui {
             detail: p.label.clone(),
             value: Some(p.id.clone()),
         }));
-        Overlay::Picker {
-            title: format!("reasoning profile of {}", model.selection),
+        Overlay::picker(
+            format!("reasoning profile of {}", model.selection),
             items,
-            filter: String::new(),
-            selected: 0,
-            action: PickAction::Profile {
+            PickAction::Profile {
                 model: model.selection.clone(),
             },
-        }
+        )
     }
 }

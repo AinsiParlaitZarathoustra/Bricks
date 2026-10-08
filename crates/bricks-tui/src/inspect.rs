@@ -8,6 +8,7 @@ use crate::ui::Ui;
 use crate::view::diff_line;
 use cersei_agent::control::{Controller, SessionSummary, Snapshot};
 use ratatui::text::Line;
+use std::path::Path;
 
 fn l(s: impl Into<String>) -> Line<'static> {
     Line::from(s.into())
@@ -320,44 +321,73 @@ pub fn diff(ui: &Ui) -> Overlay {
     Overlay::text("diff", v)
 }
 
-pub fn sessions(list: Vec<SessionSummary>, current: &str) -> Overlay {
-    let items = list
-        .into_iter()
-        .map(|s| {
-            let when = chrono::DateTime::from_timestamp_millis(s.updated_at)
-                .map(|d| {
-                    d.with_timezone(&chrono::Local)
-                        .format("%Y-%m-%d %H:%M")
-                        .to_string()
-                })
-                .unwrap_or_default();
-            PickItem {
-                label: format!(
-                    "{}{}",
-                    if s.id == current { "● " } else { "  " },
-                    if s.title.is_empty() {
-                        s.id.clone()
-                    } else {
-                        s.title.clone()
-                    }
-                ),
-                detail: format!(
-                    "{when} · {} msg · {} · {}",
-                    s.message_count,
-                    s.model.unwrap_or_else(|| "?".into()),
-                    s.working_dir
-                        .map(|w| w.display().to_string())
-                        .unwrap_or_default()
-                ),
-                value: Some(s.id),
-            }
+fn session_item(s: SessionSummary, current: &str) -> PickItem {
+    let when = chrono::DateTime::from_timestamp_millis(s.updated_at)
+        .map(|d| {
+            d.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d %H:%M")
+                .to_string()
         })
-        .collect();
+        .unwrap_or_default();
+    let folder = match &s.working_dir {
+        Some(w) if w.is_dir() => w.display().to_string(),
+        Some(w) => format!("{} (folder no longer found)", w.display()),
+        None => "(no folder recorded: older session)".into(),
+    };
+    PickItem {
+        label: format!(
+            "{}{}",
+            if s.id == current { "● " } else { "  " },
+            if s.title.is_empty() {
+                s.id.clone()
+            } else {
+                s.title.clone()
+            }
+        ),
+        detail: format!(
+            "{when} · {} msg · {} · {folder}",
+            s.message_count,
+            s.model.unwrap_or_else(|| "?".into()),
+        ),
+        value: Some(s.id),
+    }
+}
+
+/// The session picker: the sessions of the open session's project, and
+/// (Tab) those of every project. Choosing one resumes it in its own folder.
+pub fn sessions(
+    project: Vec<SessionSummary>,
+    all: Vec<SessionSummary>,
+    current: &str,
+    workspace: &Path,
+) -> Overlay {
+    let all_empty = if all.is_empty() {
+        "no stored session yet".to_string()
+    } else {
+        "no session matches".to_string()
+    };
+    let project_empty = if all.is_empty() {
+        "no stored session yet".to_string()
+    } else {
+        format!(
+            "no session of this project yet — Tab shows the {} of every project",
+            all.len()
+        )
+    };
     Overlay::Picker {
-        title: "sessions".into(),
-        items,
+        title: format!("sessions — this project ({})", workspace.display()),
+        items: project
+            .into_iter()
+            .map(|s| session_item(s, current))
+            .collect(),
         filter: String::new(),
         selected: 0,
         action: PickAction::Session,
+        empty: project_empty,
+        other: Some(Box::new(crate::overlay::PickerView {
+            title: "sessions — all projects".into(),
+            items: all.into_iter().map(|s| session_item(s, current)).collect(),
+            empty: all_empty,
+        })),
     }
 }

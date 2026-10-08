@@ -15,12 +15,13 @@ pub mod settings;
 
 pub use approval::{ApprovalBroker, ApprovalGate, ApprovalRequest, DecidedBy, Decision};
 pub use controller::{
-    list_sessions, Activity, Controller, EngineConfig, EventStream, ModelCatalog, ModelChoice,
-    OpenOptions, ProfileChoice, SessionChoice, Snapshot, ToolFactory, ToolInfo,
+    list_sessions, list_sessions_in, Activity, Controller, EngineConfig, EventStream, ModelCatalog,
+    ModelChoice, OpenOptions, ProfileChoice, ProjectContext, ProjectLoader, SessionChoice,
+    Snapshot, ToolFactory, ToolInfo,
 };
 pub use protocol::{
     AttachmentInfo, Command, Envelope, Event, FailureKind, MaintenanceOutcome, Prompt, PromptBlock,
     RunOutcome, SearchHit, WrittenFile, SCHEMA_VERSION,
 };
-pub use session::{SessionMeta, SessionSummary};
+pub use session::{same_workspace, SessionMeta, SessionScope, SessionSummary};
 pub use settings::{Action, AgentSettings, ApprovalRules};

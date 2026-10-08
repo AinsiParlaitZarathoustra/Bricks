@@ -296,7 +296,7 @@ impl Human {
     }
 }
 
-pub async fn run(global: &Global, args: RunArgs) -> i32 {
+pub async fn run(global: &Global, launch: &std::path::Path, args: RunArgs) -> i32 {
     let blocks = match prompt_blocks(&args, std::io::stdin().is_terminal(), read_stdin) {
         Ok(b) => b,
         Err(e) => {
@@ -305,7 +305,7 @@ pub async fn run(global: &Global, args: RunArgs) -> i32 {
         }
     };
     let interactive = !args.non_interactive && controlling_terminal();
-    let cfg = match setup::engine(global, interactive) {
+    let cfg = match setup::engine(global, launch, interactive) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("bricks: {e}");

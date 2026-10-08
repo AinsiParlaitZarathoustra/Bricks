@@ -24,6 +24,18 @@ struct Tty {
 
 impl Tty {
     fn start(p: &Project, args: &[&str]) -> Self {
+        Self::start_in(p, p.path(), args, &[])
+    }
+
+    /// Started from `cwd`, with `env` set (`Some`) or removed (`None`).
+    /// The terminal identity variables of the test's own terminal are
+    /// removed first: only `env` says what terminal this is.
+    fn start_in(
+        p: &Project,
+        cwd: &std::path::Path,
+        args: &[&str],
+        env: &[(&str, Option<&str>)],
+    ) -> Self {
         let pty = native_pty_system()
             .openpty(PtySize {
                 rows: 24,
@@ -34,9 +46,27 @@ impl Tty {
             .unwrap();
         let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_bricks"));
         cmd.args(args);
-        cmd.cwd(p.path());
+        cmd.cwd(cwd);
         cmd.env("BRICKS_HOME", p.home.path());
         cmd.env("TERM", "xterm-256color");
+        for k in [
+            "TERM_PROGRAM",
+            "TERM_PROGRAM_VERSION",
+            "TMUX",
+            "STY",
+            "KITTY_WINDOW_ID",
+            "WT_SESSION",
+            "VTE_VERSION",
+            "KONSOLE_VERSION",
+        ] {
+            cmd.env_remove(k);
+        }
+        for (k, v) in env {
+            match v {
+                Some(v) => cmd.env(k, v),
+                None => cmd.env_remove(k),
+            }
+        }
         let child = pty.slave.spawn_command(cmd).unwrap();
         drop(pty.slave);
         let writer: Arc<Mutex<Box<dyn Write + Send>>> =
@@ -185,4 +215,104 @@ fn without_a_terminal_the_interface_refuses_and_points_to_run() {
     let out = p.run(&["tui"], None);
     assert_eq!(out.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out.stderr).contains("bricks run"));
+}
+
+/// Quit with Ctrl+C twice, idle.
+fn quit(tty: &mut Tty) {
+    std::thread::sleep(Duration::from_millis(300));
+    tty.send(b"\x03");
+    std::thread::sleep(Duration::from_millis(200));
+    tty.send(b"\x03");
+    assert_eq!(tty.wait_exit(20), 0, "{}", tty.text().escape_debug());
+}
+
+/// What the interface writes for an answer with a link, in a terminal
+/// described by `env`, with `--hyperlinks mode`.
+fn answer_output(mode: &str, env: &[(&str, Option<&str>)]) -> String {
+    let m = model(vec![text("Voir [la doc](https://example.com/doc) ici.")]);
+    let p = Project::new(&m.url, "");
+    let mut tty = Tty::start_in(&p, p.path(), &["--hyperlinks", mode], env);
+    tty.wait_for("Ask Bricks", 20);
+    tty.send(b"lien ?\r");
+    tty.wait_for("ici.", 20);
+    std::thread::sleep(Duration::from_millis(400));
+    quit(&mut tty);
+    tty.text()
+}
+
+#[test]
+fn answer_links_are_clickable_only_where_asked_or_known() {
+    const OPEN: &str = ";https://example.com/doc\x1b\\";
+    const CLOSE: &str = "\x1b]8;;\x1b\\";
+    let out = answer_output("always", &[]);
+    assert!(
+        out.contains("\x1b]8;id=") && out.contains(OPEN),
+        "{}",
+        out.escape_debug()
+    );
+    assert_eq!(
+        out.matches("\x1b]8;id=").count(),
+        out.matches(CLOSE).count(),
+        "every link is closed"
+    );
+    // The text and the written address stay readable.
+    assert!(out.contains("la doc") && out.contains("<https://example.com/doc>"));
+
+    let never = answer_output("never", &[("TERM_PROGRAM", Some("iTerm.app"))]);
+    assert!(!never.contains("\x1b]8;"), "never: no OSC 8");
+    assert!(
+        never.contains("<https://example.com/doc>"),
+        "the address is shown"
+    );
+    let unknown = answer_output("auto", &[]);
+    assert!(!unknown.contains("\x1b]8;"), "auto, unknown terminal: off");
+    let iterm = answer_output("auto", &[("TERM_PROGRAM", Some("iTerm.app"))]);
+    assert!(iterm.contains(OPEN), "auto in iTerm2: on");
+    let tmux = answer_output(
+        "auto",
+        &[
+            ("TERM_PROGRAM", Some("iTerm.app")),
+            ("TMUX", Some("/tmp/t,1,0")),
+        ],
+    );
+    assert!(!tmux.contains("\x1b]8;"), "auto under tmux: off");
+}
+
+#[test]
+fn resuming_another_projects_session_moves_the_interface_there() {
+    let m = model(vec![text("dans beta")]);
+    let p = Project::new(&m.url, "");
+    let root = tempfile::tempdir().unwrap();
+    let alpha = root.path().join("projet-alpha");
+    let beta = root.path().join("projet-beta");
+    for (d, f) in [(&alpha, "seulement_alpha.rs"), (&beta, "seulement_beta.rs")] {
+        std::fs::create_dir(d).unwrap();
+        std::fs::write(d.join("bricks.toml"), "[agent]\nmodel = \"local/m\"\n").unwrap();
+        std::fs::write(d.join(f), "").unwrap();
+    }
+    // A session of beta.
+    let mut c = p.command(&["run", "--json", "bonjour"]);
+    let out = c.current_dir(&beta).output().unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let id = envelopes(&out.stdout)[0]["session_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let mut tty = Tty::start_in(&p, &alpha, &["--workspace", "."], &[]);
+    tty.wait_for("projet-alpha", 20);
+    tty.send(format!("/resume {id}\r").as_bytes());
+    tty.wait_for("resumed session", 20);
+    tty.wait_for("projet-beta", 20);
+    // Completion now lists beta's files.
+    tty.send(b"@seulement_be");
+    tty.wait_for("seulement_beta.rs", 20);
+    tty.send(b"\x15");
+    quit(&mut tty);
+    assert!(tty.text().contains(&format!("bricks resume {id}")));
 }

@@ -48,6 +48,7 @@ fn live(
         show_thinking: false,
         focus_approval: false,
         message: None,
+        hyperlinks: false,
     };
     term.draw(|f| view::draw_live(f, app, composer, &o))
         .unwrap();
@@ -172,9 +173,9 @@ fn inspectors_scroll_and_pickers_filter() {
     term.draw(|f| overlay::draw(f, &o)).unwrap();
     let s = screen(&term);
     assert!(s.contains("ligne 50") && !s.contains("ligne 49 "), "{s}");
-    let mut p = Overlay::Picker {
-        title: "model".into(),
-        items: vec![
+    let mut p = Overlay::picker(
+        "model",
+        vec![
             overlay::PickItem {
                 label: "local/m".into(),
                 detail: "Test".into(),
@@ -186,10 +187,8 @@ fn inspectors_scroll_and_pickers_filter() {
                 value: Some("other/x".into()),
             },
         ],
-        filter: String::new(),
-        selected: 0,
-        action: overlay::PickAction::Model,
-    };
+        overlay::PickAction::Model,
+    );
     if let Overlay::Picker { filter, .. } = &mut p {
         filter.push_str("oth");
     }

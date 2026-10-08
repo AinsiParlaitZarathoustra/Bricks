@@ -1,6 +1,6 @@
 //! Command line.
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
@@ -11,7 +11,13 @@ use std::path::PathBuf;
     long_about = "Bricks — a coding agent in the terminal.\n\n\
         Without a command, opens the interactive interface. `bricks run` runs one prompt \
         without it (scripts, CI). Models come from ~/.bricks/providers.toml (or --providers); \
-        settings from ./bricks.toml. See docs/cli.md."
+        settings from the project's bricks.toml. See docs/cli.md.\n\n\
+        Examples:\n  \
+        bricks --workspace ~/Documents/atlas\n  \
+        bricks --workspace \"~/Documents/My project\"\n  \
+        bricks --workspace ./atlas sessions\n  \
+        bricks sessions --all\n  \
+        bricks --workspace ./atlas run \"Describe this project.\""
 )]
 pub struct Cli {
     #[command(flatten)]
@@ -22,10 +28,18 @@ pub struct Cli {
 
 #[derive(Debug, Clone, Args)]
 pub struct Global {
-    /// Working directory (default: the current directory).
-    #[arg(long = "cd", global = true, value_name = "DIR")]
-    pub cd: Option<PathBuf>,
-    /// Providers file (default: ~/.bricks/providers.toml).
+    /// Project folder to open. Default: the current folder. `~` and `~/…`
+    /// are expanded (also when quoted); relative paths start from the
+    /// current folder. A resumed session keeps its own folder.
+    #[arg(
+        long = "workspace",
+        visible_alias = "cd",
+        global = true,
+        value_name = "DIR"
+    )]
+    pub workspace: Option<PathBuf>,
+    /// Providers file (default: ~/.bricks/providers.toml). A relative path
+    /// starts from the current folder.
     #[arg(long, global = true, value_name = "FILE")]
     pub providers: Option<PathBuf>,
     /// Model, as `provider_id/model_id` from the providers file.
@@ -34,6 +48,24 @@ pub struct Global {
     /// Reasoning profile of that model (as configured).
     #[arg(long, global = true, value_name = "PROFILE")]
     pub reasoning: Option<String>,
+    /// Clickable web links in the interface (OSC 8): `auto` when the
+    /// terminal is known to support them, `always`, or `never` (the link's
+    /// address stays written next to it in every mode).
+    #[arg(
+        long,
+        global = true,
+        value_enum,
+        default_value_t = Hyperlinks::Auto,
+        value_name = "WHEN"
+    )]
+    pub hyperlinks: Hyperlinks,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum Hyperlinks {
+    Auto,
+    Always,
+    Never,
 }
 
 #[derive(Debug, Subcommand)]
@@ -42,13 +74,18 @@ pub enum Cmd {
     Tui,
     /// Run one prompt without the interface.
     Run(RunArgs),
-    /// List stored sessions.
+    /// List the stored sessions of the project (`--all`: every project).
     Sessions {
-        /// One JSON object per line.
+        /// One JSON object per line (same selection as the text listing).
         #[arg(long)]
         json: bool,
+        /// Every stored session, whatever its project.
+        #[arg(long)]
+        all: bool,
     },
-    /// Resume a session in the interface (without an id: choose it).
+    /// Resume a session in the interface (without an id: choose it among
+    /// the project's sessions, or all of them). A session resumes in its
+    /// own folder, with that project's settings.
     Resume { session_id: Option<String> },
 }
 
