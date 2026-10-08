@@ -137,8 +137,8 @@ impl Provider for SimulatedClaude {
                         .send(StreamEvent::ContentBlockStart {
                             index: 2,
                             block_type: "tool_use".into(),
-                            id: None,
-                            name: None,
+                            id: Some("usage-glob".into()),
+                            name: Some("Glob".into()),
                         })
                         .await;
                     let _ = tx
@@ -188,8 +188,8 @@ impl Provider for SimulatedClaude {
                         .send(StreamEvent::ContentBlockStart {
                             index: 1,
                             block_type: "tool_use".into(),
-                            id: None,
-                            name: None,
+                            id: Some("usage-read".into()),
+                            name: Some("Read".into()),
                         })
                         .await;
                     let _ = tx
@@ -365,6 +365,10 @@ async fn main() -> anyhow::Result<()> {
     ];
     let active_model = models[0]; // Sonnet for this run
 
+    let fixture = tempfile::tempdir()?;
+    std::fs::create_dir(fixture.path().join("src"))?;
+    std::fs::write(fixture.path().join("src/main.rs"), "fn main() {}\n")?;
+
     let tracker = UsageTracker::new();
     let tracker_ref = tracker.clone(); // clone shares the Arc'd internals
     let start = Instant::now();
@@ -375,7 +379,7 @@ async fn main() -> anyhow::Result<()> {
         .system_prompt("You are a code analyst. Examine the project and summarize it.")
         .max_turns(5)
         .permission_policy(AllowAll)
-        .working_dir(".")
+        .working_dir(fixture.path())
         .reporter(tracker_ref)
         .on_event(|e| {
             if let AgentEvent::TextDelta(t) = e {
@@ -450,6 +454,10 @@ async fn main() -> anyhow::Result<()> {
 
     // ── Tool call breakdown ──────────────────────────────────────────────
     let tool_calls = tracker.tool_calls.lock().clone();
+    anyhow::ensure!(
+        tool_calls.len() == 2 && tool_calls.iter().all(|call| !call.is_error),
+        "simulated tool calls must complete successfully"
+    );
     if !tool_calls.is_empty() {
         println!("  Tool Calls");
         println!("  ----------");

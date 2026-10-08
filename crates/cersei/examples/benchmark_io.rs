@@ -59,13 +59,15 @@ async fn bench_tool(
 
     // Warmup
     for _ in 0..3 {
-        tool.execute(input.clone(), ctx).await;
+        let result = tool.execute(input.clone(), ctx).await;
+        assert!(!result.is_error, "{name} warmup failed: {}", result.content);
     }
 
     for _ in 0..iters {
         let start = Instant::now();
-        let _result = tool.execute(input.clone(), ctx).await;
+        let result = tool.execute(input.clone(), ctx).await;
         let elapsed = start.elapsed();
+        assert!(!result.is_error, "{name} failed: {}", result.content);
         total += elapsed;
         min = min.min(elapsed);
         max = max.max(elapsed);
@@ -166,10 +168,12 @@ async fn main() -> anyhow::Result<()> {
                 "file_path": test_file.display().to_string(),
                 "old_string": "Hello, world!",
                 "new_string": "Hello, Cersei!",
+                "replace_all": true,
             });
             let start = Instant::now();
-            edit_tool.execute(input, &ctx).await;
+            let result = edit_tool.execute(input, &ctx).await;
             let elapsed = start.elapsed();
+            assert!(!result.is_error, "Edit failed: {}", result.content);
             total += elapsed;
             min = min.min(elapsed);
             max = max.max(elapsed);
@@ -334,13 +338,13 @@ async fn main() -> anyhow::Result<()> {
             "  std::fs::read  {:.3}ms  vs  Cersei Read  {:.3}ms  (overhead: {:.3}ms)",
             std_read.as_secs_f64() * 1000.0,
             results[0].avg().as_secs_f64() * 1000.0,
-            (results[0].avg() - std_read).as_secs_f64() * 1000.0,
+            (results[0].avg().as_secs_f64() - std_read.as_secs_f64()) * 1000.0,
         );
         println!(
             "  std::fs::write {:.3}ms  vs  Cersei Write {:.3}ms  (overhead: {:.3}ms)",
             std_write.as_secs_f64() * 1000.0,
             results[1].avg().as_secs_f64() * 1000.0,
-            (results[1].avg() - std_write).as_secs_f64() * 1000.0,
+            (results[1].avg().as_secs_f64() - std_write.as_secs_f64()) * 1000.0,
         );
     }
 

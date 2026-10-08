@@ -69,7 +69,7 @@ async fn run() {
             &format!("filesystem() = {} tools", fs.len()),
             fs.len() == 10
         );
-        check!(&format!("shell() = {} tools", sh.len()), sh.len() == 5);
+        check!(&format!("shell() = {} tools", sh.len()), sh.len() == 6);
         check!(&format!("web() = {} tools", web.len()), web.len() == 2);
         check!(
             &format!("planning() = {} tools", plan.len()),

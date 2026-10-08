@@ -37,7 +37,7 @@ make its work more effective.
 
 ### Project status
 
-**Bricks 0.3.6** has a substantial, stable foundation. Development continues,
+**Bricks 0.4.6** has a substantial, stable foundation. Development continues,
 with further features and code optimisations still ahead.
 
 Bricks is a fork of Cersei, created by **Adib Mohsin (Pacifio)**. The inherited
@@ -199,14 +199,17 @@ cersei                facade crate — use cersei::prelude::*
 
 ## Benchmarks
 
-**Measured again on 2026-10-06.** The machine is an Apple A18 Pro (6
-cores, 8 GB) running macOS 27.2. The build uses the workspace's release
-profile (`opt-level = "z"`, thin LTO). No model is called by any benchmark
-below.
+**Bricks 0.4.6, measured on 2026-10-08** (commit `dee981e`), compared with
+the previous run of 2026-10-06 (commit `7315d82`, the code that became
+0.3.6 — the sub-agent and code-engine work landed after it) and with
+Pacifio's published figures for Cersei 0.1.6.
 
-Pacifio's figures were published with Cersei 0.1.6 on Apple Silicon, on a
-different machine. The comparison shows orders of magnitude and
-regressions, not a controlled A/B test.
+The machine is an Apple A18 Pro (6 cores, 8 GiB) running macOS 27.2,
+Rust 1.98.1, workspace release profile (`opt-level = "z"`, thin LTO). No
+model is called by any benchmark below. Pacifio's figures come from a
+different Apple Silicon machine: that column shows orders of magnitude and
+regressions, not a controlled A/B test. Full report, raw notes and harness
+fixes: [docs/benchmarks-bricks-2026-10-08.md](docs/benchmarks-bricks-2026-10-08.md).
 
 ### Tool I/O
 
@@ -214,25 +217,32 @@ regressions, not a controlled A/B test.
 cargo run --release -p cersei --example benchmark_io
 ```
 
-50 iterations per tool, in-process dispatch, average and range.
+50 iterations per tool after warm-up, in-process dispatch, mean. Every call
+is now checked for success.
 
-| Tool | Now | min – max | Cersei 0.1.6 (Pacifio) |
+| Tool | 0.4.6 | 0.3.6 cycle | Cersei 0.1.6 (Pacifio) |
 |---|---|---|---|
-| Edit | 0.05 ms | 0.05 – 0.13 ms | 0.04 ms |
-| Glob | 0.07 ms | 0.06 – 0.08 ms | 0.05 ms |
-| Write | 0.14 ms | 0.04 – 1.68 ms | 0.09 ms |
-| Read | 0.25 ms | 0.19 – 0.43 ms | 0.09 ms |
-| Grep | 2.42 ms | 1.43 – 2.84 ms | 5.85 ms |
-| Bash | 37.6 ms | 35.2 – 41.5 ms | 15.64 ms |
+| Read | 0.11 ms | 0.25 ms | 0.09 ms |
+| Write | 0.05 ms | 0.14 ms | 0.09 ms |
+| Edit | 0.81 ms | *(0.05 ms)* | *(0.04 ms)* |
+| Glob | 0.05 ms | 0.07 ms | 0.05 ms |
+| Grep | 1.86 ms | 2.42 ms | 5.85 ms |
+| Bash | 39.8 ms | 37.6 ms | 15.64 ms |
 
-Why some tools got slower:
-
-* **Read** now detects binary and non-UTF-8 files, handles BOMs, counts the
+* **Edit.** The earlier harness timed an ambiguous call (the text appears
+  several times) whose error was ignored: it measured a refusal. The
+  harness now uses `replace_all` and checks the result, so 0.81 ms is the
+  first real figure for a repeated edit; the figures in brackets are not
+  comparable.
+* **Read** detects binary and non-UTF-8 files, handles BOMs, counts the
   exact total and checks that the file did not change during the read.
-* **Bash** now runs in a persistent shell that keeps state, supervises the
-  whole process tree and spills large outputs to disk. Each command
-  therefore pays a request/response round-trip and a short output-settling
-  window (15 ms).
+* **Bash** runs in a persistent shell that keeps state, supervises the
+  whole process tree and spills large outputs to disk: each command pays a
+  request/response round-trip and a short output-settling window (15 ms).
+
+The standalone suite (`examples/benchmark`, 100 iterations) gives the same
+picture: Read 0.118 ms, Write 0.050 ms, Edit 0.759 ms, Glob 0.066 ms,
+Grep 2.017 ms, Bash 39.7 ms.
 
 ### Memory I/O
 
@@ -240,71 +250,91 @@ Why some tools got slower:
 cargo run --release -p cersei-memory --features graph --example memory_bench
 ```
 
-| Operation | Now (mean) | Cersei 0.1.6 (Pacifio) |
-|---|---|---|
-| Scan 100 memory files (frontmatter) | 1.71 ms | 1.2 ms |
-| Load MEMORY.md | 16.4 µs | 9.6 µs |
-| Memory recall, text (100 files) | 1.88 ms | 1.3 ms |
-| Memory recall, graph (1 000 nodes) | 1.34 ms | 98 µs (graph size not stated) |
-| Graph store | 114 µs per node | 30 µs per node |
-| Topic query (graph) | 118 µs | 77 µs |
-| Session write | 37 µs per entry | 27 µs per entry |
-| Session load (100 entries) | 279 µs | 268 µs |
+| Operation (mean) | 0.4.6 | 0.3.6 cycle | Cersei 0.1.6 (Pacifio) |
+|---|---|---|---|
+| Scan 100 memory files (frontmatter) | 1.84 ms | 1.71 ms | 1.2 ms |
+| Load MEMORY.md | 15.4 µs | 16.4 µs | 9.6 µs |
+| Memory recall, text (100 files) | 2.03 ms | 1.88 ms | 1.3 ms |
+| Memory recall, graph (1 000 nodes) | 1.36 ms | 1.34 ms | 98 µs (graph size not stated) |
+| Graph store | 76.2 µs per node | 114 µs per node | 30 µs per node |
+| Topic query (graph) | 114.5 µs | 118 µs | 77 µs |
+| Session write | 35.9 µs per entry | 37 µs per entry | 27 µs per entry |
+| Session load (100 entries) | 279 µs | 279 µs | 268 µs |
 
-Notes on the graph rows:
+* **Recall.** Graph recall matches the query as a substring of every stored
+  memory, so it grows with the graph size; Pacifio's figure gives no size.
+* **Writes.** Every graph query and write is parameterised: nothing written
+  by a user or a model is spliced into a query.
 
-* **Recall.** Graph recall matches the query as a substring of every
-  stored memory, so it grows with the graph size. Pacifio's figure gives
-  no size, so the two numbers are not comparable.
-* **Writes.** Graph writes are slower because every query and write is now
-  parameterised: nothing written by a user or a model is spliced into a
-  query anymore.
+The structured long-term memory (hybrid recall) has its own measurements in
+[docs/memory.md](docs/memory.md#measurements): recall p50 2.0 / 3.5 / 6.8 ms
+at 500 / 2 000 / 10 000 episodes.
 
-The structured long-term memory (hybrid recall, Sprint 6) has its own
-measurements in [docs/memory.md](docs/memory.md#measurements): recall
-p50 2.0 / 3.5 / 6.8 ms at 500 / 2 000 / 10 000 episodes.
+### Agent framework overhead (`bench/general-agents`)
 
-### Agent framework overhead (`bench/general-agents`, Cersei side)
+```bash
+CERSEI_BENCH_AXES=1,2,3,4 cargo run --release -p cersei-agent --example general_agent_bench --features bench-full
+```
 
-The workload is build → one turn → shut down, with a stub model and one
-echo tool (`cargo run --release -p cersei-agent --example general_agent_bench --features bench-full`).
+A minimal agent with one tool is built, held and dropped; no model turn is
+run (parity with the Python harnesses).
 
-| Axis | Now | Cersei 0.1.6 (Pacifio) |
-|---|---|---|
-| Instantiation (mean) | 33.9 µs | 8.5 µs |
-| Memory per agent (jemalloc) | 71.8 KB | 704 B |
-| 10 000 concurrent agents: turn p50 / p99 | 0.08 / 0.81 ms | 0.056 / 0.155 ms |
-| 10 000 concurrent agents: RSS | 695 MB | 22 MB |
-| Graph recall under load, 10 000 nodes (p50) | 90.2 ms | 94.0 ms |
-| Semantic search under load, 10 000 chunks (p50) | 65.6 µs | 50.7 µs |
+| Axis | 0.4.6 | 0.3.6 cycle | Cersei 0.1.6 (Pacifio) |
+|---|---|---|---|
+| Instantiation (mean) | 21.3 µs | 33.9 µs | 8.5 µs |
+| Memory per agent (jemalloc) | 71.7 KB | 71.8 KB | 704 B |
+| 10 000 agents built concurrently: per-agent p50 / p99 | 0.066 / 1.05 ms | 0.08 / 0.81 ms | 0.056 / 0.155 ms |
+| 10 000 agents built concurrently: total | 197 ms | — | — |
+| 10 000 agents held: peak RSS | 647 MiB | 695 MiB | 22 MB |
+| Graph recall under load, 10 000 nodes (p50) | 83.0 ms | 90.2 ms | 94.0 ms |
+| Semantic search under load, 10 000 chunks (p50) | not run | 65.6 µs | 50.7 µs |
 
 Each agent carries a context manager, a tool-output compressor with its
-store, a web context and an approval-ready permission path. These additional
-capabilities explain the higher instantiation cost and memory footprint.
-Built-in compression rules are parsed once per process and shared.
+store, a web context and an approval-ready permission path; these explain
+the higher footprint than Cersei 0.1.6. 10 000 is the largest step tested,
+not a limit found. Graph recall under load is 10 workers × 100 queries
+(p95 130 ms, p99 226 ms).
 
-The Python frameworks (Agno, LangGraph, PydanticAI, CrewAI) have **not yet been
-re-run**: their published results in `bench/general-agents/results/` date
-from Pacifio's run. Re-running them downloads those frameworks from PyPI:
-`./bench/general-agents/run.sh`.
+**Python frameworks, re-run on the same machine** (Python 3.12.13, versions
+from `uv.lock`; Rust memory measured with jemalloc, Python with
+tracemalloc, which misses native allocations — the allocation column is not
+an equal comparison of total RAM):
+
+| Framework | Construction (mean) | Allocation per agent | 1 000 agents: total | 1 000 agents: peak RSS |
+|---|---|---|---|---|
+| **Bricks 0.4.6** | 21.3 µs | 71 703 B | 20.4 ms | 98.5 MiB |
+| Agno 2.5.17 | 6.0 µs | 5 394 B | 19.0 ms | 103.6 MiB |
+| PydanticAI 1.22.0 | 228.6 µs | 8 196 B | 262.1 ms | 107.2 MiB |
+| LangGraph 1.1.8 | 1 950.7 µs | 30 344 B | 2 101.1 ms | 168.7 MiB |
+| CrewAI 1.14.2 | 7 476.2 µs | 17 900 B | 3 024.0 ms | 1 526.2 MiB |
 
 ### CLI startup
 
 ```bash
-python3 scripts/bench_cli.py --bricks <path> --iterations 50
+python3 scripts/bench_cli.py --bricks target/release/bricks --iterations 50
 ```
 
-The command is `--version`, with no model call: 50 runs after warm-up.
+`--version`, no model call: 50 runs after 3 warm-up runs. Sizes and RSS in
+MiB.
 
-| CLI | Startup (mean) | Executed file | Peak RSS |
-|---|---|---|---|
-| bricks 0.2.6 | 5.4 ms | 27.1 MB | 7.4 MB |
-| Claude Code 2.1.289 | 7.4 ms | 219.0 MB | 24.6 MB |
-| Codex CLI 0.150.1 | 9.0 ms | 218.4 MB | 16.8 MB |
+| CLI | Startup (mean) | min – max | Executed file | Peak RSS |
+|---|---|---|---|---|
+| **bricks 0.4.6** | 4.8 ms | 4.3 – 6.1 ms | 29.4 MiB | 7.5 MiB |
+| bricks, 0.3.6 cycle | 5.4 ms | — | 27.1 MiB | 7.4 MiB |
+| Claude Code 2.1.289 | 7.3 ms | 6.4 – 11.2 ms | 219.0 MiB | 24.6 MiB |
+| Codex CLI 0.150.1 | 8.6 ms | 7.5 – 11.9 ms | 218.4 MiB | 16.9 MiB |
 
-Pacifio's earlier comparison (269 ms for Claude Code) measured the former
-Node.js Claude Code; the current one is a native binary. The "Abstract CLI"
-it compared against no longer exists; `bricks` replaces it.
+This measures startup, not the time to answer a prompt. Pacifio's earlier
+comparison (269 ms for Claude Code) measured the former Node.js Claude
+Code; the "Abstract CLI" it compared against no longer exists.
+
+### Stress suites and token accounting
+
+The five `stress_*` examples pass **256 checks, 0 failures**
+(infrastructure 46, tools 47, orchestration 33, skills 47, memory 83).
+`usage_report`, with a simulated provider, reports 5 017 input and 714
+output tokens for two successful tool calls, and its three consistency
+checks pass; these are simulator figures, not real consumption.
 
 ### Not re-run yet
 

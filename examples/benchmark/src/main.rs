@@ -74,13 +74,15 @@ async fn bench_tool(
 
     // Warmup (3 runs)
     for _ in 0..3 {
-        tool.execute(input.clone(), ctx).await;
+        let result = tool.execute(input.clone(), ctx).await;
+        assert!(!result.is_error, "{name} warmup failed: {}", result.content);
     }
 
     for _ in 0..iters {
         let start = Instant::now();
-        let _result = tool.execute(input.clone(), ctx).await;
+        let result = tool.execute(input.clone(), ctx).await;
         let elapsed = start.elapsed();
+        assert!(!result.is_error, "{name} failed: {}", result.content);
         total += elapsed;
         min = min.min(elapsed);
         max = max.max(elapsed);
@@ -247,16 +249,18 @@ async fn main() -> anyhow::Result<()> {
         let mut max = Duration::ZERO;
         for _ in 0..3 {
             std::fs::write(&test_file, &test_content)?;
-            edit_tool
+            let result = edit_tool
                 .execute(
                     serde_json::json!({
                         "file_path": test_file.display().to_string(),
                         "old_string": "Hello, world!",
                         "new_string": "Hello, Cersei!",
+                        "replace_all": true,
                     }),
                     &ctx,
                 )
                 .await;
+            assert!(!result.is_error, "Edit warmup failed: {}", result.content);
         }
         for _ in 0..ITERS {
             std::fs::write(&test_file, &test_content)?;
@@ -264,10 +268,12 @@ async fn main() -> anyhow::Result<()> {
                 "file_path": test_file.display().to_string(),
                 "old_string": "Hello, world!",
                 "new_string": "Hello, Cersei!",
+                "replace_all": true,
             });
             let start = Instant::now();
-            edit_tool.execute(input, &ctx).await;
+            let result = edit_tool.execute(input, &ctx).await;
             let elapsed = start.elapsed();
+            assert!(!result.is_error, "Edit failed: {}", result.content);
             total += elapsed;
             min = min.min(elapsed);
             max = max.max(elapsed);

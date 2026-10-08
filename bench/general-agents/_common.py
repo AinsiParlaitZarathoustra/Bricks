@@ -14,8 +14,8 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-RESULTS_DIR = Path(__file__).parent / "results"
-RESULTS_DIR.mkdir(exist_ok=True)
+RESULTS_DIR = Path(os.environ.get("CERSEI_BENCH_OUT_DIR", Path(__file__).parent / "results"))
+RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 # Python frameworks hit asyncio scaling walls long before Rust does. Capping
 # at 1k by default keeps each harness under 3 minutes wall-clock on a laptop.
