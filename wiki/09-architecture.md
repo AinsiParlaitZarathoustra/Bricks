@@ -1,6 +1,24 @@
 # Architecture
 
-## Crate Map
+## Current layers (Bricks 0.5.0)
+
+```
+bricks-cli            the `bricks` binary: arguments, configuration, headless / JSONL
+  bricks-tui          terminal interface: renders engine events, turns gestures into commands
+cersei-agent          engine: agent loop, controller (commands/events), approvals, compaction
+  cersei-provider, cersei-tools, cersei-memory, cersei-compression, cersei-web,
+  bricks-semantic, cersei-lsp, cersei-mcp, cersei-embeddings, cersei-skills, …
+cersei-types          shared types and the shared HTTP client
+```
+
+The complete list is in the README (Architecture) and in
+`docs/content/docs/crate-map.mdx`.
+
+## Crate Map (Cersei-era snapshot)
+
+Historical: the layout below is the original Cersei workspace (before
+`bricks-cli`, `bricks-tui` and the provider registry). File names such as
+`anthropic.rs` / `openai.rs` no longer exist.
 
 ```
 src-cersei/

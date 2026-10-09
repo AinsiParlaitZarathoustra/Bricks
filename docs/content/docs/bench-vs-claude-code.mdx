@@ -99,8 +99,11 @@ Ratios in parentheses are relative to Abstract.
 # vs Codex CLI
 ./run_tool_bench_codex.sh --iterations 20 --full
 
-# Memory architecture
+# Memory architecture (historical: abstract-cli no longer exists)
 cargo run --release -p abstract-cli --example memory_bench
 ```
+
+These scripts measured the Cersei-era `abstract` binary; they are kept to
+read the historical numbers below, not as a Bricks benchmark.
 
 Full report: [`crates/abstract-cli/benchmarks/REPORT.md`](https://github.com/pacifio/cersei/blob/main/crates/abstract-cli/benchmarks/REPORT.md)

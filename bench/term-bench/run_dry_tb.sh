@@ -84,10 +84,10 @@ if [[ ! -f "$SCRIPT_DIR/abstract_tbench.py" ]]; then
 fi
 pass "Agent module"
 
-if [[ -f "$SCRIPT_DIR/abstract-linux-amd64" ]] || [[ -f "$SCRIPT_DIR/abstract-linux-arm64" ]]; then
+if [[ -f "${ABSTRACT_BINARY_AMD64:-$SCRIPT_DIR/abstract-linux-amd64}" ]] || [[ -f "${ABSTRACT_BINARY_ARM64:-$SCRIPT_DIR/abstract-linux-arm64}" ]]; then
   pass "Linux binary"
 else
-  fail "No Linux binary found. See TERMINAL_BENCH.md"
+  fail "No abstract binary (historical harness, not built here any more). See bench/term-bench/BINARIES.md"
   exit 1
 fi
 

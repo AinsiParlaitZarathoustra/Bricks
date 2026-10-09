@@ -1,6 +1,9 @@
 /target
 **/target
-Cargo.lock
+# The workspace's /Cargo.lock is versioned: Bricks ships a binary, and builds
+# are checked with `--locked`. A consumer outside the workspace keeps its own
+# lock locally (it resolves the same crates through path dependencies).
+/examples/**/Cargo.lock
 .DS_Store
 *.swp
 *.swo
@@ -33,6 +36,9 @@ bench/**/abstract-output.jsonl
 # Anything under a bench runner that historically hardcoded keys.
 bench/**/runner-*.sh
 bench/**/runner-*.bash
+# Sanitized example (reads the key from the environment); scanned by
+# scripts/check_secrets.py like any tracked file.
+!bench/term-bench/runner-google.sh
 
 # Belt-and-braces: anything that looks like a secret-bearing file.
 .env
@@ -46,6 +52,12 @@ credentials.*.json
 # Python venvs created by bench harnesses.
 bench/**/.venv/
 bench/**/__pycache__/
+**/__pycache__/
+*.pyc
+
+# Linux bench binaries are build outputs; see bench/term-bench/BINARIES.md.
+bench/term-bench/abstract-linux-*
+bench/term-bench/tbench-agent-linux-*
 
 # Atlas editor
 .atlas

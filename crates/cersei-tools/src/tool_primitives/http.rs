@@ -54,7 +54,7 @@ impl std::fmt::Display for HttpError {
 impl std::error::Error for HttpError {}
 
 fn build_client(opts: &HttpOptions) -> Result<reqwest::Client, HttpError> {
-    let mut builder = reqwest::Client::builder();
+    let mut builder = cersei_types::http::client_builder();
 
     if let Some(timeout) = opts.timeout {
         builder = builder.timeout(timeout);

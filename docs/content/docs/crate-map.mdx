@@ -1,9 +1,35 @@
 ---
 title: Crate Map
-description: Detailed breakdown of every crate in the Cersei workspace.
+description: Detailed breakdown of every crate in the Bricks workspace.
 ---
 
 # Crate Map
+
+The Bricks workspace (version 0.5.0). The inherited crates keep their
+`cersei-*` names. Layers, from the top:
+
+```text
+bricks-cli          the `bricks` binary: arguments, configuration, headless / JSONL
+  bricks-tui        terminal interface: renders engine events, turns gestures into commands
+cersei-agent        engine: agent loop, controller (commands/events), approvals, compaction
+  cersei-provider, cersei-tools, cersei-memory, cersei-compression, cersei-web,
+  bricks-semantic, cersei-lsp, cersei-mcp, cersei-embeddings, cersei-skills, …
+cersei-types        shared types and the shared HTTP client
+```
+
+## bricks-cli
+
+The `bricks` command, a thin layer over the engine: loads `providers.toml`
+and `bricks.toml`, starts the controller of `cersei-agent`, and presents its
+events — through `bricks-tui` when interactive, as text or versioned JSONL
+otherwise (`bricks run`, `bricks serve`). See `docs/cli.md` in the repository.
+Install from a checkout: `cargo install --path crates/bricks-cli`.
+
+## bricks-tui
+
+The interactive terminal interface (ratatui): renders the engine's events
+(streaming text, tool calls, approvals, totals) and turns keys and gestures
+into engine commands. It holds no agent logic.
 
 ## cersei (facade)
 
@@ -13,31 +39,32 @@ Re-exports everything. Use `cersei::prelude::*` for common types.
 pub use cersei_types as types;
 pub use cersei_provider as provider;
 pub use cersei_tools as tools;
-pub use cersei_agent::{Agent, AgentBuilder, AgentOutput};
+pub use cersei_agent::{Agent, AgentBuilder, AgentOutput, Reporter};
 pub use cersei_agent::events::{AgentEvent, AgentStream};
 pub use cersei_memory as memory;
 pub use cersei_hooks as hooks;
 pub use cersei_mcp as mcp;
-pub use cersei_provider::anthropic::Anthropic;
-pub use cersei_provider::openai::OpenAi;
+// Providers are configuration, not types:
+pub use cersei_provider::{provider_from_config, ConfiguredProvider, ProviderRegistry, ResolvedModel};
 
 // feature-gated
-pub use cersei_vms as vms;             // feature = "vms" (default)
+pub use cersei_vms as vms;             // feature = "vms"
 pub use cersei_agentlang as agentlang; // feature = "agentlang"
 pub use cersei_agentrl as agentrl;     // feature = "agentrl"
+pub use cersei_workflows as workflows; // feature = "workflows"
 ```
 
 ## cersei-types
 
-Zero-dependency core types: `Message`, `Role`, `ContentBlock`, `Usage`, `StopReason`, `StreamEvent`, `CerseiError`, `ToolDefinition`.
+Core types: `Message`, `Role`, `ContentBlock`, `Usage`, `StopReason`, `StreamEvent`, `CerseiError`, `ToolDefinition`. Also `cersei_types::http`, the HTTP client shared by providers, web, MCP and embeddings (rustls, Hickory DNS resolver).
 
 ## cersei-provider
 
-`Provider` trait + `Anthropic` and `OpenAi` implementations. SSE streaming, token counting, capability discovery, prompt caching.
+`Provider` trait and a registry built from `providers.toml`: each model speaks one of three protocols (`chat_completions`, `responses`, `anthropic_messages`) through one shared, bounded SSE decoder. Retries with `Retry-After`, prices, reasoning profiles. See `docs/providers.md` in the repository.
 
 ## cersei-tools
 
-`Tool` trait, 34 built-in tools organized into sets, `PermissionPolicy` trait, bash command classifier, shell state persistence, `CostTracker`, skill discovery. Depends on `cersei-embeddings` for `CodeSearch`'s hybrid BM25 + vector mode.
+`Tool` trait, 34 built-in tools organized into sets, `PermissionPolicy` trait, bash safety analysis (an SDK primitive, not wired into `Bash`'s permissions), shell state persistence, `CostTracker`, skill discovery. Depends on `cersei-embeddings` for `CodeSearch`'s hybrid BM25 + vector mode.
 
 **Tool count by category:**
 - Filesystem: 6 (Read, Write, Edit, Glob, Grep, NotebookEdit)
@@ -55,7 +82,7 @@ Proc macro: `#[derive(Tool)]`. Auto-generates `Tool` impl from `ToolExecute` tra
 
 ## cersei-embeddings
 
-Provider-agnostic `EmbeddingProvider` trait with built-in Gemini and OpenAI backends, a `usearch`-backed `VectorIndex`, and an ergonomic `EmbeddingStore<P>` for the add-text / search-by-text flow. Standalone — has no dependency on other `cersei-*` crates. See [embeddings docs](/docs/embeddings-overview).
+Provider-agnostic `EmbeddingProvider` trait with built-in Gemini and OpenAI backends, a `usearch`-backed `VectorIndex`, and an ergonomic `EmbeddingStore<P>` for the add-text / search-by-text flow. Depends only on `cersei-types` (for the shared HTTP client). See [embeddings docs](/docs/embeddings-overview).
 
 ## cersei-agent
 
@@ -81,6 +108,17 @@ The **AgentTemplate** DSL: hand-written lexer/parser/AST + an async, permission-
 
 **AgentRL** — the self-evolving orchestration layer. `Orchestrator` (the loop), the `AgentRlRunner` trait + batteries-included `CerseiRunner`, `ExecutionGraph`/`GraphReporter` (failure tracing), `ToolRegistry` + `DynamicTool` (the tool database), the `Verifier` system, and a secret `scrub` pass. Depends on `cersei-agent`, `cersei-vms`, `cersei-embeddings`, `cersei-memory`, and `cersei-agentlang`. See [AgentRL](/docs/agentrl-overview).
 
-## abstract-cli
+## Other crates
 
-Complete CLI coding agent. REPL, streaming renderer, interactive permissions, session management, slash commands, TOML config, graph memory on by default.
+* **bricks-semantic** — shared code understanding engine per workspace: lexical search, syntax context, optional LSP.
+* **cersei-compression** — tool-output reduction, command-aware rules, tree-sitter skeletons.
+* **cersei-web** — web search, bounded fetching with SSRF filtering, Markdown extraction, BM25 passages.
+* **cersei-lsp** — LSP client.
+* **cersei-skills** — agentskills.io-compatible skill registry.
+* **cersei-workflows** — serializable workflow engine.
+* **cersei-vms** — sandbox and VM isolation.
+* **cersei-tbench** — the Terminal-Bench agent (`tbench-agent`).
+* **cersei-testkit**, **longmem-bench** — test helpers and a benchmark; not published.
+
+`abstract-cli`, the CLI of the Cersei era, no longer exists in this
+workspace; `bricks-cli` replaces it.

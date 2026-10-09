@@ -51,7 +51,7 @@ The crate is pure Rust, depends only on workspace-shared crates (`regex`, `once_
 
 ## 5-line quick start
 
-<Tabs items={['As an SDK user', 'Directly', 'From abstract-cli']}>
+<Tabs items={['As an SDK user', 'Directly', 'From bricks']}>
 <Tab value="As an SDK user">
 ```rust
 use cersei::Agent;
@@ -81,19 +81,11 @@ let out = compress_tool_output(
 
 Infallible — on any internal error the raw input is returned unchanged so the agent loop never breaks.
 </Tab>
-<Tab value="From abstract-cli">
-```bash
-# CLI flag
-abstract --compress aggressive "fix the failing tests"
-
-# Env var (picked up on startup)
-ABSTRACT_COMPRESSION=aggressive abstract
-
-# Config file — ~/.abstract/config.toml or .abstract/config.toml
-compression_level = "aggressive"
-
-# Runtime toggle in the REPL
-> /compression aggressive
+<Tab value="From bricks">
+```toml
+# bricks.toml (project) — see docs/compression.md in the repository
+[compression]
+level = "aggressive"
 ```
 </Tab>
 </Tabs>
@@ -116,7 +108,7 @@ agent.set_compression_level(CompressionLevel::Off);
 let current = agent.compression_level();
 ```
 
-The field is a shared mutex, so `/compression on|off|…` in the Abstract REPL can flip the active agent's level mid-session without a rebuild.
+The field is a shared mutex, so an embedding application can flip the active agent's level mid-session without a rebuild.
 
 ## What's in the box
 
@@ -166,7 +158,7 @@ tracing_subscriber::fmt()
     .init();
 ```
 
-Or just set `RUST_LOG=cersei_compression=info` when running `abstract`.
+The `bricks` binary installs no subscriber of its own: `RUST_LOG` applies to binaries that install one, like the snippet above.
 
 Sample log line from a live `gemini-2.5-flash` run:
 

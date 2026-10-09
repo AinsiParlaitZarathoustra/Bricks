@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Abstract vs Claude Code — CLI Tool Benchmark
+# HISTORICAL: measures the Cersei-era `abstract` binary (abstract-cli), which
+# no longer exists in the Bricks workspace. Kept to reproduce old numbers.
 # Usage: ./run_tool_bench.sh [--iterations N] [--full]
 #
 # Compares the Abstract CLI against Claude Code CLI across:

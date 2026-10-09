@@ -138,6 +138,11 @@ fn collect_chunks(working_dir: &Path) -> Vec<ChunkMeta> {
         .follow_links(false)
         .into_iter()
         .filter_entry(|e| {
+            // The folder searched is always walked, even when its own name
+            // starts with a dot; only hidden entries inside it are skipped.
+            if e.depth() == 0 {
+                return true;
+            }
             let name = e.file_name().to_str().unwrap_or("");
             !name.starts_with('.')
                 && name != "node_modules"
@@ -235,7 +240,7 @@ fn bm25_search(
         .parse_query(query)
         .map_err(|e| format!("Query parse: {e}"))?;
     let top = searcher
-        .search(&parsed, &TopDocs::with_limit(limit))
+        .search(&parsed, &TopDocs::with_limit(limit).order_by_score())
         .map_err(|e| format!("Search: {e}"))?;
 
     let mut results = Vec::new();
@@ -541,5 +546,119 @@ impl Tool for CodeSearchTool {
             ));
         }
         ToolResult::success(output)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::permissions::AllowAll;
+    use crate::{CostTracker, Extensions};
+
+    fn ctx(dir: &Path) -> ToolContext {
+        ToolContext {
+            working_dir: dir.to_path_buf(),
+            session_id: "code-search-test".into(),
+            permissions: Arc::new(AllowAll),
+            cost_tracker: Arc::new(CostTracker::new()),
+            mcp_manager: None,
+            extensions: Extensions::default(),
+        }
+    }
+
+    /// `path:start-end` of each `── Result n ── path:start-end (score: …)`
+    /// header, the path relative to `root` (results name absolute paths).
+    fn headers(out: &str, root: &Path) -> Vec<String> {
+        let root = format!("{}/", root.display());
+        out.lines()
+            .filter(|l| l.starts_with("── Result"))
+            .map(|l| {
+                let h = l
+                    .split(" ── ")
+                    .nth(1)
+                    .unwrap()
+                    .split(" (score")
+                    .next()
+                    .unwrap();
+                h.strip_prefix(&root).unwrap_or(h).to_string()
+            })
+            .collect()
+    }
+
+    /// One test (the index cache is shared by the process): BM25 paths and
+    /// line ranges, the result limit, a query that does not parse, no
+    /// match, and the hybrid mode — on the in-memory Tantivy index.
+    #[tokio::test]
+    async fn bm25_and_hybrid_search_keep_paths_lines_and_limits() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src");
+        std::fs::create_dir(&src).unwrap();
+        let mut long = String::new();
+        for i in 1..=120 {
+            if i == 95 {
+                long.push_str("fn compute_invoice_total() { /* zebrafinch */ }\n");
+            } else {
+                long.push_str(&format!("let filler_{i} = {i};\n"));
+            }
+        }
+        std::fs::write(src.join("billing.rs"), &long).unwrap();
+        std::fs::write(src.join("notes.md"), "The zebrafinch sings at dawn.\n").unwrap();
+        std::fs::write(src.join("image.bin"), "zebrafinch").unwrap();
+        let c = ctx(dir.path());
+
+        let tool = CodeSearchTool::new();
+        let out = tool
+            .execute(serde_json::json!({ "query": "zebrafinch" }), &c)
+            .await;
+        assert!(!out.is_error, "{}", out.content);
+        let h = headers(&out.content, dir.path());
+        // Chunks of 50 lines with a 10-line overlap: line 95 is in 81-120.
+        assert!(h.iter().any(|x| x == "src/billing.rs:81-120"), "{h:?}");
+        assert!(h.iter().any(|x| x == "src/notes.md:1-1"), "{h:?}");
+        assert!(
+            !h.iter().any(|x| x.contains("image.bin")),
+            "not an indexed extension"
+        );
+
+        let out = tool
+            .execute(serde_json::json!({ "query": "zebrafinch", "limit": 1 }), &c)
+            .await;
+        assert_eq!(
+            headers(&out.content, dir.path()).len(),
+            1,
+            "{}",
+            out.content
+        );
+
+        let out = tool
+            .execute(serde_json::json!({ "query": "nosuchwordanywhere" }), &c)
+            .await;
+        assert!(!out.is_error && out.content.starts_with("No results found"));
+
+        let out = tool
+            .execute(serde_json::json!({ "query": "content:(" }), &c)
+            .await;
+        assert!(
+            out.is_error && out.content.contains("Query parse"),
+            "{}",
+            out.content
+        );
+
+        // Hybrid: BM25 candidates merged with vector neighbours.
+        let other = tempfile::tempdir().unwrap();
+        std::fs::write(other.path().join("a.rs"), "fn zebrafinch_parser() {}\n").unwrap();
+        std::fs::write(other.path().join("b.rs"), "fn unrelated() {}\n").unwrap();
+        let hybrid = CodeSearchTool::with_embeddings(Arc::new(
+            cersei_embeddings::HashingEmbeddings::new(64),
+        ));
+        let out = hybrid
+            .execute(
+                serde_json::json!({ "query": "zebrafinch_parser" }),
+                &ctx(other.path()),
+            )
+            .await;
+        assert!(!out.is_error, "{}", out.content);
+        let h = headers(&out.content, other.path());
+        assert_eq!(h.first().map(String::as_str), Some("a.rs:1-1"), "{h:?}");
     }
 }

@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Abstract vs Codex CLI — Tool Benchmark
+# HISTORICAL: measures the Cersei-era `abstract` binary (abstract-cli), which
+# no longer exists in the Bricks workspace. Kept to reproduce old numbers.
 # Usage: ./run_tool_bench_codex.sh [--iterations N] [--full]
 #
 # Compares Abstract CLI against OpenAI Codex CLI across:

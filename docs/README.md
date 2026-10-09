@@ -3,14 +3,14 @@
 This is a Next.js application generated with
 [Create Fumadocs](https://github.com/fuma-nama/fumadocs).
 
-Run development server:
+The site uses **npm** and its lock file `package-lock.json` (the one
+Dependabot updates); no other package manager or lock file is kept.
 
 ```bash
-npm run dev
-# or
-pnpm dev
-# or
-yarn dev
+npm ci                 # install exactly the locked versions
+npm run types:check    # MDX, Next type generation, TypeScript
+npm run build          # production build
+npm run dev            # development server
 ```
 
 Open http://localhost:3000 with your browser to see the result.

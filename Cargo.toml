@@ -29,7 +29,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.4.8"
+version = "0.5.0"
 edition = "2021"
 authors = ["Adib Mohsin"]
 license = "MIT"
@@ -48,11 +48,12 @@ futures = "0.3"
 async-trait = "0.1"
 
 # HTTP
-# NOTE: `hickory-dns` gives reqwest a pure-Rust DNS resolver. Required for fully
-# static musl binaries — the default getaddrinfo resolver fails (no NSS) in a
-# static musl build, which silently breaks every outbound API call.
-reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls", "rustls-tls-webpki-roots", "hickory-dns"], default-features = false }
-reqwest-eventsource = "0.6"
+# DNS: every client resolves through hickory (pure Rust), set by
+# `cersei_types::http` — static musl binaries have no NSS for getaddrinfo.
+# reqwest's own `hickory-dns` feature is not used: it pins hickory 0.25
+# (RUSTSEC-2026-0118/0119); the shared resolver uses 0.26.
+reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls", "rustls-tls-webpki-roots"], default-features = false }
+hickory-resolver = { version = "0.26.3", default-features = false, features = ["tokio", "system-config"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -104,27 +105,27 @@ quote = "1"
 proc-macro2 = "1"
 
 # Workspace crates
-cersei = { path = "crates/cersei", version = "0.4.8" }
-cersei-types = { path = "crates/cersei-types", version = "0.4.8" }
-cersei-provider = { path = "crates/cersei-provider", version = "0.4.8" }
-cersei-tools = { path = "crates/cersei-tools", version = "0.4.8" }
-cersei-tools-derive = { path = "crates/cersei-tools-derive", version = "0.4.8" }
-cersei-agent = { path = "crates/cersei-agent", version = "0.4.8" }
-cersei-memory = { path = "crates/cersei-memory", version = "0.4.8" }
-cersei-hooks = { path = "crates/cersei-hooks", version = "0.4.8" }
-cersei-mcp = { path = "crates/cersei-mcp", version = "0.4.8" }
-cersei-lsp = { path = "crates/cersei-lsp", version = "0.4.8" }
-bricks-semantic = { path = "crates/bricks-semantic", version = "0.4.8" }
-cersei-embeddings = { path = "crates/cersei-embeddings", version = "0.4.8" }
-cersei-compression = { path = "crates/cersei-compression", version = "0.4.8" }
-cersei-skills = { path = "crates/cersei-skills", version = "0.4.8" }
-cersei-vms = { path = "crates/cersei-vms", version = "0.4.8" }
-cersei-agentlang = { path = "crates/cersei-agentlang", version = "0.4.8" }
-cersei-agentrl = { path = "crates/cersei-agentrl", version = "0.4.8" }
-cersei-workflows = { path = "crates/cersei-workflows", version = "0.4.8" }
-cersei-web = { path = "crates/cersei-web", version = "0.4.8" }
+cersei = { path = "crates/cersei", version = "0.5.0" }
+cersei-types = { path = "crates/cersei-types", version = "0.5.0" }
+cersei-provider = { path = "crates/cersei-provider", version = "0.5.0" }
+cersei-tools = { path = "crates/cersei-tools", version = "0.5.0" }
+cersei-tools-derive = { path = "crates/cersei-tools-derive", version = "0.5.0" }
+cersei-agent = { path = "crates/cersei-agent", version = "0.5.0" }
+cersei-memory = { path = "crates/cersei-memory", version = "0.5.0" }
+cersei-hooks = { path = "crates/cersei-hooks", version = "0.5.0" }
+cersei-mcp = { path = "crates/cersei-mcp", version = "0.5.0" }
+cersei-lsp = { path = "crates/cersei-lsp", version = "0.5.0" }
+bricks-semantic = { path = "crates/bricks-semantic", version = "0.5.0" }
+cersei-embeddings = { path = "crates/cersei-embeddings", version = "0.5.0" }
+cersei-compression = { path = "crates/cersei-compression", version = "0.5.0" }
+cersei-skills = { path = "crates/cersei-skills", version = "0.5.0" }
+cersei-vms = { path = "crates/cersei-vms", version = "0.5.0" }
+cersei-agentlang = { path = "crates/cersei-agentlang", version = "0.5.0" }
+cersei-agentrl = { path = "crates/cersei-agentrl", version = "0.5.0" }
+cersei-workflows = { path = "crates/cersei-workflows", version = "0.5.0" }
+cersei-web = { path = "crates/cersei-web", version = "0.5.0" }
 cersei-testkit = { path = "crates/cersei-testkit" }
-bricks-tui = { path = "crates/bricks-tui", version = "0.4.8" }
+bricks-tui = { path = "crates/bricks-tui", version = "0.5.0" }
 clap = { version = "4.5", features = ["derive"] }
 ratatui = "0.30"
 nucleo-matcher = "0.3"

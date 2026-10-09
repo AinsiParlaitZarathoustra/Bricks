@@ -17,3 +17,6 @@ anyhow = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
 reqwest = { workspace = true }
+hickory-resolver = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

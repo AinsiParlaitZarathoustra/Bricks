@@ -94,7 +94,7 @@ if ! command -v uv &>/dev/null; then fail "'uv' not found."; exit 1; fi
 pass "uv"
 
 [[ -f "$SCRIPT_DIR/abstract_tbench.py" ]] && pass "Agent module" || { fail "Agent module not found"; exit 1; }
-[[ -f "$SCRIPT_DIR/abstract-linux-amd64" || -f "$SCRIPT_DIR/abstract-linux-arm64" ]] && pass "Linux binary" || { fail "No binary found"; exit 1; }
+[[ -f "${ABSTRACT_BINARY_AMD64:-$SCRIPT_DIR/abstract-linux-amd64}" || -f "${ABSTRACT_BINARY_ARM64:-$SCRIPT_DIR/abstract-linux-arm64}" ]] && pass "Linux binary" || { fail "No abstract binary (historical harness). See bench/term-bench/BINARIES.md"; exit 1; }
 
 ENV_FLAG=""
 if $USE_DAYTONA; then

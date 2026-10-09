@@ -50,25 +50,18 @@ cersei-skills      = "0.1"   # agentskills.io registry
 cersei-vms         = "0.1"   # Sandbox / VM isolation
 ```
 
-## Abstract CLI
+## Bricks CLI
 
-Install the reference CLI tool built on Cersei directly from crates.io:
-
-```bash
-cargo install abstract-cli
-```
-
-This installs the `abstract` binary — a complete coding agent CLI.
-
-### One-line installer
-
-Prefer not to manage a Rust toolchain? On macOS or Linux:
+The `bricks` command is built from a checkout of the Bricks repository:
 
 ```bash
-curl -fsSL https://cersei.pacifio.dev/install-abstract.sh | bash
+cargo install --path crates/bricks-cli
 ```
 
-Detects your OS, installs Rust if needed, builds from source, and drops the binary on your PATH.
+It reads its models from `~/.bricks/providers.toml`; see `docs/cli.md` and
+`docs/providers.md` in the repository. The `abstract-cli` crate and the
+`install-abstract.sh` installer of the Cersei era built the old `abstract`
+binary and do not install Bricks.
 
 ## Tracking `main`
 

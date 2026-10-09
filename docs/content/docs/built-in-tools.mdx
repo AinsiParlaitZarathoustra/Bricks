@@ -204,7 +204,7 @@ Execute a shell command. Working directory and environment variables persist acr
 />
 
 <Callout>
-The bash classifier automatically analyzes commands for risk level. Destructive commands (`rm -rf /`, `dd`, fork bombs) are blocked regardless of permission policy.
+Bash calls are approved by the permission policy at the `Execute` level, whatever the command. No analysis of the command runs before it and none lowers or raises that level. The AST analysis of `cersei_tools::tool_primitives::bash_safety` is an SDK primitive a caller can use on its own; see [Code intelligence](/docs/code-intelligence#bash-command-safety-analysis).
 </Callout>
 
 ### PowerShell

@@ -3,23 +3,22 @@ title: Abstract CLI
 description: A coding agent CLI built on Cersei — single binary, graph memory, 34 tools.
 ---
 
+
+> **Historical (Cersei era).** This page documents `abstract`, the CLI of
+> `abstract-cli`, which no longer exists in the Bricks workspace. Its commands
+> and flags do not apply to Bricks. The current CLI is `bricks`
+> (`crates/bricks-cli`): install it from a checkout with
+> `cargo install --path crates/bricks-cli`, and see `docs/cli.md` in the
+> repository.
+
 # Abstract CLI
 
 Abstract is a complete CLI coding agent built on the Cersei SDK. One binary, zero runtime dependencies, graph memory by default.
 
 ## Install
 
-One-line install on macOS or Linux — detects your OS, installs the Rust toolchain if missing, builds from source, and drops the `abstract` binary on your PATH:
-
-```bash
-curl -fsSL https://cersei.pacifio.dev/install-abstract.sh | bash
-```
-
-Or with an existing Rust toolchain:
-
-```bash
-cargo install --git https://github.com/pacifio/cersei abstract-cli
-```
+No longer offered: the installer and the `abstract-cli` crate built the old
+binary. Use `bricks` instead (see above).
 
 ## Usage
 

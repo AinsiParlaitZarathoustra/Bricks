@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.5.0] — 2026-10-10
+
+### Security — dependencies (Sprint 11.1)
+
+- **Hickory 0.26.3**: `hickory-proto` 0.25.2 (RUSTSEC-2026-0118, RUSTSEC-2026-0119) is gone from the graph. reqwest stays at 0.12 without its `hickory-dns` feature; one Hickory 0.26 resolver is injected into every HTTP client through `cersei_types::http` (providers, web, MCP, embeddings, the HTTP tool). Still a Rust resolver (static musl builds do not depend on `getaddrinfo`); SSRF filtering checks the same resolution. On macOS, a scoped link-local nameserver (`fe80::…%en0`) that Hickory 0.26 refuses is skipped with a warning; no public DNS is ever added.
+- **tantivy 0.26.2, notify 8, portable-pty 0.9**: removes lru 0.12.5 (RUSTSEC-2026-0002), `instant` and `serial`. `cargo audit`: 9 advisories before (2 vulnerabilities, 2 unsound, 5 unmaintained), 4 after (0 vulnerabilities; lru 0.16.4 RUSTSEC-2026-0253 not reachable from tantivy's `usize` keys; bincode, fxhash, paste unmaintained). Details: `docs/maintenance.md`.
+- `reqwest-eventsource`, unused, is removed.
+
+### Fixed (Sprint 11.1)
+
+- **SSE decoder**: a block with `event:` but no `data` is no longer dispatched, and its name no longer leaks into the next event; `data:` with an empty value is still an event. One event (data, name, current line) is bounded to 16 MiB; comment lines are skipped without being stored. Beyond the bound the response ends with an explicit protocol error that reaches the runner — not retried, not replayed. The end-of-stream flush of a last event without a blank line is kept and documented.
+- **Bash analysis** (`tool_primitives::bash_safety`, an SDK primitive not wired into permissions): writes (`>`, `tee`, `sed -i`), interpreters and `sh -c` (whose literal script is analysed), `find -exec`/`-delete`, `xargs`, `awk system()`, `env`/`command`/`sudo`/`timeout` wrappers, git mutations (`branch -D`, `stash pop/drop/clear`, …), recursive deletion of `/` or the home folder in all its spellings, parse errors and dynamic names or targets are no longer reported as safe. `rm -rf` of an ordinary folder is `High`, not `Forbidden`. The Bash tool's approval (`Execute`) is unchanged.
+- **CodeSearch** indexed nothing when the workspace folder's name starts with a dot.
+
+### Removed (Sprint 11.1)
+
+- **`cersei_tools::bash_classifier`** (`classify_bash_command`, its `BashRiskLevel` with `Low`/`Medium`/`Critical`, `to_permission_level`): a second, substring-based classifier that nothing in production used. Use `tool_primitives::bash_safety::analyze_command`.
+- The Linux benchmark binaries, two `.pyc` files and `failure_patterns.txt` are no longer tracked (local copies kept; how to rebuild or recover them: `bench/term-bench/BINARIES.md`).
+- `docs/bun.lock`: the documentation site uses npm only (`package-lock.json`, `packageManager` set).
+
+### Changed — repository (Sprint 11.1)
+
+- **Version 0.5.0** across the workspace.
+- `Cargo.lock` is versioned; validations use `--locked`.
+- `sync_cargo.sh` publishes `bricks-semantic` and `cersei-web` too, and checks its list against `cargo metadata` before anything (`scripts/check_publish_order.py`, tested by `scripts/test_sync_cargo.sh`). Nothing was published.
+- `scripts/check_secrets.py` finds key-shaped values in staged or tracked files without printing them; `docs/secrets-history.md` lists the history's findings by fingerprint, with rotation and purge steps (not carried out).
+- Documentation: the crate map names `bricks-cli` and `bricks-tui`; pages of the old `abstract` CLI and provider system are marked historical, and install instructions point to `cargo install --path crates/bricks-cli`. The README shows version 0.5.0; its benchmark figures stay those measured on 0.4.6.
+
 ## [0.4.8] — 2026-10-08
 
 ### Removed — turn limits (Sprint 11.02)

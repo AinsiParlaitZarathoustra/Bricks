@@ -139,20 +139,17 @@ fn is_public_v4(ip: Ipv4Addr) -> bool {
 
 // ─── Resolver ────────────────────────────────────────────────────────────────
 
-/// DNS for the page client: answers are filtered by the policy, so the check
-/// holds for the address actually connected to.
+/// DNS for the page client: the shared resolver (`cersei_types::http`),
+/// with answers filtered by the policy, so the check holds for the address
+/// actually connected to.
 #[derive(Clone)]
 pub struct FilteringResolver {
     policy: Arc<NetworkPolicy>,
-    inner: Arc<tokio::sync::OnceCell<hickory_resolver::TokioResolver>>,
 }
 
 impl FilteringResolver {
     pub fn new(policy: Arc<NetworkPolicy>) -> Self {
-        Self {
-            policy,
-            inner: Arc::new(tokio::sync::OnceCell::new()),
-        }
+        Self { policy }
     }
 }
 
@@ -161,22 +158,13 @@ impl reqwest::dns::Resolve for FilteringResolver {
         let this = self.clone();
         Box::pin(async move {
             let host = name.as_str().trim_end_matches('.').to_ascii_lowercase();
-            let resolver = this
-                .inner
-                .get_or_try_init(|| async {
-                    let mut b = hickory_resolver::TokioResolver::builder_tokio()?;
-                    b.options_mut().ip_strategy =
-                        hickory_resolver::config::LookupIpStrategy::Ipv4AndIpv6;
-                    Ok::<_, hickory_resolver::ResolveError>(b.build())
-                })
-                .await?;
-            let lookup = resolver.lookup_ip(host.as_str()).await?;
+            let lookup = cersei_types::http::lookup(host.as_str()).await?;
             // The port is not known here: an exception for `host` (any port)
             // lets every address through; `host:port` exceptions are checked
             // on the URL before the request.
             let allowed = this.policy.allows_private(&host, None);
             let addrs: Vec<SocketAddr> = lookup
-                .iter()
+                .into_iter()
                 .filter(|ip| allowed || is_public(*ip))
                 .map(|ip| SocketAddr::new(ip, 0))
                 .collect();

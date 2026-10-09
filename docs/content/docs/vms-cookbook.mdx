@@ -277,7 +277,7 @@ docker run --rm cersei/sandbox-base:latest /usr/local/bin/cersei-envd --help || 
 cargo run --release --example vms_docker_smoke   # in 0.1.10
 ```
 
-In 0.1.10, `abstract --sandbox docker "fix the failing tests"` will allocate a sandbox automatically; for now, instantiate `DockerRuntime` and call `.create(...)` from your own glue code.
+The `bricks` CLI does not allocate a sandbox (the `abstract --sandbox` flag planned in the Cersei era was never part of Bricks): instantiate `DockerRuntime` and call `.create(...)` from your own glue code.
 
 ---
 

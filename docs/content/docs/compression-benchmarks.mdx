@@ -107,10 +107,11 @@ GOOGLE_API_KEY=... \
 
 Every call into `compress_tool_output` emits a `tracing::info!` event on the `cersei_compression` target. The integration tests install a subscriber automatically, so `--nocapture` surfaces them. In your own binary:
 
-```bash
-RUST_LOG=cersei_compression=info cargo run -p abstract-cli -- \
-  --compress aggressive "find any TODO comments in the codebase"
-```
+install a `tracing` subscriber filtered on `cersei_compression=info` (see
+the [overview](/docs/compression-overview)). The `bricks` binary installs no
+subscriber, so `RUST_LOG` has no effect on it. (The `abstract` CLI of the
+Cersei era had a `--compress` flag; Bricks sets the level with `[compression]
+level` in `bricks.toml`.)
 
 Sample line from the Gemini run:
 

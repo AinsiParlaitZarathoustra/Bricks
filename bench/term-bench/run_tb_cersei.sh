@@ -50,8 +50,8 @@ info(){ echo -e "${CYAN}▸${RESET} $*"; }; pass(){ echo -e "${GREEN}✓${RESET}
 echo ""; echo -e "${BOLD}cersei-tbench × Terminal-Bench 2.0${RESET}"
 command -v uv &>/dev/null && pass "uv" || { fail "'uv' not found"; exit 1; }
 [[ -f "$SCRIPT_DIR/tbench_agent.py" ]] && pass "Adapter" || { fail "tbench_agent.py missing"; exit 1; }
-[[ -f "$SCRIPT_DIR/tbench-agent-linux-amd64" || -f "$SCRIPT_DIR/tbench-agent-linux-arm64" ]] \
-  && pass "Binary" || { fail "tbench-agent binary missing — build it first"; exit 1; }
+[[ -f "${TBENCH_AGENT_BINARY_AMD64:-$SCRIPT_DIR/tbench-agent-linux-amd64}" || -f "${TBENCH_AGENT_BINARY_ARM64:-$SCRIPT_DIR/tbench-agent-linux-arm64}" ]] \
+  && pass "Binary" || { fail "tbench-agent binary missing — build it as in bench/term-bench/BINARIES.md"; exit 1; }
 
 ENV_FLAG=""
 if $USE_DAYTONA; then

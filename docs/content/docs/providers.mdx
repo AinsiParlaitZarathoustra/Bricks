@@ -6,6 +6,14 @@ description: 13 built-in LLM providers — Anthropic, OpenAI, Google, Mistral, G
 import { Callout } from 'fumadocs-ui/components/callout';
 import { TypeTable } from 'fumadocs-ui/components/type-table';
 
+> **Historical (Cersei era).** This page describes the old provider system
+> (`from_model_string`, `--model` aliases, provider-specific environment
+> variables) and the `abstract` CLI. None of it exists in Bricks: models are
+> declared in `providers.toml` and chosen as `provider_id/model_id`. The
+> current contract is `docs/providers.md` in the repository; do not follow
+> the commands below.
+
+
 # Providers
 
 Cersei supports 13 providers out of the box. Most use the OpenAI-compatible API format, which means adding a provider is just an env var — no new code.

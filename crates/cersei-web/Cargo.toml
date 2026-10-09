@@ -26,11 +26,10 @@ dom_query = { version = "0.28", features = ["markdown"] }
 # Lexical ranking; the default tokenizer (stemmers, stop-word lists) is not used.
 bm25 = { version = "2.3.2", default-features = false }
 encoding_rs = "0.8.42"
-# DNS through the same resolver reqwest uses here (static musl builds).
-hickory-resolver = { version = "0.25", features = ["tokio", "system-config"] }
+# HTTP clients and their DNS (`cersei_types::http`: hickory, static builds).
+cersei-types = { workspace = true }
 
 [dev-dependencies]
-cersei-types = { workspace = true }
 cersei-testkit = { workspace = true }
 tempfile = { workspace = true }
 flate2 = "1"

@@ -32,8 +32,12 @@ from harbor.models.agent.context import AgentContext  # type:ignore
 from harbor.models.trial.paths import EnvironmentPaths  # type:ignore
 
 _BENCH_DIR = Path(__file__).resolve().parent
-_BINARY_ARM64 = _BENCH_DIR / "tbench-agent-linux-arm64"
-_BINARY_AMD64 = _BENCH_DIR / "tbench-agent-linux-amd64"
+# Static Linux builds of `tbench-agent` (crate cersei-tbench), provided
+# locally — they are not versioned. Override with TBENCH_AGENT_BINARY_AMD64 /
+# TBENCH_AGENT_BINARY_ARM64. See BINARIES.md (build, checksums). Nothing is
+# ever downloaded.
+_BINARY_ARM64 = Path(os.environ.get("TBENCH_AGENT_BINARY_ARM64", _BENCH_DIR / "tbench-agent-linux-arm64"))
+_BINARY_AMD64 = Path(os.environ.get("TBENCH_AGENT_BINARY_AMD64", _BENCH_DIR / "tbench-agent-linux-amd64"))
 
 # Vertex service-account key (host path). Forwarded into each ephemeral container
 # so the agent can mint self-refreshing access tokens. Override with VERTEX_SA_FILE.
@@ -67,8 +71,9 @@ class CerseiTBenchAgent(BaseInstalledAgent):
         binary_path = _BINARY_AMD64 if ("x86_64" in arch or "amd64" in arch) else _BINARY_ARM64
         if not binary_path.exists():
             raise RuntimeError(
-                f"Binary not found at {binary_path}. Build with the musl cross-toolchain "
-                "(see project_agentrl_termbench memory / TERMINAL_BENCH.md)."
+                f"Binary not found at {binary_path}. Build it (static musl) as described "
+                "in bench/term-bench/BINARIES.md, or set TBENCH_AGENT_BINARY_AMD64 / "
+                "TBENCH_AGENT_BINARY_ARM64 to a local build."
             )
         await environment.upload_file(
             source_path=binary_path,

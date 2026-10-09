@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 #
-# sync_cargo.sh — publish the Cersei workspace crates to crates.io.
+# sync_cargo.sh — publish the library crates of the workspace to crates.io.
 #
-# The crate currently published is 0.1.9; the workspace has since moved on (and
-# gained new crates). This script publishes every library crate at the version
-# declared in the workspace `Cargo.toml`, in dependency order (leaves first), so
-# crates.io always has a crate's dependencies available before the dependents are
-# uploaded. Crates whose current version is already on crates.io are skipped, so
-# the script is safe to re-run after a partial/failed run.
+# It publishes the crates listed in CRATES below — an explicit selection, not
+# every workspace member (`cersei-testkit` and `longmem-bench` are private;
+# `bricks-cli` and `bricks-tui` are not published by this script) — at the
+# version declared in the workspace `Cargo.toml`, in dependency order (leaves
+# first), so crates.io always has a crate's dependencies before its dependents.
+# Before anything is done, the list is checked against `cargo metadata`
+# (scripts/check_publish_order.py): an unknown or private crate, a missing
+# internal dependency or a wrong order stops the script. Crates whose current
+# version is already on crates.io are skipped, so the script is safe to re-run
+# after a partial/failed run.
 #
 # Usage:
 #   ./sync_cargo.sh                 # publish everything that isn't already up
@@ -44,16 +48,20 @@ fi
 echo "Workspace version: $VERSION"
 
 # Library crates in dependency order (a crate appears after everything it
-# depends on). `cersei` is the umbrella facade and goes last.
+# depends on: normal, build and optional dependencies; dev-dependencies are
+# path-only and stripped on publish). `cersei` is the umbrella facade and goes
+# last.
 CRATES=(
   cersei-types
   cersei-compression
   cersei-embeddings
   cersei-lsp
+  bricks-semantic
   cersei-tools-derive
   cersei-hooks
   cersei-mcp
   cersei-provider
+  cersei-web
   cersei-skills
   cersei-memory
   cersei-vms
@@ -65,6 +73,12 @@ CRATES=(
   cersei-tbench
   cersei
 )
+
+# The list must match the workspace graph before anything is published.
+if ! python3 scripts/check_publish_order.py "${CRATES[@]}"; then
+  echo "the crate list above is not publishable as is; nothing was done" >&2
+  exit 1
+fi
 
 # Return 0 if <name>@<version> already exists on crates.io.
 already_published() {

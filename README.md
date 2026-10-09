@@ -4,7 +4,7 @@
 
 **An engine for agentic development. Built in Rust. At home in your terminal.**
 
-![Version](https://img.shields.io/badge/version-0.4.6-blue)
+![Version](https://img.shields.io/badge/version-0.5.0-blue)
 ![Rust](https://img.shields.io/badge/built_with-Rust-orange)
 
 [Quick start](#quick-start) · [What it does](#what-it-does) · [Configuration](#configuration) · [Documentation](#documentation) · [License](#license)
@@ -37,7 +37,7 @@ make its work more effective.
 
 ### Project status
 
-**Bricks 0.4.6** has a substantial, stable foundation. Development continues,
+**Bricks 0.5.0** has a substantial, stable foundation. Development continues,
 with further features and code optimisations still ahead.
 
 Bricks is a fork of Cersei, created by **Adib Mohsin (Pacifio)**. The inherited

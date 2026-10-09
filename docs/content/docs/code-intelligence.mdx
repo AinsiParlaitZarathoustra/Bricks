@@ -315,6 +315,8 @@ Files are ranked by importance score:
 
 Located in `cersei_tools::tool_primitives::bash_safety`. Uses tree-sitter to parse bash commands into ASTs and classify them by risk level.
 
+It is an SDK primitive: nothing calls it before the `Bash` tool runs a command, and it changes no permission. The tool is approved by the permission policy at the `Execute` level. The analysis runs nothing, and it is conservative: a parse error, a dynamic command name or target (`$CMD`, `"$DIR"`), an interpreter or an unknown program is never `Safe`, and every segment of a list, pipeline, substitution or redirection counts. It does not see aliases, functions defined elsewhere, `PATH` or the content of scripts.
+
 ### Usage
 
 ```rust
@@ -341,10 +343,12 @@ println!("Write paths: {:?}", analysis.write_paths); // ["temp.txt"]
 
 | Level | Description | Example Commands |
 |-------|-------------|-----------------|
-| **Safe** | Read-only, navigation, inspection | `ls`, `cat`, `grep`, `pwd`, `git status`, `echo` |
-| **Moderate** | Writes files, runs builds | `mkdir`, `cp`, `cargo build`, `npm install`, `git add` |
-| **High** | Destructive, network, permissions | `rm`, `chmod`, `curl`, `ssh`, `git push` |
-| **Forbidden** | Never auto-approve | `sudo`, `rm -rf /`, `dd`, `mkfs` |
+| **Safe** | Read-only, navigation, inspection | `ls`, `cat`, `grep`, `pwd`, `git status`, `git stash list`, `echo` |
+| **Moderate** | Writes files, runs builds, unknown programs | `mkdir`, `cp`, `echo x > f`, `tee f`, `sed -i`, `cargo build`, `git add`, `git stash pop`, `xargs` |
+| **High** | Destructive, code execution, network, permissions | `rm`, `rm -rf build`, `chmod`, `curl`, `bash -c`, `python3 -c`, `find -exec`, `git push`, `git branch -D`, `git stash clear` |
+| **Forbidden** | Never auto-approve | `sudo`, recursive deletion of `/` or the home folder (`rm -fr /`, `rm -rf "$HOME"`), `dd`, `mkfs`, fork bombs |
+
+Wrappers do not hide the program they run: `env`, `command`, `nice`, `nohup`, `timeout`, `xargs`, `find -exec` and `sudo` are followed, and the literal script of `bash -c '…'` is analysed too.
 
 ### Detected Constructs
 
@@ -352,12 +356,14 @@ The analyzer detects these AST patterns:
 
 | Construct | Detection | Risk Impact |
 |-----------|-----------|-------------|
-| Command substitution `$(...)` | `command_substitution` node | Moderate |
-| Process substitution `<(...)` | `process_substitution` node | Moderate |
-| File redirection `> file` | `file_redirect` node | Moderate (extracts target path) |
-| Pipeline `cmd1 \| cmd2` | `pipeline` node | Moderate |
-| Privilege escalation `sudo` | command name check | Forbidden |
-| Destructive flags `-rf /` | argument inspection | Forbidden |
+| Command substitution `$(...)` | `command_substitution` node | Moderate, plus the commands inside |
+| Process substitution `<(...)` | `process_substitution` node | Moderate, plus the commands inside |
+| Output redirection `> file` | `file_redirect` node | Moderate (extracts target path); `< file`, `2>&1` and `/dev/null` are not writes |
+| Pipeline `cmd1 \| cmd2` | `pipeline` node | Moderate, plus every stage |
+| Parse error | `ERROR` node | High |
+| Dynamic command name `$CMD` | expansion in the name | High |
+| Privilege escalation `sudo` | command name check | Forbidden, plus the program it runs |
+| Recursive deletion of `/` or `~` | flags and targets (`-fr`, `-r -f`, `--recursive`, `"/"`, `$HOME`) | Forbidden |
 
 ### API Reference
 

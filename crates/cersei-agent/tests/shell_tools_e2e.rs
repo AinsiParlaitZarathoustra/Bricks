@@ -473,3 +473,49 @@ async fn cancelling_a_turn_stops_the_running_command() {
         "pid {pid} survived the cancel"
     );
 }
+
+/// The bash analysis of `tool_primitives::bash_safety` is an SDK primitive:
+/// a command it rates `Safe` still goes through the approval rules of the
+/// real Bash tool (level `execute`), for `ask` as for `deny`.
+#[tokio::test]
+async fn a_command_rated_safe_still_needs_the_approval_rules() {
+    use cersei_agent::control::{Action, ApprovalBroker, ApprovalGate, ApprovalRules};
+    use cersei_tools::tool_primitives::bash_safety::is_safe;
+
+    let command = "ls > /dev/null";
+    assert!(is_safe(command));
+    for action in [Action::Ask, Action::Deny] {
+        let work = tempfile::tempdir().unwrap();
+        let url = serve(vec![
+            tool_call("s1", "Bash", json!({ "command": command })),
+            tool_call("s2", "Bash", json!({ "command": "touch ran" })),
+            text("ok"),
+        ]);
+        let rules = ApprovalRules {
+            execute: action,
+            ..ApprovalRules::default()
+        };
+        // Non-interactive: an `ask` cannot be answered and is refused.
+        let broker = ApprovalBroker::new(false);
+        let a = agent(&url, work.path())
+            .permission_policy(ApprovalGate::new(rules, broker.clone()))
+            .build()
+            .unwrap();
+        let _ = a.run("go").await;
+        let results = tool_results(&a);
+        assert!(!results.is_empty(), "{action:?}");
+        assert!(
+            results.iter().all(|r| r.contains("Permission denied")),
+            "{action:?}: {results:?}"
+        );
+        assert!(
+            !work.path().join("ran").exists(),
+            "{action:?}: a command ran"
+        );
+        if action == Action::Ask {
+            let asked = broker.unsatisfied();
+            assert_eq!(asked[0].tool, "Bash");
+            assert_eq!(asked[0].level, "execute");
+        }
+    }
+}

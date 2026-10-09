@@ -43,10 +43,10 @@ tree-sitter-rust = "0.23"
 tree-sitter-typescript = "0.23"
 tree-sitter-python = "0.23"
 tree-sitter-go = "0.23"
-notify = { version = "7", optional = true }
-portable-pty = { version = "0.8", optional = true }
+notify = { version = "8", optional = true }
+portable-pty = { version = "0.9", optional = true }
 base64 = "0.22"
-tantivy = "0.22"
+tantivy = "0.26.2"
 cersei-embeddings = { workspace = true }
 cersei-vms = { workspace = true, optional = true }
 ignore = { workspace = true }

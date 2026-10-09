@@ -3,7 +3,6 @@
 pub mod apply_patch;
 pub mod ask_user;
 pub mod bash;
-pub mod bash_classifier;
 pub mod code_scout;
 pub mod code_search;
 pub mod config_tool;

@@ -77,7 +77,7 @@ Claude Code and OpenCode are closed, monolithic CLI apps. You can't embed them i
 
 ## Performance at a Glance
 
-Numbers from `run_tool_bench_claude.sh` and `run_tool_bench_codex.sh`. Apple Silicon, release builds.
+Numbers from `run_tool_bench_claude.sh` and `run_tool_bench_codex.sh`, measured on the Cersei-era `abstract` CLI (historical: it no longer exists in this workspace). Apple Silicon, release builds. For Bricks 0.4.6 measurements, see the Benchmarks section of the repository README.
 
 ### Startup Time
 
@@ -346,17 +346,13 @@ For graph memory:
 cersei-memory = { version = "0.1", features = ["graph"] }
 ```
 
-For the Abstract CLI (complete coding agent) — install directly from crates.io:
+For the `bricks` CLI (complete coding agent), from a checkout of the Bricks repository:
 
 ```bash
-cargo install abstract-cli
+cargo install --path crates/bricks-cli
 ```
 
-Or one-line install on macOS or Linux without a Rust toolchain (detects OS, installs Rust if needed, builds from source, drops the binary on your PATH):
-
-```bash
-curl -fsSL https://cersei.pacifio.dev/install-abstract.sh | bash
-```
+See `docs/cli.md` in the repository. (`abstract-cli`, the CLI of the Cersei era, no longer exists.)
 
 ---
 

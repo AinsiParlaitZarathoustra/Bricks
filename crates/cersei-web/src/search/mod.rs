@@ -125,7 +125,7 @@ impl Searcher {
     pub fn new(cfg: SearchConfig, user_agent: &str) -> Result<Self, String> {
         // Endpoints are fixed and validated at load; no redirect is followed
         // so a key is never sent anywhere else.
-        let client = reqwest::Client::builder()
+        let client = cersei_types::http::client_builder()
             .redirect(reqwest::redirect::Policy::none())
             .user_agent(user_agent.to_string())
             .connect_timeout(cfg.timeout)

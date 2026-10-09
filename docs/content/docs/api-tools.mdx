@@ -1,6 +1,6 @@
 ---
 title: Tools (cersei-tools)
-description: Tool trait, 34 built-in tools, permission system, bash classifier, skill discovery.
+description: Tool trait, 34 built-in tools, permission system, bash safety analysis, skill discovery.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -9,7 +9,7 @@ import { TypeTable } from 'fumadocs-ui/components/type-table';
 
 # cersei-tools
 
-Tool execution system with 34 built-in tools, a granular permission model, a bash command safety classifier, and skill discovery from Claude Code and OpenCode formats.
+Tool execution system with 34 built-in tools, a granular permission model, a bash command safety analysis (SDK primitive), and skill discovery from Claude Code and OpenCode formats.
 
 ---
 
@@ -321,17 +321,22 @@ Agent::builder().permission_policy(RuleBased::new(rules))
 
 ---
 
-## Bash Classifier
+## Bash Safety Analysis
 
-The `BashTool` includes a command safety classifier that analyzes shell commands before execution:
+`BashTool` always asks the `PermissionPolicy` at the `Execute` level; nothing
+classifies the command before it runs, and the approval does not depend on
+the command text.
 
-- `ls`, `cat`, `head` → `ReadOnly`
-- `echo`, `cp`, `mv` → `Write`
-- `npm install`, `cargo build` → `Execute`
-- `rm -rf`, `dd`, `mkfs` → `Dangerous`
-- `shutdown`, `reboot` → `Forbidden`
+`cersei_tools::tool_primitives::bash_safety::analyze_command` is a separate
+primitive: it parses a command with tree-sitter and reports a risk level
+(`Safe`, `Moderate`, `High`, `Forbidden`), the commands seen and the paths
+written. A caller may use it, for example to show a warning; it is not wired
+into the tool's permissions. See
+[Code intelligence](/docs/code-intelligence#bash-command-safety-analysis).
 
-This runs automatically — you don't need to configure it. The classifier's output is checked against the agent's `PermissionPolicy`.
+The heuristic `cersei_tools::bash_classifier` module (`classify_bash_command`,
+its `BashRiskLevel` with `Low`/`Medium`/`Critical`) was removed in the
+Sprint 11.1 cleanup; use `bash_safety` instead.
 
 ---
 

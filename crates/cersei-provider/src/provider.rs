@@ -139,7 +139,7 @@ impl ProviderBuilder {
             key,
             profile: self.profile,
             tariff: self.tariff,
-            client: self.client.unwrap_or_default(),
+            client: self.client.unwrap_or_else(cersei_types::http::client),
         })
     }
 }
@@ -570,7 +570,17 @@ impl Provider for ConfiguredProvider {
             'read: while let Some(chunk) = bytes.next().await {
                 match chunk {
                     Ok(b) => {
-                        for sse in decoder.push(&b) {
+                        // An event over the decoder's bound ends the response
+                        // with a protocol error. Not retryable, so not replayed.
+                        let decoded = match decoder.push(&b) {
+                            Ok(events) => events,
+                            Err(overflow) => {
+                                let message = overflow.to_string();
+                                let _ = tx.send(StreamEvent::Error { message }).await;
+                                return;
+                            }
+                        };
+                        for sse in decoded {
                             let (events, done) = state.on_event(sse);
                             for ev in events {
                                 if tx.send(relay.map(ev)).await.is_err() {

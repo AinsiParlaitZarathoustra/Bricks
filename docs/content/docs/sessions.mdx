@@ -161,15 +161,18 @@ agent.run("Now fix the bug you found").await?;
 
 When `with_messages()` is used (e.g., during provider switching), the runner skips loading from memory to prevent duplicates.
 
-### Abstract CLI
+### Bricks CLI
 
 ```bash
-abstract --resume                # resume the most recent session
-abstract --resume abc12345       # resume a specific session by ID
-abstract sessions list           # list all sessions with size and date
-abstract sessions show abc12345  # view transcript
-abstract sessions rm abc12345    # delete a session
+bricks sessions                     # this project's sessions, most recent first
+bricks sessions --all               # every stored session
+bricks resume                       # open the interface on the session picker
+bricks resume abc12345              # open the interface on that session
+bricks run --session abc12345 "…"   # continue a session headless
 ```
+
+See `docs/cli.md` in the repository. (The `abstract sessions show/rm` commands
+of the Cersei era do not exist in Bricks.)
 
 ### Soft Delete (Tombstones)
 
@@ -235,14 +238,8 @@ With auto-compact enabled (default), most sessions never reach a single fork. A 
 
 ### CLI
 
-`abstract sessions rm` removes all parts automatically:
-
-```bash
-abstract sessions rm abc12345
-# Deleted session: abc12345 (3 parts)
-```
-
-`abstract sessions list` shows the combined size across parts.
+Deleting a session removes all of its parts. (Historical: the Cersei-era
+`abstract sessions rm` did it; the Bricks CLI has no delete command.)
 
 ---
 
@@ -397,11 +394,7 @@ grep '"type":"user"' session.jsonl | python3 -c "import sys,json; [print(json.lo
 grep '"type":"tombstone"' session.jsonl
 ```
 
-Or via the CLI:
-
-```bash
-abstract sessions show abc12345
-```
+Or open it in the Bricks interface with `bricks resume abc12345`.
 
 ### Concurrent Access
 
@@ -413,6 +406,4 @@ Session files use append-only writes — multiple processes can safely append to
 # Delete old sessions (older than 30 days)
 find ~/.claude/projects -name "*.jsonl" -mtime +30 -delete
 
-# Clear memory
-abstract memory clear
 ```

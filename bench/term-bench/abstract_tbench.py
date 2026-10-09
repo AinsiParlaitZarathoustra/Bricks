@@ -1,6 +1,11 @@
 """
 Abstract agent adapter for terminal-bench 2.0 (harbor framework).
 
+HISTORICAL: it drives the former `abstract` CLI, which no longer exists in
+this repository; the `abstract-cli` build below cannot be reproduced from it,
+and the provenance of the old binaries is unknown (see BINARIES.md). It is
+kept for reference. For Bricks, use tbench_agent.py (tbench-agent).
+
 Usage (no harbor patching required):
     cd bench && uv sync
     OPENAI_API_KEY=<key> PYTHONPATH=. uv run harbor run \
@@ -32,8 +37,8 @@ from harbor.models.trial.paths import EnvironmentPaths  # type:ignore
 
 # Pre-built static binaries (lives next to this file)
 _BENCH_DIR = Path(__file__).resolve().parent
-_BINARY_ARM64 = _BENCH_DIR / "abstract-linux-arm64"
-_BINARY_AMD64 = _BENCH_DIR / "abstract-linux-amd64"
+_BINARY_ARM64 = Path(os.environ.get("ABSTRACT_BINARY_ARM64", _BENCH_DIR / "abstract-linux-arm64"))
+_BINARY_AMD64 = Path(os.environ.get("ABSTRACT_BINARY_AMD64", _BENCH_DIR / "abstract-linux-amd64"))
 
 
 class AbstractAgent(BaseInstalledAgent):
@@ -112,8 +117,10 @@ class AbstractAgent(BaseInstalledAgent):
 
         if not binary_path.exists():
             raise RuntimeError(
-                f"Binary not found at {binary_path}. "
-                "See TERMINAL_BENCH.md for build instructions."
+                f"Binary not found at {binary_path}. This historical harness needs the "
+                "former `abstract` binary, which is no longer built here; see "
+                "bench/term-bench/BINARIES.md (recovery from Git history, checksums), or "
+                "set ABSTRACT_BINARY_AMD64 / ABSTRACT_BINARY_ARM64."
             )
 
         await environment.upload_file(

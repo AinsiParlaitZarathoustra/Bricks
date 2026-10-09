@@ -32,7 +32,7 @@ impl GeminiEmbeddings {
             model: DEFAULT_MODEL.into(),
             dimensions: DEFAULT_DIMENSIONS,
             truncate_chars: DEFAULT_TRUNCATE,
-            client: reqwest::Client::new(),
+            client: cersei_types::http::client(),
         }
     }
 

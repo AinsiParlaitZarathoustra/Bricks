@@ -1,5 +1,10 @@
 # Running Abstract on Terminal-Bench 2.0
 
+> Historical: this page describes the `abstract` harness of the Cersei era
+> (`abstract_tbench.py`, `run_dry_tb.sh`, `run_tb_full.sh`). The current
+> agent is `tbench-agent` (`tbench_agent.py`, `run_tb_cersei.sh`). Scripts
+> live in `bench/term-bench/`.
+
 ## Prerequisites
 
 1. **Docker** — required for sandboxed containers
@@ -84,18 +89,12 @@ PYTHONPATH=. uv run harbor run \
 - Auto-approves all tool permissions
 - Increases max turns to 80
 
-## Building the Linux binary
+## Linux binaries
 
-The pre-built binary (`abstract-linux-arm64`) must be statically linked to work
-on both Alpine (musl) and Debian (glibc) containers. Build with Alpine + musl:
-
-```bash
-docker run --rm -v $(pwd)/..:/src -w /src rust:1.94-alpine sh -c "
-  apk add --no-cache musl-dev openssl-dev openssl-libs-static pkgconf git perl make
-  OPENSSL_STATIC=1 CARGO_TARGET_DIR=/tmp/tgt cargo build --release -p abstract-cli
-  cp /tmp/tgt/release/abstract /src/bench/abstract-linux-arm64
-"
-```
+The binaries are not tracked by Git. How to build `tbench-agent`, the
+checksums of the historical `abstract-*` binaries, how to recover them from
+the history, and the environment variables that point the harnesses at
+another path: see [BINARIES.md](BINARIES.md).
 
 ## Local benchmark (without Docker)
 

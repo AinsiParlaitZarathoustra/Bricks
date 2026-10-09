@@ -44,7 +44,7 @@ pub struct BoundedHttpClient {
 
 impl BoundedHttpClient {
     pub fn new(max_message_bytes: usize) -> Result<Self, String> {
-        let client = reqwest::Client::builder()
+        let client = cersei_types::http::client_builder()
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|e| format!("cannot build the MCP HTTP client: {e}"))?;

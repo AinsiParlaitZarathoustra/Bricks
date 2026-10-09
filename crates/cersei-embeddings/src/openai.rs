@@ -33,7 +33,7 @@ impl OpenAiEmbeddings {
             dimensions: DEFAULT_DIMENSIONS,
             truncate_chars: DEFAULT_TRUNCATE,
             base_url: DEFAULT_BASE_URL.into(),
-            client: reqwest::Client::new(),
+            client: cersei_types::http::client(),
         }
     }
 
