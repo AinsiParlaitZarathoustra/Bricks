@@ -1,14 +1,41 @@
-//! # Phase 4 Stress Test — Skills System
+//! # Stress test — Agent Skills
 //!
-//! Tests skill discovery, loading, expansion, bundled skills, disk skills
-//! in both commands and skills formats, and real user skill compatibility.
+//! The `bricks-skills` service and the `Skill` tool, on temporary folders
+//! only (an injected home: no personal skill of the machine is read).
+//! Built-in documents, the five sources and their priorities, collisions,
+//! trust, incompatible documents, activation, resources, the tool contract,
+//! an agent's single `Skill` registration, and discovery at scale.
 //!
 //! ```bash
-//! cargo run --example phase4_stress_test --release
+//! cargo run --release -p cersei --example stress_skills
 //! ```
 
 use cersei::prelude::*;
+use cersei::skills::{standard_roots, ProjectDecision, ResolveError, SkillAccess, SkillsService};
+use std::path::Path;
 use std::sync::Arc;
+use std::time::Instant;
+
+fn write(root: &Path, dir: &str, front: &str, body: &str) {
+    let d = root.join(dir);
+    std::fs::create_dir_all(&d).unwrap();
+    std::fs::write(d.join("SKILL.md"), format!("---\n{front}---\n{body}")).unwrap();
+}
+
+struct Nothing;
+
+#[async_trait]
+impl Provider for Nothing {
+    fn name(&self) -> &str {
+        "none"
+    }
+    fn context_window(&self, _: &str) -> u64 {
+        100_000
+    }
+    async fn complete(&self, _: CompletionRequest) -> Result<cersei::provider::CompletionStream> {
+        Err(CerseiError::Provider("not used".into()))
+    }
+}
 
 fn main() {
     let mut passed = 0u32;
@@ -27,415 +54,348 @@ fn main() {
     }
 
     println!("\n╔══════════════════════════════════════════════════╗");
-    println!("║  Phase 4 — Skills System Stress Test              ║");
+    println!("║  Agent Skills — Stress Test                      ║");
     println!("╚══════════════════════════════════════════════════╝\n");
 
     let rt = tokio::runtime::Runtime::new().unwrap();
-    let ctx = ToolContext {
-        working_dir: std::env::temp_dir(),
-        session_id: "phase4".into(),
-        permissions: Arc::new(AllowAll),
-        cost_tracker: Arc::new(CostTracker::new()),
-        mcp_manager: None,
-        extensions: Extensions::default(),
-    };
+    let tmp = tempfile::tempdir().unwrap();
+    let project = tmp.path().join("project");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::create_dir_all(&home).unwrap();
 
-    // ── 1. Bundled Skills ────────────────────────────────────────────────
-    println!("  1. Bundled Skills");
-    println!("  ─────────────────");
+    // ── 1. Built-in skills ───────────────────────────────────────────────
+    println!("  1. Built-in skills");
+    println!("  ──────────────────");
     {
-        use cersei_tools::skills::bundled::*;
-
-        let all = user_invocable_skills();
-        check!(&format!("{} bundled skills", all.len()), all.len() >= 7);
-
-        // Find by name
-        check!("find 'simplify'", find_bundled_skill("simplify").is_some());
-        check!("find 'debug'", find_bundled_skill("debug").is_some());
-        check!("find 'commit'", find_bundled_skill("commit").is_some());
-        check!("find 'verify'", find_bundled_skill("verify").is_some());
-        check!("find 'remember'", find_bundled_skill("remember").is_some());
-        check!("find 'stuck'", find_bundled_skill("stuck").is_some());
-        check!("find 'loop'", find_bundled_skill("loop").is_some());
-
-        // Find by alias
+        let svc = SkillsService::standard(&project, Some(&home));
+        let access = SkillAccess::new(Arc::new(svc));
+        let names: Vec<String> = access
+            .catalog()
+            .entries
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
+        for n in ["commit", "debug", "remember", "simplify", "stuck", "verify"] {
+            check!(
+                format!("built-in `{n}` is listed"),
+                names.iter().any(|x| x == n)
+            );
+        }
+        for n in &names {
+            let a = access.activate(n).unwrap();
+            check!(
+                format!("`{n}` parses with the common parser, no template"),
+                !a.body.contains("$ARGUMENTS") && a.dir.is_none()
+            );
+        }
         check!(
-            "alias 'mem' → remember",
-            find_bundled_skill("mem").unwrap().name == "remember"
+            "historical aliases are gone (`mem`, `diagnose`)",
+            access.activate("mem").is_err() && access.activate("diagnose").is_err()
         );
         check!(
-            "alias 'diagnose' → debug",
-            find_bundled_skill("diagnose").unwrap().name == "debug"
+            "no `loop` built-in (no scheduler in Bricks)",
+            access.activate("loop").is_err()
         );
-        check!(
-            "alias 'help-me' → stuck",
-            find_bundled_skill("help-me").unwrap().name == "stuck"
-        );
-        check!(
-            "alias 'check' → verify",
-            find_bundled_skill("check").unwrap().name == "verify"
-        );
-
-        // Case insensitive
-        check!("case insensitive", find_bundled_skill("SIMPLIFY").is_some());
-        check!("not found", find_bundled_skill("nonexistent").is_none());
-
-        // Allowed tools
-        let debug = find_bundled_skill("debug").unwrap();
-        check!("debug has allowed_tools", debug.allowed_tools.is_some());
-        check!(
-            "debug allows Read",
-            debug.allowed_tools.unwrap().contains(&"Read")
-        );
-
-        let simplify = find_bundled_skill("simplify").unwrap();
-        check!(
-            "simplify has no tool restriction",
-            simplify.allowed_tools.is_none()
-        );
-
-        // Load and expand
-        let loaded = load_bundled(debug, None);
-        let expanded = loaded.expand(Some("tests are flaky"));
-        check!(
-            "expand replaces $ARGUMENTS",
-            expanded.contains("tests are flaky")
-        );
-        check!(
-            "expand removes $ARGUMENTS marker",
-            !expanded.contains("$ARGUMENTS")
-        );
-        println!();
     }
-
-    // ── 2. Disk Skills (Claude Code Format) ──────────────────────────────
-    println!("  2. Claude Code Format (.claude/commands/*.md)");
-    println!("  ──────────────────────────────────────────────");
-    {
-        use cersei_tools::skills::discovery::*;
-
-        let tmp = tempfile::tempdir().unwrap();
-        let cmd_dir = tmp.path().join(".claude/commands");
-        std::fs::create_dir_all(&cmd_dir).unwrap();
-
-        // Create test skills
-        std::fs::write(
-            cmd_dir.join("deploy.md"),
-            "\
----
-description: Deploy the application
-argument-hint: <environment>
-allowed-tools: Bash, Read
----
-
-Deploy $ARGUMENTS to the target environment.
-1. Run tests first
-2. Build the release
-3. Deploy$ARGUMENTS_SUFFIX
-",
-        )
-        .unwrap();
-
-        std::fs::write(
-            cmd_dir.join("review.md"),
-            "\
-# Code Review
-
-Review the changes in this PR and provide feedback.
-Focus on: correctness, performance, readability.
-",
-        )
-        .unwrap();
-
-        std::fs::write(
-            cmd_dir.join("no-frontmatter.md"),
-            "\
-Just a plain skill with no YAML frontmatter.
-It should still be discoverable.
-",
-        )
-        .unwrap();
-
-        let skills = discover_all(Some(tmp.path()), &[]);
-        let deploy = skills.iter().find(|s| s.name == "deploy");
-        check!("discover deploy.md", deploy.is_some());
-        check!(
-            "deploy has description from FM",
-            deploy.unwrap().description == "Deploy the application"
-        );
-        check!(
-            "deploy has allowed_tools",
-            deploy.unwrap().allowed_tools.is_some()
-        );
-
-        let review = skills.iter().find(|s| s.name == "review");
-        check!("discover review.md", review.is_some());
-        check!(
-            "review description from first line",
-            review.unwrap().description.contains("Code Review")
-        );
-
-        let plain = skills.iter().find(|s| s.name == "no-frontmatter");
-        check!("discover no-frontmatter.md", plain.is_some());
-
-        // Load and expand
-        let loaded = load_skill("deploy", Some(tmp.path()), &[]);
-        check!("load deploy", loaded.is_some());
-        let loaded = loaded.unwrap();
-        let expanded = loaded.expand(Some("production"));
-        check!("expand $ARGUMENTS", expanded.contains("Deploy production"));
-        check!(
-            "expand $ARGUMENTS_SUFFIX",
-            expanded.contains(": production")
-        );
-        check!("no leftover markers", !expanded.contains("$ARGUMENTS"));
-        println!();
-    }
-
-    // ── 3. Disk Skills (Skills Format) ─────────────────────────────────
-    println!("  3. Skills Format (.claude/skills/<name>/SKILL.md)");
-    println!("  ───────────────────────────────────────────────────");
-    {
-        use cersei_tools::skills::discovery::*;
-
-        let tmp = tempfile::tempdir().unwrap();
-
-        // Create skills format skill
-        let skill_dir = tmp.path().join(".claude/skills/cloudflare");
-        std::fs::create_dir_all(&skill_dir).unwrap();
-        std::fs::write(
-            skill_dir.join("SKILL.md"),
-            "\
----
-name: cloudflare
-description: Cloudflare platform development skill
-references:
-  - workers
-  - pages
----
-
-# Cloudflare Platform
-
-Use this skill for any Cloudflare development.
-
-## Workers
-Deploy serverless functions to Cloudflare Workers.
-",
-        )
-        .unwrap();
-
-        // Create agents-sdk skill
-        let skill_dir2 = tmp.path().join(".claude/skills/agents-sdk");
-        std::fs::create_dir_all(&skill_dir2).unwrap();
-        std::fs::write(
-            skill_dir2.join("SKILL.md"),
-            "\
----
-name: agents-sdk
-description: Build AI agents with the Agents SDK
----
-
-# Agents SDK Skill
-
-Build durable AI agents that survive restarts.
-",
-        )
-        .unwrap();
-
-        let skills = discover_all(Some(tmp.path()), &[]);
-        let cf = skills.iter().find(|s| s.name == "cloudflare");
-        check!("discover cloudflare SKILL.md", cf.is_some());
-        check!(
-            "cloudflare format is Skills",
-            cf.unwrap().format == cersei_tools::skills::SkillFormat::Skills
-        );
-
-        let agents = skills.iter().find(|s| s.name == "agents-sdk");
-        check!("discover agents-sdk SKILL.md", agents.is_some());
-
-        // Load
-        let loaded = load_skill("cloudflare", Some(tmp.path()), &[]);
-        check!("load cloudflare", loaded.is_some());
-        check!(
-            "content has Workers section",
-            loaded.unwrap().content.contains("Workers")
-        );
-        println!();
-    }
-
-    // ── 4. Precedence & Deduplication ────────────────────────────────────
-    println!("  4. Precedence & Deduplication");
-    println!("  ─────────────────────────────");
-    {
-        use cersei_tools::skills::discovery::*;
-
-        let tmp = tempfile::tempdir().unwrap();
-        let cmd_dir = tmp.path().join(".claude/commands");
-        std::fs::create_dir_all(&cmd_dir).unwrap();
-
-        // Create a disk skill with same name as bundled
-        std::fs::write(
-            cmd_dir.join("simplify.md"),
-            "# Overridden simplify\nDisk version.",
-        )
-        .unwrap();
-
-        let skills = discover_all(Some(tmp.path()), &[]);
-        let simplify = skills.iter().find(|s| s.name == "simplify").unwrap();
-        check!("bundled takes precedence", simplify.bundled);
-
-        // No duplicate
-        let simplify_count = skills.iter().filter(|s| s.name == "simplify").count();
-        check!("no duplicate simplify", simplify_count == 1);
-        println!();
-    }
-
-    // ── 5. SkillTool Integration ─────────────────────────────────────────
-    println!("  5. SkillTool (via Agent)");
-    println!("  ────────────────────────");
-    rt.block_on(async {
-        let tmp = tempfile::tempdir().unwrap();
-        let cmd_dir = tmp.path().join(".claude/commands");
-        std::fs::create_dir_all(&cmd_dir).unwrap();
-        std::fs::write(cmd_dir.join("greet.md"), "Say hello to $ARGUMENTS warmly.").unwrap();
-
-        let tool = cersei_tools::skill_tool::SkillTool::new().with_project_root(tmp.path());
-        let ctx = ToolContext {
-            working_dir: tmp.path().to_path_buf(),
-            ..ctx.clone()
-        };
-
-        // List
-        let r = tool
-            .execute(serde_json::json!({"skill": "list"}), &ctx)
-            .await;
-        check!(
-            "SkillTool list works",
-            r.content.contains("Available skills:")
-        );
-        check!("List includes bundled", r.content.contains("simplify"));
-        check!("List includes disk skill", r.content.contains("greet"));
-
-        // Load bundled
-        let r = tool
-            .execute(serde_json::json!({"skill": "commit"}), &ctx)
-            .await;
-        check!(
-            "Load bundled 'commit'",
-            !r.is_error && r.content.contains("git")
-        );
-
-        // Load disk
-        let r = tool
-            .execute(serde_json::json!({"skill": "greet", "args": "world"}), &ctx)
-            .await;
-        check!("Load disk 'greet'", !r.is_error);
-        check!(
-            "Expand $ARGUMENTS",
-            r.content.contains("Say hello to world")
-        );
-
-        // Not found with suggestion
-        let r = tool
-            .execute(serde_json::json!({"skill": "simp"}), &ctx)
-            .await;
-        check!(
-            "Not found gives suggestion",
-            r.is_error && r.content.contains("Did you mean")
-        );
-    });
     println!();
 
-    // ── 6. Real User Skills ──────────────────────────────────────────────
-    println!("  6. Real User Skills (~/.claude/commands/)");
-    println!("  ─────────────────────────────────────────");
+    // ── 2. Sources and priorities ────────────────────────────────────────
+    println!("  2. Sources, priorities, collisions");
+    println!("  ──────────────────────────────────");
     {
-        use cersei_tools::skills::discovery::*;
+        let ok = |n: &str, d: &str| format!("name: {n}\ndescription: {d}\n");
+        write(
+            &project.join(".agents/skills"),
+            "shared",
+            &ok("shared", "p-agents"),
+            "A",
+        );
+        write(
+            &project.join(".claude/skills"),
+            "shared",
+            &ok("shared", "p-claude"),
+            "B",
+        );
+        write(
+            &home.join(".agents/skills"),
+            "shared",
+            &ok("shared", "h-agents"),
+            "C",
+        );
+        write(
+            &home.join(".claude/skills"),
+            "shared",
+            &ok("shared", "h-claude"),
+            "D",
+        );
+        write(
+            &home.join(".claude/skills"),
+            "verify",
+            &ok("verify", "personal verify"),
+            "E",
+        );
+        write(
+            &project.join(".cersei/skills"),
+            "legacy",
+            &ok("legacy", "old"),
+            "F",
+        );
+        std::fs::create_dir_all(project.join(".claude/commands")).unwrap();
+        std::fs::write(project.join(".claude/commands/cmd.md"), "Do $ARGUMENTS").unwrap();
+        let svc = Arc::new(SkillsService::standard(&project, Some(&home)));
+        let access = SkillAccess::new(Arc::clone(&svc));
+        let desc = |a: &SkillAccess, n: &str| a.activate(n).map(|x| x.description).ok();
+        check!(
+            "pending project: personal wins",
+            desc(&access, "shared").as_deref() == Some("h-agents")
+        );
+        check!(
+            "a personal skill shadows a built-in one",
+            desc(&access, "verify").as_deref() == Some("personal verify")
+        );
+        access.decide_project(ProjectDecision::Granted);
+        check!(
+            "approved project: .agents first",
+            desc(&access, "shared").as_deref() == Some("p-agents")
+        );
+        let reg = svc.registry();
+        check!(
+            "every homonym stays visible for diagnostics (4)",
+            reg.candidates.iter().filter(|c| c.key == "shared").count() == 4
+        );
+        check!(
+            ".cersei/skills and .claude/commands are not read",
+            access.activate("legacy").is_err() && access.activate("cmd").is_err()
+        );
+        let child = access.clone();
+        access.decide_project(ProjectDecision::Denied);
+        check!(
+            "a sub-agent's access follows the session's decision",
+            desc(&child, "shared").as_deref() == Some("h-agents")
+        );
+    }
+    println!();
 
-        let home_cmds = dirs::home_dir().map(|h| h.join(".claude/commands"));
-        if let Some(ref dir) = home_cmds {
-            if dir.exists() {
-                let skills = discover_all(None, &[]);
-                let disk_skills: Vec<_> = skills.iter().filter(|s| !s.bundled).collect();
-                check!(
-                    &format!("Found {} user skills", disk_skills.len()),
-                    !disk_skills.is_empty()
-                );
+    // ── 3. Validation ────────────────────────────────────────────────────
+    println!("  3. Validation and incompatible documents");
+    println!("  ────────────────────────────────────────");
+    {
+        let t = tempfile::tempdir().unwrap();
+        let root = t.path().join("h/.agents/skills");
+        write(
+            &root,
+            "données",
+            "name: données\ndescription: unicode\n",
+            "x",
+        );
+        write(
+            &root,
+            "fork",
+            "name: fork\ndescription: d\ncontext: fork\n",
+            "x",
+        );
+        write(&root, "wrong-dir", "name: other\ndescription: d\n", "x");
+        std::fs::create_dir_all(root.join("crlf")).unwrap();
+        std::fs::write(
+            root.join("crlf/SKILL.md"),
+            "---\r\nname: crlf\r\ndescription: >-\r\n  two\r\n  lines\r\n---\r\nbody\r\n",
+        )
+        .unwrap();
+        let svc = SkillsService::new(
+            standard_roots(&t.path().join("p"), Some(&t.path().join("h"))),
+            &[],
+            None,
+        );
+        let a = SkillAccess::new(Arc::new(svc));
+        check!("Unicode name accepted", a.activate("données").is_ok());
+        check!(
+            "CRLF and folded description",
+            a.activate("crlf").map(|x| x.description).ok().as_deref() == Some("two lines")
+        );
+        check!(
+            "`context: fork` → incompatible, not activable",
+            matches!(
+                a.activate("fork"),
+                Err(cersei::skills::ActivationError::Resolve(
+                    ResolveError::Incompatible { .. }
+                ))
+            )
+        );
+        check!(
+            "name must match its directory",
+            a.activate("other").is_err() && a.activate("wrong-dir").is_err()
+        );
+    }
+    println!();
 
-                for s in &disk_skills {
-                    println!(
-                        "    {} — {} [{:?}]",
-                        s.name,
-                        &s.description[..s.description.floor_char_boundary(50)],
-                        s.format
-                    );
-                }
+    // ── 4. The Skill tool ────────────────────────────────────────────────
+    println!("  4. Skill tool");
+    println!("  ─────────────");
+    {
+        let t = tempfile::tempdir().unwrap();
+        let root = t.path().join("h/.agents/skills");
+        write(
+            &root,
+            "list",
+            "name: list\ndescription: named list\n",
+            "LIST-BODY",
+        );
+        write(
+            &root,
+            "pdf",
+            "name: pdf\ndescription: PDFs\nallowed-tools: Bash Read\n",
+            "Use scripts/x.sh",
+        );
+        std::fs::create_dir_all(root.join("pdf/scripts")).unwrap();
+        std::fs::write(root.join("pdf/scripts/x.sh"), "SCRIPT-CONTENT").unwrap();
+        let svc = SkillsService::new(
+            standard_roots(&t.path().join("p"), Some(&t.path().join("h"))),
+            &[],
+            None,
+        );
+        let session = cersei::tools::skill_tool::SkillSession::new(SkillAccess::new(Arc::new(svc)));
+        let ext = Extensions::default();
+        ext.insert(session.clone());
+        let ctx = ToolContext {
+            working_dir: t.path().to_path_buf(),
+            session_id: "stress-skills".into(),
+            permissions: Arc::new(AllowAll),
+            cost_tracker: Arc::new(CostTracker::new()),
+            mcp_manager: None,
+            extensions: ext,
+        };
+        let tool = cersei::tools::skill_tool::SkillTool::new();
+        check!(
+            "read-only permission level",
+            tool.permission_level() == PermissionLevel::ReadOnly
+        );
+        let r = rt.block_on(tool.execute(serde_json::json!({"skill": "list"}), &ctx));
+        check!(
+            "`skill: list` without action lists",
+            r.content.contains("can be activated")
+        );
+        let r = rt.block_on(tool.execute(
+            serde_json::json!({"action": "activate", "skill": "list"}),
+            &ctx,
+        ));
+        check!(
+            "a skill named `list` is activable",
+            r.content.contains("LIST-BODY")
+        );
+        let r = rt.block_on(tool.execute(
+            serde_json::json!({"skill": "pdf", "args": "report.pdf"}),
+            &ctx,
+        ));
+        check!(
+            "resources listed, not read",
+            r.content.contains("scripts/x.sh") && !r.content.contains("SCRIPT-CONTENT")
+        );
+        check!(
+            "allowed-tools reported as not applied",
+            r.content.contains("does not apply it")
+        );
+        check!(
+            "the request is separate",
+            r.content
+                .contains("Request to apply it to (from the call): report.pdf")
+        );
+        check!(
+            "only proposed by the tool (the engine commits)",
+            session.ledger.lock().active().count() == 0
+        );
+    }
+    println!();
 
-                // Try loading the design skill specifically
-                let loaded = load_skill("design", None, &[]);
-                if let Some(loaded) = loaded {
-                    check!("Load 'design' skill", true);
-                    check!(
-                        &format!("design.md is {} chars", loaded.content.len()),
-                        loaded.content.len() > 100
-                    );
-                    check!(
-                        "design has real content",
-                        loaded.content.contains("Design") || loaded.content.contains("design")
-                    );
-                } else {
-                    println!("    (design skill not found — skipping)");
-                }
-            } else {
-                println!("    No ~/.claude/commands/ directory — skipping real skill tests");
-            }
+    // ── 5. Agent registration ────────────────────────────────────────────
+    println!("  5. Agent");
+    println!("  ────────");
+    {
+        let svc = SkillsService::standard(&project, Some(&home));
+        let access = SkillAccess::new(Arc::new(svc));
+        let agent = Agent::builder()
+            .provider(Nothing)
+            .tools(cersei::tools::coding())
+            .skills(access.clone())
+            .build()
+            .unwrap();
+        check!(
+            "`Skill` registered once",
+            agent
+                .tool_list()
+                .iter()
+                .filter(|t| t.name() == "Skill")
+                .count()
+                == 1
+        );
+        let agent = Agent::builder()
+            .provider(Nothing)
+            .tool(cersei::tools::skill_tool::SkillTool::new())
+            .skills(access)
+            .build()
+            .unwrap();
+        check!(
+            "an existing `Skill` tool is not duplicated",
+            agent
+                .tool_list()
+                .iter()
+                .filter(|t| t.name() == "Skill")
+                .count()
+                == 1
+        );
+        let plain = Agent::builder().provider(Nothing).build().unwrap();
+        check!(
+            "no service: no `Skill` tool",
+            plain.tool_by_name("Skill").is_none()
+        );
+    }
+    println!();
+
+    // ── 6. Discovery at scale ────────────────────────────────────────────
+    println!("  6. Discovery at scale");
+    println!("  ─────────────────────");
+    {
+        let t = tempfile::tempdir().unwrap();
+        let root = t.path().join("h/.agents/skills");
+        for i in 0..300 {
+            let n = format!("skill-{i:03}");
+            write(
+                &root,
+                &n,
+                &format!("name: {n}\ndescription: number {i}\n"),
+                &"x".repeat(2_000),
+            );
         }
-        println!();
+        let start = Instant::now();
+        let svc = SkillsService::new(
+            standard_roots(&t.path().join("p"), Some(&t.path().join("h"))),
+            &[],
+            None,
+        );
+        let elapsed = start.elapsed();
+        let a = SkillAccess::new(Arc::new(svc));
+        let cat = a.catalog();
+        println!("    300 skills discovered in {} ms", elapsed.as_millis());
+        check!("catalog bounded (100 entries)", cat.entries.len() == 100);
+        check!("partial catalog says so", cat.omitted == 200);
+        check!(
+            "catalog carries no instructions",
+            !cat.render().unwrap_or_default().contains(&"x".repeat(100))
+        );
+        let start = Instant::now();
+        a.service.reload();
+        println!("    reload in {} ms", start.elapsed().as_millis());
+        check!("discovery under 2 s", elapsed.as_millis() < 2_000);
     }
+    println!();
 
-    // ── 7. Format Skill List Output ──────────────────────────────────────
-    println!("  7. Skill List Formatting");
-    println!("  ────────────────────────");
-    {
-        use cersei_tools::skills::discovery::*;
-
-        let skills = discover_all(None, &[]);
-        let formatted = format_skill_list(&skills);
-
-        check!(
-            "Formatted list starts with header",
-            formatted.starts_with("Available skills:")
-        );
-        check!("Contains [bundled] tag", formatted.contains("[bundled]"));
-        check!(
-            "Contains aliases",
-            formatted.contains("aliases:") || skills.iter().all(|s| s.aliases.is_empty())
-        );
-
-        // Check formatting structure
-        let lines: Vec<&str> = formatted.lines().collect();
-        check!(
-            &format!("Has {} lines for {} skills", lines.len(), skills.len()),
-            lines.len() > skills.len()
-        );
-        println!();
-    }
-
-    // ── Summary ──────────────────────────────────────────────────────────
-    println!("╔══════════════════════════════════════════════════╗");
+    let total = passed + failed;
     if failed == 0 {
-        println!(
-            "║  \x1b[32mALL {} CHECKS PASSED\x1b[0m                              ║",
-            passed
-        );
+        println!("╔══════════════════════════════════════════════════╗");
+        println!("║  \x1b[32mALL {total} CHECKS PASSED\x1b[0m                              ║");
+        println!("╚══════════════════════════════════════════════════╝");
     } else {
-        println!(
-            "║  \x1b[31m{} PASSED, {} FAILED\x1b[0m                               ║",
-            passed, failed
-        );
-    }
-    println!("╚══════════════════════════════════════════════════╝\n");
-    if failed > 0 {
+        println!("  \x1b[31m{failed} of {total} checks FAILED\x1b[0m");
         std::process::exit(1);
     }
 }

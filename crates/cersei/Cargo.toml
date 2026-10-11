@@ -20,6 +20,7 @@ cersei-agent = { workspace = true }
 cersei-memory = { workspace = true }
 cersei-hooks = { workspace = true }
 cersei-mcp = { workspace = true }
+bricks-skills = { workspace = true }
 cersei-vms = { workspace = true, optional = true }
 cersei-agentlang = { workspace = true, optional = true }
 cersei-agentrl = { workspace = true, optional = true }

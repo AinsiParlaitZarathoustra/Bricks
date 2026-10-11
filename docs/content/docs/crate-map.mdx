@@ -5,7 +5,7 @@ description: Detailed breakdown of every crate in the Bricks workspace.
 
 # Crate Map
 
-The Bricks workspace (version 0.5.0). The inherited crates keep their
+The Bricks workspace (version 0.6.0). The inherited crates keep their
 `cersei-*` names. Layers, from the top:
 
 ```text
@@ -13,7 +13,7 @@ bricks-cli          the `bricks` binary: arguments, configuration, headless / JS
   bricks-tui        terminal interface: renders engine events, turns gestures into commands
 cersei-agent        engine: agent loop, controller (commands/events), approvals, compaction
   cersei-provider, cersei-tools, cersei-memory, cersei-compression, cersei-web,
-  bricks-semantic, cersei-lsp, cersei-mcp, cersei-embeddings, cersei-skills, …
+  bricks-semantic, bricks-skills, cersei-lsp, cersei-mcp, cersei-embeddings, …
 cersei-types        shared types and the shared HTTP client
 ```
 
@@ -37,6 +37,7 @@ Re-exports everything. Use `cersei::prelude::*` for common types.
 
 ```rust
 pub use cersei_types as types;
+pub use bricks_skills as skills;
 pub use cersei_provider as provider;
 pub use cersei_tools as tools;
 pub use cersei_agent::{Agent, AgentBuilder, AgentOutput, Reporter};
@@ -74,7 +75,7 @@ Core types: `Message`, `Role`, `ContentBlock`, `Usage`, `StopReason`, `StreamEve
 - Scheduling: 5 (CronCreate/List/Delete, Sleep, RemoteTrigger)
 - Orchestration: 9 (SendMessage, Tasks x6, Worktree x2)
 - Other: 3 (AskUserQuestion, SyntheticOutput, ConfigTool)
-- Skills: 1 (SkillTool — discovers and runs bundled/custom skills)
+- Skills: 1 (`Skill` — activates Agent Skills through `bricks-skills`; added by `AgentBuilder::skills`, not part of the sets)
 
 ## cersei-tools-derive
 
@@ -114,7 +115,7 @@ The **AgentTemplate** DSL: hand-written lexer/parser/AST + an async, permission-
 * **cersei-compression** — tool-output reduction, command-aware rules, tree-sitter skeletons.
 * **cersei-web** — web search, bounded fetching with SSRF filtering, Markdown extraction, BM25 passages.
 * **cersei-lsp** — LSP client.
-* **cersei-skills** — agentskills.io-compatible skill registry.
+* **bricks-skills** — Agent Skills (`SKILL.md`): format and validation, the five sources and their priorities, trust of project skills, catalog, activation, resources, built-in skills. Re-exported as `cersei::skills`. Formerly `cersei-skills` (renamed in Sprint 12; see `docs/skills.md`).
 * **cersei-workflows** — serializable workflow engine.
 * **cersei-vms** — sandbox and VM isolation.
 * **cersei-tbench** — the Terminal-Bench agent (`tbench-agent`).

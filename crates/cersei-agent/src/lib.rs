@@ -16,6 +16,7 @@ pub mod events;
 pub mod reporters;
 pub(crate) mod runner;
 pub mod session_memory;
+pub mod skills;
 pub mod subagent;
 pub mod system_prompt;
 
@@ -51,13 +52,18 @@ pub use reporters::Reporter;
 pub struct UserInput {
     pub text: String,
     pub attachments: Vec<ContentBlock>,
+    /// Skills to activate before the text, in order (a person's choice:
+    /// `/skill`, `--skill`). Each is checked and placed in the context
+    /// before the request; if one cannot be, the run fails before any
+    /// request is sent.
+    pub skills: Vec<String>,
 }
 
 impl UserInput {
     pub fn text(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
-            attachments: Vec::new(),
+            ..Default::default()
         }
     }
 }
@@ -166,16 +172,16 @@ type EventFilter = Arc<dyn Fn(&AgentEvent) -> bool + Send + Sync>;
 
 #[allow(dead_code)]
 pub struct Agent {
-    /// The model's provider. Replaced by [`Agent::set_model`]; a run reads
-    /// it at the start of each turn.
-    provider: parking_lot::RwLock<Arc<dyn Provider>>,
+    /// Provider, model label and reasoning profile, changed together by
+    /// [`Agent::set_model`] / [`Agent::set_reasoning`]. A run takes one
+    /// snapshot per request: a request never combines an old provider with
+    /// a new profile.
+    selection: parking_lot::RwLock<Selection>,
     tools: Vec<Box<dyn Tool>>,
     system_prompt: Option<String>,
     append_system_prompt: Option<String>,
-    model: parking_lot::Mutex<Option<String>>,
     max_tokens: u32,
     temperature: Option<f32>,
-    reasoning_profile: parking_lot::Mutex<Option<String>>,
     working_dir: PathBuf,
     permission_policy: Arc<dyn PermissionPolicy>,
     memory: Option<Arc<dyn Memory>>,
@@ -233,6 +239,8 @@ pub struct Agent {
     /// orchestration layers (e.g. cersei-agentrl) to hand tools a dynamic tool
     /// registry, a sandbox handle, a Mailbox/KvStore, etc. at runtime.
     pub(crate) extensions: cersei_tools::Extensions,
+    /// The skills service and this agent's activations (`None`: no skills).
+    pub(crate) skills: Option<cersei_tools::skill_tool::SkillSession>,
 }
 
 impl Agent {
@@ -362,31 +370,57 @@ impl Agent {
         runner::model_label(self)
     }
 
-    /// The selected reasoning profile, if any.
+    /// The reasoning profile requested for this agent (`None`: the model's
+    /// default, as the provider configuration declares it).
     pub fn reasoning_profile(&self) -> Option<String> {
-        self.reasoning_profile.lock().clone()
+        self.selection.read().reasoning.clone()
     }
 
-    /// Switch model and reasoning profile. A run in progress uses them from
-    /// its next turn; measurements made with the previous model no longer
-    /// count as measured.
+    /// Switch model and reasoning profile, together. A run in progress uses
+    /// them from its next request; the request being streamed (and its
+    /// retries) keeps the selection it was sent with. Measurements made with
+    /// the previous selection no longer count as measured.
     pub fn set_model(
         &self,
         provider: Box<dyn Provider>,
         label: Option<String>,
         reasoning_profile: Option<String>,
     ) {
-        *self.provider.write() = Arc::from(provider);
-        *self.model.lock() = label;
-        *self.reasoning_profile.lock() = reasoning_profile;
+        {
+            let mut sel = self.selection.write();
+            *sel = Selection {
+                provider: Arc::from(provider),
+                label,
+                reasoning: reasoning_profile,
+                generation: sel.generation + 1,
+            };
+        }
         self.context
             .lock()
             .invalidate("the model or reasoning profile changed");
     }
 
+    /// Change only the reasoning profile (`None`: back to the model's
+    /// default). Same rules as [`Agent::set_model`].
+    pub fn set_reasoning(&self, reasoning_profile: Option<String>) {
+        {
+            let mut sel = self.selection.write();
+            sel.reasoning = reasoning_profile;
+            sel.generation += 1;
+        }
+        self.context
+            .lock()
+            .invalidate("the reasoning profile changed");
+    }
+
     /// The current provider.
     pub(crate) fn provider(&self) -> Arc<dyn Provider> {
-        self.provider.read().clone()
+        self.selection.read().provider.clone()
+    }
+
+    /// One consistent snapshot of the selection (for one request).
+    pub(crate) fn selection(&self) -> Selection {
+        self.selection.read().clone()
     }
 
     pub fn session_id(&self) -> Option<&str> {
@@ -542,15 +576,18 @@ impl Agent {
     }
 
     /// The system prompt of the requests of the current run: the configured
-    /// prompt, then the recalled long-term memory block (if any).
+    /// prompt, the catalog of skills (names and descriptions only), then the
+    /// recalled long-term memory block (if any).
     pub(crate) fn effective_system(&self) -> Option<String> {
-        let recalled = self.recalled.lock().clone();
-        match (&self.system_prompt, recalled) {
-            (Some(s), Some(r)) => Some(format!("{s}\n\n{r}")),
-            (Some(s), None) => Some(s.clone()),
-            (None, Some(r)) => Some(r),
-            (None, None) => None,
-        }
+        let parts: Vec<String> = [
+            self.system_prompt.clone(),
+            self.skills_catalog(),
+            self.recalled.lock().clone(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        (!parts.is_empty()).then(|| parts.join("\n\n"))
     }
 
     /// Built-in tools, then MCP tools.
@@ -569,6 +606,26 @@ impl Agent {
 
     pub fn tool_by_name(&self, name: &str) -> Option<&dyn Tool> {
         self.tool_list().into_iter().find(|t| t.name() == name)
+    }
+}
+
+/// The model a request goes to: provider, label, reasoning profile, and a
+/// generation that changes with every switch.
+#[derive(Clone)]
+pub(crate) struct Selection {
+    pub(crate) provider: Arc<dyn Provider>,
+    pub(crate) label: Option<String>,
+    pub(crate) reasoning: Option<String>,
+    pub(crate) generation: u64,
+}
+
+impl Selection {
+    /// The label of the model (its `provider_id/model_id` when known).
+    pub(crate) fn model_label(&self) -> String {
+        self.label
+            .clone()
+            .or_else(|| self.provider.model_info().map(|m| m.selection))
+            .unwrap_or_else(|| self.provider.name().to_string())
     }
 }
 
@@ -625,6 +682,8 @@ pub struct AgentBuilder {
     web_config: Option<cersei_web::WebConfig>,
     initial_messages: Option<Vec<Message>>,
     benchmark_mode: bool,
+    skills: Option<bricks_skills::SkillAccess>,
+    preloaded_skills: Vec<(String, bricks_skills::Activation)>,
     extensions: cersei_tools::Extensions,
 }
 
@@ -666,6 +725,8 @@ impl Default for AgentBuilder {
             web_config: None,
             initial_messages: None,
             benchmark_mode: false,
+            skills: None,
+            preloaded_skills: Vec::new(),
             extensions: cersei_tools::Extensions::default(),
         }
     }
@@ -896,6 +957,24 @@ impl AgentBuilder {
         self
     }
 
+    /// Give this agent the skills of a project: their catalog in its system
+    /// prompt, the `Skill` tool (unless a tool of that name is already
+    /// registered), and its own activations. `access` carries the session's
+    /// trust; it is shared with sub-agents, the activations are not.
+    pub fn skills(mut self, access: bricks_skills::SkillAccess) -> Self {
+        self.skills = Some(access);
+        self
+    }
+
+    /// Skills already validated by the caller (a sub-agent profile's), with
+    /// the id their text carries, recorded as active from the start. Their
+    /// text is the caller's to place (the profile puts it in the system
+    /// prompt).
+    pub fn preloaded_skills(mut self, skills: Vec<(String, bricks_skills::Activation)>) -> Self {
+        self.preloaded_skills = skills;
+        self
+    }
+
     /// Inject a type-map that is cloned into every `ToolContext` this agent
     /// builds, letting tools retrieve runtime-injected handles (dynamic tool
     /// registry, sandbox, Mailbox/KvStore) via `ctx.extensions.get::<T>()`.
@@ -985,17 +1064,38 @@ impl AgentBuilder {
                 .insert(cersei_tools::code_scout::SemanticHandle(engine));
         }
 
+        // Skills: one session (service + trust, this agent's ledger) and the
+        // `Skill` tool, registered once.
+        let mut tools = self.tools;
+        let skills = self.skills.map(|access| {
+            let session = cersei_tools::skill_tool::SkillSession::new(access);
+            {
+                let mut ledger = session.ledger.lock();
+                for (id, a) in self.preloaded_skills {
+                    ledger.commit(id, a, bricks_skills::Origin::Profile);
+                }
+            }
+            self.extensions.insert(session.clone());
+            if !tools.iter().any(|t| t.name() == "Skill") {
+                tools.push(Box::new(cersei_tools::skill_tool::SkillTool::new()));
+            }
+            session
+        });
+
         let cancel_token = self.cancel_token.unwrap_or_default();
         let run_cancel = cancel_token.child_token();
         Ok(Agent {
-            provider: parking_lot::RwLock::new(Arc::from(provider)),
-            tools: self.tools,
+            selection: parking_lot::RwLock::new(Selection {
+                provider: Arc::from(provider),
+                label: self.model,
+                reasoning: self.reasoning_profile,
+                generation: 0,
+            }),
+            tools,
             system_prompt: self.system_prompt,
             append_system_prompt: self.append_system_prompt,
-            model: parking_lot::Mutex::new(self.model),
             max_tokens: self.max_tokens,
             temperature: self.temperature,
-            reasoning_profile: parking_lot::Mutex::new(self.reasoning_profile),
             working_dir,
             permission_policy: self.permission_policy.unwrap_or_else(|| Arc::new(AllowAll)),
             memory: self.memory,
@@ -1037,6 +1137,7 @@ impl AgentBuilder {
             cancel_token,
             run_cancel: parking_lot::Mutex::new(run_cancel),
             extensions: self.extensions,
+            skills,
         })
     }
 

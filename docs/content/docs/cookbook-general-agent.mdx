@@ -46,8 +46,8 @@ async fn main() -> anyhow::Result<()> {
         McpServerConfig::stdio("github", "npx", &["-y", "@anthropic/mcp-server-github"]),
     ];
 
-    // 5. Skills: auto-discovered from .claude/commands/ and .claude/skills/
-    // (automatically loaded by the skill tool in cersei_tools::all())
+    // 5. Skills: give the builder a skills service (see "Skills" below)
+    //    .skills(SkillAccess::new(Arc::new(SkillsService::standard(&working_dir, home))))
 
     // 6. Build the agent
     let mut builder = Agent::builder()
@@ -116,19 +116,18 @@ All three layers are composed into a single context string injected into every s
 
 ### Skills
 
-Skills are auto-discovered from the filesystem:
+Skills are standard `SKILL.md` directories in `.agents/skills/` or `.claude/skills/` (project, approved per session), `~/.agents/skills/` or `~/.claude/skills/` (personal), or built in:
 
 ```
-.claude/commands/deploy.md     → /deploy skill
-.claude/commands/review.md     → /review skill
-.claude/skills/test/SKILL.md   → /test skill (with YAML frontmatter)
+.agents/skills/deploy/SKILL.md   → `deploy` in the catalog (name + description)
 ```
 
-The agent can invoke them via the Skill tool:
+The agent activates one with the Skill tool and gets its instructions; the request stays separate:
 ```
-Agent: [Skill] skill="deploy", args="production"
-→ Expands deploy.md template with args, executes as a prompt
+Agent: [Skill] action="activate", skill="deploy", args="production"
+→ the instructions of deploy/SKILL.md, then "Request to apply it to: production"
 ```
+Nothing runs by activation; the agent then uses its normal tools. See `docs/skills.md`.
 
 ### MCP Servers
 

@@ -495,9 +495,11 @@ stays visible across turns.
 const SESSION_SKILLS_GUIDANCE: &str = r#"
 ## Skills
 
-/<skill-name> (e.g., /commit) invokes a skill — a reusable prompt template.
-Skills are loaded from .claude/commands/*.md, .claude/skills/*/SKILL.md, or bundled.
-Use the Skill tool to execute them. Only use skills that are listed as available.
+A skill is a procedure (a SKILL.md) for a kind of task. The skills you can use are listed
+in this prompt by name and description; activate one with the Skill tool to read its
+full instructions before acting. Activation runs nothing and grants no permission: every
+action still goes through the tools and their approvals, and the user's instructions come
+first. Only use skills that are listed as available.
 "#;
 
 const SESSION_MEMORY_GUIDANCE: &str = r#"
@@ -732,10 +734,10 @@ mod tests {
             tools_available: vec!["Skill".into()],
             ..Default::default()
         };
-        assert!(build_system_prompt(&with).contains("/<skill-name>"));
+        assert!(build_system_prompt(&with).contains("activate one with the Skill tool"));
 
         let without = SystemPromptOptions::default();
-        assert!(!build_system_prompt(&without).contains("/<skill-name>"));
+        assert!(!build_system_prompt(&without).contains("activate one with the Skill tool"));
     }
 
     #[test]

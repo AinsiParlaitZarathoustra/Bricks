@@ -48,6 +48,7 @@ impl Tty {
         cmd.args(args);
         cmd.cwd(cwd);
         cmd.env("BRICKS_HOME", p.home.path());
+        cmd.env("HOME", p.home.path());
         cmd.env("TERM", "xterm-256color");
         for k in [
             "TERM_PROGRAM",

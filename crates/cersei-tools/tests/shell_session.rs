@@ -406,6 +406,19 @@ async fn leftover_processes_of_a_finished_command_are_stopped() {
     assert!(procs::wait_gone(&[pid], Duration::from_secs(3)).await);
 }
 
+/// The command of the test HTTP server (`tests/fixtures/http_server.py`):
+/// a real child process, no reverse DNS lookup at start.
+fn http_server(args: &[&str]) -> String {
+    let script =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/http_server.py");
+    let mut cmd = format!("python3 -u '{}'", script.display());
+    for a in args {
+        cmd.push(' ');
+        cmd.push_str(a);
+    }
+    cmd
+}
+
 #[tokio::test]
 async fn a_background_server_is_supervised_and_independent() {
     let f = Fixture::new();
@@ -414,7 +427,10 @@ async fn a_background_server_is_supervised_and_independent() {
     let task = f
         .sessions
         .start_task(
-            "served; echo \"$FROM_SHELL\" >&2; exec python3 -u -m http.server 0 --bind 127.0.0.1",
+            &format!(
+                "served; echo \"$FROM_SHELL\" >&2; exec {}",
+                http_server(&[])
+            ),
             None,
             Some(regex::Regex::new(r"port (\d+)").unwrap()),
             f.cwd(),
@@ -458,6 +474,55 @@ async fn a_background_server_is_supervised_and_independent() {
         task.stop(Duration::from_secs(2)).await,
         cersei_tools::shell::background::TaskState::Stopped
     );
+    assert_eq!(
+        task.stop(Duration::from_secs(2)).await,
+        cersei_tools::shell::background::TaskState::Stopped
+    );
+    assert!(procs::wait_gone(&[pid], Duration::from_secs(3)).await);
+    assert!(std::net::TcpStream::connect(("127.0.0.1", port)).is_err());
+}
+
+/// The fixture never needs a name resolution: with `socket.getfqdn`
+/// replaced by a function that fails at once, it still starts, answers and
+/// stops (the failure would kill it before the readiness line).
+#[tokio::test]
+async fn the_test_server_starts_answers_and_stops_without_reverse_dns() {
+    let f = Fixture::new();
+    let task = f
+        .sessions
+        .start_task(
+            &http_server(&["--forbid-getfqdn"]),
+            None,
+            Some(regex::Regex::new(r"port (\d+)").unwrap()),
+            f.cwd(),
+            &config(),
+        )
+        .await
+        .unwrap();
+    task.wait_ready(Duration::from_secs(15)).await;
+    let st = task.status();
+    let port: u16 = match &st.readiness {
+        cersei_tools::shell::background::Readiness::Ready { line, .. } => {
+            regex::Regex::new(r"port (\d+)")
+                .unwrap()
+                .captures(line)
+                .unwrap()[1]
+                .parse()
+                .unwrap()
+        }
+        other => panic!("not ready: {other:?} {st:?}"),
+    };
+    let o = f
+        .run(&format!("python3 -c \"import urllib.request as u; print(u.urlopen('http://127.0.0.1:{port}/').status)\""))
+        .await;
+    assert_eq!(o.stdout.text, "200\n", "{}", o.stderr.text);
+    let err = task.read(cersei_tools::shell::background::Stream::Stderr, 0, 50);
+    assert!(
+        !err.lines.iter().any(|(_, l)| l.contains("getfqdn")),
+        "{:?}",
+        err.lines
+    );
+    let pid = task.pid;
     assert_eq!(
         task.stop(Duration::from_secs(2)).await,
         cersei_tools::shell::background::TaskState::Stopped

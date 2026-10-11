@@ -18,6 +18,9 @@ pub enum PickAction {
     Profile {
         model: String,
     },
+    /// `/effort`: a profile of the current model (`None`: back to its
+    /// declared default).
+    Effort,
     Session,
 }
 

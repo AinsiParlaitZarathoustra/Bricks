@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+#
+# Bricks pre-commit hook — light checks of what is about to be committed.
+#
+# Optional and local: enable it with `scripts/hooks/install.sh enable`
+# (never automatically). Bypass it once with `git commit --no-verify`.
+# It is no substitute for the full validation (build, Clippy, tests,
+# audit), which it does not run.
+#
+# Everything is checked on the *staged* content (the index), not on the
+# working tree: a partially staged file is judged by the bytes of the
+# commit. The index is exported to a temporary snapshot through a copy of
+# the index file, so the real index is never touched; the hook modifies no
+# file, runs no formatter in fix mode and stages nothing.
+#
+# Checks:
+#   1. `git diff --cached --check`: whitespace errors, conflict markers;
+#   2. rustfmt (check mode) on the staged `.rs` files, with the snapshot's
+#      modules and configuration;
+#   3. known secret shapes (scripts/check_secrets.py --staged, values never
+#      printed), with the staged allowlist.
+
+set -uo pipefail
+
+fail() {
+  echo "pre-commit: $*" >&2
+  exit 1
+}
+
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || fail "not inside a Git repository"
+cd "$root" || fail "cannot enter $root"
+git_dir="$(git rev-parse --git-dir)"
+
+# Nothing staged (e.g. --allow-empty): nothing to check.
+if git diff --cached --quiet --diff-filter=ACMRD; then
+  exit 0
+fi
+
+# 1. Whitespace errors and conflict markers in the staged changes.
+if ! git diff --cached --check --diff-filter=ACMR >&2; then
+  fail "staged changes have whitespace errors or conflict markers (listed above); fix them, then stage again"
+fi
+
+# Snapshot of the index (a copy of the index file: the real one stays as is).
+snap="$(mktemp -d "${TMPDIR:-/tmp}/bricks-precommit.XXXXXX")" || fail "cannot create a temporary folder"
+cleanup() { rm -rf "$snap"; }
+trap cleanup EXIT INT TERM
+cp "$git_dir/index" "$snap/index" || fail "cannot copy the index"
+GIT_INDEX_FILE="$snap/index" git checkout-index --all --prefix="$snap/tree/" \
+  || fail "cannot export the staged content"
+
+# Staged Rust files (added, copied, modified, renamed; deletions excluded),
+# NUL-separated: spaces and Unicode in names are safe.
+rust_files=()
+while IFS= read -r -d '' f; do
+  case "$f" in
+    *.rs) rust_files+=("$f") ;;
+  esac
+done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+
+# 2. Formatting of the staged Rust files.
+if [ "${#rust_files[@]}" -gt 0 ]; then
+  command -v rustfmt >/dev/null 2>&1 \
+    || fail "rustfmt is required (\`rustup component add rustfmt\`); nothing was installed"
+  edition="$(sed -n 's/^edition *= *"\([0-9]*\)".*/\1/p' "$snap/tree/Cargo.toml" 2>/dev/null | head -n1)"
+  edition="${edition:-2021}"
+  (
+    cd "$snap/tree" || exit 2
+    rustfmt --check --edition "$edition" -- "${rust_files[@]}"
+  ) >"$snap/rustfmt.out" 2>&1
+  status=$?
+  if [ $status -ne 0 ]; then
+    cat "$snap/rustfmt.out" >&2
+    if grep -q '^Error\|^error' "$snap/rustfmt.out"; then
+      fail "rustfmt could not read the staged Rust code (above): a module or file it needs is not staged, or the code does not parse"
+    fi
+    fail "staged Rust code is not formatted (diff above); run \`cargo fmt --all\`, check the result, and stage it"
+  fi
+fi
+
+# 3. Known secret shapes, with the staged scanner and allowlist.
+command -v python3 >/dev/null 2>&1 || fail "python3 is required for the secret check; nothing was installed"
+scanner="$snap/tree/scripts/check_secrets.py"
+[ -f "$scanner" ] || fail "scripts/check_secrets.py is not in the index: stage it, or bypass with --no-verify"
+if ! python3 -I "$scanner" --staged; then
+  fail "possible secrets in the staged content (values not shown); remove them, or add a synthetic fixture to scripts/secret-allowlist.txt and stage it"
+fi
+exit 0

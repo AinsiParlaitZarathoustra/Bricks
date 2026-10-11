@@ -269,6 +269,29 @@ pub fn apply_tool_result_budget(messages: &mut [Message], budget_chars: usize) -
 pub fn apply_tool_result_budget_with(
     messages: &mut [Message],
     budget_chars: usize,
+    placeholder: impl FnMut(&str, usize) -> String,
+) -> bool {
+    apply_tool_result_budget_protected(messages, budget_chars, &[], placeholder)
+}
+
+/// A tool result carrying one of `protected` (the markers of active skill
+/// activations) is neither counted nor removed: those instructions stay.
+fn is_protected(content: &ToolResultContent, protected: &[String]) -> bool {
+    !protected.is_empty()
+        && match content {
+            ToolResultContent::Text(t) => protected.iter().any(|p| t.contains(p.as_str())),
+            ToolResultContent::Blocks(b) => b.iter().any(|bb| {
+                matches!(bb, ContentBlock::Text { text } if protected.iter().any(|p| text.contains(p.as_str())))
+            }),
+        }
+}
+
+/// [`apply_tool_result_budget_with`], keeping the results that carry an
+/// active skill activation.
+pub(crate) fn apply_tool_result_budget_protected(
+    messages: &mut [Message],
+    budget_chars: usize,
+    protected: &[String],
     mut placeholder: impl FnMut(&str, usize) -> String,
 ) -> bool {
     let total: usize = messages
@@ -277,7 +300,11 @@ pub fn apply_tool_result_budget_with(
             MessageContent::Blocks(blocks) => blocks
                 .iter()
                 .filter_map(|b| match b {
-                    ContentBlock::ToolResult { content, .. } => Some(tool_result_len(content)),
+                    ContentBlock::ToolResult { content, .. }
+                        if !is_protected(content, protected) =>
+                    {
+                        Some(tool_result_len(content))
+                    }
                     _ => None,
                 })
                 .collect::<Vec<_>>(),
@@ -311,7 +338,7 @@ pub fn apply_tool_result_budget_with(
                 {
                     let size = tool_result_len(content);
                     let already = matches!(content, ToolResultContent::Text(t) if t.starts_with("[tool result removed"));
-                    if size > 200 && !already {
+                    if size > 200 && !already && !is_protected(content, protected) {
                         freed += size;
                         *content = ToolResultContent::Text(placeholder(tool_use_id, size));
                         changed = true;
@@ -390,6 +417,9 @@ pub async fn run_prepared(
     cancel: tokio_util::sync::CancellationToken,
 ) -> Result<AgentOutput> {
     let result = run_loop(agent, input, &event_tx, &cancel).await;
+    if let Some(s) = agent.skill_session() {
+        s.ledger.lock().clear_pending();
+    }
     if let Err(e) = &result {
         let why = if matches!(e, CerseiError::Cancelled) {
             "cancelled by the user"
@@ -483,6 +513,8 @@ pub(crate) async fn clear_context(agent: &Agent) -> Result<usize> {
         memory_key,
     });
     agent.compaction_state.lock().applied = number;
+    // The instructions of active skills left with the context.
+    agent.clear_skills();
     agent
         .context
         .lock()
@@ -571,6 +603,12 @@ async fn run_loop(
                     session_id: session_id.clone(),
                     message_count: count,
                 });
+                // The session's skills: checked against their sources before
+                // anything of them is used again.
+                for ev in agent.restore_skills() {
+                    send(agent, Some(&event_tx), ev).await;
+                }
+                agent.readd_missing_skills();
             }
         }
     } // end session load guard
@@ -623,6 +661,10 @@ async fn run_loop(
         )
         .await;
     }
+
+    // Skills chosen by the person, before their request: all checked and
+    // placed, or none and the request is not sent.
+    activate_user_skills(agent, &input.skills, &event_tx, cancel).await?;
 
     if input.attachments.is_empty() {
         push_message(agent, Message::user(prompt));
@@ -777,17 +819,22 @@ async fn run_loop(
             let mut msgs = agent.messages.lock();
             let refs = agent.raw_refs.lock();
             let raw = agent.raw_history.lock();
-            apply_tool_result_budget_with(&mut msgs, agent.tool_result_budget, |id, len| {
-                let saved = refs.get(id).cloned().or_else(|| {
-                    raw_tool_result(&raw, id).and_then(|text| {
-                        agent
-                            .compressor
-                            .raw_store()?
-                            .put(&format!("removed-{id}"), &text)
-                            .ok()
-                    })
-                });
-                match saved {
+            let protected = agent.active_skill_markers();
+            apply_tool_result_budget_protected(
+                &mut msgs,
+                agent.tool_result_budget,
+                &protected,
+                |id, len| {
+                    let saved = refs.get(id).cloned().or_else(|| {
+                        raw_tool_result(&raw, id).and_then(|text| {
+                            agent
+                                .compressor
+                                .raw_store()?
+                                .put(&format!("removed-{id}"), &text)
+                                .ok()
+                        })
+                    });
+                    match saved {
                     Some(r) => format!(
                         "[tool result removed from the active context to save space ({len} chars);                          full output: {}]",
                         r.hint()
@@ -796,7 +843,8 @@ async fn run_loop(
                         "[tool result removed from the active context to save space ({len} chars);                          it could not be saved — run the tool again if you need it]"
                     ),
                 }
-            })
+                },
+            )
         };
         if removed {
             agent
@@ -816,11 +864,14 @@ async fn run_loop(
         // The provider is bound to one configured model and ignores this
         // string; it is only a label for events and metadata.
         // Read once per turn: a model change applies from the next turn.
-        let provider = agent.provider();
-        let model = model_label(agent);
+        // One snapshot for this request: provider, label and profile go
+        // together; a change made meanwhile applies to the next request.
+        let selection = agent.selection();
+        let provider = selection.provider.clone();
+        let model = selection.model_label();
 
         let mut options = ProviderOptions::default();
-        if let Some(profile) = agent.reasoning_profile.lock().clone() {
+        if let Some(profile) = selection.reasoning.clone() {
             options.set(cersei_provider::REASONING_PROFILE_OPTION, &profile);
         }
 
@@ -888,6 +939,9 @@ async fn run_loop(
         };
 
         let status = ensure_budget(agent, &mut request, &event_tx).await?;
+        // The context this request describes: its usage measures it only if
+        // nothing (a switch, a rewrite) changed it before the response.
+        let mut sent_version = agent.context.lock().version();
         let _ = event_tx
             .send(AgentEvent::ModelRequestStart {
                 turn,
@@ -946,6 +1000,7 @@ async fn run_loop(
                         return Err(e);
                     }
                     request.messages = agent.messages.lock().clone();
+                    sent_version = agent.context.lock().version();
                     continue;
                 }
                 Err(e) if e.is_retryable() && retry_count < MAX_RETRIES => {
@@ -1069,22 +1124,24 @@ async fn run_loop(
         // measured: the request just executed, with this model.
         let assistant_index = request.messages.len();
         push_message(agent, response.message.clone());
-        let model = model_view(agent);
+        // Recorded against the selection the request was sent with.
+        let sent_model = ModelView::of(provider.as_ref(), &model);
         let status = {
             let mut ctx = agent.context.lock();
             let view = RequestView::of(&request);
-            ctx.record_response(
-                &model,
+            ctx.record_response_sent(
+                &sent_model,
                 &view,
                 &response.usage,
                 Some((assistant_index, &response.message)),
+                sent_version,
             );
             let msgs = agent.messages.lock().clone();
             let next = RequestView {
                 messages: &msgs,
                 ..RequestView::of(&request)
             };
-            ctx.status(&model, &next)
+            ctx.status(&model_view(agent), &next)
         };
         send(agent, Some(&event_tx), AgentEvent::ContextUpdate(status)).await;
 
@@ -1442,6 +1499,11 @@ async fn run_loop(
             let mut raw_blocks: Vec<ContentBlock> = Vec::new();
 
             for (tool_id, tool_name, tool_input, mut result, duration, change) in results {
+                // A skill activation proposed by this agent's own `Skill`
+                // tool (its one-time id is in the ledger): committed once it
+                // fits, refused whole otherwise. Its text is never reduced.
+                let verified_skill =
+                    commit_skill_activation(agent, &tool_name, &mut result, &event_tx).await;
                 // The tool's own output, before the engine adds notes to it
                 // (the failure streak changes them every round).
                 let own_output = result.content.clone();
@@ -1498,33 +1560,39 @@ async fn run_loop(
                 let report = result.to_report();
                 let output = report.render_output();
                 let level = *agent.compression_level.lock();
-                let processed = agent.compressor.process(
-                    &cersei_compression::ToolOutput {
-                        tool: &tool_name,
-                        input: &tool_input,
-                        content: &output,
-                        is_error: report.status.is_error(),
-                        call_id: &tool_id,
-                        exit_code: report.exit_code,
-                    },
-                    level,
-                );
-                if let Some(r) = &processed.raw {
-                    agent.raw_refs.lock().insert(tool_id.clone(), r.clone());
-                }
+                let (context_text, partial_view, compression) = if verified_skill {
+                    (output.clone(), false, None)
+                } else {
+                    let processed = agent.compressor.process(
+                        &cersei_compression::ToolOutput {
+                            tool: &tool_name,
+                            input: &tool_input,
+                            content: &output,
+                            is_error: report.status.is_error(),
+                            call_id: &tool_id,
+                            exit_code: report.exit_code,
+                        },
+                        level,
+                    );
+                    if let Some(r) = &processed.raw {
+                        agent.raw_refs.lock().insert(tool_id.clone(), r.clone());
+                    }
+                    (
+                        processed.text,
+                        processed.partial_view,
+                        Some(processed.stats),
+                    )
+                };
                 // A file counts as read only when the model saw its exact
                 // text: a skeleton or a summary is not enough to edit it.
-                if (tool_name == "Read" || tool_name == "read")
-                    && !result.is_error
-                    && !processed.partial_view
+                if (tool_name == "Read" || tool_name == "read") && !result.is_error && !partial_view
                 {
                     if let Some(path) = tool_input.get("file_path").and_then(|v| v.as_str()) {
                         files_read.insert(resolve_path(&tool_ctx.working_dir, path));
                     }
                 }
-                let capped_content = report.render(&tool_name, duration, Some(&processed.text));
+                let capped_content = report.render(&tool_name, duration, Some(&context_text));
                 let full_text = report.render(&tool_name, duration, None);
-                let compression = Some(processed.stats);
                 raw_blocks.push(ContentBlock::ToolResult {
                     tool_use_id: tool_id.clone(),
                     content: ToolResultContent::Text(full_text.clone()),
@@ -1727,13 +1795,7 @@ pub(crate) struct CompactionState {
 }
 
 pub(crate) fn model_label(agent: &Agent) -> String {
-    let provider = agent.provider();
-    agent
-        .model
-        .lock()
-        .clone()
-        .or_else(|| provider.model_info().map(|m| m.selection))
-        .unwrap_or_else(|| provider.name().to_string())
+    agent.selection().model_label()
 }
 
 fn tool_definitions(agent: &Agent) -> Vec<ToolDefinition> {
@@ -1745,7 +1807,8 @@ fn tool_definitions(agent: &Agent) -> Vec<ToolDefinition> {
 }
 
 fn model_view(agent: &Agent) -> ModelView {
-    ModelView::of(agent.provider().as_ref(), &model_label(agent))
+    let sel = agent.selection();
+    ModelView::of(sel.provider.as_ref(), &sel.model_label())
 }
 
 /// Status of the next request as it would be built now.
@@ -1867,8 +1930,25 @@ async fn run_compaction(
                 tokens_after,
                 ..
             },
-            Some(new),
+            Some(mut new),
         ) => {
+            // Active skills whose text was summarised away come back whole,
+            // after the summary (never twice: only the missing ones).
+            let readd = agent.skills_to_readd(&new);
+            if !readd.is_empty() {
+                if let Some(first) = new.first_mut() {
+                    let mut blocks = first.content_blocks();
+                    let at = blocks
+                        .iter()
+                        .position(|b| !matches!(b, ContentBlock::Text { .. }))
+                        .unwrap_or(blocks.len())
+                        .min(1);
+                    for (i, text) in readd.into_iter().enumerate() {
+                        blocks.insert(at + i, ContentBlock::Text { text });
+                    }
+                    first.content = MessageContent::Blocks(blocks);
+                }
+            }
             let number = {
                 let mut st = agent.compaction_state.lock();
                 st.failures = 0;
@@ -1950,6 +2030,210 @@ async fn run_compaction(
     )
     .await;
     run.outcome
+}
+
+/// Whether `text` can be added to the context now, compacting once (by
+/// the existing rules) when it cannot. `Err` says why it cannot.
+async fn admit_skill_text(
+    agent: &Agent,
+    text: &str,
+    tx: Option<&mpsc::Sender<AgentEvent>>,
+) -> std::result::Result<(), String> {
+    let check = |agent: &Agent| {
+        let status = context_status(agent);
+        let est = agent
+            .context
+            .lock()
+            .estimator(&model_view(agent))
+            .text(text)
+            .upper;
+        let limit = status.input_limit.saturating_sub(status.margin);
+        let left = limit.saturating_sub(status.context_used.upper_bound);
+        (est <= left, est, left)
+    };
+    if check(agent).0 {
+        return Ok(());
+    }
+    let outcome = run_compaction(agent, CompactReason::BudgetExceeded, true, tx).await;
+    let (ok, est, left) = check(agent);
+    if ok {
+        return Ok(());
+    }
+    Err(format!(
+        "its instructions (about {est} tokens) do not fit in the context ({left} tokens left{})",
+        if outcome.is_compacted() {
+            " after a compaction"
+        } else {
+            "; a compaction could not free enough"
+        }
+    ))
+}
+
+/// Commit the activation a `Skill` result proposes, if it is one of this
+/// agent's own proposals. Returns whether an activation was committed (its
+/// text then bypasses output reduction).
+async fn commit_skill_activation(
+    agent: &Agent,
+    tool_name: &str,
+    result: &mut ToolResult,
+    tx: &mpsc::Sender<AgentEvent>,
+) -> bool {
+    if tool_name != "Skill" || result.is_error {
+        return false;
+    }
+    let Some(session) = agent.skill_session() else {
+        return false;
+    };
+    let Some(id) = result
+        .metadata
+        .as_ref()
+        .and_then(|m| m.get(cersei_tools::skill_tool::ACTIVATION_KEY))
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+    else {
+        return false;
+    };
+    // Only a proposal this agent's tool made counts; anything else is an
+    // ordinary output.
+    let Some((activation, origin)) = session.ledger.lock().take_pending(&id) else {
+        return false;
+    };
+    match admit_skill_text(agent, &result.content, Some(tx)).await {
+        Ok(()) => {
+            send(
+                agent,
+                Some(tx),
+                AgentEvent::SkillActivated {
+                    agent_id: None,
+                    name: activation.name.clone(),
+                    source: activation.source.clone(),
+                    revision: activation.revision.clone(),
+                    origin: origin.as_str().into(),
+                },
+            )
+            .await;
+            session.ledger.lock().commit(id, activation, origin);
+            agent.save_skills();
+            true
+        }
+        Err(why) => {
+            send(
+                agent,
+                Some(tx),
+                AgentEvent::SkillNotActivated {
+                    agent_id: None,
+                    name: activation.name.clone(),
+                    reason: why.clone(),
+                },
+            )
+            .await;
+            *result = ToolResult::error(format!(
+                "Skill `{}` was not activated: {why}. Its instructions were not shortened; \
+                 continue without them, or ask the user to free context (`/compact`, `/clear`).",
+                activation.name
+            ));
+            false
+        }
+    }
+}
+
+async fn user_skill_failed(
+    agent: &Agent,
+    tx: &mpsc::Sender<AgentEvent>,
+    name: &str,
+    why: String,
+) -> CerseiError {
+    send(
+        agent,
+        Some(tx),
+        AgentEvent::SkillNotActivated {
+            agent_id: None,
+            name: name.to_string(),
+            reason: why.clone(),
+        },
+    )
+    .await;
+    CerseiError::InvalidInput(format!(
+        "skill `{name}` was not activated: {why}; the request was not sent"
+    ))
+}
+
+/// Activate the skills a person chose for this run, before their request.
+async fn activate_user_skills(
+    agent: &Agent,
+    names: &[String],
+    tx: &mpsc::Sender<AgentEvent>,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> Result<()> {
+    if names.is_empty() {
+        return Ok(());
+    }
+    let Some(session) = agent.skill_session() else {
+        return Err(CerseiError::InvalidInput(
+            "skills are not configured for this session; the request was not sent".into(),
+        ));
+    };
+    // Everything is read and checked first.
+    let mut todo = Vec::new();
+    for name in names {
+        let a = match session.access.activate(name) {
+            Ok(a) => a,
+            Err(e) => return Err(user_skill_failed(agent, tx, name, e.to_string()).await),
+        };
+        let already = session
+            .ledger
+            .lock()
+            .active_revision(&a.source, &a.revision)
+            .is_some();
+        if !already
+            && !todo
+                .iter()
+                .any(|(_, t): &(String, bricks_skills::Activation)| {
+                    t.same_revision(&a.source, &a.revision)
+                })
+        {
+            todo.push((bricks_skills::Ledger::new_id(), a));
+        }
+    }
+    if todo.is_empty() {
+        return Ok(());
+    }
+    let texts: Vec<String> = todo
+        .iter()
+        .map(|(id, a)| agent.render_skill(a, id))
+        .collect();
+    if let Err(why) = admit_skill_text(agent, &texts.join("\n\n"), Some(tx)).await {
+        let names: Vec<&str> = todo.iter().map(|(_, a)| a.name.as_str()).collect();
+        return Err(user_skill_failed(agent, tx, &names.join(", "), why).await);
+    }
+    if cancel.is_cancelled() {
+        return Err(CerseiError::Cancelled);
+    }
+    let blocks: Vec<ContentBlock> = texts
+        .into_iter()
+        .map(|text| ContentBlock::Text { text })
+        .collect();
+    push_message(agent, Message::user_blocks(blocks));
+    for (id, a) in todo {
+        send(
+            agent,
+            Some(tx),
+            AgentEvent::SkillActivated {
+                agent_id: None,
+                name: a.name.clone(),
+                source: a.source.clone(),
+                revision: a.revision.clone(),
+                origin: "user".into(),
+            },
+        )
+        .await;
+        session
+            .ledger
+            .lock()
+            .commit(id, a, bricks_skills::Origin::User);
+    }
+    agent.save_skills();
+    Ok(())
 }
 
 /// Check the budget of `request` before it is sent, compacting once if it

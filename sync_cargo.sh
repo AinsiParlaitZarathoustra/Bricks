@@ -62,7 +62,7 @@ CRATES=(
   cersei-mcp
   cersei-provider
   cersei-web
-  cersei-skills
+  bricks-skills
   cersei-memory
   cersei-vms
   cersei-tools

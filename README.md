@@ -4,7 +4,7 @@
 
 **An engine for agentic development. Built in Rust. At home in your terminal.**
 
-![Version](https://img.shields.io/badge/version-0.5.0-blue)
+![Version](https://img.shields.io/badge/version-0.6.0-blue)
 ![Rust](https://img.shields.io/badge/built_with-Rust-orange)
 
 [Quick start](#quick-start) · [What it does](#what-it-does) · [Configuration](#configuration) · [Documentation](#documentation) · [License](#license)
@@ -37,7 +37,7 @@ make its work more effective.
 
 ### Project status
 
-**Bricks 0.5.0** has a substantial, stable foundation. Development continues,
+**Bricks 0.6.0** has a substantial, stable foundation. Development continues,
 with further features and code optimisations still ahead.
 
 Bricks is a fork of Cersei, created by **Adib Mohsin (Pacifio)**. The inherited
@@ -100,6 +100,14 @@ bricks resume                                                 # pick a stored se
   (never installed by Bricks). See [docs/semantic.md](docs/semantic.md).
 * **MCP.** A client on the official SDK (`rmcp`), over stdio and Streamable
   HTTP. See [docs/mcp.md](docs/mcp.md).
+* **Skills.** Standard [Agent Skills](https://agentskills.io/specification)
+  (`SKILL.md`) from `.agents/skills` and `.claude/skills` (project and home)
+  plus built-in ones.
+  * The model sees a catalog and activates a skill with the `Skill` tool;
+    you can choose one with `/skill` or `--skill`.
+  * A project's skills need your approval for the session.
+  * Activating a skill gives instructions only: it runs nothing and grants
+    no permission. See [docs/skills.md](docs/skills.md).
 * **Long-term memory.** Sourced episodes, entities scoped by
   user/project/space, and temporal facts with evidence.
   * Hybrid recall combines vector, BM25 and a bounded graph expansion,
@@ -192,7 +200,8 @@ cersei                facade crate — use cersei::prelude::*
   bricks-semantic     shared code understanding engine: lexical, syntax, LSP
   cersei-web          search, fetching, extraction, passages
   cersei-mcp          MCP client (rmcp)
-  cersei-types, cersei-hooks, cersei-skills, cersei-lsp, cersei-workflows, …
+  bricks-skills       Agent Skills (SKILL.md): sources, trust, activation
+  cersei-types, cersei-hooks, cersei-lsp, cersei-workflows, …
 ```
 
 ---

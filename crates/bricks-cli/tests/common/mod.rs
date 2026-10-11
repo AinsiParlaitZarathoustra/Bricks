@@ -153,6 +153,9 @@ profiles = [{{ id = "deep" }}]
         c.args(args)
             .current_dir(self.dir.path())
             .env("BRICKS_HOME", self.home.path())
+            // Personal skills (~/.agents/skills, ~/.claude/skills) come
+            // from this temporary home, never from the machine's.
+            .env("HOME", self.home.path())
             .env_remove("OPENAI_API_KEY")
             .env_remove("GEMINI_API_KEY");
         c

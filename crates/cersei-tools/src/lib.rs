@@ -29,7 +29,6 @@ pub mod remote_trigger;
 pub mod send_message;
 pub mod shell;
 pub mod skill_tool;
-pub mod skills;
 pub mod sleep;
 pub mod synthetic_output;
 pub mod tasks;

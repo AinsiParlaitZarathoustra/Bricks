@@ -479,61 +479,9 @@ pub fn short_path(path: &str, home: Option<&Path>, max: usize) -> String {
     )
 }
 
-/// The status bar: model, profile, context, cost, activity, project.
-pub fn status_line(app: &App, spinner: &str, maintenance: bool) -> Line<'static> {
-    let s = &app.status;
-    let mut spans = vec![Span::styled(
-        s.model.clone(),
-        Style::default().add_modifier(Modifier::BOLD),
-    )];
-    if let Some(r) = &s.reasoning {
-        spans.push(Span::styled(format!(" · {r}"), dim()));
-    }
-    if let Some(c) = &s.context {
-        let k = |n: u64| {
-            if n >= 1000 {
-                format!("{:.1}k", n as f64 / 1000.0)
-            } else {
-                n.to_string()
-            }
-        };
-        let prov = match c.context_used.provenance {
-            cersei_agent::Provenance::Measured => "",
-            cersei_agent::Provenance::Counted => " counted",
-            cersei_agent::Provenance::Mixed => " ~",
-            cersei_agent::Provenance::Estimated => " est.",
-        };
-        spans.push(Span::styled(
-            format!(
-                "  ctx {}/{}{prov}",
-                k(c.context_used.tokens),
-                k(c.input_limit)
-            ),
-            dim(),
-        ));
-    }
-    match s.total.as_ref().map(|u| u.cost_usd) {
-        Some(Some(c)) => spans.push(Span::styled(format!("  ${c:.4}"), dim())),
-        Some(None) => spans.push(Span::styled("  Not priced", dim())),
-        None => {}
-    }
-    if app.running() {
-        spans.push(Span::styled(
-            format!("  {spinner} working — Ctrl+C to cancel"),
-            Style::default().fg(Color::Yellow),
-        ));
-    } else if maintenance {
-        spans.push(Span::styled(format!("  {spinner} updating memory"), dim()));
-    }
-    // The project last: what is happening comes first on a narrow terminal.
-    if !s.working_dir.is_empty() {
-        let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
-        spans.push(Span::styled(
-            format!("  ⌂ {}", short_path(&s.working_dir, home.as_deref(), 32)),
-            dim(),
-        ));
-    }
-    Line::from(spans)
+/// The status bar for `width` cells (see [`crate::statusbar`]).
+pub fn status_line(app: &App, spinner: &str, maintenance: bool, width: usize) -> Line<'static> {
+    crate::statusbar::status_line(app, spinner, maintenance, width)
 }
 
 /// What the live area shows besides the cells.
@@ -702,7 +650,12 @@ pub fn draw_live(f: &mut Frame, app: &App, composer: &Composer, o: &Overlay) {
         ),
     );
     f.render_widget(
-        Paragraph::new(status_line(app, o.spinner, o.maintenance)),
+        Paragraph::new(status_line(
+            app,
+            o.spinner,
+            o.maintenance,
+            area.width as usize,
+        )),
         Rect::new(
             area.x,
             (y + 1).min(area.bottom().saturating_sub(1)),

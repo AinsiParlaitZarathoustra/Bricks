@@ -141,9 +141,9 @@ Tells the model how to use sub-agents effectively:
 
 **Included when:** `Skill` is in the tool list.
 
-Explains that `/<skill-name>` invokes skills from `.claude/commands/`, `.claude/skills/`, or bundled templates.
+Explains that skills are procedures listed by name and description, activated with the `Skill` tool, which runs nothing and grants no permission. The catalog itself (`<available_skills>`) is added by the agent when it has a skills service.
 
-**Why it matters:** Skills are a user-facing feature. The model needs to know they exist and that it should use the Skill tool to execute them.
+**Why it matters:** the model needs to know the catalog is data and that activating a skill only gives it instructions.
 
 #### Memory Guidance
 

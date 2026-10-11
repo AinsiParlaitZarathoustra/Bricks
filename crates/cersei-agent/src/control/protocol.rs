@@ -110,8 +110,14 @@ pub enum Event {
     SessionOpened {
         working_dir: String,
         model: String,
+        /// The profile requested for the session (`None`: the model's
+        /// default).
         #[serde(skip_serializing_if = "Option::is_none")]
         reasoning: Option<String>,
+        /// The profile that applies: the requested one, else the model's
+        /// declared default; absent when neither exists.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        effective_reasoning: Option<String>,
         resumed: bool,
         message_count: usize,
         warnings: Vec<String>,
@@ -199,7 +205,28 @@ pub enum Event {
         model: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         reasoning: Option<String>,
+        /// See `session_opened.effective_reasoning`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        effective_reasoning: Option<String>,
         /// `next_turn` during a run, `next_run` otherwise.
+        applies: String,
+    },
+    /// The reasoning profile changed (`set_reasoning`): the effective
+    /// profile before and after (ids and configured labels), and the
+    /// requested one (`None`: the model's default). `applies`: `next_turn`
+    /// during a run, `next_run` otherwise.
+    ReasoningChanged {
+        model: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        requested: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        previous: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        previous_label: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        effective: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        effective_label: Option<String>,
         applies: String,
     },
     ContextCleared {
@@ -352,6 +379,41 @@ pub enum Event {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         diagnostics: Vec<crate::agents::ProfileDiagnostic>,
     },
+    /// A skill was activated for the session agent (`agent_id` absent) or
+    /// a sub-agent. `origin`: `user`, `model`, `profile`, `restored`.
+    SkillActivated {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_id: Option<String>,
+        name: String,
+        source: String,
+        revision: String,
+        origin: String,
+    },
+    /// A skill was not activated, or a restored activation was suspended.
+    SkillActivationFailed {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent_id: Option<String>,
+        name: String,
+        reason: String,
+    },
+    /// Answer to `list_skills` / `reload_skills`: every candidate with its
+    /// provenance and state (project ones included, for a person to
+    /// inspect; they reach the model only once approved).
+    Skills {
+        listing: Box<SkillsListing>,
+    },
+    /// Project skills were found and wait for a person's decision
+    /// (`trust_project_skills`). Asked once per session.
+    SkillsTrustRequested {
+        project: String,
+        sources: Vec<SkillSourceInfo>,
+    },
+    /// The project decision of this session (`by`: `user` or `caller`).
+    SkillsTrustResolved {
+        project: String,
+        allowed: bool,
+        by: String,
+    },
     /// A command was refused; nothing changed.
     CommandRejected {
         command: String,
@@ -378,6 +440,7 @@ impl Event {
             Event::Usage { .. } => "usage",
             Event::Compaction { .. } => "compaction",
             Event::ModelChanged { .. } => "model_changed",
+            Event::ReasoningChanged { .. } => "reasoning_changed",
             Event::ContextCleared { .. } => "context_cleared",
             Event::SessionSaved => "session_saved",
             Event::Notice { .. } => "notice",
@@ -398,6 +461,11 @@ impl Event {
             Event::JobStarted { .. } => "job_started",
             Event::JobOutput { .. } => "job_output",
             Event::JobFinished { .. } => "job_finished",
+            Event::SkillActivated { .. } => "skill_activated",
+            Event::SkillActivationFailed { .. } => "skill_activation_failed",
+            Event::Skills { .. } => "skills",
+            Event::SkillsTrustRequested { .. } => "skills_trust_requested",
+            Event::SkillsTrustResolved { .. } => "skills_trust_resolved",
             Event::CommandRejected { .. } => "command_rejected",
         }
     }
@@ -408,6 +476,53 @@ impl Event {
     pub fn is_delta(&self) -> bool {
         matches!(self, Event::TextDelta { .. } | Event::ThinkingDelta { .. })
     }
+}
+
+/// A source holding project skills, for the trust request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkillSourceInfo {
+    pub source: String,
+    pub path: String,
+    pub skills: usize,
+}
+
+/// One candidate of the skills listing.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkillListing {
+    pub name: String,
+    pub source: String,
+    /// `available` (wins its name, usable), `active` (also active in the
+    /// session agent), `shadowed` (a higher source has this name),
+    /// `invalid`, `incompatible`, `pending_approval`, `refused` (project
+    /// skills not approved), `disabled`.
+    pub state: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<String>,
+    /// Error, incompatibilities, notes, collisions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub details: Vec<String>,
+}
+
+/// The skills of the session, as `skills` reports them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkillsListing {
+    pub generation: u64,
+    /// `pending`, `granted` or `denied` for this session.
+    pub project_decision: String,
+    pub entries: Vec<SkillListing>,
+    pub total: usize,
+    pub page: usize,
+    /// Discovery diagnostics (unreadable folders, links not followed,
+    /// limits reached).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostics: Vec<String>,
+    /// Activable skills left out of the model's catalog by its bounds.
+    #[serde(default)]
+    pub catalog_omitted: usize,
 }
 
 /// One hit of a `search`: 1-based line, 1-based column in characters.
@@ -435,13 +550,25 @@ pub enum PromptBlock {
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct Prompt {
     pub blocks: Vec<PromptBlock>,
+    /// Skills to activate, in order, before the prompt (a person's choice:
+    /// `/skill`, `--skill`). All are checked when the command is received;
+    /// if one cannot be used, the command is refused and nothing is sent.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills: Vec<String>,
 }
 
 impl Prompt {
     pub fn text(text: impl Into<String>) -> Self {
         Self {
             blocks: vec![PromptBlock::Text { text: text.into() }],
+            skills: Vec::new(),
         }
+    }
+
+    /// The same prompt, with skills activated before it.
+    pub fn with_skills(mut self, skills: Vec<String>) -> Self {
+        self.skills = skills;
+        self
     }
 }
 
@@ -450,7 +577,8 @@ impl Prompt {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Command {
-    /// Start a run. Refused while a run is active (never queued silently).
+    /// Start a run. Refused while a run is active (never queued silently),
+    /// or when one of the prompt's `skills` cannot be used.
     Submit { prompt: Prompt },
     /// Cancel the active run, or else the memory maintenance in progress.
     /// Always accepted immediately.
@@ -462,6 +590,15 @@ pub enum Command {
         model: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reasoning: Option<String>,
+    },
+    /// Select a reasoning profile of the current model (`profile`: one of
+    /// its declared ids, `default` included when a profile has that id), or
+    /// go back to the model's declared default (`profile` absent or null).
+    /// An unknown id is refused and nothing changes. During a run, applies
+    /// from its next request.
+    SetReasoning {
+        #[serde(default)]
+        profile: Option<String>,
     },
     /// Compact the context now. Refused during a run.
     Compact,
@@ -501,6 +638,20 @@ pub enum Command {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         job_id: Option<String>,
     },
+    /// List the skills (all candidates, 20 per page, filtered by `query`);
+    /// answered by `skills`. Accepted at any time.
+    ListSkills {
+        #[serde(default)]
+        query: String,
+        #[serde(default)]
+        page: usize,
+    },
+    /// Read the skill sources again; activations already made keep their
+    /// text. Answered by `skills`.
+    ReloadSkills,
+    /// A person's decision on this project's skills, for this session
+    /// only. Never sent by the model.
+    TrustProjectSkills { allow: bool },
     /// Answer an approval request.
     Approve {
         approval_id: String,
@@ -516,6 +667,7 @@ impl Command {
             Command::Submit { .. } => "submit",
             Command::Cancel => "cancel",
             Command::SetModel { .. } => "set_model",
+            Command::SetReasoning { .. } => "set_reasoning",
             Command::Compact => "compact",
             Command::ClearContext => "clear_context",
             Command::Resume { .. } => "resume",
@@ -523,6 +675,9 @@ impl Command {
             Command::ListAgentProfiles { .. } => "list_agent_profiles",
             Command::ReloadAgentProfiles => "reload_agent_profiles",
             Command::AgentControl { .. } => "agent_control",
+            Command::ListSkills { .. } => "list_skills",
+            Command::ReloadSkills => "reload_skills",
+            Command::TrustProjectSkills { .. } => "trust_project_skills",
             Command::Approve { .. } => "approve",
         }
     }

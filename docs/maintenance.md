@@ -53,7 +53,35 @@ that version fails at `cargo publish --dry-run` (the registry cannot resolve
 them). This is expected before the first real publication of a version.
 
 `bricks-cli`, `bricks-tui`, `cersei-testkit` and `longmem-bench` are not
-published by the script.
+published by the script. `bricks-skills` (formerly `cersei-skills`, renamed
+in Sprint 12) is published before `cersei-tools`, which depends on it; the
+former name stays on crates.io at its last version and is not updated.
+
+## Pre-commit hook (optional)
+
+`scripts/hooks/pre-commit` makes three quick checks of what is staged:
+`git diff --cached --check` (whitespace errors, conflict markers), rustfmt
+in check mode on the staged `.rs` files, and `scripts/check_secrets.py
+--staged` (values never printed; the staged allowlist only). It judges the
+**index**, not the working tree: it exports the staged content through a
+copy of the index file, so a partially staged file is checked as it will be
+committed, and the real index, the working tree and the files are never
+modified. It runs no build, Clippy, test or audit — the full validation
+stays as it is.
+
+Nothing is installed automatically:
+
+```bash
+scripts/hooks/install.sh status
+scripts/hooks/install.sh enable     # links .git/hooks/pre-commit to the script
+scripts/hooks/install.sh disable    # removes that link only
+```
+
+An existing pre-commit hook is never replaced or removed, and
+`core.hooksPath` is never changed (when it is set, call the script from your
+own hook). `git commit --no-verify` bypasses it once. A missing tool
+(`rustfmt`, `python3`) is reported, never installed. Tested by
+`scripts/test_pre_commit.sh` in temporary repositories.
 
 ## Secrets
 
@@ -86,6 +114,43 @@ Resolved versions of the DNS/HTTP stack: reqwest 0.12.28 (without its
 injected through `reqwest::dns::Resolve`. reqwest 0.13 was not adopted: its
 `rustls` feature switches to aws-lc-rs and the platform verifier, without
 the WebPKI roots — a change of TLS contract beyond this cleanup.
+
+### Dependency update of Sprint 12.5 (2026-10-11)
+
+A simulation (`cargo update --dry-run`) proposed 22 changes. Applied, by
+`cargo update -p …`, in two groups, the lockfile diff inspected after each
+(exactly these packages changed, nothing transitive):
+
+| package | before | after | why |
+|---|---|---|---|
+| `uuid` | 1.27.0 | 1.28.0 | compatible release |
+| `serde_json` | 1.0.151 | 1.0.152 | patch |
+| `tokio-util` | 0.7.19 | 0.7.20 | patch |
+| `smallvec` | 1.16.2 | 1.16.3 | patch |
+| `indoc` | 2.0.7 | 2.0.8 | patch (proc-macro) |
+| `zstd-sys` | 2.1.0+zstd.1.5.7 | 2.1.1+zstd.1.5.7 | binding patch, same zstd |
+| `cc` | 1.6.0 | 1.7.0 | native build tool |
+| `cxx`, `cxx-build`, `cxxbridge-cmd`, `cxxbridge-flags`, `cxxbridge-macro` | 1.0.202 | 1.0.205 | updated together (one bridge version); `usearch` unchanged |
+
+Left out on purpose:
+
+* `mac_address` 1.2.1 — pulls `nix` 0.30 → 0.31, a migration this sprint
+  excludes.
+* `tree-sitter-language` 0.1.9 — Tree-sitter components stay together.
+* `syn` 3.0.7 — the version in place is kept.
+* `pest` 2.9.3 — adds two new native crates, `psm` and `stacker`.
+
+`clap` 4.6.7, `rmcp` 3.5.1, `tokio` 1.53.2 and `usearch` 2.26.4 were already
+current. reqwest/TLS/DNS, Tree-sitter, `nix`, `toml`, `dirs`, `schemars`,
+`syn` and `usearch` were not migrated.
+
+`cargo audit` (cargo-audit 0.22.2, advisory database of 2026-10-09, 1296
+advisories, 585 dependencies), before and after the update: **0
+vulnerabilities**, and the same four advisories — `lru` 0.16.4
+RUSTSEC-2026-0253 (unsound), `bincode` 2.0.1 RUSTSEC-2025-0141, `fxhash`
+0.2.1 RUSTSEC-2025-0057 and `paste` 1.0.15 RUSTSEC-2024-0436 (unmaintained).
+No advisory is ignored. Zero vulnerabilities is not zero advisories, nor a
+general guarantee.
 
 ### Residuals
 

@@ -15,7 +15,8 @@ nothing found is written anywhere.
 
 Known synthetic fixtures are listed in `scripts/secret-allowlist.txt`, one
 per line: `path<TAB>value#<sha256 prefix><TAB>why`. An entry excuses that
-value in that file only.
+value in that file only. With `--staged`, the allowlist is read from the
+index too: an entry that is not staged excuses nothing in the commit.
 
 Limits: it prevents the shapes it knows, not every possible secret (a
 password in prose, a token of an unknown provider, an encoded secret pass).
@@ -47,10 +48,19 @@ def fingerprint(value):
     return "value#" + hashlib.sha256(value.encode()).hexdigest()[:12]
 
 
-def allowlist():
+def allowlist(staged=False):
     allowed = set()
-    if os.path.exists(ALLOWLIST):
-        for line in open(ALLOWLIST, encoding="utf-8"):
+    if staged:
+        r = subprocess.run(
+            ["git", "show", ":scripts/secret-allowlist.txt"], capture_output=True, cwd=ROOT
+        )
+        lines = r.stdout.decode("utf-8", "replace").splitlines() if r.returncode == 0 else []
+    elif os.path.exists(ALLOWLIST):
+        lines = open(ALLOWLIST, encoding="utf-8").read().splitlines()
+    else:
+        lines = []
+    if lines:
+        for line in lines:
             line = line.rstrip("\n")
             if not line or line.startswith("#"):
                 continue
@@ -86,7 +96,7 @@ def main(argv):
     if len(argv) < 2:
         print(__doc__.strip().splitlines()[2], file=sys.stderr)
         return 2
-    allowed = allowlist()
+    allowed = allowlist(staged=argv[1] == "--staged")
     findings = []
     if argv[1] == "--staged":
         for path in git_lines("diff", "--cached", "--name-only", "--diff-filter=ACMR", "-z"):

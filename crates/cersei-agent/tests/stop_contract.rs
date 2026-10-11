@@ -407,6 +407,7 @@ async fn an_image_only_prompt_is_sent() {
                 file_id: None,
             },
         }],
+        skills: Vec::new(),
     };
     let out = a.run_input(&input).await.unwrap();
     assert!(out.is_complete());

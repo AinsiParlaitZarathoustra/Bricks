@@ -242,3 +242,148 @@ fn a_session_continues_headless_with_its_settings() {
     let out = p.run(&["run", "--session", "nope", "x"], None);
     assert_eq!(out.status.code(), Some(2));
 }
+
+fn write_skill(root: &std::path::Path, name: &str, body: &str) {
+    let d = root.join(name);
+    std::fs::create_dir_all(&d).unwrap();
+    std::fs::write(
+        d.join("SKILL.md"),
+        format!("---\nname: {name}\ndescription: Procedure {name}.\n---\n{body}\n"),
+    )
+    .unwrap();
+}
+
+/// `--skill` activates before the prompt (separate from it), with the
+/// same checks as `/skill`; a project skill needs `--trust-project-skills`
+/// (this session only); a skill that cannot be used sends nothing (2).
+#[test]
+fn skills_are_chosen_explicitly_and_project_skills_need_explicit_trust() {
+    let m = model(vec![text("fait"), text("fait")]);
+    let p = Project::new(&m.url, "");
+    write_skill(
+        &p.path().join(".agents/skills"),
+        "house-style",
+        "HOUSE-STYLE-BODY",
+    );
+    write_skill(&p.home.path().join(".agents/skills"), "mine", "MINE-BODY");
+
+    // Without trust: the project skill is refused, nothing is sent.
+    let out = p.run(
+        &[
+            "run",
+            "--json",
+            "--non-interactive",
+            "--skill",
+            "house-style",
+            "Écris",
+        ],
+        None,
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let evs = envelopes(&out.stdout);
+    let rejected = evs
+        .iter()
+        .find(|e| e["type"] == "command_rejected")
+        .unwrap();
+    assert!(rejected["reason"]
+        .as_str()
+        .unwrap()
+        .contains("not approved"));
+    assert!(evs.iter().any(|e| e["type"] == "notice"
+        && e["message"]
+            .as_str()
+            .unwrap()
+            .contains("--trust-project-skills")));
+    assert!(m.seen.lock().unwrap().is_empty(), "no request sent");
+
+    // With trust and a personal skill: both activated, in order, before
+    // the prompt, which stays its own message.
+    let out = p.run(
+        &[
+            "run",
+            "--json",
+            "--non-interactive",
+            "--trust-project-skills",
+            "--skill",
+            "house-style",
+            "--skill",
+            "mine",
+            "Écris le README",
+        ],
+        None,
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let evs = envelopes(&out.stdout);
+    let resolved = evs
+        .iter()
+        .find(|e| e["type"] == "skills_trust_resolved")
+        .unwrap();
+    assert_eq!(resolved["by"], "caller");
+    let act: Vec<_> = evs
+        .iter()
+        .filter(|e| e["type"] == "skill_activated")
+        .map(|e| {
+            (
+                e["name"].as_str().unwrap().to_string(),
+                e["origin"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        act,
+        [
+            ("house-style".to_string(), "user".to_string()),
+            ("mine".to_string(), "user".to_string())
+        ]
+    );
+    for e in &evs {
+        assert_eq!(e["schema"], 5, "additions keep the schema version");
+    }
+    let body = m.seen.lock().unwrap()[0].to_string();
+    let (i, j, k) = (
+        body.find("HOUSE-STYLE-BODY").unwrap(),
+        body.find("MINE-BODY").unwrap(),
+        body.find("Écris le README").unwrap(),
+    );
+    assert!(i < j && j < k, "skills first, then the request");
+    // The catalog of the request lists the skills, never their bodies twice.
+    assert_eq!(body.matches("HOUSE-STYLE-BODY").count(), 1);
+
+    // An unknown skill: refused before anything is sent.
+    let before = m.seen.lock().unwrap().len();
+    let out = p.run(
+        &["run", "--non-interactive", "--skill", "no-such", "x"],
+        None,
+    );
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("no-such"));
+    assert_eq!(m.seen.lock().unwrap().len(), before);
+}
+
+/// Without any skill on the machine (temporary home), a session works as
+/// before; the built-in skills are listed, nothing else.
+#[test]
+fn a_session_without_skills_works_and_lists_only_built_ins() {
+    let m = model(vec![text("ok")]);
+    let p = Project::new(&m.url, "");
+    let out = p.run(&["run", "--json", "--non-interactive", "Bonjour"], None);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let body = m.seen.lock().unwrap()[0].to_string();
+    assert!(body.contains("<name>verify</name>") && body.contains("<name>debug</name>"));
+    assert!(!body.contains("$ARGUMENTS"));
+}

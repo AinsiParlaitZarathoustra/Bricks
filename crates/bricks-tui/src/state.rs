@@ -110,7 +110,11 @@ pub struct Status {
     pub session_id: String,
     pub working_dir: String,
     pub model: String,
+    /// The requested profile (`None`: the model's default).
     pub reasoning: Option<String>,
+    /// The profile that applies (requested, else the model's declared
+    /// default), as the engine reports it.
+    pub effective_reasoning: Option<String>,
     pub context: Option<ContextStatus>,
     pub total: Option<Usage>,
     pub turns_usage: Vec<Usage>,
@@ -181,6 +185,8 @@ pub struct App {
     pub last_seq: u64,
     /// `+N −N` of the open session.
     pub totals: EditTotals,
+    /// The configured models (names, profile labels), from the engine.
+    pub models: Vec<cersei_agent::control::ModelChoice>,
 }
 
 fn summary(input: &serde_json::Value) -> String {
@@ -265,10 +271,17 @@ impl App {
                 working_dir,
                 model,
                 reasoning,
+                effective_reasoning,
                 warnings,
                 resumed,
                 message_count,
             } => {
+                self.status.effective_reasoning = effective_reasoning.clone();
+                // Per-response usage belongs to the session it was received
+                // in: a resumed or another session starts an empty list.
+                self.status.turns_usage.clear();
+                self.status.total = None;
+                self.status.context = None;
                 // Totals start again for every session opened (new or
                 // resumed): nothing is rebuilt from an old transcript.
                 self.totals = EditTotals {
@@ -296,7 +309,13 @@ impl App {
                 reasoning,
             } => {
                 self.run = Some((env.run_id.clone().unwrap_or_default(), Instant::now()));
+                if *model != self.status.model {
+                    self.status.effective_reasoning = None;
+                }
                 self.status.model = model.clone();
+                if reasoning.is_some() {
+                    self.status.effective_reasoning = reasoning.clone();
+                }
                 self.status.reasoning = reasoning.clone();
                 let labels = attachments
                     .iter()
@@ -474,13 +493,48 @@ impl App {
                     format!("no compaction: {outcome}")
                 });
             }
+            Event::ReasoningChanged {
+                requested,
+                previous,
+                previous_label,
+                effective,
+                effective_label,
+                applies,
+                ..
+            } => {
+                self.status.reasoning = requested.clone();
+                self.status.effective_reasoning = effective.clone();
+                let name = |id: &Option<String>, label: &Option<String>| {
+                    label
+                        .clone()
+                        .or_else(|| id.clone())
+                        .unwrap_or_else(|| "no profile".into())
+                };
+                let default = if requested.is_none() {
+                    " (the model's default)"
+                } else {
+                    ""
+                };
+                self.note(format!(
+                    "Reasoning effort: {} → {}{default}\n{}",
+                    name(previous, previous_label),
+                    name(effective, effective_label),
+                    if applies == "next_turn" {
+                        "Applies to the next request of this run."
+                    } else {
+                        "Applies to the next request."
+                    }
+                ));
+            }
             Event::ModelChanged {
                 model,
                 reasoning,
+                effective_reasoning,
                 applies,
             } => {
                 self.status.model = model.clone();
                 self.status.reasoning = reasoning.clone();
+                self.status.effective_reasoning = effective_reasoning.clone();
                 let when = if applies == "next_turn" {
                     "from the next turn"
                 } else {
@@ -685,6 +739,88 @@ impl App {
                     self.error(format!("  {}: {}", d.source, d.message));
                 }
             }
+            Event::Skills { listing } => {
+                self.note(format!(
+                    "{} skill candidate(s), page {} (project skills: {}):",
+                    listing.total, listing.page, listing.project_decision
+                ));
+                for e in &listing.entries {
+                    let line = format!(
+                        "  {} [{}] {}{}",
+                        e.name,
+                        e.source,
+                        e.state,
+                        e.description
+                            .as_deref()
+                            .map(|d| format!(" — {d}"))
+                            .unwrap_or_default()
+                    );
+                    if matches!(e.state.as_str(), "invalid" | "incompatible") {
+                        self.error(line);
+                    } else {
+                        self.note(line);
+                    }
+                    if let Some(p) = &e.path {
+                        self.note(format!("      {p}"));
+                    }
+                    for d in &e.details {
+                        self.note(format!("      {d}"));
+                    }
+                }
+                if listing.catalog_omitted > 0 {
+                    self.note(format!(
+                        "  ({} usable skills are left out of the model's catalog by its bounds)",
+                        listing.catalog_omitted
+                    ));
+                }
+                for d in &listing.diagnostics {
+                    self.error(format!("  {d}"));
+                }
+            }
+            Event::SkillsTrustRequested { project, sources } => {
+                let found: Vec<String> = sources
+                    .iter()
+                    .map(|s| format!("{} in {}", s.skills, s.path))
+                    .collect();
+                self.note(format!(
+                    "Project skills found in {project}: {}. They are not used until you decide, \
+                     for this session: /skills to inspect them, /skills trust to allow them, \
+                     /skills deny to refuse.",
+                    found.join(", ")
+                ));
+            }
+            Event::SkillsTrustResolved {
+                project,
+                allowed,
+                by,
+            } => self.note(format!(
+                "project skills of {project} {} for this session (by {by})",
+                if *allowed { "allowed" } else { "refused" }
+            )),
+            Event::SkillActivated {
+                agent_id,
+                name,
+                source,
+                revision,
+                origin,
+            } => self.note(format!(
+                "skill `{name}` active ({source}, revision {revision}, {origin}){}",
+                agent_id
+                    .as_deref()
+                    .map(|a| format!(" in {a}"))
+                    .unwrap_or_default()
+            )),
+            Event::SkillActivationFailed {
+                agent_id,
+                name,
+                reason,
+            } => self.error(format!(
+                "skill `{name}` not activated{}: {reason}",
+                agent_id
+                    .as_deref()
+                    .map(|a| format!(" in {a}"))
+                    .unwrap_or_default()
+            )),
             Event::ChangesReady { changeset } => self.note(format!(
                 "changes of {} ready: ChangeSet {} ({} file(s), branch {}) — /changes {} inspect | apply | discard",
                 changeset.agent_id,
@@ -836,6 +972,43 @@ mod tests {
             at: 0,
             event,
         }
+    }
+
+    #[test]
+    fn per_response_usage_never_mixes_sessions() {
+        let mut app = App::new();
+        let opened = |id: &str| Envelope {
+            session_id: id.into(),
+            run_id: None,
+            ..env(
+                1,
+                Event::SessionOpened {
+                    working_dir: "/p".into(),
+                    model: "m".into(),
+                    reasoning: None,
+                    effective_reasoning: None,
+                    resumed: false,
+                    message_count: 0,
+                    warnings: vec![],
+                },
+            )
+        };
+        app.apply(&opened("a"));
+        let u = Usage {
+            input_tokens: 5,
+            ..Default::default()
+        };
+        app.apply(&env(
+            2,
+            Event::Usage {
+                turn: Box::new(u.clone()),
+                total: Box::new(u.clone()),
+            },
+        ));
+        assert_eq!(app.status.turns_usage.len(), 1);
+        app.apply(&opened("b"));
+        assert!(app.status.turns_usage.is_empty());
+        assert!(app.status.total.is_none());
     }
 
     #[test]

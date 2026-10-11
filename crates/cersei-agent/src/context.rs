@@ -497,6 +497,23 @@ impl ContextManager {
         usage: &Usage,
         assistant: Option<(usize, &Message)>,
     ) -> bool {
+        let version = self.version;
+        self.record_response_sent(model, request, usage, assistant, version)
+    }
+
+    /// [`Self::record_response`] for a request sent when the context was at
+    /// `sent_version`. Its usage always counts in the session totals (once);
+    /// it becomes the current measurement only if nothing invalidated the
+    /// context since (a switch of model or profile, a rewrite): an older
+    /// response never restores a measurement that no longer applies.
+    pub fn record_response_sent(
+        &mut self,
+        model: &ModelView,
+        request: &RequestView,
+        usage: &Usage,
+        assistant: Option<(usize, &Message)>,
+        sent_version: u64,
+    ) -> bool {
         let prompt =
             usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens;
         if prompt == 0 && usage.output_tokens == 0 {
@@ -550,6 +567,9 @@ impl ContextManager {
             ))
         });
 
+        if sent_version != self.version {
+            return false;
+        }
         self.measurement = Some(Measurement {
             model: model.selection.clone(),
             version: self.version,

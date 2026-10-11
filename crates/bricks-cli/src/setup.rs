@@ -9,7 +9,7 @@
 
 use crate::args::Global;
 use cersei_agent::control::{
-    EngineConfig, OpenOptions, ProjectContext, ProjectLoader, SessionChoice,
+    EngineConfig, OpenOptions, ProjectContext, ProjectLoader, SessionChoice, SkillsSetup,
 };
 use cersei_agent::system_prompt::{build_system_prompt, SystemPromptOptions};
 use cersei_agent::BricksConfig;
@@ -277,6 +277,9 @@ pub fn engine(global: &Global, launch: &Path, interactive: bool) -> Result<Engin
         sessions_dir(),
     );
     cfg.interactive = interactive;
+    // Skills: the session's project sources and the user's home folder
+    // (`~/.agents/skills`, `~/.claude/skills`), plus the built-in ones.
+    cfg.skills = Some(SkillsSetup::with_home(dirs::home_dir()));
     cfg.project_loader = Some(Arc::new(CliProjects {
         registry,
         interactive,

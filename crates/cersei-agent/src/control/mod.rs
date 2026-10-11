@@ -17,11 +17,12 @@ pub use approval::{ApprovalBroker, ApprovalGate, ApprovalRequest, DecidedBy, Dec
 pub use controller::{
     list_sessions, list_sessions_in, Activity, Controller, EngineConfig, EventStream, ModelCatalog,
     ModelChoice, OpenOptions, ProfileChoice, ProjectContext, ProjectLoader, SessionChoice,
-    Snapshot, ToolFactory, ToolInfo,
+    SkillsSetup, Snapshot, ToolFactory, ToolInfo,
 };
 pub use protocol::{
     AttachmentInfo, Command, Envelope, Event, FailureKind, MaintenanceOutcome, Prompt, PromptBlock,
-    RunOutcome, SearchHit, WrittenFile, SCHEMA_VERSION,
+    RunOutcome, SearchHit, SkillListing, SkillSourceInfo, SkillsListing, WrittenFile,
+    SCHEMA_VERSION,
 };
 pub use session::{same_workspace, SessionMeta, SessionScope, SessionSummary};
 pub use settings::{Action, AgentSettings, ApprovalRules};

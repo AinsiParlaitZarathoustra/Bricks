@@ -13,12 +13,14 @@
 
 pub mod commands;
 pub mod composer;
+pub mod diag;
 pub mod inspect;
 pub mod links;
 pub mod markdown;
 pub mod mentions;
 pub mod overlay;
 pub mod state;
+pub mod statusbar;
 pub mod term;
 pub mod ui;
 pub mod view;
@@ -156,10 +158,32 @@ async fn run_effects(ui: &mut Ui, ctl: &Controller, effects: Vec<Effect>) -> boo
                 let snapshot = ctl.snapshot();
                 ui.overlay = Some(match p {
                     Present::ModelPicker => Ui::model_picker(&ctl.models(), &snapshot.model),
+                    Present::EffortPicker => {
+                        match ctl
+                            .models()
+                            .into_iter()
+                            .find(|m| m.selection == snapshot.model)
+                        {
+                            Some(m) => Ui::effort_picker(
+                                &m,
+                                snapshot.reasoning.as_deref(),
+                                snapshot.effective_reasoning.as_deref(),
+                            ),
+                            None => {
+                                ui.message = Some(format!(
+                                    "model `{}` is no longer configured",
+                                    snapshot.model
+                                ));
+                                continue;
+                            }
+                        }
+                    }
                     Present::SessionPicker => session_picker(ctl).await,
                     Present::Memory => inspect::memory(&snapshot, &ui.app),
                     Present::Context => inspect::context(&snapshot),
+                    Present::ContextDetails => inspect::context_details(&snapshot),
                     Present::Cost => inspect::costs(&snapshot, &ui.app),
+                    Present::CostDetails => inspect::cost_details(&snapshot, &ui.app),
                     Present::Session => inspect::session(&snapshot),
                     Present::Diff => inspect::diff(ui),
                     Present::Tools => inspect::tools(ctl),
@@ -194,6 +218,8 @@ async fn session_picker(ctl: &Controller) -> overlay::Overlay {
 pub async fn run(ctl: Controller, mut events: EventStream, opts: TuiOptions) -> Result<(), String> {
     let working_dir = ctl.snapshot().working_dir;
     let mut ui = Ui::new(&working_dir);
+    // Names and profile labels for the status bar (the engine's catalog).
+    ui.app.models = ctl.models();
     ui.hyperlinks = links::enabled(
         opts.hyperlinks,
         std::io::IsTerminal::is_terminal(&std::io::stdout()),

@@ -206,7 +206,12 @@ async fn background_tasks_through_the_agent() {
             "b1",
             "Bash",
             json!({
-                "command": "python3 -u -m http.server 0 --bind 127.0.0.1",
+                "command": format!(
+                    "python3 -u '{}'",
+                    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("../cersei-tools/tests/fixtures/http_server.py")
+                        .display()
+                ),
                 "background": true,
                 "ready_pattern": "port \\d+",
                 "ready_timeout": 15000

@@ -159,6 +159,25 @@ pub enum AgentEvent {
         files: Vec<cersei_tools::preview::FileChange>,
     },
 
+    // Skills
+    /// A skill's instructions are now in this agent's context (`origin`:
+    /// `model`, `user`, `profile`, or `restored` with a session).
+    /// `agent_id` is set when a sub-agent's event is forwarded.
+    SkillActivated {
+        agent_id: Option<String>,
+        name: String,
+        source: String,
+        revision: String,
+        origin: String,
+    },
+    /// A skill was not activated (refused, too large, failed), or an
+    /// activation was suspended when a session was restored.
+    SkillNotActivated {
+        agent_id: Option<String>,
+        name: String,
+        reason: String,
+    },
+
     // Terminal
     /// Lifecycle of a sub-agent started by this run (its own text is never
     /// part of this run's answer).

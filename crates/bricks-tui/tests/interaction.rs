@@ -372,3 +372,211 @@ async fn slash_search_goes_through_the_engine_and_shows_its_results() {
         })]
     );
 }
+
+/// Feed events to the interface up to the first of `kind` (inclusive).
+async fn feed(ui: &mut Ui, kind: &str, events: &mut EventStream) {
+    loop {
+        let e = tokio::time::timeout(Duration::from_secs(10), events.next())
+            .await
+            .unwrap()
+            .unwrap();
+        ui.on_event(&e);
+        if e.event.kind() == kind {
+            return;
+        }
+    }
+}
+
+/// `/skills`, `/skills trust`, `/skill <name> <request>` typed in the
+/// interface reach the real engine and its answers are shown; the
+/// interface builds no catalog of its own.
+#[tokio::test]
+async fn the_skills_commands_go_through_the_engine() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = tempfile::tempdir().unwrap();
+    for (root, name) in [
+        (dir.path().join(".agents/skills"), "local-proc"),
+        (home.path().join(".agents/skills"), "mine"),
+    ] {
+        std::fs::create_dir_all(root.join(name)).unwrap();
+        std::fs::write(
+            root.join(name).join("SKILL.md"),
+            format!("---\nname: {name}\ndescription: Procedure {name}.\n---\nBODY-{name}\n"),
+        )
+        .unwrap();
+    }
+    let script = Script::new(vec![Reply::text("fait")]);
+    let mut bricks = BricksConfig::default();
+    bricks.agent.model = Some("test/a".into());
+    let mut cfg = EngineConfig::new(
+        dir.path(),
+        ScriptedCatalog::new(&["a"], script.clone()),
+        bricks,
+        dir.path().join(".s"),
+    );
+    cfg.skills = Some(SkillsSetup::with_home(Some(home.path().to_path_buf())));
+    let (ctl, mut events) = Controller::open(
+        cfg,
+        OpenOptions {
+            session: SessionChoice::New,
+            model: None,
+            reasoning: None,
+        },
+    )
+    .await
+    .unwrap();
+    let mut ui = Ui::new(dir.path());
+    feed(&mut ui, "skills_trust_requested", &mut events).await;
+    let notices = |ui: &Ui| -> String {
+        ui.app
+            .cells
+            .iter()
+            .filter_map(|c| match c {
+                Cell::Notice(t) | Cell::Error(t) => Some(t.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    assert!(notices(&ui).contains("/skills trust"));
+
+    // The first Enter completes from the popup (the command takes
+    // arguments), the second sends it.
+    typed(&mut ui, "/skills");
+    assert!(ui.on_key(key(KeyCode::Enter)).is_empty());
+    execute(&ctl, ui.on_key(key(KeyCode::Enter))).await;
+    feed(&mut ui, "skills", &mut events).await;
+    let shown = notices(&ui);
+    assert!(
+        shown.contains("local-proc [project:.agents] pending_approval"),
+        "{shown}"
+    );
+    assert!(shown.contains("mine [user:.agents] available"), "{shown}");
+
+    typed(&mut ui, "/skills trust");
+    execute(&ctl, ui.on_key(key(KeyCode::Enter))).await;
+    feed(&mut ui, "skills_trust_resolved", &mut events).await;
+    assert!(notices(&ui).contains("allowed for this session (by user)"));
+
+    typed(&mut ui, "/skill local-proc résume le projet");
+    execute(&ctl, ui.on_key(key(KeyCode::Enter))).await;
+    feed(&mut ui, "run_finished", &mut events).await;
+    assert!(notices(&ui).contains("skill `local-proc` active"));
+    let req = &script.requests()[0].1;
+    let n = req.messages.len();
+    assert!(req.messages[n - 2]
+        .get_all_text()
+        .contains("BODY-local-proc"));
+    assert_eq!(req.messages[n - 1].get_all_text(), "résume le projet");
+}
+
+/// `/effort` and the model picker's "(default)" go through the explicit
+/// reasoning command: the default really clears the override (the old
+/// `set_model` without a profile kept it).
+#[tokio::test]
+async fn effort_and_the_pickers_default_reset_the_profile() {
+    use bricks_tui::commands::{parse, Action};
+    assert_eq!(
+        parse("/effort default").unwrap(),
+        Action::Engine(Command::SetReasoning { profile: None })
+    );
+    assert_eq!(
+        parse("/effort deep").unwrap(),
+        Action::Engine(Command::SetReasoning {
+            profile: Some("deep".into())
+        })
+    );
+    assert!(matches!(
+        parse("/effort").unwrap(),
+        Action::Present(bricks_tui::commands::Present::EffortPicker)
+    ));
+
+    let dir = tempfile::tempdir().unwrap();
+    let script = Script::new(vec![Reply::text("a"), Reply::text("b")]);
+    let mut bricks = BricksConfig::default();
+    bricks.agent.model = Some("test/a".into());
+    let cfg = EngineConfig::new(
+        dir.path(),
+        ScriptedCatalog::new(&["a"], script.clone()),
+        bricks,
+        dir.path().join(".s"),
+    );
+    let (ctl, mut events) = Controller::open(
+        cfg,
+        OpenOptions {
+            session: SessionChoice::New,
+            model: None,
+            reasoning: Some("deep".into()),
+        },
+    )
+    .await
+    .unwrap();
+    let mut ui = Ui::new(dir.path());
+    feed(&mut ui, "session_opened", &mut events).await;
+    assert_eq!(ui.app.status.reasoning.as_deref(), Some("deep"));
+
+    // The model picker → profiles of the current model → "(default)".
+    let model = ctl
+        .models()
+        .into_iter()
+        .find(|m| m.selection == "test/a")
+        .unwrap();
+    ui.overlay = Some(Ui::profile_picker(&model));
+    let effects = ui.on_key(key(KeyCode::Enter));
+    assert_eq!(
+        effects,
+        vec![Effect::Send(Command::SetReasoning { profile: None })]
+    );
+    execute(&ctl, effects).await;
+    feed(&mut ui, "reasoning_changed", &mut events).await;
+    assert_eq!(ctl.snapshot().reasoning, None);
+    assert_eq!(ui.app.status.reasoning, None);
+
+    // The `/effort` picker: labels shown, ids sent, a choice applies.
+    let picker = Ui::effort_picker(&model, None, None);
+    ui.overlay = Some(picker);
+    ui.on_key(key(KeyCode::Down));
+    ui.on_key(key(KeyCode::Down));
+    let effects = ui.on_key(key(KeyCode::Enter));
+    assert_eq!(
+        effects,
+        vec![Effect::Send(Command::SetReasoning {
+            profile: Some("deep".into())
+        })]
+    );
+    execute(&ctl, effects).await;
+    feed(&mut ui, "reasoning_changed", &mut events).await;
+    let shown: String = ui
+        .app
+        .cells
+        .iter()
+        .filter_map(|c| match c {
+            Cell::Notice(t) => Some(t.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        shown.contains("Reasoning effort:") && shown.contains("→ deep"),
+        "{shown}"
+    );
+    assert!(shown.contains("Applies to the next request."), "{shown}");
+    // The next request carries it.
+    ctl.send(Command::Submit {
+        prompt: Prompt::text("go"),
+    })
+    .unwrap();
+    feed(&mut ui, "run_finished", &mut events).await;
+    let req = &script.requests()[0].1;
+    assert_eq!(
+        req.options.get::<String>("reasoning_profile").as_deref(),
+        Some("deep")
+    );
+
+    // A model without profiles says so.
+    let mut bare = model.clone();
+    bare.profiles.clear();
+    let o = Ui::effort_picker(&bare, None, None);
+    let text = format!("{o:?}");
+    assert!(text.contains("No reasoning profiles configured for this model."));
+}

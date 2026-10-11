@@ -13,7 +13,7 @@ Bricks is a workspace of crates inherited from Cersei (`cersei-*`) plus its own 
 2. **Zero-cost abstractions** — In-process tool dispatch at 0.02-0.09ms. No IPC, no subprocess spawning.
 3. **Streaming-first** — All async operations emit events. Never blocks waiting for tool results.
 4. **POSIX-native I/O** — Direct syscalls where possible. File ops use `std::fs`, shell uses `nix`.
-5. **Compatible** — Session format (JSONL), memory format (MEMORY.md), and skill format (.claude/commands/) are all Claude Code compatible.
+5. **Compatible** — Session format (JSONL), memory format (MEMORY.md), are Claude Code compatible; skills follow the Agent Skills standard (`SKILL.md` in `.agents/skills` or `.claude/skills`; Claude-specific directives are not implemented — see `docs/skills.md`).
 
 ## Crate Map
 
@@ -23,7 +23,8 @@ bricks-cli                The `bricks` binary: arguments, configuration, headles
 cersei                    Facade — re-exports all sub-crates via prelude
   cersei-types            Messages, errors, stream events (no dependencies)
   cersei-provider         Provider trait, registry from providers.toml, 3 protocols
-  cersei-tools            34 tools, permissions, bash analysis, skills
+  cersei-tools            34 tools, permissions, bash analysis, the Skill tool
+  bricks-skills           Agent Skills: sources, trust, activation
   cersei-tools-derive     #[derive(Tool)] proc macro
   cersei-agent            Agent builder, agentic loop, compact, events
   cersei-memory           Memory trait, memdir, CLAUDE.md, graph, sessions

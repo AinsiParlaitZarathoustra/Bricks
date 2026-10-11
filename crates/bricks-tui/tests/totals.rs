@@ -30,6 +30,7 @@ fn opened() -> Event {
         working_dir: "/p".into(),
         model: "local/m".into(),
         reasoning: None,
+        effective_reasoning: None,
         resumed: false,
         message_count: 0,
         warnings: vec![],

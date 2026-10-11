@@ -691,23 +691,36 @@ Read or modify session-scoped configuration values.
 
 ### Skill
 
-Load and execute a skill (prompt template) from `.claude/commands/`, `.claude/skills/`, or bundled skills.
+Activates an [Agent Skill](https://agentskills.io/specification) — reads its full instructions — or lists the skills the agent may activate, or locates one of a skill's files. It runs nothing and grants no permission. Present only on agents built with a skills service (`AgentBuilder::skills`; the `bricks` CLI does it).
 
-**Permission:** None
+**Permission:** ReadOnly
 
 <TypeTable
   type={{
+    action: {
+      type: 'string',
+      description: '"activate" (default when `skill` is given), "list", or "resource". `skill: "list"` without an action lists.',
+    },
     skill: {
       type: 'string',
-      description: 'Skill name, or "list" to show available skills.',
-      required: true,
+      description: 'The skill name, exactly as listed.',
     },
     args: {
       type: 'string',
-      description: 'Arguments passed to the skill (replaces $ARGUMENTS in template).',
+      description: 'The request to apply the skill to; returned separately, never substituted into the instructions.',
+    },
+    query: {
+      type: 'string',
+      description: 'For "list": words to filter names and descriptions (20 per page, `page`).',
+    },
+    path: {
+      type: 'string',
+      description: 'For "resource": a path relative to the skill\'s directory.',
     },
   }}
 />
+
+See `docs/skills.md` in the repository for sources, trust, activation and limits.
 
 ### ToolSearch
 

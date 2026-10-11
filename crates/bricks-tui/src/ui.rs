@@ -566,10 +566,17 @@ impl Ui {
                 Some(model) => vec![Effect::ChooseProfile(model)],
                 None => Vec::new(),
             },
+            // The current model: a profile, or back to its default, through
+            // the explicit reasoning command (`SetModel` with no profile keeps
+            // the previous one). Another model: switched with that profile.
+            PickAction::Profile { model } if model == self.app.status.model => {
+                vec![Effect::Send(Command::SetReasoning { profile: value })]
+            }
             PickAction::Profile { model } => vec![Effect::Send(Command::SetModel {
                 model: Some(model),
                 reasoning: value,
             })],
+            PickAction::Effort => vec![Effect::Send(Command::SetReasoning { profile: value })],
             PickAction::Session => match value {
                 Some(id) => vec![Effect::Send(Command::Resume { session_id: id })],
                 None => Vec::new(),
@@ -650,13 +657,79 @@ impl Ui {
                     if m.priced {
                         ""
                     } else {
-                        " · no price (cost unknown)"
+                        " · Not priced (no price configured)"
                     }
                 ),
                 value: Some(m.selection.clone()),
             })
             .collect();
         Overlay::picker("model (from the configuration)", items, PickAction::Model)
+    }
+
+    /// `/effort`: the current model's profiles (labels shown, ids selected),
+    /// the reset to its declared default first, `●` on the effective one.
+    pub fn effort_picker(
+        model: &cersei_agent::control::ModelChoice,
+        requested: Option<&str>,
+        effective: Option<&str>,
+    ) -> Overlay {
+        if model.profiles.is_empty() {
+            return Overlay::text(
+                format!("Reasoning effort · {}", model.name),
+                vec![Line::from(
+                    "No reasoning profiles configured for this model.",
+                )],
+            );
+        }
+        let label_of = |id: &str| {
+            model
+                .profiles
+                .iter()
+                .find(|p| p.id == id)
+                .map(|p| p.label.clone())
+                .unwrap_or_else(|| id.to_string())
+        };
+        let mut items = vec![PickItem {
+            label: format!(
+                "{}Default · {}",
+                if requested.is_none() { "● " } else { "  " },
+                model
+                    .default_profile
+                    .as_deref()
+                    .map(label_of)
+                    .unwrap_or_else(|| "no profile parameters".into())
+            ),
+            detail: "the model's declared default".into(),
+            value: None,
+        }];
+        items.extend(model.profiles.iter().map(|p| PickItem {
+            label: format!(
+                "{}{}",
+                if requested == Some(p.id.as_str()) {
+                    "● "
+                } else {
+                    "  "
+                },
+                p.label
+            ),
+            detail: if p.label == p.id {
+                String::new()
+            } else {
+                p.id.clone()
+            },
+            value: Some(p.id.clone()),
+        }));
+        Overlay::picker(
+            format!(
+                "Reasoning effort · {} — current: {}",
+                model.name,
+                effective
+                    .map(label_of)
+                    .unwrap_or_else(|| "no profile".into())
+            ),
+            items,
+            PickAction::Effort,
+        )
     }
 
     /// Profile picker for a model.

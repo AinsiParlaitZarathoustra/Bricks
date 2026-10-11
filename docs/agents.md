@@ -125,8 +125,8 @@ Instructions (the Markdown body, kept verbatim).
 * `max_turns` (former): turn limits were removed in 0.4.8. The key is still
   accepted, ignored, and reported as a diagnostic (remove it); nothing
   limits the child's turns.
-* `skills`: skills loaded into the sub-agent's system prompt (see *Skills
-  of profiles*); a missing skill is reported and takes no tool away.
+* `skills`: skills preloaded whole into the sub-agent's system prompt (see
+  *Skills of profiles*); one that cannot be used refuses the launch.
 * Parsing: `serde-saphyr` with a budget (depth 8, 256 nodes, 16 aliases,
   16 KiB of scalars, one document); unknown and duplicate keys are refused;
   tags are not executed; nothing is interpolated (`${HOME}` stays text).
@@ -360,13 +360,24 @@ never the text), `job_finished`.
 
 ## Skills of profiles
 
-A profile's `skills: [name, …]` are loaded with Bricks' skill loader from
-the child's workspace (project, user, bundled) into its system prompt —
-present on every request, never compacted away — within
-`skills_max_bytes`. Each is reported in the result (`skills`: `loaded`,
-`truncated`, `missing`, `invalid`, `skipped`) with its source and
-revision. A missing skill is a diagnostic, not a failure; skills never
-remove tools.
+A profile's `skills: [name, …]` are resolved with the session's skills
+service (`docs/skills.md`): the same sources, priorities and trust as the
+session agent — a project skill needs the session's approval. They are read
+and checked **before** the child is built and before any provider call:
+a missing, refused, invalid or incompatible skill, or a total over
+`skills_max_bytes` (24 000 bytes), refuses the launch with the reason;
+nothing is cut. The skills go whole into the child's system prompt
+(present on every request, never compacted away), are reported in the
+result (`skills`: `loaded`, with source and revision) and as
+`skill_activated` events (`origin: "profile"`, with the child's
+`agent_id`). Older results may still show the former states (`truncated`,
+`missing`, `invalid`, `skipped`).
+
+Every child — foreground, background, nested, in a worktree — has its own
+`Skill` tool and its own activations; it shares the session's sources and
+trust, never the parent's activations or messages. A child in a worktree
+reads its project's skills in place and works in its worktree. Skills
+never remove tools or take the workspace's write lock.
 
 ## Usage
 

@@ -305,13 +305,16 @@ pub async fn run(global: &Global, launch: &std::path::Path, args: RunArgs) -> i3
         }
     };
     let interactive = !args.non_interactive && controlling_terminal();
-    let cfg = match setup::engine(global, launch, interactive) {
+    let mut cfg = match setup::engine(global, launch, interactive) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("bricks: {e}");
             return exit::USAGE;
         }
     };
+    if let Some(skills) = cfg.skills.as_mut() {
+        skills.trust_project = args.trust_project_skills;
+    }
     let (ctl, mut events) =
         match Controller::open(cfg, setup::open_options(global, args.session.clone())).await {
             Ok(x) => x,
@@ -344,11 +347,20 @@ pub async fn run(global: &Global, launch: &std::path::Path, args: RunArgs) -> i3
         }
     }
     if let Err(e) = ctl.send(Command::Submit {
-        prompt: Prompt { blocks },
+        prompt: Prompt {
+            blocks,
+            skills: args.skills.clone(),
+        },
     }) {
-        // Reported as `command_rejected` too.
-        if let Some(env) = events.next().await {
+        // Reported as `command_rejected` too (after any event already
+        // queued, e.g. a notice about the project's skills).
+        while let Ok(Some(env)) =
+            tokio::time::timeout(std::time::Duration::from_secs(5), events.next()).await
+        {
             emit(&env);
+            if matches!(env.event, Event::CommandRejected { .. }) {
+                break;
+            }
         }
         if !json {
             eprintln!("bricks: {e}");

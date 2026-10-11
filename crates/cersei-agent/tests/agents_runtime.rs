@@ -162,6 +162,12 @@ impl Provider for TestProvider {
             )
         } else if has_tool_result(&req) {
             Reply::text(&format!("done: {}", task.lines().next().unwrap_or("")))
+        } else if let Some(inner) = marker(&task, "delegate-skilled") {
+            Reply::tool(
+                "d1",
+                "Agent",
+                json!({ "task": inner.replace('|', ":"), "profile": "skilled" }),
+            )
         } else if let Some(inner) = marker(&task, "delegate") {
             Reply::tool(
                 "d1",
@@ -255,6 +261,16 @@ async fn open(
     interactive: bool,
     tweak: impl FnOnce(&mut BricksConfig),
 ) -> Env {
+    open_full(replies, rules, interactive, tweak, |_, _| {}).await
+}
+
+async fn open_full(
+    replies: Vec<Reply>,
+    rules: ApprovalRules,
+    interactive: bool,
+    tweak: impl FnOnce(&mut BricksConfig),
+    engine: impl FnOnce(&mut EngineConfig, &Path),
+) -> Env {
     let dir = tempfile::tempdir().unwrap();
     // A repository with one commit (worktrees need one).
     git(dir.path(), &["init", "-q", "-b", "main"]);
@@ -281,6 +297,7 @@ async fn open(
         project_dir: Some(dir.path().join(".bricks/agents")),
         user_dir: None,
     });
+    engine(&mut cfg, dir.path());
     let (ctl, mut events) = Controller::open(
         cfg,
         OpenOptions {
@@ -989,9 +1006,69 @@ async fn parallel_writers_get_worktrees_and_changesets_without_last_writer_wins(
 
 // ─── Skills, permissions ─────────────────────────────────────────────────────
 
+/// Skills on (home in a sub-folder, nothing of the machine), project
+/// skills approved by the caller when `trust`.
+fn with_skills(trust: bool) -> impl FnOnce(&mut EngineConfig, &Path) {
+    move |cfg, dir| {
+        let mut setup = SkillsSetup::with_home(Some(dir.join(".home")));
+        setup.trust_project = trust;
+        cfg.skills = Some(setup);
+    }
+}
+
+fn write_skill(root: &Path, name: &str, body: &str) {
+    let d = root.join(name);
+    std::fs::create_dir_all(&d).unwrap();
+    std::fs::write(
+        d.join("SKILL.md"),
+        format!("---\nname: {name}\ndescription: Procedure {name}.\n---\n{body}\n"),
+    )
+    .unwrap();
+}
+
+async fn skilled_profile(env: &mut Env, skills: &str) {
+    let root = env.dir.path();
+    std::fs::create_dir_all(root.join(".bricks/agents")).unwrap();
+    std::fs::write(
+        root.join(".bricks/agents/skilled.md"),
+        format!(
+            "---\nname: skilled\ndescription: Uses skills.\nskills: [{skills}]\n---\nBe skilled.\n"
+        ),
+    )
+    .unwrap();
+    // Not committed: the skill is found in place, not through Git.
+    write_skill(
+        &root.join(".agents/skills"),
+        "house-style",
+        "SKILL-MARKER-42: write short sentences.",
+    );
+    env.ctl.send(Command::ReloadAgentProfiles).unwrap();
+    until(&mut env.events, |e| {
+        matches!(e, Event::AgentProfiles { .. })
+    })
+    .await;
+    // Sources are read on demand, not per turn.
+    env.ctl.send(Command::ReloadSkills).unwrap();
+    until(&mut env.events, |e| matches!(e, Event::Skills { .. })).await;
+}
+
+fn skill_events(evs: &[Envelope]) -> Vec<(Option<String>, String, String)> {
+    evs.iter()
+        .filter_map(|e| match &e.event {
+            Event::SkillActivated {
+                agent_id,
+                name,
+                origin,
+                ..
+            } => Some((agent_id.clone(), name.clone(), origin.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
 #[tokio::test]
-async fn profile_skills_are_loaded_into_the_child() {
-    let mut env = open(
+async fn profile_skills_are_preloaded_whole_before_the_childs_first_call() {
+    let mut env = open_full(
         vec![
             Reply::tool(
                 "c1",
@@ -1003,26 +1080,10 @@ async fn profile_skills_are_loaded_into_the_child() {
         allow(&["Agent", "Bash"]),
         true,
         |_| {},
+        with_skills(true),
     )
     .await;
-    let root = env.dir.path();
-    std::fs::create_dir_all(root.join(".bricks/agents")).unwrap();
-    std::fs::write(
-        root.join(".bricks/agents/skilled.md"),
-        "---\nname: skilled\ndescription: Uses a skill.\nskills: [house-style, no-such-skill]\n---\nBe skilled.\n",
-    )
-    .unwrap();
-    std::fs::create_dir_all(root.join(".claude/skills/house-style")).unwrap();
-    std::fs::write(
-        root.join(".claude/skills/house-style/SKILL.md"),
-        "---\nname: house-style\ndescription: House style.\n---\nSKILL-MARKER-42: write short sentences.\n",
-    )
-    .unwrap();
-    env.ctl.send(Command::ReloadAgentProfiles).unwrap();
-    until(&mut env.events, |e| {
-        matches!(e, Event::AgentProfiles { .. })
-    })
-    .await;
+    skilled_profile(&mut env, "house-style").await;
     let evs = submit(&mut env, "go").await;
     let rs = results(&evs);
     let states: Vec<(String, String)> = rs[0]
@@ -1032,23 +1093,210 @@ async fn profile_skills_are_loaded_into_the_child() {
         .collect();
     assert_eq!(
         states,
-        vec![
-            ("house-style".to_string(), "loaded".to_string()),
-            ("no-such-skill".to_string(), "missing".to_string())
-        ]
+        vec![("house-style".to_string(), "loaded".to_string())]
     );
     assert!(rs[0].skills[0].revision.is_some() && rs[0].skills[0].source.is_some());
-    // In the first request and the next one (it is not in the history).
+    let child = rs[0].agent_id.clone();
+    assert!(skill_events(&evs).contains(&(Some(child), "house-style".into(), "profile".into())));
+    // In the child's first request, whole, and in the next one.
     let reqs = env.shared.child_requests.lock().clone();
     assert!(reqs.len() >= 2);
     for r in &reqs {
         let sys = r.system.as_deref().unwrap();
-        assert!(sys.contains("SKILL-MARKER-42"));
-        assert!(sys.contains("no-such-skill"));
+        assert!(sys.contains("SKILL-MARKER-42: write short sentences."));
+        assert!(!sys.contains("truncated"));
     }
-    // No tool was taken away.
     let names: Vec<&str> = reqs[0].tools.iter().map(|t| t.name.as_str()).collect();
-    assert!(names.contains(&"Bash") && names.contains(&"Agent"));
+    assert!(names.contains(&"Bash") && names.contains(&"Agent") && names.contains(&"Skill"));
+}
+
+#[tokio::test]
+async fn a_background_child_gets_its_profile_skills_too() {
+    let mut env = open_full(
+        vec![
+            Reply::tool(
+                "c1",
+                "Agent",
+                json!({ "task": "later [glob]", "profile": "skilled", "background": true }),
+            ),
+            Reply::text("started"),
+        ],
+        allow(&["Agent", "Glob"]),
+        true,
+        |_| {},
+        with_skills(true),
+    )
+    .await;
+    skilled_profile(&mut env, "house-style").await;
+    let mut evs = submit(&mut env, "go").await;
+    if results(&evs).is_empty() {
+        evs.extend(
+            until(&mut env.events, |e| {
+                matches!(e, Event::AgentFinished { .. })
+            })
+            .await,
+        );
+    }
+    let rs = results(&evs);
+    assert_eq!(rs[0].skills[0].state, "loaded");
+    let reqs = env.shared.child_requests.lock().clone();
+    assert!(reqs[0]
+        .system
+        .as_deref()
+        .unwrap()
+        .contains("SKILL-MARKER-42"));
+}
+
+#[tokio::test]
+async fn a_profile_skill_that_cannot_be_used_refuses_the_launch_before_any_call() {
+    for (skills, trust, want) in [
+        ("house-style, no-such-skill", true, "no-such-skill"),
+        // Project skills not approved for the session: refused too.
+        ("house-style", false, "not approved"),
+    ] {
+        let mut env = open_full(
+            vec![
+                Reply::tool("c1", "Agent", json!({ "task": "x", "profile": "skilled" })),
+                Reply::text("ok"),
+            ],
+            allow(&["Agent"]),
+            true,
+            |_| {},
+            with_skills(trust),
+        )
+        .await;
+        skilled_profile(&mut env, skills).await;
+        let evs = submit(&mut env, "go").await;
+        let (is_error, out) = tool_out(&evs, "c1");
+        assert!(is_error && out.contains(want), "{out}");
+        assert!(spawned(&evs).is_empty());
+        assert!(env.shared.child_requests.lock().is_empty(), "no child call");
+    }
+}
+
+#[tokio::test]
+async fn a_profile_over_the_skill_budget_is_refused_not_cut() {
+    let mut env = open_full(
+        vec![
+            Reply::tool("c1", "Agent", json!({ "task": "x", "profile": "skilled" })),
+            Reply::text("ok"),
+        ],
+        allow(&["Agent"]),
+        true,
+        |b| b.agents.skills_max_bytes = 100,
+        with_skills(true),
+    )
+    .await;
+    skilled_profile(&mut env, "house-style").await;
+    write_skill(
+        &env.dir.path().join(".agents/skills"),
+        "house-style",
+        &"long line\n".repeat(50),
+    );
+    env.ctl.send(Command::ReloadSkills).unwrap();
+    until(&mut env.events, |e| matches!(e, Event::Skills { .. })).await;
+    let evs = submit(&mut env, "go").await;
+    let (is_error, out) = tool_out(&evs, "c1");
+    assert!(
+        is_error && out.contains("skills_max_bytes") && out.contains("nothing is cut"),
+        "{out}"
+    );
+    assert!(env.shared.child_requests.lock().is_empty());
+}
+
+#[tokio::test]
+async fn a_worktree_child_reads_its_origin_projects_skill_in_place() {
+    let mut env = open_full(
+        vec![
+            Reply::tool(
+                "c1",
+                "Agent",
+                json!({ "task": "work [glob]", "profile": "skilled", "isolation": "worktree" }),
+            ),
+            Reply::text("ok"),
+        ],
+        allow(&["Agent", "Glob"]),
+        true,
+        |_| {},
+        with_skills(true),
+    )
+    .await;
+    skilled_profile(&mut env, "house-style").await;
+    let evs = submit(&mut env, "go").await;
+    let sp = spawned(&evs);
+    assert_eq!(sp[0].isolation, "worktree");
+    let wt = sp[0].workspace.clone();
+    let origin = env.dir.path().canonicalize().unwrap();
+    let sys = env.shared.child_requests.lock()[0].system.clone().unwrap();
+    let skill_dir = origin.join(".agents/skills/house-style");
+    assert!(
+        sys.contains(&format!("Skill directory: {}", skill_dir.display())),
+        "{sys}"
+    );
+    assert!(
+        sys.contains(&format!("Your working directory is unchanged: {wt}")),
+        "{sys}"
+    );
+    assert!(!wt.starts_with(&origin.display().to_string()) || wt.contains("workspaces"));
+}
+
+#[tokio::test]
+async fn nested_delegation_resolves_skills_the_same_way_and_the_parent_keeps_its_own() {
+    let mut env = open_full(
+        vec![
+            Reply::tool("p1", "Skill", json!({ "skill": "parent-only" })),
+            Reply::tool(
+                "c1",
+                "Agent",
+                json!({ "task": "relay [delegate-skilled:inner [glob]]" }),
+            ),
+            Reply::text("ok"),
+        ],
+        allow(&["Agent", "Glob"]),
+        true,
+        |_| {},
+        with_skills(true),
+    )
+    .await;
+    skilled_profile(&mut env, "house-style").await;
+    write_skill(
+        &env.dir.path().join(".home/.agents/skills"),
+        "parent-only",
+        "PARENT-ONLY-BODY",
+    );
+    env.ctl.send(Command::ReloadSkills).unwrap();
+    until(&mut env.events, |e| matches!(e, Event::Skills { .. })).await;
+    let evs = submit(&mut env, "go").await;
+    assert!(skill_events(&evs).contains(&(None, "parent-only".into(), "model".into())));
+    let reqs = env.shared.child_requests.lock().clone();
+    let grandchild: Vec<_> = reqs
+        .iter()
+        .filter(|r| {
+            r.system
+                .as_deref()
+                .is_some_and(|s| s.contains("SKILL-MARKER-42"))
+        })
+        .collect();
+    assert!(
+        !grandchild.is_empty(),
+        "the grandchild got its profile's skill"
+    );
+    for r in &reqs {
+        let mut all = r.system.clone().unwrap_or_default();
+        for m in &r.messages {
+            all.push_str(&m.get_all_text());
+        }
+        assert!(
+            !all.contains("PARENT-ONLY-BODY"),
+            "a parent's activation is its own"
+        );
+    }
+    // The children's own ledgers: only the grandchild has `house-style`.
+    let profile_events: Vec<_> = skill_events(&evs)
+        .into_iter()
+        .filter(|(_, n, o)| n == "house-style" && o == "profile")
+        .collect();
+    assert_eq!(profile_events.len(), 1);
 }
 
 #[tokio::test]

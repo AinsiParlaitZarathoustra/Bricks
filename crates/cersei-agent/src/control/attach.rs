@@ -217,6 +217,7 @@ pub fn convert(
         input: UserInput {
             text,
             attachments: blocks,
+            skills: prompt.skills.clone(),
         },
         attachments: infos,
     })
@@ -246,6 +247,7 @@ mod tests {
                 },
                 PromptBlock::Folder { path: "src".into() },
             ],
+            skills: Vec::new(),
         };
         let limits = AttachLimits {
             max_file_bytes: 101,
@@ -284,6 +286,7 @@ mod tests {
             blocks: vec![PromptBlock::File {
                 path: "missing.rs".into(),
             }],
+            skills: Vec::new(),
         };
         assert!(convert(&gone, dir.path(), limits)
             .unwrap_err()
@@ -309,6 +312,7 @@ mod tests {
                             path: "capture écran.png".into(),
                         },
                     ],
+                    skills: Vec::new(),
                 },
                 dir.path(),
                 limits,
@@ -330,6 +334,7 @@ mod tests {
             blocks: vec![PromptBlock::Image {
                 path: "a b.rs".into(),
             }],
+            skills: Vec::new(),
         };
         assert!(convert(&image, dir.path(), limits)
             .unwrap_err()

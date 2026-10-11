@@ -1,13 +1,13 @@
 # Architecture
 
-## Current layers (Bricks 0.5.0)
+## Current layers (Bricks 0.6.0)
 
 ```
 bricks-cli            the `bricks` binary: arguments, configuration, headless / JSONL
   bricks-tui          terminal interface: renders engine events, turns gestures into commands
 cersei-agent          engine: agent loop, controller (commands/events), approvals, compaction
   cersei-provider, cersei-tools, cersei-memory, cersei-compression, cersei-web,
-  bricks-semantic, cersei-lsp, cersei-mcp, cersei-embeddings, cersei-skills, …
+  bricks-semantic, bricks-skills, cersei-lsp, cersei-mcp, cersei-embeddings, …
 cersei-types          shared types and the shared HTTP client
 ```
 

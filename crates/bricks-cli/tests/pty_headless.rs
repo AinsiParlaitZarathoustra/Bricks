@@ -26,6 +26,7 @@ fn ctrl_c_cancels_the_run_and_keeps_the_session() {
     cmd.args(["run", "--json", "Attends"]);
     cmd.cwd(p.path());
     cmd.env("BRICKS_HOME", p.home.path());
+    cmd.env("HOME", p.home.path());
     let mut child = pty.slave.spawn_command(cmd).unwrap();
     drop(pty.slave);
     let mut reader = pty.master.try_clone_reader().unwrap();

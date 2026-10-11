@@ -403,7 +403,10 @@ impl Composer {
         self.cursor = 0;
         self.anchor = None;
         self.browsing = None;
-        Prompt { blocks }
+        Prompt {
+            blocks,
+            skills: Vec::new(),
+        }
     }
 
     pub fn clear(&mut self) {

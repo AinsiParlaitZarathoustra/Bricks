@@ -317,7 +317,7 @@ dependencies = [
 
 [[package]]
 name = "bricks-cli"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "bricks-tui",
  "cersei-agent",
@@ -341,7 +341,7 @@ dependencies = [
 
 [[package]]
 name = "bricks-semantic"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "cersei-lsp",
  "cersei-types",
@@ -366,8 +366,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "bricks-skills"
+version = "0.6.0"
+dependencies = [
+ "parking_lot",
+ "serde",
+ "serde-saphyr",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "unicode-normalization",
+ "uuid",
+]
+
+[[package]]
 name = "bricks-tui"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "cersei-agent",
  "cersei-memory",
@@ -459,9 +473,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.6.0"
+version = "1.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f74872d07caf508b30a21f6836e7d7016a2eaf7d9ff4f48deaa58cd8a0407630"
+checksum = "50a649af8a827553c29fb0cb4bd4a6f1a0dd695bd3232b9bc98bd9c8a3ffbb8b"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -477,11 +491,12 @@ checksum = "4f4c707c6a209cbe82d10abd08e1ea8995e9ea937d2550646e02798948992be0"
 
 [[package]]
 name = "cersei"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.22.1",
+ "bricks-skills",
  "cersei-agent",
  "cersei-agentlang",
  "cersei-agentrl",
@@ -513,12 +528,13 @@ dependencies = [
 
 [[package]]
 name = "cersei-agent"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
  "base64 0.22.1",
  "bricks-semantic",
+ "bricks-skills",
  "cersei-compression",
  "cersei-embeddings",
  "cersei-hooks",
@@ -555,7 +571,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-agentlang"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "cersei-tools",
@@ -571,7 +587,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-agentrl"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -602,7 +618,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-compression"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "cersei-types",
@@ -624,7 +640,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-embeddings"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "cersei-types",
@@ -640,7 +656,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-hooks"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "cersei-types",
@@ -651,7 +667,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-lsp"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "cersei-lsp",
  "dashmap",
@@ -667,7 +683,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-mcp"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "bytes",
  "cersei-testkit",
@@ -693,7 +709,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-memory"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "cersei-embeddings",
@@ -718,7 +734,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-provider"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -738,25 +754,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "cersei-skills"
-version = "0.5.0"
-dependencies = [
- "anyhow",
- "cersei-types",
- "chrono",
- "dirs",
- "serde",
- "serde_json",
- "serde_yaml",
- "tempfile",
- "thiserror 2.0.21",
- "tracing",
- "walkdir",
-]
-
-[[package]]
 name = "cersei-tbench"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "cersei-agent",
@@ -774,7 +773,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-testkit"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "futures",
  "tokio",
@@ -782,11 +781,12 @@ dependencies = [
 
 [[package]]
 name = "cersei-tools"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bricks-semantic",
+ "bricks-skills",
  "cersei-compression",
  "cersei-embeddings",
  "cersei-lsp",
@@ -830,7 +830,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-tools-derive"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -839,7 +839,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-types"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -856,7 +856,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-vms"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -883,7 +883,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-web"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "bm25",
  "cersei-testkit",
@@ -908,7 +908,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-workflows"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "cersei-agent",
@@ -1261,14 +1261,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d045de693cb712d0b22c6a64be5b953f67b3ce00ab5ad3dd5d8b441886ab8e1a"
 dependencies = [
  "quote",
- "syn 3.0.6",
+ "syn 2.0.119",
 ]
 
 [[package]]
 name = "cxx"
-version = "1.0.202"
+version = "1.0.205"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13f6de320895f42e6e081abb5c7983bedcf0b6d0ff9323de0d33f620c8ac1199"
+checksum = "c8a02bfeba9074b2bbb39492c9b0908ec854f455a3cccdcde7a1de55e2315e40"
 dependencies = [
  "cc",
  "cxx-build",
@@ -1281,9 +1281,9 @@ dependencies = [
 
 [[package]]
 name = "cxx-build"
-version = "1.0.202"
+version = "1.0.205"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4fde53ca86b9704a943fef0f1e1d836239a6aedca5de3c65fa9f97ec0bd46d39"
+checksum = "bbc2ac76997619d2d888b58ad79488f1c835de41ca4dd3dd7082acf4ecb0a50f"
 dependencies = [
  "cc",
  "codespan-reporting",
@@ -1296,9 +1296,9 @@ dependencies = [
 
 [[package]]
 name = "cxxbridge-cmd"
-version = "1.0.202"
+version = "1.0.205"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "07bae89236c811fd4d08ed3441759ac4ac98d752cbfd3de341315ba16ad20ec3"
+checksum = "54a486ed16a3f2a053fe7f5b98db4c1a59846a23e8cb9e49f9d1bd48830d51a2"
 dependencies = [
  "clap",
  "codespan-reporting",
@@ -1310,15 +1310,15 @@ dependencies = [
 
 [[package]]
 name = "cxxbridge-flags"
-version = "1.0.202"
+version = "1.0.205"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49045042e5fced01b80742aba5508de82aa4f13677ed3fa2b4cda709c40c5918"
+checksum = "c72569be94e2283764d334cd285980b747dbe221e27e315484eb6bcd93fa808a"
 
 [[package]]
 name = "cxxbridge-macro"
-version = "1.0.202"
+version = "1.0.205"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b181252e2e3d3b5d183afbdc033a3958b445eb3e1a0ae65fc3d4f5259f5da6fd"
+checksum = "423e795284a7f7b3f843c956a5322c4bc497b60c2dd1a6339da10313cb18d575"
 dependencies = [
  "indexmap",
  "proc-macro2",
@@ -1600,7 +1600,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2531,9 +2531,9 @@ dependencies = [
 
 [[package]]
 name = "indoc"
-version = "2.0.7"
+version = "2.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79cf5c93f93228cf8efb3ba362535fb11199ac548a09ce117c9b1adc3030d706"
+checksum = "a37b2691796cffeb8a8cd305ac66e65841559f147f4e63231d0eafa4db5384d1"
 dependencies = [
  "rustversion",
 ]
@@ -2816,7 +2816,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "longmem-bench"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3092,7 +3092,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3570,7 +3570,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3967,7 +3967,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4181,9 +4181,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.151"
+version = "1.0.152"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
+checksum = "1741ab7a6cc54a03a89b5d563ed60075c277d9e3cfa73ad0c1f23f23974703c6"
 dependencies = [
  "indexmap",
  "itoa",
@@ -4223,19 +4223,6 @@ dependencies = [
  "itoa",
  "ryu",
  "serde",
-]
-
-[[package]]
-name = "serde_yaml"
-version = "0.9.34+deprecated"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a8b1a1a2ebf674015cc02edccce75287f1a0130d394307b36743c2f5d504b47"
-dependencies = [
- "indexmap",
- "itoa",
- "ryu",
- "serde",
- "unsafe-libyaml",
 ]
 
 [[package]]
@@ -4382,9 +4369,9 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
 name = "smallvec"
-version = "1.16.2"
+version = "1.16.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f9395f0f0eee849a9b707b2f06bb92a6a422090e2123bb2ef8e87a0e61892a8e"
+checksum = "5b3dc8af474f516a851ff4bd12db780f948b9250ad37211e4eec0bccea54e01b"
 
 [[package]]
 name = "socket2"
@@ -4719,10 +4706,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4998,9 +4985,9 @@ dependencies = [
 
 [[package]]
 name = "tokio-util"
-version = "0.7.19"
+version = "0.7.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "494815d09bf52b5548659851081238f0ca39ff638363907596da739561c62c52"
+checksum = "e464cf451ba96ebfc6f9b6542f17ee8b8956e33f1e40d9690624e59d7a7f8a4b"
 dependencies = [
  "bytes",
  "futures-core",
@@ -5339,12 +5326,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
 
 [[package]]
-name = "unsafe-libyaml"
-version = "0.2.11"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "673aac59facbab8a9007c7f6108d11f63b603f7cabff99fabf650fea5c32b861"
-
-[[package]]
 name = "untrusted"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5398,9 +5379,9 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 
 [[package]]
 name = "uuid"
-version = "1.27.0"
+version = "1.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "97277d36b9c3ace13e58fa6e753f8b0bbbf302a18dd193240d70f9e29681059a"
+checksum = "7cc1186384beb7dd8eedea376413fd654937285ea6c9cfbb928dc3043ea4b606"
 dependencies = [
  "atomic",
  "getrandom 0.4.3",
@@ -5692,7 +5673,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6153,9 +6134,9 @@ dependencies = [
 
 [[package]]
 name = "zstd-sys"
-version = "2.1.0+zstd.1.5.7"
+version = "2.1.1+zstd.1.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ef0a8027ec3ee71300ab3bcbcd0393f434aa72b91ca6d635a39941deae8eea0"
+checksum = "aeec9eaf2dffbbd09201e23bd0ffcbaa33bb8e9266a10734fd7ed90a85eca078"
 dependencies = [
  "cc",
  "pkg-config",

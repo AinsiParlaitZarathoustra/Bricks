@@ -66,7 +66,8 @@ pub struct DelegationSettings {
     /// Headless: how long to wait for background children after the
     /// answer, before cancelling them.
     pub background_drain_ms: u64,
-    /// Bytes of profile skills loaded into a child, in total.
+    /// Bytes of profile skills preloaded into a child, in total. A profile
+    /// whose skills exceed it is refused (nothing is cut).
     pub skills_max_bytes: usize,
 }
 
@@ -349,6 +350,20 @@ pub enum SubAgentEvent {
         duration_ms: u64,
     },
     Finished(Box<AgentResult>),
+    /// A skill was activated in a child (`origin`: `profile`, `model`).
+    SkillActivated {
+        agent_id: String,
+        name: String,
+        source: String,
+        revision: String,
+        origin: String,
+    },
+    /// A child's skill was not activated.
+    SkillNotActivated {
+        agent_id: String,
+        name: String,
+        reason: String,
+    },
     /// A change was applied to the session's workspace by a child working
     /// in it (`changeset_id: None`), or by applying a ChangeSet.
     EditApplied {
@@ -698,6 +713,8 @@ struct Prepared {
     resolved: Resolved,
     background: bool,
     isolation: Option<Isolation>,
+    /// The profile's skills, read and checked before anything starts.
+    skills: Vec<bricks_skills::Activation>,
 }
 
 /// What a child task takes from its parent's context.
@@ -711,6 +728,10 @@ struct ParentCtx {
     depth: u32,
     sink: Option<SubAgentSink>,
     jobs: Option<cersei_tools::jobs::JobsHandle>,
+    /// The parent's skills service and trust (its project's sources, read
+    /// in place: a worktree child uses its origin project's skills). The
+    /// parent's activations are not passed on.
+    skills: Option<bricks_skills::SkillAccess>,
 }
 
 /// One per session (or embedding): shared by every delegation tool.
@@ -921,13 +942,54 @@ impl AgentSpawner {
             Isolation::Auto => None,
             other => Some(other),
         });
+        let skills = self.profile_skills(&profile, ext)?;
         Ok(Prepared {
             req: req.clone(),
             profile,
             resolved,
             background,
             isolation,
+            skills,
         })
+    }
+
+    /// Read and check a profile's skills with the parent's service and
+    /// trust: every one usable and the whole within `skills_max_bytes`, or
+    /// the launch is refused before any provider call.
+    fn profile_skills(
+        &self,
+        profile: &AgentProfile,
+        ext: &cersei_tools::Extensions,
+    ) -> Result<Vec<bricks_skills::Activation>, SpawnError> {
+        if profile.skills.is_empty() {
+            return Ok(Vec::new());
+        }
+        let Some(session) = ext.get::<cersei_tools::skill_tool::SkillSession>() else {
+            return Err(SpawnError::Invalid(format!(
+                "profile `{}` needs skills ({}), but skills are not available to this agent.",
+                profile.name,
+                profile.skills.join(", ")
+            )));
+        };
+        let mut out: Vec<bricks_skills::Activation> = Vec::new();
+        for name in &profile.skills {
+            let a = session
+                .access
+                .activate(name)
+                .map_err(|e| SpawnError::Invalid(format!("profile `{}`: {e}.", profile.name)))?;
+            if !out.iter().any(|o| o.same_revision(&a.source, &a.revision)) {
+                out.push(a);
+            }
+        }
+        let total: usize = out.iter().map(|a| a.body.len()).sum();
+        if total > self.settings.skills_max_bytes {
+            return Err(SpawnError::Invalid(format!(
+                "profile `{}`: its skills total {total} bytes, over [agents] skills_max_bytes \
+                 ({}); nothing is cut, so the sub-agent is not started.",
+                profile.name, self.settings.skills_max_bytes
+            )));
+        }
+        Ok(out)
     }
 
     /// Shared or worktree, from the writers that would really coexist.
@@ -1030,6 +1092,10 @@ impl AgentSpawner {
 
         let sink = ctx.extensions.get::<SubAgentSink>().map(|s| (*s).clone());
         let pctx = ParentCtx {
+            skills: ctx
+                .extensions
+                .get::<cersei_tools::skill_tool::SkillSession>()
+                .map(|s| s.access.clone()),
             working_dir: ctx.working_dir.clone(),
             permissions: Arc::clone(&ctx.permissions),
             mcp_manager: ctx.mcp_manager.clone(),
@@ -1320,6 +1386,7 @@ impl AgentSpawner {
             .build_child(
                 &info,
                 &p.profile,
+                &p.skills,
                 &p.resolved,
                 reasoning,
                 provider,
@@ -1339,6 +1406,18 @@ impl AgentSpawner {
                     .await;
             }
         };
+        for l in &skills {
+            self.emit(
+                &sink,
+                SubAgentEvent::SkillActivated {
+                    agent_id: info.agent_id.clone(),
+                    name: l.name.clone(),
+                    source: l.source.clone().unwrap_or_default(),
+                    revision: l.revision.clone().unwrap_or_default(),
+                    origin: "profile".into(),
+                },
+            );
+        }
         info.skills = skills;
 
         let prompt = match p.req.context.as_deref().filter(|c| !subagent::is_blank(c)) {
@@ -1449,6 +1528,26 @@ impl AgentSpawner {
                         is_error,
                         duration_ms: duration.as_millis() as u64,
                     }),
+                    AgentEvent::SkillActivated {
+                        name,
+                        source,
+                        revision,
+                        origin,
+                        ..
+                    } => Some(SubAgentEvent::SkillActivated {
+                        agent_id: fwd_id.clone(),
+                        name,
+                        source,
+                        revision,
+                        origin,
+                    }),
+                    AgentEvent::SkillNotActivated { name, reason, .. } => {
+                        Some(SubAgentEvent::SkillNotActivated {
+                            agent_id: fwd_id.clone(),
+                            name,
+                            reason,
+                        })
+                    }
                     AgentEvent::EditApplied {
                         tool_call_id,
                         tool,
@@ -1545,6 +1644,7 @@ impl AgentSpawner {
         self: &Arc<Self>,
         info: &SpawnInfo,
         profile: &AgentProfile,
+        preload: &[bricks_skills::Activation],
         resolved: &Resolved,
         reasoning: Option<String>,
         provider: Box<dyn cersei_provider::Provider>,
@@ -1590,10 +1690,24 @@ impl AgentSpawner {
             ext.insert(j.clone());
         }
         ext.insert(super::runtime::RuntimeHandle(Arc::clone(&self.runtime)));
-        let (skill_text, skills) =
-            load_skills(&profile.skills, cwd, self.settings.skills_max_bytes);
+        // The profile's skills, as validated before the launch: whole, in
+        // the system prompt (where compaction never removes them).
         let mut system = child_system_prompt(profile, &names, cwd);
-        system.push_str(&skill_text);
+        let mut skills = Vec::new();
+        let mut preloaded = Vec::new();
+        for a in preload {
+            let id = bricks_skills::Ledger::new_id();
+            system.push_str("\n\n");
+            system.push_str(&bricks_skills::render_activation(a, &id, Some(cwd)));
+            skills.push(SkillLoad {
+                name: a.name.clone(),
+                state: "loaded".into(),
+                source: Some(a.source.clone()),
+                revision: Some(a.revision.clone()),
+                bytes: a.body.len(),
+            });
+            preloaded.push((id, a.clone()));
+        }
         let mut b = Agent::builder()
             .provider_boxed(provider)
             .tools(tools)
@@ -1609,6 +1723,9 @@ impl AgentSpawner {
             .cancel_token(cancel.child_token());
         if let Some(r) = reasoning {
             b = b.reasoning_profile(r);
+        }
+        if let Some(access) = &pc.skills {
+            b = b.skills(access.clone()).preloaded_skills(preloaded);
         }
         let agent = b
             .build()
@@ -1704,7 +1821,9 @@ impl AgentSpawner {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SkillLoad {
     pub name: String,
-    /// `loaded`, `truncated`, `missing`, `invalid`, `skipped` (budget).
+    /// `loaded` (a profile's skills are loaded whole, or the launch is
+    /// refused; older records may say `truncated`, `missing`, `invalid` or
+    /// `skipped`).
     pub state: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
@@ -1713,96 +1832,6 @@ pub struct SkillLoad {
     pub bytes: usize,
 }
 
-/// Load a profile's skills with Bricks' own skill loader, for the child's
-/// workspace, within `max_bytes` in total. Nothing is run.
-pub fn load_skills(
-    names: &[String],
-    workspace: &Path,
-    max_bytes: usize,
-) -> (String, Vec<SkillLoad>) {
-    let mut text = String::new();
-    let mut loads = Vec::new();
-    let mut used = 0usize;
-    for name in names {
-        let loaded = cersei_tools::skills::discovery::load_skill(name, Some(workspace), &[]);
-        let Some(skill) = loaded else {
-            loads.push(SkillLoad {
-                name: name.clone(),
-                state: "missing".into(),
-                source: None,
-                revision: None,
-                bytes: 0,
-            });
-            continue;
-        };
-        let content = skill.content.trim().to_string();
-        if subagent::is_blank(&content) {
-            loads.push(SkillLoad {
-                name: name.clone(),
-                state: "invalid".into(),
-                source: skill.meta.path.clone(),
-                revision: None,
-                bytes: 0,
-            });
-            continue;
-        }
-        let revision = super::profile::revision_of(&content);
-        let source = skill
-            .meta
-            .path
-            .clone()
-            .unwrap_or_else(|| format!("bundled:{}", skill.meta.name));
-        let room = max_bytes.saturating_sub(used);
-        if room < 64 {
-            loads.push(SkillLoad {
-                name: name.clone(),
-                state: "skipped".into(),
-                source: Some(source),
-                revision: Some(revision),
-                bytes: 0,
-            });
-            continue;
-        }
-        let (body, state) = if content.len() > room {
-            let mut cut = room;
-            while !content.is_char_boundary(cut) {
-                cut -= 1;
-            }
-            (
-                format!("{}\n[skill truncated at {room} bytes]", &content[..cut]),
-                "truncated",
-            )
-        } else {
-            (content.clone(), "loaded")
-        };
-        used += body.len();
-        text.push_str(&format!(
-            "\n\n## Skill `{}` ({source}, revision {revision})\n\n{body}",
-            skill.meta.name
-        ));
-        loads.push(SkillLoad {
-            name: name.clone(),
-            state: state.into(),
-            source: Some(source),
-            revision: Some(revision),
-            bytes: body.len(),
-        });
-    }
-    let missing: Vec<&str> = loads
-        .iter()
-        .filter(|l| l.state != "loaded" && l.state != "truncated")
-        .map(|l| l.name.as_str())
-        .collect();
-    if !missing.is_empty() {
-        text.push_str(&format!(
-            "\n\nSkills named by this profile that could not be loaded: {} (your tools are unchanged).",
-            missing.join(", ")
-        ));
-    }
-    (text, loads)
-}
-
-/// Shell commands the child ran, from its own tool calls.
 fn commands_of(out: &AgentOutput) -> Vec<CommandRun> {
     out.tool_calls
         .iter()

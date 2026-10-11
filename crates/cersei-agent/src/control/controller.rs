@@ -144,6 +144,52 @@ pub struct EngineConfig {
     /// `bricks.toml`, system prompt, memory...). Without one, the values
     /// above apply to every session, whatever its folder.
     pub project_loader: Option<Arc<dyn ProjectLoader>>,
+    /// Skills (`None`: no skills, no `Skill` tool). Each session reads its
+    /// own project's sources; its trust decision is its own.
+    pub skills: Option<SkillsSetup>,
+}
+
+/// Where a session's skills come from, besides its project.
+#[derive(Clone, Default)]
+pub struct SkillsSetup {
+    /// The home folder whose `~/.agents/skills` and `~/.claude/skills` are
+    /// read (`None`: no personal skills). Injected, never guessed here.
+    pub home: Option<PathBuf>,
+    /// Personal skills usable without asking (the local policy; default
+    /// true).
+    pub personal: bool,
+    /// Sources given by an embedder, after the default ones.
+    pub extra_roots: Vec<bricks_skills::SkillRoot>,
+    /// The caller's explicit approval of the project skills of the session
+    /// opened by `Controller::open` (`--trust-project-skills`): that
+    /// project, that session only — a session resumed later in the same
+    /// controller starts undecided again.
+    pub trust_project: bool,
+}
+
+impl SkillsSetup {
+    pub fn with_home(home: Option<PathBuf>) -> Self {
+        Self {
+            home,
+            personal: true,
+            extra_roots: Vec::new(),
+            trust_project: false,
+        }
+    }
+}
+
+/// The skills of a session in `working_dir`: a fresh trust (pending).
+fn skill_access(cfg: &EngineConfig, working_dir: &Path) -> Option<bricks_skills::SkillAccess> {
+    let setup = cfg.skills.as_ref()?;
+    let project = std::fs::canonicalize(working_dir).unwrap_or_else(|_| working_dir.to_path_buf());
+    let service = bricks_skills::SkillsService::with_roots(
+        bricks_skills::standard_roots(&project, setup.home.as_deref()),
+        setup.extra_roots.clone(),
+        Some(project),
+    );
+    let access = bricks_skills::SkillAccess::new(Arc::new(service));
+    access.set_personal(setup.personal);
+    Some(access)
 }
 
 /// What belongs to a session's project (its workspace): read for the
@@ -206,6 +252,7 @@ impl EngineConfig {
             attach_limits: AttachLimits::default(),
             agent_profile_sources: None,
             project_loader: None,
+            skills: None,
         }
     }
 }
@@ -249,7 +296,10 @@ pub struct Snapshot {
     pub title: String,
     pub working_dir: PathBuf,
     pub model: String,
+    /// Requested profile (`None`: the model's default).
     pub reasoning: Option<String>,
+    /// The profile that applies (requested, else the model's default).
+    pub effective_reasoning: Option<String>,
     pub activity: Activity,
     pub maintenance_running: bool,
     pub interactive: bool,
@@ -286,6 +336,8 @@ struct Inner {
     profiles: parking_lot::RwLock<Arc<crate::agents::ProfileCatalog>>,
     /// The session's sub-agent runtime (when `[agents] enabled`).
     spawner: parking_lot::RwLock<Option<Arc<crate::agents::AgentSpawner>>>,
+    /// The session's skills (service and trust), when configured.
+    skills: parking_lot::RwLock<Option<bricks_skills::SkillAccess>>,
 }
 
 /// One session, driven by commands. Cheap to clone.
@@ -441,6 +493,7 @@ fn session_tools(
     (tools, spawner_out)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_agent(
     cfg: &EngineConfig,
     project: &ProjectContext,
@@ -448,6 +501,7 @@ fn build_agent(
     provider: Box<dyn Provider>,
     broker: &Arc<ApprovalBroker>,
     profiles: &Arc<crate::agents::ProfileCatalog>,
+    skills: Option<bricks_skills::SkillAccess>,
 ) -> Result<(Agent, Option<Arc<crate::agents::AgentSpawner>>), String> {
     let settings = &project.bricks.agent;
     let (tools, spawner) = session_tools(cfg, project, meta, profiles);
@@ -490,6 +544,9 @@ fn build_agent(
     }
     for s in &project.mcp_servers {
         b = b.mcp_server(s.clone());
+    }
+    if let Some(access) = skills {
+        b = b.skills(access);
     }
     let agent = b.build().map_err(|e| e.to_string())?;
     Ok((agent, spawner))
@@ -666,7 +723,16 @@ impl Controller {
         )?;
         let broker = ApprovalBroker::new(cfg.interactive);
         let profiles = profile_catalog(&project, &meta);
-        let (agent, spawner) = build_agent(&cfg, &project, &meta, provider, &broker, &profiles)?;
+        let skills = skill_access(&cfg, &meta.working_dir);
+        let (agent, spawner) = build_agent(
+            &cfg,
+            &project,
+            &meta,
+            provider,
+            &broker,
+            &profiles,
+            skills.clone(),
+        )?;
         let agent = Arc::new(agent);
         meta.save(&files_dir(&cfg, &meta.id))?;
         let queue = Arc::new(EventQueue::new(&meta.id, cfg.queue_capacity));
@@ -692,6 +758,11 @@ impl Controller {
             working_dir: meta.working_dir.display().to_string(),
             model: meta.model.clone(),
             reasoning: meta.reasoning.clone(),
+            effective_reasoning: effective_reasoning(
+                &cfg.catalog,
+                &meta.model,
+                meta.reasoning.as_deref(),
+            ),
             resumed,
             message_count,
             warnings: all_warnings,
@@ -708,13 +779,25 @@ impl Controller {
             idle: tokio::sync::Notify::new(),
             profiles: parking_lot::RwLock::new(profiles),
             spawner: parking_lot::RwLock::new(spawner.clone()),
+            skills: parking_lot::RwLock::new(skills),
         });
         if let Some(sp) = &spawner {
             install_session_sink(&queue, sp.runtime());
         }
         install_job_sink(&queue, &inner.agent.read());
         queue.push(None, opened, None).await;
-        Ok((Controller { inner }, EventStream { queue }))
+        let controller = Controller { inner };
+        if controller
+            .inner
+            .cfg
+            .skills
+            .as_ref()
+            .is_some_and(|s| s.trust_project)
+        {
+            controller.decide_project_skills(true, "caller")?;
+        }
+        controller.announce_project_skills().await;
+        Ok((controller, EventStream { queue }))
     }
 
     /// The open session's project.
@@ -802,6 +885,11 @@ impl Controller {
             title: meta.title.clone(),
             working_dir: meta.working_dir.clone(),
             model: meta.model.clone(),
+            effective_reasoning: effective_reasoning(
+                &self.inner.cfg.catalog,
+                &meta.model,
+                meta.reasoning.as_deref(),
+            ),
             reasoning: meta.reasoning.clone(),
             activity: self.inner.activity.lock().clone(),
             maintenance_running: self.inner.maintenance.lock().is_some(),
@@ -1096,6 +1184,121 @@ impl Controller {
 
     /// Send a command. Refused commands return the reason (also emitted as
     /// `command_rejected`); accepted ones report through events.
+    /// The session's skills (service and trust), when configured.
+    pub fn skills(&self) -> Option<bricks_skills::SkillAccess> {
+        self.inner.skills.read().clone()
+    }
+
+    /// The embedder's (or the command line's) explicit decision on this
+    /// project's skills, for this session — `--trust-project-skills`. The
+    /// same effect as a person's `trust_project_skills` command.
+    pub fn trust_project_skills(&self, allow: bool) -> Result<(), String> {
+        self.decide_project_skills(allow, "caller")
+    }
+
+    fn decide_project_skills(&self, allow: bool, by: &str) -> Result<(), String> {
+        let Some(access) = self.inner.skills.read().clone() else {
+            return Err("skills are not configured for this session".into());
+        };
+        access.decide_project(if allow {
+            bricks_skills::ProjectDecision::Granted
+        } else {
+            bricks_skills::ProjectDecision::Denied
+        });
+        let agent = self.agent();
+        let events = agent.recheck_skills();
+        let project = access
+            .service
+            .project()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+        let q = self.inner.queue.clone();
+        let by = by.to_string();
+        tokio::spawn(async move {
+            q.push(
+                None,
+                Event::SkillsTrustResolved {
+                    project,
+                    allowed: allow,
+                    by,
+                },
+                None,
+            )
+            .await;
+            for e in events {
+                if let Some(ev) = skill_event(e) {
+                    q.push(None, ev, None).await;
+                }
+            }
+        });
+        Ok(())
+    }
+
+    /// Project skills found and not decided yet: a person is asked once
+    /// (interactive), otherwise the session says they are not used.
+    async fn announce_project_skills(&self) {
+        let Some(access) = self.inner.skills.read().clone() else {
+            return;
+        };
+        if access.trust().project != bricks_skills::ProjectDecision::Pending {
+            return;
+        }
+        let reg = access.service.registry();
+        let mut sources: Vec<super::protocol::SkillSourceInfo> = Vec::new();
+        for c in reg.project_candidates() {
+            let root = reg.root(c);
+            let path = root
+                .path
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default();
+            match sources.iter_mut().find(|s| s.source == c.source) {
+                Some(s) => s.skills += 1,
+                None => sources.push(super::protocol::SkillSourceInfo {
+                    source: c.source.clone(),
+                    path,
+                    skills: 1,
+                }),
+            }
+        }
+        if sources.is_empty() {
+            return;
+        }
+        let project = access
+            .service
+            .project()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+        let ev = if self.inner.cfg.interactive {
+            Event::SkillsTrustRequested { project, sources }
+        } else {
+            let n: usize = sources.iter().map(|s| s.skills).sum();
+            Event::Notice {
+                message: format!(
+                    "{n} project skill(s) found in {project} are not used: nobody approved them \
+                     for this session (--trust-project-skills does, for this project and \
+                     session only)"
+                ),
+            }
+        };
+        self.inner.queue.push(None, ev, None).await;
+    }
+
+    fn emit_skills(&self, access: &bricks_skills::SkillAccess, query: &str, page: usize) {
+        let listing = skills_listing(access, &self.agent(), query, page);
+        let q = self.inner.queue.clone();
+        tokio::spawn(async move {
+            q.push(
+                None,
+                Event::Skills {
+                    listing: Box::new(listing),
+                },
+                None,
+            )
+            .await
+        });
+    }
+
     pub fn send(&self, cmd: Command) -> Result<(), String> {
         match cmd {
             Command::Cancel => {
@@ -1161,6 +1364,27 @@ impl Controller {
                 });
                 Ok(())
             }
+            Command::ListSkills { ref query, page } => {
+                let Some(access) = self.inner.skills.read().clone() else {
+                    return self.reject(&cmd, "skills are not configured for this session".into());
+                };
+                self.emit_skills(&access, query, page);
+                Ok(())
+            }
+            Command::ReloadSkills => {
+                let Some(access) = self.inner.skills.read().clone() else {
+                    return self.reject(&cmd, "skills are not configured for this session".into());
+                };
+                access.service.reload();
+                self.emit_skills(&access, "", 0);
+                Ok(())
+            }
+            Command::TrustProjectSkills { allow } => {
+                match self.decide_project_skills(allow, "user") {
+                    Ok(()) => Ok(()),
+                    Err(e) => self.reject(&cmd, e),
+                }
+            }
             Command::ReloadAgentProfiles => {
                 let reg = self.inner.profiles.read().reload();
                 self.emit_profiles(&reg, "", 0);
@@ -1222,10 +1446,81 @@ impl Controller {
                 }
                 let q = self.inner.queue.clone();
                 let ev = Event::ModelChanged {
+                    effective_reasoning: effective_reasoning(
+                        &self.inner.cfg.catalog,
+                        &new_model,
+                        new_reasoning.as_deref(),
+                    ),
                     model: new_model,
                     reasoning: new_reasoning,
                     applies: if running { "next_turn" } else { "next_run" }.into(),
                 };
+                tokio::spawn(async move { q.push(None, ev, None).await });
+                Ok(())
+            }
+            Command::SetReasoning { ref profile } => {
+                let (model, previous_req) = {
+                    let m = self.inner.meta.lock();
+                    (m.model.clone(), m.reasoning.clone())
+                };
+                let Some(choice) = self
+                    .inner
+                    .cfg
+                    .catalog
+                    .models()
+                    .into_iter()
+                    .find(|c| c.selection == model)
+                else {
+                    return self.reject(&cmd, format!("model `{model}` is no longer configured"));
+                };
+                if let Some(p) = profile {
+                    if choice.profiles.is_empty() {
+                        return self.reject(
+                            &cmd,
+                            "No reasoning profiles configured for this model.".into(),
+                        );
+                    }
+                    if !choice.profiles.iter().any(|x| &x.id == p) {
+                        let ids: Vec<&str> =
+                            choice.profiles.iter().map(|x| x.id.as_str()).collect();
+                        return self.reject(
+                            &cmd,
+                            format!(
+                                "unknown reasoning profile `{p}` for {model}; choose one of: {} (or `default`)",
+                                ids.join(", ")
+                            ),
+                        );
+                    }
+                }
+                let label = |id: &Option<String>| {
+                    id.as_ref().and_then(|i| {
+                        choice
+                            .profiles
+                            .iter()
+                            .find(|x| &x.id == i)
+                            .map(|x| x.label.clone())
+                    })
+                };
+                let previous = previous_req.clone().or(choice.default_profile.clone());
+                let effective = profile.clone().or(choice.default_profile.clone());
+                let running = matches!(*self.inner.activity.lock(), Activity::Running { .. });
+                self.agent().set_reasoning(profile.clone());
+                {
+                    let mut m = self.inner.meta.lock();
+                    m.reasoning = profile.clone();
+                    m.touch();
+                    let _ = m.save(&files_dir(&self.inner.cfg, &m.id));
+                }
+                let ev = Event::ReasoningChanged {
+                    model,
+                    requested: profile.clone(),
+                    previous_label: label(&previous),
+                    previous,
+                    effective_label: label(&effective),
+                    effective,
+                    applies: if running { "next_turn" } else { "next_run" }.into(),
+                };
+                let q = self.inner.queue.clone();
                 tokio::spawn(async move { q.push(None, ev, None).await });
                 Ok(())
             }
@@ -1251,6 +1546,12 @@ impl Controller {
                     *a = Activity::Running {
                         run_id: run_id.clone(),
                     };
+                }
+                // Skills chosen with the prompt: all usable now, or nothing
+                // is sent.
+                if let Err(e) = self.agent().check_skills(&prompt.skills) {
+                    self.set_activity(Activity::Idle);
+                    return self.reject(&cmd, e);
                 }
                 let wd = self.agent().working_dir().to_path_buf();
                 let converted = match attach::convert(prompt, &wd, self.inner.cfg.attach_limits) {
@@ -1381,6 +1682,10 @@ impl Controller {
             None,
         )?;
         let profiles = profile_catalog(&project, &meta);
+        // The target's project has its own skills and a fresh decision:
+        // nothing of the previous project's catalog, activations or trust
+        // carries over.
+        let skills = skill_access(cfg, &meta.working_dir);
         let (agent, spawner) = build_agent(
             cfg,
             &project,
@@ -1388,6 +1693,7 @@ impl Controller {
             provider,
             &self.inner.broker,
             &profiles,
+            skills.clone(),
         )?;
         let agent = Arc::new(agent);
         meta.save(&files_dir(cfg, &meta.id))?;
@@ -1435,12 +1741,19 @@ impl Controller {
             working_dir: meta.working_dir.display().to_string(),
             model: meta.model.clone(),
             reasoning: meta.reasoning.clone(),
+            effective_reasoning: effective_reasoning(
+                &cfg.catalog,
+                &meta.model,
+                meta.reasoning.as_deref(),
+            ),
             resumed: true,
             message_count: count,
             warnings: all_warnings,
         };
         *self.inner.meta.lock() = meta;
+        *self.inner.skills.write() = skills;
         self.inner.queue.push(None, ev, None).await;
+        self.announce_project_skills().await;
         Ok(())
     }
 
@@ -1716,6 +2029,12 @@ async fn translate(
                 message: format!("hook {hook_name} blocked: {reason}"),
             },
             AgentEvent::Status(s) => Event::Notice { message: s },
+            e @ (AgentEvent::SkillActivated { .. } | AgentEvent::SkillNotActivated { .. }) => {
+                match skill_event(e) {
+                    Some(ev) => ev,
+                    None => continue,
+                }
+            }
             AgentEvent::SubAgent(e) => sub_agent_event(e),
             AgentEvent::Job(e) => job_event(e),
             AgentEvent::MemoryRecalled {
@@ -1782,10 +2101,192 @@ async fn translate(
     (text, turns)
 }
 
+/// The profile that applies to `model`: `requested`, else the model's
+/// declared default. `None` when neither exists (no profile parameters are
+/// sent; not "reasoning off").
+fn effective_reasoning(
+    catalog: &Arc<dyn ModelCatalog>,
+    model: &str,
+    requested: Option<&str>,
+) -> Option<String> {
+    requested.map(str::to_string).or_else(|| {
+        catalog
+            .models()
+            .into_iter()
+            .find(|c| c.selection == model)
+            .and_then(|c| c.default_profile)
+    })
+}
+
+/// A skill event of the session agent, as a protocol event.
+fn skill_event(e: AgentEvent) -> Option<Event> {
+    match e {
+        AgentEvent::SkillActivated {
+            agent_id,
+            name,
+            source,
+            revision,
+            origin,
+        } => Some(Event::SkillActivated {
+            agent_id,
+            name,
+            source,
+            revision,
+            origin,
+        }),
+        AgentEvent::SkillNotActivated {
+            agent_id,
+            name,
+            reason,
+        } => Some(Event::SkillActivationFailed {
+            agent_id,
+            name,
+            reason,
+        }),
+        _ => None,
+    }
+}
+
+/// Every candidate of the session's sources, with its state for this
+/// session (20 per page, filtered by `query`).
+pub(crate) fn skills_listing(
+    access: &bricks_skills::SkillAccess,
+    agent: &Agent,
+    query: &str,
+    page: usize,
+) -> super::protocol::SkillsListing {
+    use bricks_skills::{CandidateState, ProjectDecision, Scope};
+    const PER_PAGE: usize = 20;
+    let reg = access.service.registry();
+    let trust = access.trust();
+    let active = agent.active_skills();
+    let q = query.trim().to_lowercase();
+    let mut entries = Vec::new();
+    let mut winner: Option<(String, String)> = None; // (key, source)
+    for c in &reg.candidates {
+        let root = reg.root(c);
+        let allowed = trust.allows(root);
+        let mut details = Vec::new();
+        let state = if !allowed {
+            match (c.scope, trust.project) {
+                (Scope::Project, ProjectDecision::Denied) => "refused",
+                (Scope::Project, _) => "pending_approval",
+                _ => "disabled",
+            }
+        } else if winner.as_ref().is_some_and(|(k, _)| *k == c.key) {
+            if let Some((_, by)) = &winner {
+                details.push(format!("hidden by the same name in {by}"));
+            }
+            "shadowed"
+        } else {
+            winner = Some((c.key.clone(), c.source.clone()));
+            match &c.state {
+                CandidateState::Valid => {
+                    if active
+                        .iter()
+                        .any(|(n, s, _, _)| *n == c.key && *s == c.source)
+                    {
+                        "active"
+                    } else {
+                        "available"
+                    }
+                }
+                CandidateState::Invalid { error } => {
+                    details.push(error.clone());
+                    "invalid"
+                }
+                CandidateState::Incompatible { reasons } => {
+                    details.push(format!("uses {}", reasons.join(", ")));
+                    "incompatible"
+                }
+            }
+        };
+        details.extend(c.notes.iter().cloned());
+        if !q.is_empty()
+            && !c.key.to_lowercase().contains(&q)
+            && !c
+                .description
+                .as_deref()
+                .is_some_and(|d| d.to_lowercase().contains(&q))
+        {
+            continue;
+        }
+        entries.push(super::protocol::SkillListing {
+            name: c.key.clone(),
+            source: c.source.clone(),
+            state: state.into(),
+            description: c.description.clone(),
+            path: c.dir.as_ref().map(|d| d.display().to_string()),
+            revision: c.revision.clone(),
+            details,
+        });
+    }
+    let total = entries.len();
+    let entries = entries
+        .into_iter()
+        .skip(page * PER_PAGE)
+        .take(PER_PAGE)
+        .collect();
+    super::protocol::SkillsListing {
+        generation: reg.generation,
+        project_decision: match trust.project {
+            ProjectDecision::Pending => "pending",
+            ProjectDecision::Granted => "granted",
+            ProjectDecision::Denied => "denied",
+        }
+        .into(),
+        entries,
+        total,
+        page,
+        diagnostics: reg
+            .diagnostics
+            .iter()
+            .map(|d| {
+                format!(
+                    "{}: {}{}",
+                    d.source,
+                    d.path
+                        .as_ref()
+                        .map(|p| format!("{}: ", p.display()))
+                        .unwrap_or_default(),
+                    d.message
+                )
+            })
+            .chain(
+                reg.truncated
+                    .then(|| "the scan stopped at a limit".to_string()),
+            )
+            .collect(),
+        catalog_omitted: access.catalog().omitted,
+    }
+}
+
 /// A sub-agent runtime event, as a protocol event.
 pub(crate) fn sub_agent_event(e: crate::agents::SubAgentEvent) -> Event {
     use crate::agents::SubAgentEvent as S;
     match e {
+        S::SkillActivated {
+            agent_id,
+            name,
+            source,
+            revision,
+            origin,
+        } => Event::SkillActivated {
+            agent_id: Some(agent_id),
+            name,
+            source,
+            revision,
+            origin,
+        },
+        S::SkillNotActivated {
+            agent_id,
+            name,
+            reason,
+        } => Event::SkillActivationFailed {
+            agent_id: Some(agent_id),
+            name,
+            reason,
+        },
         S::Spawned(info) => Event::AgentSpawned { agent: info },
         S::State {
             agent_id,

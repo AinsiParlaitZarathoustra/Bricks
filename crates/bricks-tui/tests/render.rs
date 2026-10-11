@@ -64,6 +64,7 @@ fn the_live_area_shows_progress_status_and_composer() {
             working_dir: "/p".into(),
             model: "local/m".into(),
             reasoning: Some("deep".into()),
+            effective_reasoning: None,
             resumed: false,
             message_count: 0,
             warnings: vec![],

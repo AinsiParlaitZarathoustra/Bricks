@@ -22,6 +22,8 @@
 //! ```
 
 // Re-export sub-crates
+/// Agent Skills (`SKILL.md`): format, sources, trust, activation.
+pub use bricks_skills as skills;
 pub use cersei_agent::events::{
     self as events, AgentEvent, AgentStream, CompactReason, WarningState,
 };

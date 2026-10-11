@@ -340,26 +340,18 @@ Sprint 11.1 cleanup; use `bash_safety` instead.
 
 ---
 
-## Skills Discovery
+## Skills
 
-The `SkillTool` discovers and runs prompt templates from disk:
+Skills are [Agent Skills](https://agentskills.io/specification) (`SKILL.md`), served by the `bricks-skills` crate (`cersei::skills`). Give an agent a service and the `Skill` tool is registered once, the catalog goes into its system prompt, and its activations are its own:
 
 ```rust
-let skill_tool = SkillTool::new().with_project_root(".");
+use cersei::skills::{SkillAccess, SkillsService};
+
+let access = SkillAccess::new(Arc::new(SkillsService::standard(project, home)));
+let agent = Agent::builder().provider(p).tools(cersei::tools::coding()).skills(access).build()?;
 ```
 
-**Discovery locations (in order):**
-
-| Location | Format |
-|----------|--------|
-| `.claude/commands/*.md` | Claude Code format |
-| `.claude/skills/*/SKILL.md` | OpenCode format |
-| `~/.claude/commands/*.md` | User-level (global) |
-| Bundled | simplify, debug, commit, verify, stuck, remember, loop |
-
-Skills support `$ARGUMENTS` template expansion. The model invokes them with `skill="name" args="..."`.
-
----
+Sources by priority: `<project>/.agents/skills`, `<project>/.claude/skills` (both need an explicit approval), `~/.agents/skills`, `~/.claude/skills`, then the built-in `commit`, `debug`, `remember`, `simplify`, `stuck`, `verify`. `.claude/commands/*.md` and `$ARGUMENTS` templates are no longer supported. See `docs/skills.md` in the repository.
 
 ## Shell State Persistence
 

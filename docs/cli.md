@@ -93,8 +93,9 @@ bricks --workspace ./my-project run "Describe this project."
 * **Other paths** on the command line (`--providers`, `--file`,
   `--image`): `--providers` starts from the folder Bricks was started in;
   attachments are resolved against the session's folder, as before.
-* **Shown.** The status bar ends with the project (`⌂ ~/Documents/atlas`,
-  shortened with `…/` and a short mark of the full path when long);
+* **Shown.** The status bar ends with the project (`~/Documents/atlas`,
+  shortened with `…/` and a short mark of the full path when long, or only
+  its last folder on a narrow terminal);
   `/session` and the session picker show the full path.
 * **Not a sandbox.** A workspace chooses settings and CodeScout's scope;
   the other tools follow the approval policy, as everywhere. A workspace
@@ -110,6 +111,8 @@ bricks --workspace ./my-project run "Describe this project."
 | `bricks run --model <p/m> --reasoning <profile> "…"` | with another model / profile |
 | `bricks run --json --non-interactive "…"` | JSONL on stdout, no human interaction |
 | `bricks run --session <id> "…"` | continue a stored session headless |
+| `bricks run --skill <name> [--skill …] "…"` | activate skills before the prompt (see `docs/skills.md`) |
+| `bricks run --trust-project-skills …` | allow this project's skills for this session only |
 | `bricks sessions [--json]` | the project's stored sessions, most recent first |
 | `bricks sessions --all [--json]` | every stored session, whatever the project |
 | `bricks resume` | open the interface on the session picker (this project; Tab: all) |
@@ -134,6 +137,15 @@ It works without a terminal: no terminal mode is changed.
 
 `--file <path>` and `--image <path>` attach files and images. Their
 content is captured when the run starts.
+
+**Skills.** `--skill <name>` (repeatable) activates skills, in order,
+before the prompt, which stays a separate message. Every one is checked
+before anything is sent; one that is missing, not approved, invalid or
+incompatible stops the command with exit code 2 and nothing is sent. The
+project's skills (`.agents/skills`, `.claude/skills`) are used only with
+`--trust-project-skills`, for this project and this session; without it a
+`notice` says they were found and not used, and nothing waits for an
+answer. The flag grants no other permission. See `docs/skills.md`.
 
 **Output.** Without `--json`, the answer is streamed to stdout. Tool
 calls, notices and errors go to stderr. With `--json`, stdout carries
@@ -215,7 +227,7 @@ Every line is one envelope:
 
 | field | |
 |---|---|
-| `schema` | `5`; incremented on any change a consumer could notice (2: `run_finished` gained `incomplete` and `termination`; 3: the `search` command and its `search_results` event; 4: sub-agents — `agent_*` events, `agent_id` in `approval_requested`, `list_agent_profiles` and `reload_agent_profiles`; 5: turn limits removed — `agent_spawned` no longer has `max_turns`, `edit_applied` gains `agent_id` and `changeset_id`, `binary` in its files). Additions a consumer can ignore — new event types, new optional fields, new commands, new states — keep the version (Sprint 10.5's runtime is such an addition); a removed or renamed field or event, or a changed meaning, increments it. Consumers ignore unknown types and fields |
+| `schema` | `5`; incremented on any change a consumer could notice (2: `run_finished` gained `incomplete` and `termination`; 3: the `search` command and its `search_results` event; 4: sub-agents — `agent_*` events, `agent_id` in `approval_requested`, `list_agent_profiles` and `reload_agent_profiles`; 5: turn limits removed — `agent_spawned` no longer has `max_turns`, `edit_applied` gains `agent_id` and `changeset_id`, `binary` in its files). Additions a consumer can ignore — new event types, new optional fields, new commands, new states — keep the version (Sprint 10.5's runtime, Sprint 12's skills events and commands, Sprint 12.5's `set_reasoning`, `reasoning_changed` and `effective_reasoning` are such additions); a removed or renamed field or event, or a changed meaning, increments it. Consumers ignore unknown types and fields |
 | `session_id` | the session |
 | `run_id` | the run (absent for session-level events) |
 | `seq` | 1, 2, 3, … contiguous: a gap never happens silently |
@@ -226,7 +238,7 @@ Events (`type`):
 
 | type | fields | |
 |---|---|---|
-| `session_opened` | `working_dir, model, reasoning?, resumed, message_count, warnings` | first event |
+| `session_opened` | `working_dir, model, reasoning?, effective_reasoning?, resumed, message_count, warnings` | first event; `reasoning`: the requested profile (absent: the model's default); `effective_reasoning`: the one that applies (absent when the model declares none) |
 | `run_started` | `prompt, attachments[{kind,path,bytes,sha256?,note?}], model, reasoning?` | |
 | `text_delta` | `text` | the answer, streamed |
 | `thinking_delta` | `text` | only reasoning the provider exposed; never reconstructed |
@@ -240,7 +252,8 @@ Events (`type`):
 | `context` | `status{context_used{tokens, provenance, …}, context_window, input_limit, totals, …}` | `provenance`: `measured`, `counted`, `mixed`, `estimated` |
 | `usage` | `turn{…}, total{…}` | observed token usage; `cost_usd` absent = unknown, not zero |
 | `compaction` | `reason, outcome, compacted` | |
-| `model_changed` | `model, reasoning?, applies` | `next_turn` during a run, `next_run` otherwise |
+| `model_changed` | `model, reasoning?, effective_reasoning?, applies` | `next_turn` during a run, `next_run` otherwise |
+| `reasoning_changed` | `model, requested?, previous?, previous_label?, effective?, effective_label?, applies` | answer to `set_reasoning`: the effective profile before and after (ids and configured labels); `requested` absent = the model's default |
 | `context_cleared` | `messages_removed` | |
 | `session_saved` | | |
 | `notice` | `message` | retries, configuration diagnostics, continuations after a cut answer, no-progress warnings |
@@ -258,6 +271,11 @@ Events (`type`):
 | `run_usage` | `root_run_id, own, descendants, total, final_total, pending_agents` | after a run, then once more when its last background descendant ends (`final_total: true`); each agent counted once |
 | `agent_control_result` | `action, ok, text` | answer to `agent_control` |
 | `job_started` / `job_output` / `job_finished` | `job_id, agent_id, root_run_id, command, cwd, pid` / `job_id, stdout_bytes, stderr_bytes` / `job_id, state, code?, signal?, duration_ms, logs` | background commands; `job_output` carries counts, never the output |
+| `skill_activated` | `agent_id?, name, source, revision, origin` | a skill's instructions are in an agent's context; `origin`: `user`, `model`, `profile`, `restored`; `agent_id` absent for the session agent |
+| `skill_activation_failed` | `agent_id?, name, reason` | not activated (refused, too large, invalid…), or suspended on restoration |
+| `skills` | `listing{generation, project_decision, entries[{name, source, state, description?, path?, revision?, details}], total, page, diagnostics?, catalog_omitted}` | answer to `list_skills` / `reload_skills`; `state`: `available`, `active`, `shadowed`, `invalid`, `incompatible`, `pending_approval`, `refused`, `disabled` |
+| `skills_trust_requested` | `project, sources[{source, path, skills}]` | project skills wait for a person's decision (interactive; once per session) |
+| `skills_trust_resolved` | `project, allowed, by` | `by`: `user` or `caller` (`--trust-project-skills`) |
 | `command_rejected` | `command, reason` | nothing changed |
 
 A short run:
@@ -280,6 +298,8 @@ views the frontends read do not carry them.
 {"type":"submit","prompt":{"blocks":[{"kind":"text","text":"…"},{"kind":"file","path":"src/a b.rs"}]}}
 {"type":"cancel"}
 {"type":"set_model","model":"p/m","reasoning":"deep"}
+{"type":"set_reasoning","profile":"medium"}
+{"type":"set_reasoning"}
 {"type":"compact"}
 {"type":"clear_context"}
 {"type":"resume","session_id":"…"}
@@ -287,6 +307,10 @@ views the frontends read do not carry them.
 {"type":"search","text":"needle","regex":false}
 {"type":"list_agent_profiles","query":"review","page":0}
 {"type":"reload_agent_profiles"}
+{"type":"submit","prompt":{"blocks":[{"kind":"text","text":"…"}],"skills":["release-notes"]}}
+{"type":"list_skills","query":"pdf","page":0}
+{"type":"reload_skills"}
+{"type":"trust_project_skills","allow":true}
 {"type":"agent_control","action":"apply_changes","changeset_id":"cs_…"}
 {"type":"agent_control","action":"stop_job","job_id":"job_…"}
 ```
@@ -299,6 +323,12 @@ session.
 Rules during a run:
 
 * `cancel` is always accepted and reaches the run at once.
+* `set_reasoning` selects a profile of the current model (`profile`: one of
+  its ids, `default` included when a profile has that id), or goes back to
+  the model's declared default (`profile` absent or null). An unknown id is
+  refused (`command_rejected`) and nothing changes. `set_model` keeps its
+  meaning: without `reasoning` it keeps the profile when the model is the
+  same.
 * `set_model` is accepted and applies from the next turn (`model_changed`
   says so). Profiles are the configuration's; there is no fixed list.
 * `submit`, `resume`, `compact` and `clear_context` are refused
@@ -307,6 +337,9 @@ Rules during a run:
 * `list_agent_profiles`, `reload_agent_profiles` and `agent_control` are
   accepted at any time; a reload does not change a running sub-agent.
   `cancel` while idle cancels pending background sub-agents.
+* `list_skills`, `reload_skills` and `trust_project_skills` are accepted at
+  any time; a reload does not change instructions already active. A
+  `submit` whose `prompt.skills` cannot all be used is refused.
 * `search` is read-only and accepted at any time; it uses the workspace's
   shared code engine (the one the agents' `CodeScout` uses) and never
   starts a language server (see `docs/semantic.md`).
@@ -374,10 +407,51 @@ When a call must be asked about:
   each; originals are stored with the session) open with Ctrl+O.
 * **Reasoning** appears as a collapsed block only when the provider exposed
   some. Ctrl+T shows it live; Ctrl+O shows it after the fact.
-* **Status bar.** It shows the model, the profile, the context used and the
-  prompt budget, with the provenance (`est.`, `~`, `counted`, or nothing for
-  measured), then the project folder. The cost reads `Not priced` when the
-  model has no price (nothing before the first response).
+* **Status bar.** Composed for the terminal's width, measured in cells (wide
+  characters and emoji count double, text is cut between graphemes):
+  `Example Model · High │ Context ≈18.8k / 984k (≈1.9%) │ Not priced │ ~/Documents/bricks`
+  on a wide terminal, then `Ctx ≈1.9%`, the project's last folder, the model
+  without its profile, and at the narrowest the model and the activity.
+  * The model is its configured name; the profile is the effective one (the
+    requested profile, else the model's declared default), by its label.
+  * `≈` marks an estimate (provenance `estimated` or `mixed`); a measured or
+    counted occupation has no mark.
+  * The cost is the estimate (`$0.0123`, `<$0.0001`, `$0.00` only for an
+    exact zero), or `Not priced` when no price applies **or** only part of
+    the usage is priced — a partial amount is never shown as a total.
+    Nothing is shown before the first response.
+  * During a run `⠋ working — Ctrl+C to cancel` stays (shortened to
+    `working · Ctrl+C`, `Ctrl+C`, then the spinner alone); the memory
+    maintenance shows `updating memory`.
+* **`/effort`.** The reasoning profiles of the current model, as the
+  providers file declares them (ids, labels, parameters); there is no
+  built-in list.
+  * `/effort` opens them, `●` on the requested one and the effective one in
+    the title; `/effort <id>` selects one.
+  * `/effort default` goes back to the **model's declared default**: not
+    "reasoning off", and not an earlier choice of the session. A profile
+    whose id is `default` stays selectable in the picker.
+  * The change applies to the next request — during a run, its next turn;
+    the request being streamed and its retries keep their selection. It is
+    stored with the session, as the model is.
+  * An unknown id is refused with the choices, and nothing changes. A model
+    without profiles says `No reasoning profiles configured for this model.`
+* **`/cost`.** The session's usage from the engine: requests (compactions
+  and requests without usage said apart), input, cache read, cache write,
+  output and reasoning (a part of output, never added to it), and the
+  pricing state: an estimate, `$0.00` for a known zero, `Not priced`, or
+  `Not priced (partial)` with the known subtotal labelled as such and the
+  unpriced categories. `/cost details`: per response received by the
+  interface since the session was opened or resumed (a resumed session's
+  earlier requests are only in the total).
+* **`/context`.** The active context apart from the session's consumption:
+  window (`Not configured` when the configuration states none), prompt
+  budget, current usage, occupation (`used / prompt budget`; may exceed
+  100%), safe availability (`prompt budget − margin − upper bound`: what
+  admission allows, prudent and not a server guarantee) and the source.
+  `/context details`: measured and estimated parts, method, upper bound,
+  output reserve, margin, raw availability (`prompt budget − used`),
+  session totals and notes.
 * **Totals.** The line just above the status bar shows `+N −N`: the lines
   added and removed by the changes applied to the session's workspace
   since the session was opened — a sum of operations (two edits of one
@@ -418,7 +492,9 @@ When a call must be asked about:
 
 `/model [p/m [profile]]` · `/search <text>` (`re:<regex>`) ·
 `/agents [words | reload | running | status <id> | result <id> | cancel <id>]` ·
-`/changes <id> [inspect | apply | discard]` · `/jobs [stop <id>]` · `/memory` · `/context` · `/cost` · `/session` ·
+`/skills [words | reload | trust | deny]` · `/skill <name> <request>` ·
+`/effort [id | default]` · `/changes <id> [inspect | apply | discard]` · `/jobs [stop <id>]` · `/memory` ·
+`/context [details]` · `/cost [details]` · `/session` ·
 `/resume [id]` · `/compact` · `/clear` · `/diff` · `/tools` · `/mcp` ·
 `/config` · `/file <path>` · `/folder <path>` · `/image <path>` · `/help` ·
 `/quit`.

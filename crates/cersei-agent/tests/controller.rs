@@ -575,6 +575,7 @@ async fn a_session_resumes_with_its_settings_or_says_why_not() {
         message_count,
         warnings,
         working_dir,
+        ..
     } = next(&mut events).await.event
     else {
         unreachable!()

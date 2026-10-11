@@ -2,7 +2,7 @@
 //! `Command`s of the engine contract; presentation actions (opening an
 //! inspector, quitting) stay in the interface.
 
-use cersei_agent::control::Command;
+use cersei_agent::control::{Command, Prompt};
 
 /// What a slash command does.
 #[derive(Debug, Clone, PartialEq)]
@@ -16,9 +16,15 @@ pub enum Action {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Present {
     ModelPicker,
+    /// `/effort`: the current model's reasoning profiles.
+    EffortPicker,
     Memory,
     Context,
+    /// `/context details`.
+    ContextDetails,
     Cost,
+    /// `/cost details`.
+    CostDetails,
     Session,
     SessionPicker,
     Diff,
@@ -76,6 +82,19 @@ pub const COMMANDS: &[SlashCommand] = &[
         },
     },
     SlashCommand {
+        name: "effort",
+        aliases: &[],
+        args: "[profile id | default]",
+        description: "reasoning effort of the current model: its configured profiles; `default` = the model's own default",
+        build: |arg| match arg.trim() {
+            "" => present(Present::EffortPicker),
+            "default" => Ok(Action::Engine(Command::SetReasoning { profile: None })),
+            id => Ok(Action::Engine(Command::SetReasoning {
+                profile: Some(id.to_string()),
+            })),
+        },
+    },
+    SlashCommand {
         name: "search",
         aliases: &["s"],
         args: "<text> | re:<regex>",
@@ -127,6 +146,57 @@ pub const COMMANDS: &[SlashCommand] = &[
             Ok(Action::Engine(Command::ListAgentProfiles {
                 query: arg.to_string(),
                 page: 0,
+            }))
+        },
+    },
+    SlashCommand {
+        name: "skills",
+        aliases: &[],
+        args: "[search words] | reload | trust | deny",
+        description: "skills: catalog, sources, collisions, diagnostics; trust or deny this project's skills for the session",
+        build: |arg| {
+            let arg = arg.trim();
+            Ok(Action::Engine(match arg {
+                "reload" => Command::ReloadSkills,
+                "trust" | "allow" => Command::TrustProjectSkills { allow: true },
+                "deny" | "refuse" => Command::TrustProjectSkills { allow: false },
+                query => {
+                    // `/skills <words> page <n>` pages through the listing.
+                    let (query, page) = match query.rsplit_once(" page ") {
+                        Some((q, n)) if n.trim().parse::<usize>().is_ok() => {
+                            (q.trim(), n.trim().parse().unwrap_or(0))
+                        }
+                        _ => match query.strip_prefix("page ") {
+                            Some(n) if n.trim().parse::<usize>().is_ok() => {
+                                ("", n.trim().parse().unwrap_or(0))
+                            }
+                            _ => (query, 0),
+                        },
+                    };
+                    Command::ListSkills {
+                        query: query.to_string(),
+                        page,
+                    }
+                }
+            }))
+        },
+    },
+    SlashCommand {
+        name: "skill",
+        aliases: &[],
+        args: "<name> <request>",
+        description: "activate a skill, then send the request (nothing is sent if the skill cannot be activated)",
+        build: |arg| {
+            let arg = arg.trim();
+            let (name, request) = arg.split_once(char::is_whitespace).unwrap_or((arg, ""));
+            if name.is_empty() {
+                return Err("give a skill name (see /skills)".into());
+            }
+            if request.trim().is_empty() {
+                return Err(format!("give the request after the skill: /skill {name} <request>"));
+            }
+            Ok(Action::Engine(Command::Submit {
+                prompt: Prompt::text(request.trim()).with_skills(vec![name.to_string()]),
             }))
         },
     },
@@ -189,15 +259,23 @@ pub const COMMANDS: &[SlashCommand] = &[
         name: "context",
         aliases: &["ctx"],
         args: "",
-        description: "context occupation, window and provenance of the numbers",
-        build: |_| present(Present::Context),
+        description: "context occupation, budget and availability (`/context details`: measurement, margins, notes)",
+        build: |arg| match arg.trim() {
+            "" => present(Present::Context),
+            "details" => present(Present::ContextDetails),
+            other => Err(format!("unknown argument `{other}`: /context or /context details")),
+        },
     },
     SlashCommand {
         name: "cost",
         aliases: &["usage"],
         args: "",
-        description: "tokens and cost of the session (unknown without prices)",
-        build: |_| present(Present::Cost),
+        description: "tokens and cost of the session (`/cost details`: per response)",
+        build: |arg| match arg.trim() {
+            "" => present(Present::Cost),
+            "details" => present(Present::CostDetails),
+            other => Err(format!("unknown argument `{other}`: /cost or /cost details")),
+        },
     },
     SlashCommand {
         name: "session",
@@ -356,6 +434,65 @@ mod tests {
             ))
         );
         assert!(parse("/file").is_err());
+        assert_eq!(
+            parse("/skills").unwrap(),
+            Action::Engine(Command::ListSkills {
+                query: String::new(),
+                page: 0
+            })
+        );
+        assert_eq!(
+            parse("/skills pdf page 2").unwrap(),
+            Action::Engine(Command::ListSkills {
+                query: "pdf".into(),
+                page: 2
+            })
+        );
+        assert_eq!(
+            parse("/skills reload").unwrap(),
+            Action::Engine(Command::ReloadSkills)
+        );
+        assert_eq!(
+            parse("/skills trust").unwrap(),
+            Action::Engine(Command::TrustProjectSkills { allow: true })
+        );
+        assert_eq!(
+            parse("/skills deny").unwrap(),
+            Action::Engine(Command::TrustProjectSkills { allow: false })
+        );
+        // `/skill <name> <request>`: the request is its own text.
+        match parse("/skill pdf-tools extract page 3 of report.pdf").unwrap() {
+            Action::Engine(Command::Submit { prompt }) => {
+                assert_eq!(prompt.skills, ["pdf-tools"]);
+                assert_eq!(
+                    prompt,
+                    Prompt::text("extract page 3 of report.pdf")
+                        .with_skills(vec!["pdf-tools".into()])
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(
+            parse("/skill pdf-tools").is_err(),
+            "no request, nothing sent"
+        );
+        assert_eq!(parse("/cost").unwrap(), Action::Present(Present::Cost));
+        assert_eq!(
+            parse("/cost details").unwrap(),
+            Action::Present(Present::CostDetails)
+        );
+        assert_eq!(
+            parse("/ctx details").unwrap(),
+            Action::Present(Present::ContextDetails)
+        );
+        assert!(parse("/cost euros").unwrap_err().contains("/cost details"));
+        assert!(parse("/context all")
+            .unwrap_err()
+            .contains("/context details"));
+        assert!(parse("/skill").is_err());
+        // Native commands keep their names; nothing is created per skill.
+        assert_ne!(find("skill").unwrap().name, find("skills").unwrap().name);
+        assert!(find("pdf-tools").is_none());
         assert!(parse("/nope").unwrap_err().contains("/help"));
         assert_eq!(
             complete("co").iter().map(|c| c.name).collect::<Vec<_>>(),

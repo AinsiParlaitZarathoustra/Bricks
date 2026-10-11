@@ -14,81 +14,35 @@ fn l(s: impl Into<String>) -> Line<'static> {
     Line::from(s.into())
 }
 
-fn cost(u: &cersei_types::Usage) -> String {
-    match u.cost_usd {
-        Some(c) => format!("${c:.4} (estimated from the configured prices)"),
-        None => "unknown — no price is configured for this model (not zero)".into(),
-    }
-}
-
 pub fn context(s: &Snapshot) -> Overlay {
-    let c = &s.context;
-    let mut v = vec![
-        l(format!("model: {}", c.context_window.model)),
-        l(format!(
-            "used: {} tokens ({:?}: {})",
-            c.context_used.tokens, c.context_used.provenance, c.context_used.method
-        )),
-        l(format!(
-            "  measured {} + estimated {}, upper bound {}",
-            c.context_used.measured_tokens,
-            c.context_used.estimated_tokens,
-            c.context_used.upper_bound
-        )),
-        l(format!(
-            "prompt budget: {} tokens (output reserve {}, margin {})",
-            c.input_limit, c.reserved_output, c.margin
-        )),
-        l(format!(
-            "window: {}",
-            c.context_window
-                .total
-                .map(|t| format!("{t} tokens"))
-                .unwrap_or_else(|| "not stated by the configuration".into())
-        )),
-        l(format!(
-            "occupation: {:.1}% of the prompt budget",
-            c.fraction_used() * 100.0
-        )),
-        l(""),
-        l(format!(
-            "session consumption (cumulative, never decreases): {} tokens over {} requests",
-            c.total_tokens, c.totals.requests
-        )),
-    ];
-    for n in &c.notes {
-        v.push(l(format!("note: {n}")));
-    }
-    Overlay::text("context", v)
+    Overlay::text("context", crate::diag::context_summary(&s.context))
 }
 
-pub fn costs(s: &Snapshot, app: &App) -> Overlay {
-    let u = &s.usage;
-    let mut v = vec![
-        l(format!(
-            "session: input {} · cache read {} · cache write {} · output {} (reasoning {})",
-            u.input_tokens,
-            u.cache_read_input_tokens,
-            u.cache_creation_input_tokens,
-            u.output_tokens,
-            u.reasoning_tokens
-        )),
-        l(format!("cost: {}", cost(u))),
-        l(""),
-        l("per response (observed usage reported by the server):"),
-    ];
-    for (i, t) in app.status.turns_usage.iter().enumerate() {
-        v.push(l(format!(
-            "  {:>3}. in {} · out {} · {}",
-            i + 1,
-            t.input_tokens,
-            t.output_tokens,
-            t.cost_usd
-                .map(|c| format!("${c:.4}"))
-                .unwrap_or_else(|| "cost unknown".into())
-        )));
+pub fn context_details(s: &Snapshot) -> Overlay {
+    Overlay::text("context details", crate::diag::context_details(&s.context))
+}
+
+/// The model shown with a cost: the current one (a session that changed
+/// model has usage of several; the totals are the session's).
+fn current_model(s: &Snapshot) -> String {
+    match &s.effective_reasoning {
+        Some(r) => format!("{} · {r}", s.model),
+        None => s.model.clone(),
     }
-    Overlay::text("cost", v)
+}
+
+pub fn costs(s: &Snapshot, _app: &App) -> Overlay {
+    Overlay::text(
+        "cost",
+        crate::diag::cost_summary(&current_model(s), &s.usage, &s.context.totals),
+    )
+}
+
+pub fn cost_details(s: &Snapshot, app: &App) -> Overlay {
+    Overlay::text(
+        "cost details",
+        crate::diag::cost_details(&app.status.turns_usage, &s.usage),
+    )
 }
 
 pub fn session(s: &Snapshot) -> Overlay {

@@ -13,6 +13,7 @@ cersei-types = { workspace = true }
 cersei-provider = { workspace = true }
 cersei-tools = { workspace = true }
 bricks-semantic = { workspace = true }
+bricks-skills = { workspace = true }
 cersei-hooks = { workspace = true }
 cersei-memory = { workspace = true }
 cersei-mcp = { workspace = true }

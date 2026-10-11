@@ -1,5 +1,78 @@
 # Changelog
 
+## [0.6.0] — 2026-10-11
+
+### Added — interface and reliability (Sprint 12.5)
+
+- **`/effort`**: the reasoning profiles of the current model, from the providers file (ids, labels, parameters; no built-in list). `/effort <id>` selects one; `/effort default` goes back to the **model's declared default** (not "off", not an earlier choice). A profile whose id is `default` stays selectable in the picker. An unknown id is refused with the choices and changes nothing; a model without profiles says `No reasoning profiles configured for this model.`
+- **Contract**: command `set_reasoning {profile?}` (absent/null: the model's default) and event `reasoning_changed` (effective profile before/after, ids and labels). `session_opened` and `model_changed` gain `effective_reasoning`; `Snapshot::effective_reasoning`. `set_model` keeps its meaning. Additions: JSONL schema stays 5.
+- **`/cost`** and **`/context`** rewritten as readable summaries, plus `/cost details` and `/context details`. Any other argument is refused.
+  - Cost has distinct states: an estimate, `$0.00` for a known zero, `Not priced`, and `Not priced (partial)` with the known subtotal labelled as such and the unpriced categories. A small amount never rounds to zero (`<$0.0001`).
+  - Cache read/write are kept apart from input. Reasoning is shown as part of output and never added to it.
+  - Context separates occupation from the session total. The `≈` mark depends on provenance; occupation is measured against the prompt budget and may exceed 100%. A window that is not declared reads `Not configured`.
+  - Two distinct availabilities: safe (`budget − margin − upper bound`) and raw (`budget − used`).
+- **Adaptive status bar**:
+  - Model name and effective profile label, context, cost, activity and project, chosen by the width actually available, measured in terminal cells and cut between graphemes; control characters are neutralised.
+  - The activity (`working`, `Ctrl+C`) stays during a run. The `⌂` decoration is gone.
+- **Optional pre-commit hook** (`scripts/hooks/pre-commit`, enabled only by `scripts/hooks/install.sh enable`). It checks the staged content (whitespace and conflict markers, rustfmt, secrets with the staged allowlist), modifies nothing, and never replaces an existing hook or `core.hooksPath`.
+
+### Fixed (Sprint 12.5)
+
+- **Concurrent model/profile switch**: provider, model label and profile now change together and are read as one snapshot per request. A request never combines an old provider with a new profile; a retry keeps its request's selection.
+- **Accounting of a response sent before a switch**: its usage counts once in the totals, but no longer becomes the context measurement of the new selection (the measurement is kept only if the context version is unchanged since sending).
+- The model picker's "(default)" for the current model kept the previous profile (`set_model` without a profile). It now clears it, through `set_reasoning`.
+- Per-response usage rows (`/cost details`) no longer carry over from another session after a resume.
+- User-facing `cost unknown` labels replaced (`Not priced`, with the partial state); JSONL fields unchanged.
+- Shell tests: the HTTP server fixture no longer does a reverse DNS lookup (`HTTPServer.server_bind` → `getfqdn`), which could hang on some machines. A test proves the fixture starts, answers and stops with `socket.getfqdn` failing. Production supervision unchanged.
+- `scripts/check_secrets.py --staged` reads the allowlist from the index.
+
+### Dependencies (Sprint 12.5)
+
+- **Version 0.6.0** across the workspace (Sprints 12 and 12.5).
+- Updated: `uuid` 1.28.0, `serde_json` 1.0.152, `tokio-util` 0.7.20, `smallvec` 1.16.3, `indoc` 2.0.8, `zstd-sys` 2.1.1, `cc` 1.7.0, `cxx` family 1.0.205.
+- Deferred: `nix` 0.31 (via `mac_address`), `tree-sitter-language`, `syn`, `pest` (new native crates).
+- `cargo audit` before and after: 0 vulnerabilities, the same four advisories. Details in `docs/maintenance.md`.
+
+### Added — Agent Skills (Sprint 12)
+
+- **Standard skills** (`SKILL.md`, [agentskills.io](https://agentskills.io/specification)): `name` and `description` required; `license`, `compatibility`, `metadata`, `allowed-tools` optional. Name rules follow the reference validator: NFKC normalisation, Unicode letters, lowercase, no leading, trailing or doubled `-`, equal to the directory name. LF/CRLF and multi-line values are accepted. Malformed YAML, duplicate keys, tags and oversized or deeply nested documents are refused; nothing is repaired. Bricks' own limits: 100 KiB per `SKILL.md`, 32 KiB of frontmatter.
+- **Sources**, by priority: `<project>/.agents/skills`, `<project>/.claude/skills`, `~/.agents/skills`, `~/.claude/skills`, then built-in.
+  - Discovery is deterministic and bounded; symbolic links are not followed.
+  - Collisions and diagnostics are visible.
+  - An invalid winner never falls back silently to a homonym.
+- **Trust of project skills** per session, decided by a person (`/skills trust`, `/skills deny`, the `trust_project_skills` command) or by an explicit caller (`--trust-project-skills`, `SkillsSetup::trust_project`, `Controller::trust_project_skills`).
+  - Before that, nothing of them reaches the model.
+  - Asked once per interactive session; never awaited in headless.
+  - Not kept across sessions or projects.
+- **Activation.**
+  - The system prompt has a catalog of names and descriptions (escaped, bounded at 100 entries / 16 KiB, saying what it omits).
+  - The `Skill` tool (read-only level) has `activate`, `list` and `resource` actions; `args` is a separate request.
+  - The engine records an activation only on the verified path (a one-time id of the agent's own tool), once it fits in the context (compacting once if needed), and never shortens it. The same revision is not repeated.
+  - Active instructions survive compaction (re-added once) and the tool-result budget.
+  - They are stored with the session (`skills.json`: identity, source, revision) and re-checked against their source on restoration (suspended, and said so, if changed or no longer allowed).
+- **A person's choice:** `/skill <name> <request>` and `bricks run --skill <name>` (repeatable) activate before the request, which stays separate. One that cannot be used refuses the command and sends nothing (`bricks run`: exit 2). `/skills [words | reload]` lists sources, states, collisions and diagnostics.
+- **Sub-agents.**
+  - A profile's `skills` are resolved with the session's service and trust before the child is built and before any provider call.
+  - They are preloaded whole; a missing, refused, invalid or incompatible skill, or a total over `skills_max_bytes`, refuses the launch.
+  - Each child has its own activations and never sees the parent's. A worktree child reads its project's skills in place.
+- **Events** (JSONL schema 5, additions): `skill_activated`, `skill_activation_failed`, `skills`, `skills_trust_requested`, `skills_trust_resolved`. **Commands:** `list_skills`, `reload_skills`, `trust_project_skills`; `prompt.skills` in `submit`.
+- Built-in skills rewritten as standard documents: `commit`, `debug`, `remember`, `simplify`, `stuck`, `verify`. Example skills in `examples/skills/`. Documentation: `docs/skills.md`.
+
+### Changed
+
+- **Crate renamed: `cersei-skills` → `bricks-skills`** (re-exported as `cersei::skills`). It is now the only skills service; `cersei-tools`, `cersei-agent` and the facade depend on it.
+- `Prompt` gains `skills` (default empty). `UserInput` gains `skills`. `AgentBuilder::skills` / `preloaded_skills`; `EngineConfig::skills` (`SkillsSetup`). `Controller::skills`, `Controller::trust_project_skills`.
+- Agents built by the CLI have the `Skill` tool and read `~/.agents/skills` and `~/.claude/skills`.
+- Unsupported Claude Code directives (`context`, `agent`, `model`, `effort`, `hooks`, `paths`, `shell`, `disable-model-invocation: true`, `user-invocable: false`) make a document *incompatible*: inspectable, never activated or preloaded.
+- `bricks run`: a refused submission now reports its `command_rejected` even when other events were queued before it.
+
+### Removed
+
+- The second skills system in `cersei-tools` (`cersei_tools::skills`: its parser, discovery, `$ARGUMENTS` templates, bundled aliases), `SkillTool::new().with_project_root(...)` / `with_extra_path(s)`, and `cersei_agent::agents::spawn::load_skills`.
+- The old registry API (`SkillRegistry`, `SkillFrontmatter` with required `version`/`license`, `.cersei/skills` discovery).
+- `.claude/commands/*.md` and `.cersei/skills` are no longer read. The `loop` built-in is gone (Bricks has no scheduler). See the migration table in `docs/skills.md`.
+- Profile skill states `truncated`, `missing`, `invalid`, `skipped` are no longer produced: such a launch is refused.
+
 ## [0.5.0] — 2026-10-10
 
 ### Security — dependencies (Sprint 11.1)

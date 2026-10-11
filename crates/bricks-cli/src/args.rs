@@ -117,4 +117,13 @@ pub struct RunArgs {
     /// (its work stays pending and resumes next time).
     #[arg(long)]
     pub no_wait_memory: bool,
+    /// Activate this skill before the prompt (repeatable, in order). Every
+    /// one is checked before anything is sent; one that cannot be used
+    /// stops the command (exit code 2).
+    #[arg(long = "skill", value_name = "NAME")]
+    pub skills: Vec<String>,
+    /// Allow this project's skills (.agents/skills, .claude/skills) for
+    /// this run's session only. Grants no other permission.
+    #[arg(long)]
+    pub trust_project_skills: bool,
 }
