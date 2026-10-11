@@ -9,8 +9,8 @@ use cersei_memory::structured::clock::parse_time;
 use cersei_memory::structured::extract::{ExtractError, ExtractionRequest, Extractor};
 use cersei_memory::structured::*;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio_util::sync::CancellationToken;
 
 // ─── Test doubles ────────────────────────────────────────────────────────────
@@ -727,9 +727,11 @@ async fn other_projects_compatible_facts_ambiguity_and_future_facts() {
     .unwrap();
     // Another project replaces nothing in Bricks; likes are compatible.
     let current = m.current_facts(P).unwrap();
-    assert!(current
-        .iter()
-        .any(|f| f.value == "Axum" && f.status == FactStatus::Active));
+    assert!(
+        current
+            .iter()
+            .any(|f| f.value == "Axum" && f.status == FactStatus::Active)
+    );
     assert_eq!(current.iter().filter(|f| f.predicate == "likes").count(), 2);
 
     // A silent different value of an exclusive property: both kept, contested.
@@ -775,11 +777,12 @@ async fn other_projects_compatible_facts_ambiguity_and_future_facts() {
     )
     .await
     .unwrap();
-    assert!(m
-        .current_facts(P)
-        .unwrap()
-        .iter()
-        .all(|f| f.predicate != "deadline"));
+    assert!(
+        m.current_facts(P)
+            .unwrap()
+            .iter()
+            .all(|f| f.predicate != "deadline")
+    );
     let later = m.facts(P, Some(day("2027-02-01")), None, false).unwrap();
     assert!(later.iter().any(|f| f.predicate == "deadline"));
     let rec = m

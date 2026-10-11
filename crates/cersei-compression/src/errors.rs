@@ -345,10 +345,10 @@ pub fn detect(lines: &[String], extra: &[Detector]) -> Vec<Block> {
                 continue;
             }
             let mut severity = det.severity;
-            if let Some(w) = &det.warning_if {
-                if lines[i..=end].iter().any(|l| w.is_match(l)) {
-                    severity = Severity::Warning;
-                }
+            if let Some(w) = &det.warning_if
+                && lines[i..=end].iter().any(|l| w.is_match(l))
+            {
+                severity = Severity::Warning;
             }
             found = Some(Block {
                 start: i,
@@ -419,7 +419,9 @@ mod tests {
 
     #[test]
     fn go_build_heading_needs_diagnostics() {
-        let log = lines("# example.com/x [example.com/x.test]\nutil/util.go:4:28: undefined: y\nFAIL\tx [build failed]");
+        let log = lines(
+            "# example.com/x [example.com/x.test]\nutil/util.go:4:28: undefined: y\nFAIL\tx [build failed]",
+        );
         let b = detect(&log, &[]);
         assert_eq!(
             (b[0].start, b[0].end, b[0].kind.as_str()),

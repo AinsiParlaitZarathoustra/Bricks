@@ -1,8 +1,8 @@
 //! `WorkflowStep` — runs a nested workflow as a single step (workflows-as-steps).
 
+use crate::Workflow;
 use crate::result::RunStatus;
 use crate::step::{Step, StepContext, StepOutcome};
-use crate::Workflow;
 use async_trait::async_trait;
 use cersei_types::{CerseiError, Result};
 use serde_json::Value;

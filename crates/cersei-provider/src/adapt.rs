@@ -10,7 +10,7 @@
 //! ever doing so.
 
 use cersei_types::ToolDefinition;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use std::collections::HashSet;
 
 /// Which provider schema dialect to serialize tools into.
@@ -153,17 +153,15 @@ fn rewrite(
             // ref degrades to the node minus its `$ref` key — the key itself
             // must go, and an empty `{}` is a permissive schema, which the
             // tool's own deserializer still backstops.
-            if let Some(Value::String(r)) = map.get("$ref") {
-                if let Some(def_name) = local_def_name(r) {
-                    if !stack.iter().any(|s| s == def_name) {
-                        if let Some(target) = defs.get(def_name) {
-                            stack.push(def_name.to_string());
-                            let resolved = rewrite(target, dialect, defs, stack);
-                            stack.pop();
-                            return resolved;
-                        }
-                    }
-                }
+            if let Some(Value::String(r)) = map.get("$ref")
+                && let Some(def_name) = local_def_name(r)
+                && !stack.iter().any(|s| s == def_name)
+                && let Some(target) = defs.get(def_name)
+            {
+                stack.push(def_name.to_string());
+                let resolved = rewrite(target, dialect, defs, stack);
+                stack.pop();
+                return resolved;
             }
 
             let mut out = Map::new();

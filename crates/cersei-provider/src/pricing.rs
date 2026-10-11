@@ -287,10 +287,11 @@ mod tests {
         c.cache_write = None;
         c.cache_write_variants.clear();
         let p = Pricing::from_config(&c).unwrap();
-        assert!(p
-            .estimate(&usage(10, 10, 0, 0), None, &[])
-            .unwrap()
-            .is_none());
+        assert!(
+            p.estimate(&usage(10, 10, 0, 0), None, &[])
+                .unwrap()
+                .is_none()
+        );
         // No tokens consumed: a genuine zero.
         let e = p.estimate(&usage(0, 0, 0, 0), None, &[]).unwrap().unwrap();
         assert_eq!(e.amount_usd, 0.0);
@@ -307,10 +308,11 @@ mod tests {
         assert_eq!(e.tariff, "offpeak");
         assert!((e.amount_usd - 9.0).abs() < 1e-9, "{e:?}");
         assert!(e.partial, "cache_read is unknown in the variant: {e:?}");
-        assert!(p
-            .estimate(&usage(1, 1, 0, 0), Some("nope"), &[])
-            .unwrap_err()
-            .contains("available"));
+        assert!(
+            p.estimate(&usage(1, 1, 0, 0), Some("nope"), &[])
+                .unwrap_err()
+                .contains("available")
+        );
     }
 
     #[test]
@@ -332,10 +334,12 @@ mod tests {
     fn config_validation() {
         let mut c = full();
         c.variants.insert("default".into(), TariffConfig::default());
-        assert!(Pricing::from_config(&c)
-            .unwrap_err()
-            .0
-            .starts_with("variants"));
+        assert!(
+            Pricing::from_config(&c)
+                .unwrap_err()
+                .0
+                .starts_with("variants")
+        );
         let mut c = full();
         c.currency = "EUR".into();
         assert_eq!(Pricing::from_config(&c).unwrap_err().0, "currency");

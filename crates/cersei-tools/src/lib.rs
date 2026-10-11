@@ -251,10 +251,10 @@ impl Extensions {
 
     pub fn get<T: Send + Sync + 'static>(&self) -> Option<Arc<T>> {
         let id = std::any::TypeId::of::<T>();
-        if let Some(local) = &self.local {
-            if let Some(v) = local.get(&id) {
-                return Arc::clone(v.value()).downcast::<T>().ok();
-            }
+        if let Some(local) = &self.local
+            && let Some(v) = local.get(&id)
+        {
+            return Arc::clone(v.value()).downcast::<T>().ok();
         }
         self.data
             .get(&id)

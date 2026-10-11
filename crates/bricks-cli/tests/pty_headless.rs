@@ -6,7 +6,7 @@
 mod common;
 
 use common::*;
-use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 use std::io::Read;
 use std::time::{Duration, Instant};
 

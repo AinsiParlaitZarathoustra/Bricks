@@ -3,9 +3,9 @@
 
 use bricks_tui::state::Cell;
 use bricks_tui::ui::{Effect, Ui};
+use cersei_agent::BricksConfig;
 use cersei_agent::control::scripted::{Reply, Script, ScriptedCatalog};
 use cersei_agent::control::*;
-use cersei_agent::BricksConfig;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use std::time::Duration;
 
@@ -123,11 +123,12 @@ async fn the_interface_and_a_direct_submission_drive_the_same_engine_alike() {
     assert_eq!(text(&via_ui), text(&direct));
     assert_eq!(text(&via_ui).0, "Trouvé le README.");
     // The presentation state shows what the engine reported.
-    assert!(ui
-        .app
-        .cells
-        .iter()
-        .any(|c| matches!(c, Cell::Tools { calls } if calls[0].name == "Glob")));
+    assert!(
+        ui.app
+            .cells
+            .iter()
+            .any(|c| matches!(c, Cell::Tools { calls } if calls[0].name == "Glob"))
+    );
     assert!(!ui.app.running());
 }
 
@@ -464,9 +465,11 @@ async fn the_skills_commands_go_through_the_engine() {
     assert!(notices(&ui).contains("skill `local-proc` active"));
     let req = &script.requests()[0].1;
     let n = req.messages.len();
-    assert!(req.messages[n - 2]
-        .get_all_text()
-        .contains("BODY-local-proc"));
+    assert!(
+        req.messages[n - 2]
+            .get_all_text()
+            .contains("BODY-local-proc")
+    );
     assert_eq!(req.messages[n - 1].get_all_text(), "résume le projet");
 }
 
@@ -475,7 +478,7 @@ async fn the_skills_commands_go_through_the_engine() {
 /// `set_model` without a profile kept it).
 #[tokio::test]
 async fn effort_and_the_pickers_default_reset_the_profile() {
-    use bricks_tui::commands::{parse, Action};
+    use bricks_tui::commands::{Action, parse};
     assert_eq!(
         parse("/effort default").unwrap(),
         Action::Engine(Command::SetReasoning { profile: None })

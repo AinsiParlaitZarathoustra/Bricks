@@ -7,12 +7,12 @@
 //! - a `KvStore` (optional) — for `kv.*`
 //! - an `Arc<dyn Sandbox>` (optional) — supplies this agent's identity
 
-use crate::interp::{run_program, EvalCtx};
+use crate::interp::{EvalCtx, run_program};
 use crate::registry::DispatchHandle;
 use async_trait::async_trait;
 use cersei_tools::{PermissionLevel, Tool, ToolCategory, ToolContext, ToolResult};
 use cersei_vms::{KvStore, Mailbox, SandboxId};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 
 pub struct RunAgentTemplateTool;
@@ -61,7 +61,7 @@ impl Tool for RunAgentTemplateTool {
             None => {
                 return ToolResult::error(
                     "RunAgentTemplate requires a DispatchHandle in the tool context extensions",
-                )
+                );
             }
         };
 
@@ -73,10 +73,13 @@ impl Tool for RunAgentTemplateTool {
         if let Some(kv) = ctx.extensions.get::<KvStore>() {
             ev = ev.with_kv(Arc::new((*kv).clone()));
         }
-        if let Some(sb) = ctx.extensions.get::<Arc<dyn cersei_vms::Sandbox>>() {
-            ev = ev.with_self_id(sb.id().clone());
-        } else {
-            ev = ev.with_self_id(SandboxId::from(ctx.session_id.as_str()));
+        match ctx.extensions.get::<Arc<dyn cersei_vms::Sandbox>>() {
+            Some(sb) => {
+                ev = ev.with_self_id(sb.id().clone());
+            }
+            _ => {
+                ev = ev.with_self_id(SandboxId::from(ctx.session_id.as_str()));
+            }
         }
 
         if let Some(Value::Object(vars)) = input.get("vars") {

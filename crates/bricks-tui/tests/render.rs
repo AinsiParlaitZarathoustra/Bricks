@@ -6,9 +6,9 @@ use bricks_tui::overlay::{self, Overlay};
 use bricks_tui::state::App;
 use bricks_tui::view::{self, Overlay as LiveOverlay};
 use cersei_agent::control::*;
-use cersei_tools::preview::{file_change, ChangePreview};
-use ratatui::backend::TestBackend;
+use cersei_tools::preview::{ChangePreview, file_change};
 use ratatui::Terminal;
+use ratatui::backend::TestBackend;
 
 fn env(seq: u64, event: Event) -> Envelope {
     Envelope {

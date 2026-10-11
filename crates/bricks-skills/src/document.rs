@@ -143,12 +143,12 @@ pub fn name_problems(name: &str, dir: Option<&str>) -> Vec<String> {
     if !name.chars().all(|c| c.is_alphanumeric() || c == '-') {
         out.push("`name` may only contain letters, digits and `-`".into());
     }
-    if let Some(dir) = dir {
-        if normalize_name(dir) != name {
-            out.push(format!(
-                "`name` `{name}` does not match its directory `{dir}`"
-            ));
-        }
+    if let Some(dir) = dir
+        && normalize_name(dir) != name
+    {
+        out.push(format!(
+            "`name` `{name}` does not match its directory `{dir}`"
+        ));
     }
     out
 }

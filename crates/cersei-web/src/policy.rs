@@ -72,10 +72,11 @@ impl NetworkPolicy {
                 None
             }
         };
-        if let Some(ip) = ip {
-            if !is_public(ip) && !self.allows_private(&ip.to_string(), port) {
-                return Err(PolicyError::Private(ip.to_string()));
-            }
+        if let Some(ip) = ip
+            && !is_public(ip)
+            && !self.allows_private(&ip.to_string(), port)
+        {
+            return Err(PolicyError::Private(ip.to_string()));
         }
         Ok(())
     }
@@ -87,7 +88,9 @@ pub enum PolicyError {
     Scheme(String),
     #[error("the URL has no host")]
     NoHost,
-    #[error("{0} is a private, local or reserved address; it is not fetched (see web.fetch.allow_private)")]
+    #[error(
+        "{0} is a private, local or reserved address; it is not fetched (see web.fetch.allow_private)"
+    )]
     Private(String),
     #[error("{0} resolves only to private, local or reserved addresses; it is not fetched")]
     ResolvesPrivate(String),
@@ -241,14 +244,17 @@ mod tests {
         ));
 
         let p = NetworkPolicy::new(&["127.0.0.1:8080".into(), "localhost".into()]);
-        assert!(p
-            .check_url(&Url::parse("http://127.0.0.1:8080/x").unwrap())
-            .is_ok());
-        assert!(p
-            .check_url(&Url::parse("http://127.0.0.1:9090/x").unwrap())
-            .is_err());
-        assert!(p
-            .check_url(&Url::parse("http://localhost:1234/").unwrap())
-            .is_ok());
+        assert!(
+            p.check_url(&Url::parse("http://127.0.0.1:8080/x").unwrap())
+                .is_ok()
+        );
+        assert!(
+            p.check_url(&Url::parse("http://127.0.0.1:9090/x").unwrap())
+                .is_err()
+        );
+        assert!(
+            p.check_url(&Url::parse("http://localhost:1234/").unwrap())
+                .is_ok()
+        );
     }
 }

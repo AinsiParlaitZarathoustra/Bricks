@@ -27,11 +27,11 @@ pub mod manager;
 pub mod types;
 
 pub use client::{
-    normalize_uri, parse_locations, path_to_uri, uri_to_path, DiagnosticsEntry, LspClient,
-    LspError, LspResult, RawLocation, ServerCaps, SyncKind,
+    DiagnosticsEntry, LspClient, LspError, LspResult, RawLocation, ServerCaps, SyncKind,
+    normalize_uri, parse_locations, path_to_uri, uri_to_path,
 };
 pub use config::LspServerConfig;
-pub use manager::{global_lsp_manager, DiagnosticsFreshness, LspManager};
+pub use manager::{DiagnosticsFreshness, LspManager, global_lsp_manager};
 
 #[cfg(any(test, feature = "mock"))]
 pub mod mock;

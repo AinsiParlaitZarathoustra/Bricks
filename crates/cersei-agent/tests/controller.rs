@@ -1,8 +1,8 @@
 //! The command/event contract, end to end, with a scripted model.
 
+use cersei_agent::BricksConfig;
 use cersei_agent::control::scripted::{Reply, Script, ScriptedCatalog};
 use cersei_agent::control::*;
-use cersei_agent::BricksConfig;
 use serde_json::json;
 use std::path::Path;
 use std::sync::Arc;
@@ -211,13 +211,14 @@ async fn commands_during_a_run_follow_the_rules() {
     assert!(
         matches!(changed.event, Event::ModelChanged { ref applies, .. } if applies == "next_turn")
     );
-    assert!(env
-        .ctl
-        .send(Command::SetModel {
-            model: Some("test/zzz".into()),
-            reasoning: None
-        })
-        .is_err());
+    assert!(
+        env.ctl
+            .send(Command::SetModel {
+                model: Some("test/zzz".into()),
+                reasoning: None
+            })
+            .is_err()
+    );
     // Cancellation is immediate, and does not poison the next run.
     env.ctl.send(Command::Cancel).unwrap();
     let fin = until(&mut env.events, "run_finished").await;
@@ -948,10 +949,11 @@ async fn agent_and_frontend_share_the_code_engine() {
         _ => unreachable!(),
     }
     assert_eq!(engine.stats().queries, 2, "the same engine answered");
-    assert!(ctl
-        .send(Command::Search {
+    assert!(
+        ctl.send(Command::Search {
             text: "  ".into(),
             regex: false
         })
-        .is_err());
+        .is_err()
+    );
 }

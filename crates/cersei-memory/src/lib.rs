@@ -25,10 +25,10 @@ use std::path::PathBuf;
 
 /// Strip YAML frontmatter from content.
 pub fn strip_frontmatter(content: &str) -> String {
-    if let Some(rest) = content.strip_prefix("---") {
-        if let Some(close_pos) = rest.find("\n---") {
-            return rest[close_pos + 4..].trim_start_matches('\n').to_string();
-        }
+    if let Some(rest) = content.strip_prefix("---")
+        && let Some(close_pos) = rest.find("\n---")
+    {
+        return rest[close_pos + 4..].trim_start_matches('\n').to_string();
     }
     content.to_string()
 }
@@ -274,10 +274,10 @@ impl Memory for JsonlMemory {
                 }
             }
         }
-        if let Some(files) = self.session_files_dir(session_id) {
-            if files.exists() {
-                tokio::fs::remove_dir_all(&files).await?;
-            }
+        if let Some(files) = self.session_files_dir(session_id)
+            && files.exists()
+        {
+            tokio::fs::remove_dir_all(&files).await?;
         }
         Ok(())
     }

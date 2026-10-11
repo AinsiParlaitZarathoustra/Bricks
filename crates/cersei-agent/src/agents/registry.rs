@@ -16,7 +16,7 @@
 //! new one. Instances keep the profile they were started with.
 
 use super::profile::{
-    intended_name, parse_profile, revision_of, AgentProfile, ProfileScope, ProfileSource,
+    AgentProfile, ProfileScope, ProfileSource, intended_name, parse_profile, revision_of,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -471,11 +471,12 @@ mod tests {
                 assert!(!p.instructions.contains(word), "{n}");
             }
         }
-        assert!(reg
-            .get("inspecteur")
-            .unwrap()
-            .instructions
-            .contains("CodeScout"));
+        assert!(
+            reg.get("inspecteur")
+                .unwrap()
+                .instructions
+                .contains("CodeScout")
+        );
     }
 
     #[test]
@@ -537,10 +538,11 @@ mod tests {
         assert!(reg.get("ok").is_ok(), "others stay usable");
         assert!(reg.get("testeur").is_ok());
         assert!(reg.diagnostics.len() >= 3);
-        assert!(reg
-            .diagnostics
-            .iter()
-            .any(|d| d.source.ends_with("inspecteur.md")));
+        assert!(
+            reg.diagnostics
+                .iter()
+                .any(|d| d.source.ends_with("inspecteur.md"))
+        );
         assert!(reg.get("nope").unwrap_err().contains("available"));
     }
 

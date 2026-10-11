@@ -89,8 +89,7 @@ pub mod q {
         RETURN DISTINCT f.id ORDER BY f.id";
     pub const EVIDENCE_COUNT: &str = "MATCH (f {id: $fact})-[s:SUPPORTED_BY]->(e) RETURN count(s)";
 
-    pub const INDEXED_ITEMS: &str =
-        "MATCH (n) WHERE n.ikey IS NOT NULL AND n.embed_model = $model \
+    pub const INDEXED_ITEMS: &str = "MATCH (n) WHERE n.ikey IS NOT NULL AND n.embed_model = $model \
         RETURN n.ikey, n.id, labels(n), n.embedding";
     pub const IKEY: &str = "MATCH (n {id: $id}) RETURN n.ikey";
     pub const MAX_IKEY: &str = "MATCH (n) WHERE n.ikey IS NOT NULL RETURN max(n.ikey)";
@@ -307,7 +306,7 @@ impl Store {
             } => {
                 return Err(format!(
                     "the memory store has schema v{graph_version}, newer than this code (v{code_version})"
-                ))
+                ));
             }
         }
         let s = Self {
@@ -358,11 +357,11 @@ impl Store {
             }
         }
         #[cfg(test)]
-        if let Some(hook) = tests::BEFORE_COMMIT.with(|h| h.borrow_mut().take()) {
-            if let Err(e) = hook() {
-                let _ = s.rollback();
-                return Err(format!("memory transaction rolled back: {e}"));
-            }
+        if let Some(hook) = tests::BEFORE_COMMIT.with(|h| h.borrow_mut().take())
+            && let Err(e) = hook()
+        {
+            let _ = s.rollback();
+            return Err(format!("memory transaction rolled back: {e}"));
         }
         s.commit()
             .map_err(|e| format!("memory transaction failed to commit: {e}"))?;
@@ -1153,14 +1152,16 @@ mod tests {
         assert_eq!(s.count(q::COUNT_FACTS), 2);
         assert!(s.has_evidence("f1", "e1"));
         assert!(!s.has_evidence("f1", "no-such-episode"));
-        assert!(s
-            .facts_by_key("project:y", "n1", "uses_framework", &["contested"])
-            .unwrap()
-            .is_empty());
-        assert!(s
-            .facts_by_key("project:x", "n1", "lives_in", &["contested", "superseded"])
-            .unwrap()
-            .is_empty());
+        assert!(
+            s.facts_by_key("project:y", "n1", "uses_framework", &["contested"])
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            s.facts_by_key("project:x", "n1", "lives_in", &["contested", "superseded"])
+                .unwrap()
+                .is_empty()
+        );
         let items = s.query(q::INDEXED_ITEMS, P::new().s("model", "m")).unwrap();
         assert_eq!(items.len(), 2, "{items:?}");
         assert!(as_vector(&items[0][3]).is_some());

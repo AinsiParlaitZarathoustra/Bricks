@@ -21,10 +21,10 @@
 //! by a lost connection is reported as such and never replayed: the tool may
 //! have run.
 
-use crate::config::{expand_server_config, McpServerConfig, ProtocolMode, TransportKind};
+use crate::McpError;
+use crate::config::{McpServerConfig, ProtocolMode, TransportKind, expand_server_config};
 use crate::http::BoundedHttpClient;
 use crate::stdio::{CloseReason, StderrLog, StdioProcess};
-use crate::McpError;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, ClientCapabilities, ClientConfig, ClientRequest,
     Implementation, InputRequest, InputRequiredResult, InputResponses, ProgressNotificationParam,
@@ -37,8 +37,8 @@ use rmcp::{ClientHandler, RoleClient, ServiceError};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::Semaphore;
 
@@ -477,7 +477,7 @@ impl McpClient {
             Some(other) => {
                 return Err(McpError::Config(format!(
                     "tool arguments must be an object, got {other}"
-                )))
+                )));
             }
         };
         let total = self.config.limits.max_total_timeout();
@@ -506,7 +506,7 @@ impl McpClient {
                             .chars()
                             .take(200)
                             .collect::<String>()
-                    )))
+                    )));
                 }
             };
             match response {
@@ -517,7 +517,7 @@ impl McpClient {
                         is_error: r.is_error.unwrap_or(false),
                         rounds,
                         protocol_version: self.info.protocol_version.clone(),
-                    })
+                    });
                 }
                 CallToolResponse::InputRequired(ir) => {
                     rounds += 1;
@@ -532,7 +532,7 @@ impl McpClient {
                     return Err(McpError::Protocol(
                         "the server returned a task handle; the tasks extension is not declared"
                             .into(),
-                    ))
+                    ));
                 }
             }
         }
@@ -635,10 +635,10 @@ impl McpClient {
 
 impl Drop for McpClient {
     fn drop(&mut self) {
-        if let Owner::Process(p) = &self.owner {
-            if let Ok(mut p) = p.try_lock() {
-                p.kill_now();
-            }
+        if let Owner::Process(p) = &self.owner
+            && let Ok(mut p) = p.try_lock()
+        {
+            p.kill_now();
         }
     }
 }

@@ -138,12 +138,12 @@ pub fn from_bricks_toml(text: &str) -> Result<(AgentSettings, ApprovalRules), St
             .clone()
             .try_into()
             .map_err(|e: toml::de::Error| format!("[agent]: {}", e.to_string().trim()))?;
-        if let Some(m) = &f.model {
-            if !m.contains('/') {
-                return Err(format!(
-                    "[agent]: model `{m}` must be `provider_id/model_id` as in providers.toml"
-                ));
-            }
+        if let Some(m) = &f.model
+            && !m.contains('/')
+        {
+            return Err(format!(
+                "[agent]: model `{m}` must be `provider_id/model_id` as in providers.toml"
+            ));
         }
         agent = AgentSettings {
             model: f.model,

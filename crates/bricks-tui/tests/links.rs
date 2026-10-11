@@ -195,9 +195,10 @@ fn styles_unicode_and_wide_characters_stay_in_place() {
     let a = shown(&diff_bytes(&empty, &plain), 80, 1);
     let b = shown(&diff_bytes(&empty, &on), 80, 1);
     assert_eq!(a.text(0), b.text(0), "same columns with and without links");
-    assert!(b
-        .text(0)
-        .starts_with("Voir l'été 漢字 🎉 café <https://ex.com/é> fin"));
+    assert!(
+        b.text(0)
+            .starts_with("Voir l'été 漢字 🎉 café <https://ex.com/é> fin")
+    );
     let urls: Vec<String> = b.links(0).into_iter().map(|l| l.2).collect();
     assert!(
         urls.iter().all(|u| u == "https://ex.com/%C3%A9"),

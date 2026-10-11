@@ -7,13 +7,13 @@
 //! normal policy; allowing them does not allow the children's own tool
 //! calls, which go through the same policy one by one.
 
-use super::runtime::{while_waiting, RuntimeHandle};
-use super::spawn::{render_result, AgentSpawnRequest, AgentSpawner, BatchOptions, Spawned};
+use super::runtime::{RuntimeHandle, while_waiting};
+use super::spawn::{AgentSpawnRequest, AgentSpawner, BatchOptions, Spawned, render_result};
 use super::workspace::{ChangeSetState, WsError};
 use async_trait::async_trait;
 use cersei_tools::{PermissionLevel, Tool, ToolCategory, ToolContext, ToolResult};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -151,7 +151,7 @@ impl Tool for NativeAgentTool {
                 return ToolResult::error(format!(
                     "Invalid input: {e}. Nothing was started. (`system_prompt` is not accepted: \
                      choose a `profile` instead.)"
-                ))
+                ));
             }
         };
         let background = req.background.unwrap_or(false);
@@ -238,7 +238,7 @@ impl Tool for AgentsTool {
         let i: AgentsInput = match serde_json::from_value(input) {
             Ok(i) => i,
             Err(e) => {
-                return ToolResult::error(format!("Invalid input: {e}. Nothing was started."))
+                return ToolResult::error(format!("Invalid input: {e}. Nothing was started."));
             }
         };
         if i.agents.iter().any(|a| a.background.is_some()) {
@@ -417,7 +417,10 @@ impl Tool for AgentControlTool {
                     st.active,
                     st.max_concurrent,
                     st.queued,
-                    recs.iter().map(render_record).collect::<Vec<_>>().join("\n")
+                    recs.iter()
+                        .map(render_record)
+                        .collect::<Vec<_>>()
+                        .join("\n")
                 ))
             }
             "status" => match need_agent(&i.agent_id) {
@@ -441,7 +444,8 @@ impl Tool for AgentControlTool {
             "wait" => match need_agent(&i.agent_id) {
                 Err(e) => e,
                 Ok(id) => {
-                    let t = Duration::from_millis(i.timeout_ms.unwrap_or(60_000).clamp(1, MAX_WAIT_MS));
+                    let t =
+                        Duration::from_millis(i.timeout_ms.unwrap_or(60_000).clamp(1, MAX_WAIT_MS));
                     let cancel = crate::subagent::run_token(&ctx.extensions).unwrap_or_default();
                     let r = while_waiting(&ctx.extensions, rt.wait(&id, t, &cancel)).await;
                     match r {
@@ -490,11 +494,14 @@ impl Tool for AgentControlTool {
                             .files
                             .iter()
                             .map(|f| match (f.added, f.removed) {
-                                (Some(a), Some(r)) => format!("{} {} (+{a} −{r})", f.status, f.path),
+                                (Some(a), Some(r)) => {
+                                    format!("{} {} (+{a} −{r})", f.status, f.path)
+                                }
                                 _ => format!("{} {} (binary)", f.status, f.path),
                             })
                             .collect();
-                        let (patch, cut) = rt.workspaces.patch_text(&cs_id, 20_000).unwrap_or_default();
+                        let (patch, cut) =
+                            rt.workspaces.patch_text(&cs_id, 20_000).unwrap_or_default();
                         ToolResult::success(format!(
                             "ChangeSet {} of {} · {:?} · branch {} · base {}\nFiles:\n{}\n\n{}{}",
                             cs.id,
@@ -504,7 +511,11 @@ impl Tool for AgentControlTool {
                             &cs.base_sha[..cs.base_sha.len().min(12)],
                             files.join("\n"),
                             patch,
-                            if cut { "\n[patch shortened; the full patch is in the ChangeSet file]" } else { "" }
+                            if cut {
+                                "\n[patch shortened; the full patch is in the ChangeSet file]"
+                            } else {
+                                ""
+                            }
                         ))
                     }
                     "apply_changes" => match rt.workspaces.apply(&cs_id, &ctx.working_dir).await {
@@ -513,7 +524,11 @@ impl Tool for AgentControlTool {
                             ToolResult::success(format!(
                                 "ChangeSet {cs_id} applied to your working tree ({} file(s)): {}. Nothing was committed.",
                                 done.files.len(),
-                                done.files.iter().map(|f| f.path.as_str()).collect::<Vec<_>>().join(", ")
+                                done.files
+                                    .iter()
+                                    .map(|f| f.path.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
                             ))
                         }
                         Err(WsError::Conflict { files, detail }) => {

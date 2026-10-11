@@ -10,7 +10,7 @@
 
 use super::*;
 use bricks_skills::{
-    render_activation, ActivationError, Ledger, Origin, ResolveError, SkillAccess,
+    ActivationError, Ledger, Origin, ResolveError, SkillAccess, render_activation,
 };
 use serde::Deserialize;
 use std::sync::Arc;
@@ -238,7 +238,7 @@ impl Tool for SkillTool {
 mod tests {
     use super::*;
     use crate::permissions::AllowAll;
-    use bricks_skills::{standard_roots, ProjectDecision, SkillsService};
+    use bricks_skills::{ProjectDecision, SkillsService, standard_roots};
     use std::path::Path;
 
     fn write(root: &Path, dir: &str, front: &str, body: &str) {
@@ -303,9 +303,10 @@ mod tests {
             r.content.contains("Deploy $ARGUMENTS carefully."),
             "not substituted"
         );
-        assert!(r
-            .content
-            .contains("Request to apply it to (from the call): staging"));
+        assert!(
+            r.content
+                .contains("Request to apply it to (from the call): staging")
+        );
         let id = r.metadata.as_ref().unwrap()[ACTIVATION_KEY]
             .as_str()
             .unwrap()

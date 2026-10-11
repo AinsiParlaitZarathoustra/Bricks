@@ -18,7 +18,7 @@ use cersei_compression::CompressionLevel;
 use cersei_provider::{Provider, ProviderRegistry};
 use cersei_tools::{PermissionLevel, Tool, ToolCategory, ToolContext, ToolResult};
 use cersei_types::Usage;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Once;
 use tracing_subscriber::EnvFilter;
 

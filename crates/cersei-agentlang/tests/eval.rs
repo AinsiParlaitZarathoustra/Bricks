@@ -1,10 +1,10 @@
 use async_trait::async_trait;
-use cersei_agentlang::interp::{run_program, EvalCtx, Limits};
-use cersei_agentlang::registry::ToolDispatch;
 use cersei_agentlang::ProgramError;
+use cersei_agentlang::interp::{EvalCtx, Limits, run_program};
+use cersei_agentlang::registry::ToolDispatch;
 use cersei_tools::permissions::{AllowAll, AllowReadOnly, PermissionPolicy};
 use cersei_tools::{CostTracker, Extensions, ToolContext, ToolResult};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
 
 /// Records every dispatched call and returns a canned result per tool name.

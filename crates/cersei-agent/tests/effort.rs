@@ -5,8 +5,8 @@
 //! `default`, refusals, a switch during a stream and during a retry, and
 //! the accounting of a response sent before a switch.
 
-use cersei_agent::control::*;
 use cersei_agent::BricksConfig;
+use cersei_agent::control::*;
 use cersei_provider::ProviderRegistry;
 use serde_json::Value;
 use std::io::{Read, Write};

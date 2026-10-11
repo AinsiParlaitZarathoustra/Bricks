@@ -2,7 +2,7 @@
 //! `Arc<SemanticEngine>`.
 
 use crate::config::SemanticConfig;
-use crate::context::{self, rel_path, ContextSettings};
+use crate::context::{self, ContextSettings, rel_path};
 use crate::lexical::{self, WalkFilters};
 use crate::lsp::{Instance, Launcher, LspPool, ProcessLauncher, Unavailable};
 use crate::planner;
@@ -15,11 +15,11 @@ use crate::view::{Document, Snapshot, ViewHandle, ViewKind};
 use cersei_lsp::RawLocation;
 use futures::future::{BoxFuture, FutureExt, Shared};
 use parking_lot::Mutex;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Component, Path, PathBuf};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
@@ -399,14 +399,13 @@ impl SemanticEngine {
         );
         if used_lsp && cacheable && self.generation() == generation_at_start {
             let mut cache = self.results.lock();
-            if cache.len() >= self.config.result_cache_entries.max(1) {
-                if let Some(oldest) = cache
+            if cache.len() >= self.config.result_cache_entries.max(1)
+                && let Some(oldest) = cache
                     .iter()
                     .min_by_key(|(_, c)| c.used)
                     .map(|(k, _)| k.clone())
-                {
-                    cache.remove(&oldest);
-                }
+            {
+                cache.remove(&oldest);
             }
             cache.insert(
                 fingerprint,
@@ -647,10 +646,8 @@ impl Drop for WaiterGuard {
             Some(e) if e.id == self.id => e.waiters.fetch_sub(1, Ordering::SeqCst) == 1,
             _ => false,
         };
-        if last {
-            if let Some(e) = inflight.remove(&self.fingerprint) {
-                e.cancel.cancel();
-            }
+        if last && let Some(e) = inflight.remove(&self.fingerprint) {
+            e.cancel.cancel();
         }
     }
 }
@@ -1276,7 +1273,7 @@ impl Exec {
             None => {
                 return Outcome::status(ResultStatus::Error {
                     message: "no file".into(),
-                })
+                });
             }
         };
         if self.q.context == ContextPolicy::Auto {
@@ -1738,24 +1735,22 @@ impl Exec {
                 });
             }
             // A definition: attach its syntax node.
-            if matches!(relation, Relation::Definition | Relation::Declaration) {
-                if let Some(p) = self.parse_doc(&doc) {
-                    if let Some(def) = syntax::definitions(&p)
-                        .into_iter()
-                        .find(|d| d.name_start <= s && s < d.name_end.max(d.name_start + 1))
-                    {
-                        c.scope = Some((def.start, def.end, def.node_kind.clone()));
-                        c.signature = Some(def.signature.clone());
-                        c.symbol = Some(SymbolRef {
-                            name: def.name,
-                            kind: def.kind,
-                        });
-                        c.provenance.push(Provenance {
-                            backend: Backend::Syntax,
-                            method: format!("tree-sitter {}", def.node_kind),
-                        });
-                    }
-                }
+            if matches!(relation, Relation::Definition | Relation::Declaration)
+                && let Some(p) = self.parse_doc(&doc)
+                && let Some(def) = syntax::definitions(&p)
+                    .into_iter()
+                    .find(|d| d.name_start <= s && s < d.name_end.max(d.name_start + 1))
+            {
+                c.scope = Some((def.start, def.end, def.node_kind.clone()));
+                c.signature = Some(def.signature.clone());
+                c.symbol = Some(SymbolRef {
+                    name: def.name,
+                    kind: def.kind,
+                });
+                c.provenance.push(Provenance {
+                    backend: Backend::Syntax,
+                    method: format!("tree-sitter {}", def.node_kind),
+                });
             }
             out.push(c);
         }
@@ -1770,10 +1765,10 @@ impl Exec {
 
     /// The name at a target (syntax first, then the word around).
     fn name_at(&mut self, at: &At) -> Option<String> {
-        if let Some(p) = self.parse_doc(&at.doc) {
-            if let Some((_, _, n)) = syntax::identifier_at(&p, at.offset) {
-                return Some(n);
-            }
+        if let Some(p) = self.parse_doc(&at.doc)
+            && let Some((_, _, n)) = syntax::identifier_at(&p, at.offset)
+        {
+            return Some(n);
         }
         let t = &at.doc.text;
         let is_w = |c: char| c.is_alphanumeric() || c == '_' || c == '$';
@@ -2025,7 +2020,7 @@ impl Exec {
                             }),
                             diagnostics: None,
                             strategy: "syntax (candidates)".into(),
-                        }
+                        };
                     }
                 }
             }
@@ -2043,22 +2038,25 @@ impl Exec {
                 method: "enclosing scope".into(),
             },
         );
-        if let Some(p) = self.parse_doc(&at.doc) {
-            if let Some(sc) = syntax::enclosing(&p, at.offset, at.offset, None) {
-                ctx.scope = Some((sc.start, sc.end, sc.node_kind.clone()));
-                if let Some(n) = sc.name {
-                    ctx.symbol = Some(SymbolRef {
-                        name: n,
-                        kind: sc.node_kind.clone(),
-                    });
+        match self.parse_doc(&at.doc) {
+            Some(p) => {
+                if let Some(sc) = syntax::enclosing(&p, at.offset, at.offset, None) {
+                    ctx.scope = Some((sc.start, sc.end, sc.node_kind.clone()));
+                    if let Some(n) = sc.name {
+                        ctx.symbol = Some(SymbolRef {
+                            name: n,
+                            kind: sc.node_kind.clone(),
+                        });
+                    }
                 }
             }
-        } else {
-            ctx.certainty = Certainty::Textual;
-            ctx.provenance = vec![Provenance {
-                backend: Backend::Lexical,
-                method: "lines".into(),
-            }];
+            _ => {
+                ctx.certainty = Certainty::Textual;
+                ctx.provenance = vec![Provenance {
+                    backend: Backend::Lexical,
+                    method: "lines".into(),
+                }];
+            }
         }
         let refs_wanted = match self.q.detail {
             Detail::Compact => 0,
@@ -2069,38 +2067,37 @@ impl Exec {
         match self.instance(&at.doc).await {
             Ok(inst) => {
                 let caps = inst.client.capabilities().cloned();
-                if caps.as_ref().is_some_and(|c| c.hover) {
-                    if let Ok(v) = self
+                if caps.as_ref().is_some_and(|c| c.hover)
+                    && let Ok(v) = self
                         .lsp_request(&inst, &at, "textDocument/hover", json!({}))
                         .await
-                    {
-                        ctx.documentation = cersei_lsp::client::hover_text(&v);
-                        if ctx.documentation.is_some() {
-                            ctx.provenance.push(Provenance {
-                                backend: Backend::Lsp,
-                                method: "textDocument/hover".into(),
-                            });
-                        }
-                        semantic_ok = true;
+                {
+                    ctx.documentation = cersei_lsp::client::hover_text(&v);
+                    if ctx.documentation.is_some() {
+                        ctx.provenance.push(Provenance {
+                            backend: Backend::Lsp,
+                            method: "textDocument/hover".into(),
+                        });
                     }
+                    semantic_ok = true;
                 }
-                if caps.as_ref().is_some_and(|c| c.definition) {
-                    if let Ok(v) = self
+                if caps.as_ref().is_some_and(|c| c.definition)
+                    && let Ok(v) = self
                         .lsp_request(&inst, &at, "textDocument/definition", json!({}))
                         .await
-                    {
-                        let locs = cersei_lsp::parse_locations(&v);
-                        cands.extend(self.map_locations(
-                            &inst,
-                            locs,
-                            Relation::Definition,
-                            "textDocument/definition",
-                        ));
-                        semantic_ok = true;
-                    }
+                {
+                    let locs = cersei_lsp::parse_locations(&v);
+                    cands.extend(self.map_locations(
+                        &inst,
+                        locs,
+                        Relation::Definition,
+                        "textDocument/definition",
+                    ));
+                    semantic_ok = true;
                 }
-                if refs_wanted > 0 && caps.as_ref().is_some_and(|c| c.references) {
-                    if let Ok(v) = self
+                if refs_wanted > 0
+                    && caps.as_ref().is_some_and(|c| c.references)
+                    && let Ok(v) = self
                         .lsp_request(
                             &inst,
                             &at,
@@ -2108,29 +2105,25 @@ impl Exec {
                             json!({ "context": { "includeDeclaration": false } }),
                         )
                         .await
-                    {
-                        let locs = cersei_lsp::parse_locations(&v);
-                        let total = locs.len();
-                        let mut refs = self.map_locations(
-                            &inst,
-                            locs,
-                            Relation::Reference,
-                            "textDocument/references",
-                        );
-                        if refs.len() > refs_wanted {
-                            refs.truncate(refs_wanted);
-                            self.omissions.push(Omission::ItemsOmitted {
-                                reason: format!(
-                                    "references beyond {refs_wanted} at this detail level"
-                                ),
-                                count: total - refs_wanted,
-                            });
-                            self.continuation.push(
-                                "ask intent=references on this target for all of them".into(),
-                            );
-                        }
-                        cands.extend(refs);
+                {
+                    let locs = cersei_lsp::parse_locations(&v);
+                    let total = locs.len();
+                    let mut refs = self.map_locations(
+                        &inst,
+                        locs,
+                        Relation::Reference,
+                        "textDocument/references",
+                    );
+                    if refs.len() > refs_wanted {
+                        refs.truncate(refs_wanted);
+                        self.omissions.push(Omission::ItemsOmitted {
+                            reason: format!("references beyond {refs_wanted} at this detail level"),
+                            count: total - refs_wanted,
+                        });
+                        self.continuation
+                            .push("ask intent=references on this target for all of them".into());
                     }
+                    cands.extend(refs);
                 }
             }
             Err(reason) => {
@@ -2149,17 +2142,15 @@ impl Exec {
         cands.insert(0, ctx);
         // Without a server, the definition by name (syntactic, may be a
         // homonym).
-        if !semantic_ok {
-            if let Some(name) = self.name_at(&at) {
-                let defs = self.definitions_named(&name).await;
-                if defs.len() > 1 {
-                    self.fallbacks.push(format!(
-                        "{} definitions named `{name}`: which one applies is not established",
-                        defs.len()
-                    ));
-                }
-                cands.extend(defs);
+        if !semantic_ok && let Some(name) = self.name_at(&at) {
+            let defs = self.definitions_named(&name).await;
+            if defs.len() > 1 {
+                self.fallbacks.push(format!(
+                    "{} definitions named `{name}`: which one applies is not established",
+                    defs.len()
+                ));
             }
+            cands.extend(defs);
         }
         Outcome {
             cands,
@@ -2337,16 +2328,15 @@ impl Exec {
             resolved: None,
             baseline_revision: None,
         };
-        if matches!(state, DiagnosticsState::Analyzed { .. }) {
-            if let Some((i, p, r, h)) =
+        if matches!(state, DiagnosticsState::Analyzed { .. })
+            && let Some((i, p, r, h)) =
                 self.engine
                     .compare_baseline(&at.doc.path, &at.doc.revision.hash, &keys)
-            {
-                report.introduced = Some(i);
-                report.preexisting = Some(p);
-                report.resolved = Some(r);
-                report.baseline_revision = Some(h);
-            }
+        {
+            report.introduced = Some(i);
+            report.preexisting = Some(p);
+            report.resolved = Some(r);
+            report.baseline_revision = Some(h);
         }
         let status = match state {
             DiagnosticsState::Analyzed { .. } => ResultStatus::Complete,

@@ -25,11 +25,11 @@
 //! This module does NOT pull in a Python RPC bridge for code execution —
 //! that's the 0.1.9 lift.
 
-use crate::subagent::{self, ChildStatus};
 use crate::Agent;
+use crate::subagent::{self, ChildStatus};
 use cersei_provider::Provider;
-use cersei_tools::permissions::{AllowReadOnly, PermissionPolicy};
 use cersei_tools::Tool;
+use cersei_tools::permissions::{AllowReadOnly, PermissionPolicy};
 use cersei_types::{CerseiError, Result};
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
@@ -322,7 +322,7 @@ async fn run_single(
                 error: Some(e.to_string()),
                 turns: 0,
                 status: ChildStatus::Failed(e.to_string()),
-            }
+            };
         }
     };
     let result = agent.run(&task.goal).await;
@@ -357,10 +357,10 @@ pub fn build_child_system_prompt(task: &DelegateTask) -> String {
     parts.push(String::new());
     parts.push(format!("YOUR TASK:\n{}", task.goal));
 
-    if let Some(ctx) = task.context.as_deref() {
-        if !ctx.trim().is_empty() {
-            parts.push(format!("\nCONTEXT:\n{ctx}"));
-        }
+    if let Some(ctx) = task.context.as_deref()
+        && !ctx.trim().is_empty()
+    {
+        parts.push(format!("\nCONTEXT:\n{ctx}"));
     }
 
     if let Some(wp) = task.workspace.as_ref() {

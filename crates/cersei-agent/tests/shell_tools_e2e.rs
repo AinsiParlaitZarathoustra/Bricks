@@ -5,13 +5,13 @@
 mod common;
 
 use async_trait::async_trait;
-use cersei_agent::events::AgentEvent;
 use cersei_agent::Agent;
+use cersei_agent::events::AgentEvent;
 use cersei_compression::CompressionLevel;
 use cersei_tools::permissions::{PermissionDecision, PermissionPolicy, PermissionRequest};
-use cersei_tools::shell::{procs, ShellConfig};
+use cersei_tools::shell::{ShellConfig, procs};
 use cersei_types::*;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
@@ -422,13 +422,15 @@ async fn a_reduced_bash_output_is_readable_after_restore() {
         .nth(1)
         .and_then(|r| r.split('"').next())
         .unwrap();
-    assert!(path.starts_with(
-        JsonlMemory::new(mem.path())
-            .session_files_dir("rs")
-            .unwrap()
-            .to_str()
-            .unwrap()
-    ));
+    assert!(
+        path.starts_with(
+            JsonlMemory::new(mem.path())
+                .session_files_dir("rs")
+                .unwrap()
+                .to_str()
+                .unwrap()
+        )
+    );
     let raw = std::fs::read_to_string(path).unwrap();
     assert!(
         raw.contains("   Compiling crate3000 v0.1.0") && raw.contains("--- stderr ---"),
@@ -462,11 +464,11 @@ async fn cancelling_a_turn_stops_the_running_command() {
     };
     let mut pid = None;
     for _ in 0..200 {
-        if let Ok(t) = std::fs::read_to_string(&pidfile) {
-            if let Ok(p) = t.trim().parse::<u32>() {
-                pid = Some(p);
-                break;
-            }
+        if let Ok(t) = std::fs::read_to_string(&pidfile)
+            && let Ok(p) = t.trim().parse::<u32>()
+        {
+            pid = Some(p);
+            break;
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }

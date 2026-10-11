@@ -20,11 +20,11 @@
 //! not "useful tokens", which would need a reading protocol.
 
 use bricks_semantic::{
-    render, CodeQuery, Intent, Requester, SemanticConfig, SemanticEngine, Target,
+    CodeQuery, Intent, Requester, SemanticConfig, SemanticEngine, Target, render,
 };
 use cersei_tools::{
-    file_read::FileReadTool, grep_tool::GrepTool, permissions::AllowAll, CostTracker, Extensions,
-    Tool, ToolContext,
+    CostTracker, Extensions, Tool, ToolContext, file_read::FileReadTool, grep_tool::GrepTool,
+    permissions::AllowAll,
 };
 use cersei_types::tokens::estimate_text;
 use serde::Deserialize;

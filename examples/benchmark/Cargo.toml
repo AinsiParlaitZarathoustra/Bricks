@@ -1,7 +1,7 @@
 [package]
 name = "cersei-benchmark"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 publish = false
 description = "Benchmark suite for Cersei SDK tool I/O performance"
 

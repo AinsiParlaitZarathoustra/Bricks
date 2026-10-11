@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex};
 use tantivy::collector::TopDocs;
 use tantivy::query::QueryParser;
 use tantivy::schema::*;
-use tantivy::{doc, Index, IndexReader, ReloadPolicy, TantivyDocument};
+use tantivy::{Index, IndexReader, ReloadPolicy, TantivyDocument, doc};
 
 // ─── Config ────────────────────────────────────────────────────────────────
 
@@ -159,10 +159,10 @@ fn collect_chunks(working_dir: &Path) -> Vec<ChunkMeta> {
         if !entry.file_type().is_file() || !should_index(entry.path()) {
             continue;
         }
-        if let Ok(meta) = entry.path().metadata() {
-            if meta.len() > 500_000 {
-                continue;
-            }
+        if let Ok(meta) = entry.path().metadata()
+            && meta.len() > 500_000
+        {
+            continue;
         }
         if let Ok(content) = std::fs::read_to_string(entry.path()) {
             all_chunks.extend(chunk_file(entry.path(), &content));

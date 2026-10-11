@@ -13,7 +13,7 @@
 use super::*;
 use crate::CompletionRequest;
 use cersei_types::{Result, StopReason, StreamEvent, Usage};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap};
 
 const PROTOCOL: &str = "responses";
@@ -144,12 +144,12 @@ fn push_user(out: &mut Vec<Value>, msg: &Message) -> Result<()> {
             ContentBlock::Audio { .. } => {
                 return Err(unsupported(
                     "the responses protocol cannot carry audio input",
-                ))
+                ));
             }
             ContentBlock::Video { .. } => {
                 return Err(unsupported(
                     "the responses protocol cannot carry video input",
-                ))
+                ));
             }
             _ => {}
         }
@@ -352,16 +352,16 @@ impl StreamState {
             .items
             .entry(oi)
             .or_insert(Item::Message { started: false });
-        if let Item::Message { started } = item {
-            if !*started {
-                *started = true;
-                out.push(StreamEvent::ContentBlockStart {
-                    index: primary(oi),
-                    block_type: "text".into(),
-                    id: None,
-                    name: None,
-                });
-            }
+        if let Item::Message { started } = item
+            && !*started
+        {
+            *started = true;
+            out.push(StreamEvent::ContentBlockStart {
+                index: primary(oi),
+                block_type: "text".into(),
+                id: None,
+                name: None,
+            });
         }
     }
 
@@ -370,16 +370,16 @@ impl StreamState {
             .items
             .entry(oi)
             .or_insert(Item::Reasoning { started: false });
-        if let Item::Reasoning { started } = item {
-            if !*started {
-                *started = true;
-                out.push(StreamEvent::ContentBlockStart {
-                    index: primary(oi),
-                    block_type: "thinking".into(),
-                    id: None,
-                    name: None,
-                });
-            }
+        if let Item::Reasoning { started } = item
+            && !*started
+        {
+            *started = true;
+            out.push(StreamEvent::ContentBlockStart {
+                index: primary(oi),
+                block_type: "thinking".into(),
+                id: None,
+                name: None,
+            });
         }
     }
 
@@ -388,21 +388,21 @@ impl StreamState {
             started: false,
             saw_delta: false,
         });
-        if let Item::Call { started, .. } = entry {
-            if !*started {
-                *started = true;
-                let id = item["call_id"]
-                    .as_str()
-                    .or_else(|| item["id"].as_str())
-                    .unwrap_or("");
-                let name = item["name"].as_str().unwrap_or("");
-                out.push(StreamEvent::ContentBlockStart {
-                    index: primary(oi),
-                    block_type: "tool_use".into(),
-                    id: Some(id.to_string()),
-                    name: Some(name.to_string()),
-                });
-            }
+        if let Item::Call { started, .. } = entry
+            && !*started
+        {
+            *started = true;
+            let id = item["call_id"]
+                .as_str()
+                .or_else(|| item["id"].as_str())
+                .unwrap_or("");
+            let name = item["name"].as_str().unwrap_or("");
+            out.push(StreamEvent::ContentBlockStart {
+                index: primary(oi),
+                block_type: "tool_use".into(),
+                id: Some(id.to_string()),
+                name: Some(name.to_string()),
+            });
         }
     }
 
@@ -475,14 +475,12 @@ impl StreamState {
                         ..
                     })
                 );
-                if !saw_delta {
-                    if let Some(args) = item["arguments"].as_str() {
-                        self.call_args.entry(oi).or_default().push_str(args);
-                        out.push(StreamEvent::InputJsonDelta {
-                            index: primary(oi),
-                            partial_json: args.to_string(),
-                        });
-                    }
+                if !saw_delta && let Some(args) = item["arguments"].as_str() {
+                    self.call_args.entry(oi).or_default().push_str(args);
+                    out.push(StreamEvent::InputJsonDelta {
+                        index: primary(oi),
+                        partial_json: args.to_string(),
+                    });
                 }
                 let args = self.call_args.get(&oi).map(String::as_str).unwrap_or("");
                 let routable = item["call_id"]
@@ -595,8 +593,8 @@ pub(crate) fn response_to_events(json: &Value) -> Result<Vec<StreamEvent>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Compat;
     use crate::StreamAccumulator;
+    use crate::config::Compat;
     use cersei_types::{ToolDefinition, ToolResultContent};
 
     fn compat() -> crate::config::ResolvedCompat {
@@ -862,10 +860,12 @@ mod tests {
         // Text but no terminal event: incomplete.
         let mut cut = text_stream();
         cut.pop();
-        assert!(run(&cut)
-            .unwrap_err()
-            .to_string()
-            .contains("without response.completed"));
+        assert!(
+            run(&cut)
+                .unwrap_err()
+                .to_string()
+                .contains("without response.completed")
+        );
         assert!(run(&[]).is_err());
     }
 
@@ -894,9 +894,10 @@ mod tests {
         let MessageContent::Blocks(b) = &r.message.content else {
             panic!()
         };
-        assert!(b
-            .iter()
-            .any(|x| matches!(x, ContentBlock::ProtocolItem { .. })));
+        assert!(
+            b.iter()
+                .any(|x| matches!(x, ContentBlock::ProtocolItem { .. }))
+        );
         assert!(response_to_events(&json!({"error":{"message":"bad"}})).is_err());
         assert!(response_to_events(&json!({"status":"failed"})).is_err());
     }

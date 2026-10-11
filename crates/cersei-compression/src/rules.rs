@@ -322,16 +322,16 @@ impl RuleSet {
         if let Some(dir) = &sources.user_rules_dir {
             loader.load_dir(dir);
         }
-        if let Some(path) = &sources.bricks_toml {
-            if path.exists() {
-                match std::fs::read_to_string(path) {
-                    Ok(text) => loader.load_bricks_toml(&path.display().to_string(), &text),
-                    Err(e) => loader.diag(
-                        &path.display().to_string(),
-                        None,
-                        format!("cannot read: {e}"),
-                    ),
-                }
+        if let Some(path) = &sources.bricks_toml
+            && path.exists()
+        {
+            match std::fs::read_to_string(path) {
+                Ok(text) => loader.load_bricks_toml(&path.display().to_string(), &text),
+                Err(e) => loader.diag(
+                    &path.display().to_string(),
+                    None,
+                    format!("cannot read: {e}"),
+                ),
             }
         }
         loader.finish()
@@ -627,7 +627,7 @@ fn compile(id: &str, def: FilterDef, origin: RuleOrigin) -> Result<Rule, String>
         Some(other) => {
             return Err(format!(
                 "field `mode`: unknown mode {other:?} (expected \"log\" or \"exact\")"
-            ))
+            ));
         }
     };
     let structured = match def.structured.as_deref() {
@@ -637,7 +637,7 @@ fn compile(id: &str, def: FilterDef, origin: RuleOrigin) -> Result<Rule, String>
         Some(other) => {
             return Err(format!(
                 "field `structured`: unknown format {other:?} (expected \"cargo-json\" or \"go-test-json\")"
-            ))
+            ));
         }
     };
     if !def.strip_lines_matching.is_empty() && !def.keep_lines_matching.is_empty() {
@@ -701,13 +701,13 @@ fn compile(id: &str, def: FilterDef, origin: RuleOrigin) -> Result<Rule, String>
                 return Err(format!(
                     "field `{}`: `end = \"until\"` needs `until`",
                     field("end")
-                ))
+                ));
             }
             (Some(other), _) => {
                 return Err(format!(
                     "field `{}`: unknown end {other:?} (expected single, blank, indented or until)",
                     field("end")
-                ))
+                ));
             }
         };
         let severity = match b.severity.as_deref() {
@@ -888,7 +888,9 @@ match = [{ program = "cargo", subcommands = ["test"] }]
     fn rules_load_from_disk_in_file_name_order() {
         let dir = tempfile::tempdir().unwrap();
         let rule = |n: usize| {
-            format!("schema_version = 1\n[filters.mine]\nmatch = [{{ program = \"mine\" }}]\nmax_lines = {n}\n")
+            format!(
+                "schema_version = 1\n[filters.mine]\nmatch = [{{ program = \"mine\" }}]\nmax_lines = {n}\n"
+            )
         };
         std::fs::write(dir.path().join("20-late.toml"), rule(20)).unwrap();
         std::fs::write(dir.path().join("10-early.toml"), rule(10)).unwrap();

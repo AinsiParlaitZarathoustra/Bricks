@@ -40,13 +40,13 @@ impl Workflow {
         // Resolve every Step node's implementation.
         let mut steps: HashMap<String, Arc<dyn Step>> = HashMap::new();
         for node in &def.nodes {
-            if let NodeKind::Step { step_id, .. } = &node.kind {
-                if !steps.contains_key(step_id) {
-                    let step = registry
-                        .get(step_id)
-                        .ok_or_else(|| CerseiError::Tool(format!("unknown step: '{}'", step_id)))?;
-                    steps.insert(step_id.clone(), step);
-                }
+            if let NodeKind::Step { step_id, .. } = &node.kind
+                && !steps.contains_key(step_id)
+            {
+                let step = registry
+                    .get(step_id)
+                    .ok_or_else(|| CerseiError::Tool(format!("unknown step: '{}'", step_id)))?;
+                steps.insert(step_id.clone(), step);
             }
         }
 

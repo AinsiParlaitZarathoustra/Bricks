@@ -348,7 +348,11 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let mem_dir = tmp.path();
 
-        create_memory_file(mem_dir, "user_role.md", "---\nname: User Role\ndescription: Developer preferences\ntype: user\n---\n\nI prefer Rust.");
+        create_memory_file(
+            mem_dir,
+            "user_role.md",
+            "---\nname: User Role\ndescription: Developer preferences\ntype: user\n---\n\nI prefer Rust.",
+        );
         create_memory_file(
             mem_dir,
             "project_arch.md",

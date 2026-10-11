@@ -11,7 +11,7 @@
 //! destructive-match guard.
 
 use super::*;
-use crate::tool_primitives::replace::{describe_failure, plan_edit, ReplaceError};
+use crate::tool_primitives::replace::{ReplaceError, describe_failure, plan_edit};
 
 pub struct MultiEditTool;
 
@@ -65,7 +65,7 @@ impl Tool for MultiEditTool {
         let (file_path, edits) = match coerce_input(input) {
             Ok(v) => v,
             Err(CoerceError::Shape(e)) | Err(CoerceError::InsideEdits(e)) => {
-                return Some(crate::preview::ChangePreview::refused(e))
+                return Some(crate::preview::ChangePreview::refused(e));
             }
         };
         let resolved = ctx.working_dir.join(&file_path);
@@ -76,7 +76,7 @@ impl Tool for MultiEditTool {
             Err(e) => {
                 return Some(crate::preview::ChangePreview::refused(format!(
                     "Failed to read {file_path}: {e}"
-                )))
+                )));
             }
         };
         let mut content = before.clone();
@@ -95,7 +95,7 @@ impl Tool for MultiEditTool {
                         edits.len(),
                         &file_path,
                         &err,
-                    )))
+                    )));
                 }
             }
         }
@@ -117,7 +117,7 @@ impl Tool for MultiEditTool {
             // the tool name, an echo of the arguments, and the parameter table
             // (F-05b/F-A14).
             Err(CoerceError::Shape(e)) => {
-                return crate::tool_feedback::invalid_input(self, &input, e)
+                return crate::tool_feedback::invalid_input(self, &input, e);
             }
             // A problem *inside* `edits` is already fully phrased. See
             // [`CoerceError::InsideEdits`] for why the shared builder is
@@ -165,9 +165,9 @@ impl Tool for MultiEditTool {
             Ok(now) if now == before => {}
             _ => {
                 return ToolResult::error(format!(
-                "{file_path} changed on disk while the edits were being prepared, so nothing was \
+                    "{file_path} changed on disk while the edits were being prepared, so nothing was \
                      written. Read it again and retry."
-            ))
+                ));
             }
         }
         if let Err(e) = crate::tool_primitives::fs::write_atomic(path, content.as_bytes()).await {

@@ -17,14 +17,14 @@ use crate::config::LspServerConfig;
 use crate::jsonrpc::{self, Notification, Reply, Request, Response, RpcError};
 use crate::types::*;
 use dashmap::DashMap;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncWrite, BufReader};
 use tokio::process::Child;
-use tokio::sync::{oneshot, Mutex, Notify};
+use tokio::sync::{Mutex, Notify, oneshot};
 use tokio_util::sync::CancellationToken;
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -349,10 +349,10 @@ impl LspClient {
                     // A server request: answer it.
                     (Some(id), Some(method)) => {
                         let reply = answer_server_request(id.clone(), method, msg.params.as_ref());
-                        if let Ok(body) = serde_json::to_vec(&reply) {
-                            if let Some(w) = writer.lock().await.as_mut() {
-                                let _ = jsonrpc::send_message(w, &body).await;
-                            }
+                        if let Ok(body) = serde_json::to_vec(&reply)
+                            && let Some(w) = writer.lock().await.as_mut()
+                        {
+                            let _ = jsonrpc::send_message(w, &body).await;
                         }
                     }
                     // A response to one of our requests.
@@ -365,12 +365,12 @@ impl LspClient {
                         if let Some(p) = &msg.params {
                             busy.observe(method, p);
                         }
-                        if method == "textDocument/publishDiagnostics" {
-                            if let Some(params) = &msg.params {
-                                let seq = diag_seq.fetch_add(1, Ordering::SeqCst) + 1;
-                                handle_publish_diagnostics(params, &diagnostics, seq);
-                                diag_notify.notify_waiters();
-                            }
+                        if method == "textDocument/publishDiagnostics"
+                            && let Some(params) = &msg.params
+                        {
+                            let seq = diag_seq.fetch_add(1, Ordering::SeqCst) + 1;
+                            handle_publish_diagnostics(params, &diagnostics, seq);
+                            diag_notify.notify_waiters();
                         }
                     }
                     (None, None) => {}
@@ -975,11 +975,7 @@ pub fn hover_text(result: &Value) -> Option<String> {
     } else {
         serde_json::to_string_pretty(contents).unwrap_or_default()
     };
-    if text.is_empty() {
-        None
-    } else {
-        Some(text)
-    }
+    if text.is_empty() { None } else { Some(text) }
 }
 
 fn parse_range(v: &Value) -> Option<Range> {
@@ -1080,12 +1076,13 @@ fn percent_decode(s: &str) -> String {
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
-                out.push(v);
-                i += 3;
-                continue;
-            }
+        if bytes[i] == b'%'
+            && i + 2 < bytes.len()
+            && let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16)
+        {
+            out.push(v);
+            i += 3;
+            continue;
         }
         out.push(bytes[i]);
         i += 1;

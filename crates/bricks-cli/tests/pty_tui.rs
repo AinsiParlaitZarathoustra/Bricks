@@ -10,7 +10,7 @@
 mod common;
 
 use common::*;
-use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use std::io::{Read, Write};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};

@@ -179,13 +179,14 @@ impl Tool for LspTool {
                     use cersei_lsp::DiagnosticsFreshness as F;
                     let note = match state {
                         F::Analyzed => "",
-                        F::Outdated => "\n(outdated: these diagnostics are for an earlier version of the file)",
-                        F::Pending => "\n(pending: the server has not analyzed this version yet; no diagnostics is not proof of no error)",
+                        F::Outdated => {
+                            "\n(outdated: these diagnostics are for an earlier version of the file)"
+                        }
+                        F::Pending => {
+                            "\n(pending: the server has not analyzed this version yet; no diagnostics is not proof of no error)"
+                        }
                     };
-                    ToolResult::success(format!(
-                        "{}{note}",
-                        LspManager::format_diagnostics(&diags)
-                    ))
+                    ToolResult::success(format!("{}{note}", LspManager::format_diagnostics(&diags)))
                 }
                 Err(e) => ToolResult::error(format!("Diagnostics failed: {e}")),
             },

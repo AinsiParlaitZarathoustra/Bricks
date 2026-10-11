@@ -6,7 +6,7 @@ use cersei_mcp::{
     Era, McpClient, McpContent, McpError, McpLimits, McpManager, McpServerConfig, ProtocolMode,
 };
 use cersei_testkit::{Reply, TestServer};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -518,10 +518,12 @@ async fn streamable_http_modern_with_headers_and_a_progress_stream() {
     assert_eq!(call.header("mcp-method"), Some("tools/call"));
     assert_eq!(call.header("mcp-name"), Some("t"));
     assert!(call.header("accept").unwrap().contains("text/event-stream"));
-    assert!(server
-        .requests()
-        .iter()
-        .all(|r| r.header("mcp-session-id").is_none()));
+    assert!(
+        server
+            .requests()
+            .iter()
+            .all(|r| r.header("mcp-session-id").is_none())
+    );
 }
 
 #[tokio::test]

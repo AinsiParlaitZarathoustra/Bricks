@@ -21,8 +21,8 @@ use cersei_web::extract::{self, Source};
 use cersei_web::fetch::Fetcher;
 use cersei_web::{chunk, rank};
 use std::alloc::{GlobalAlloc, Layout, System};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 struct Counting;
@@ -125,7 +125,9 @@ fn main() {
         cersei_types::tokens::ESTIMATION_METHOD
     );
     println!();
-    println!("| page | query | HTML bytes / tok | Markdown chars / tok | passages chars / tok | kept vs HTML | extract ms | split ms | rank ms | extract allocs (MB) | reference kept |");
+    println!(
+        "| page | query | HTML bytes / tok | Markdown chars / tok | passages chars / tok | kept vs HTML | extract ms | split ms | rank ms | extract allocs (MB) | reference kept |"
+    );
     println!("|---|---|---|---|---|---|---|---|---|---|---|");
     for (name, html, url, query, needle) in &cases {
         let u = url::Url::parse(url).unwrap();

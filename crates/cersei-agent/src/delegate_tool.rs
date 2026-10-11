@@ -10,14 +10,14 @@
 //! starts.
 
 use crate::delegate::{
-    run_batch, DelegateConfig, DelegateTask, ProviderFactory, ToolsetFactory,
-    DEFAULT_MAX_CONCURRENT,
+    DEFAULT_MAX_CONCURRENT, DelegateConfig, DelegateTask, ProviderFactory, ToolsetFactory,
+    run_batch,
 };
 use crate::subagent;
 use async_trait::async_trait;
 use cersei_tools::{PermissionLevel, Tool, ToolContext, ToolResult};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 

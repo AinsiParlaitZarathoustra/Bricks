@@ -5,8 +5,8 @@
 
 mod common;
 
-use cersei_agent::events::AgentEvent;
 use cersei_agent::Agent;
+use cersei_agent::events::AgentEvent;
 use serde_json::json;
 use std::io::{Read, Write};
 use std::net::TcpListener;

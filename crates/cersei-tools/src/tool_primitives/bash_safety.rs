@@ -257,8 +257,8 @@ fn has_dynamic(node: &Node) -> bool {
         return true;
     }
     let mut cursor = node.walk();
-    let found = node.children(&mut cursor).any(|c| has_dynamic(&c));
-    found
+
+    node.children(&mut cursor).any(|c| has_dynamic(&c))
 }
 
 /// Classify one program and its arguments. Also used for the program run by
@@ -370,13 +370,12 @@ fn classify_program(name: &Arg, args: &[Arg], analysis: &mut BashAnalysis, depth
             // `bash -c '<literal>'`: the inner command is analysed too.
             if let Some(pos) = args.iter().position(|a| {
                 a.text.starts_with('-') && !a.text.starts_with("--") && a.text.contains('c')
-            }) {
-                if let Some(script) = args.get(pos + 1) {
-                    if script.dynamic {
-                        raise(analysis, BashRiskLevel::High, "dynamic shell script");
-                    } else {
-                        analyze_into(&script.text, analysis, depth + 1);
-                    }
+            }) && let Some(script) = args.get(pos + 1)
+            {
+                if script.dynamic {
+                    raise(analysis, BashRiskLevel::High, "dynamic shell script");
+                } else {
+                    analyze_into(&script.text, analysis, depth + 1);
                 }
             }
         }

@@ -57,6 +57,7 @@ pub use store::{RunSnapshot, RunStore};
 
 /// The prelude — import this for the most common workflow types.
 pub mod prelude {
+    pub use crate::Workflow;
     pub use crate::builder::WorkflowBuilder;
     pub use crate::condition::Condition;
     pub use crate::events::{WorkflowEvent, WorkflowStream};
@@ -65,5 +66,4 @@ pub mod prelude {
     pub use crate::result::{RunStatus, WorkflowResult};
     pub use crate::step::{Step, StepContext, StepOutcome};
     pub use crate::steps::{AgentStep, FnStep, ToolStep, WorkflowStep};
-    pub use crate::Workflow;
 }

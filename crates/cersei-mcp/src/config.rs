@@ -236,8 +236,15 @@ impl McpServerConfig {
 
 // ─── Env var expansion ───────────────────────────────────────────────────────
 
-/// Expand `${VAR}` and `${VAR:-default}` patterns.
+/// Expand `${VAR}` and `${VAR:-default}` patterns from the process
+/// environment.
 pub fn expand_env_vars(input: &str) -> String {
+    expand_env_vars_with(input, |name| std::env::var(name).ok())
+}
+
+/// [`expand_env_vars`] with the variables given by `lookup` (the
+/// environment is never modified to provide them).
+pub fn expand_env_vars_with(input: &str, lookup: impl Fn(&str) -> Option<String>) -> String {
     let mut result = input.to_string();
     let mut search_from = 0;
     loop {
@@ -256,9 +263,9 @@ pub fn expand_env_vars(input: &str) -> String {
                             (inner, None)
                         };
 
-                        let replacement = match std::env::var(var_name) {
-                            Ok(val) => val,
-                            Err(_) => match default_value {
+                        let replacement = match lookup(var_name) {
+                            Some(val) => val,
+                            None => match default_value {
                                 Some(def) => def.to_string(),
                                 None => {
                                     search_from = end + 1;
@@ -280,19 +287,24 @@ pub fn expand_env_vars(input: &str) -> String {
 
 /// Expand env vars in all string fields of a server config.
 pub fn expand_server_config(config: &McpServerConfig) -> McpServerConfig {
+    expand_server_config_with(config, |name| std::env::var(name).ok())
+}
+
+/// [`expand_server_config`] with the variables given by `lookup`.
+pub fn expand_server_config_with(
+    config: &McpServerConfig,
+    lookup: impl Fn(&str) -> Option<String>,
+) -> McpServerConfig {
+    let x = |s: &str| expand_env_vars_with(s, &lookup);
     McpServerConfig {
-        command: config.command.as_deref().map(expand_env_vars),
-        args: config.args.iter().map(|a| expand_env_vars(a)).collect(),
-        env: config
-            .env
-            .iter()
-            .map(|(k, v)| (k.clone(), expand_env_vars(v)))
-            .collect(),
-        url: config.url.as_deref().map(expand_env_vars),
+        command: config.command.as_deref().map(x),
+        args: config.args.iter().map(|a| x(a)).collect(),
+        env: config.env.iter().map(|(k, v)| (k.clone(), x(v))).collect(),
+        url: config.url.as_deref().map(x),
         headers: config
             .headers
             .iter()
-            .map(|(k, v)| (k.clone(), expand_env_vars(v)))
+            .map(|(k, v)| (k.clone(), x(v)))
             .collect(),
         ..config.clone()
     }
@@ -302,11 +314,20 @@ pub fn expand_server_config(config: &McpServerConfig) -> McpServerConfig {
 mod tests {
     use super::*;
 
+    /// Variables for the tests, without touching the process environment
+    /// (tests run on several threads).
+    fn vars(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+        let map: HashMap<String, String> = pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        move |name| map.get(name).cloned()
+    }
+
     #[test]
     fn test_expand_env_vars_simple() {
-        std::env::set_var("CERSEI_TEST_VAR", "hello");
-        assert_eq!(expand_env_vars("${CERSEI_TEST_VAR}"), "hello");
-        std::env::remove_var("CERSEI_TEST_VAR");
+        let env = vars(&[("CERSEI_TEST_VAR", "hello")]);
+        assert_eq!(expand_env_vars_with("${CERSEI_TEST_VAR}", &env), "hello");
     }
 
     #[test]
@@ -322,11 +343,11 @@ mod tests {
 
     #[test]
     fn test_expand_env_vars_multiple() {
-        std::env::set_var("CERSEI_A", "one");
-        std::env::set_var("CERSEI_B", "two");
-        assert_eq!(expand_env_vars("${CERSEI_A}-${CERSEI_B}"), "one-two");
-        std::env::remove_var("CERSEI_A");
-        std::env::remove_var("CERSEI_B");
+        let env = vars(&[("CERSEI_A", "one"), ("CERSEI_B", "two")]);
+        assert_eq!(
+            expand_env_vars_with("${CERSEI_A}-${CERSEI_B}", &env),
+            "one-two"
+        );
     }
 
     #[test]
@@ -366,16 +387,15 @@ mod tests {
 
     #[test]
     fn test_expand_server_config() {
-        std::env::set_var("CERSEI_MCP_CMD", "/usr/bin/node");
+        let env = vars(&[("CERSEI_MCP_CMD", "/usr/bin/node")]);
         let mut config =
             McpServerConfig::stdio("test", "${CERSEI_MCP_CMD}", &["${CERSEI_MCP_CMD}"]);
         config.env = HashMap::from([("KEY".into(), "${CERSEI_MCP_CMD}".into())]);
         config.headers = HashMap::from([("X".into(), "${CERSEI_MCP_CMD}".into())]);
-        let expanded = expand_server_config(&config);
+        let expanded = expand_server_config_with(&config, &env);
         assert_eq!(expanded.command.as_deref(), Some("/usr/bin/node"));
         assert_eq!(expanded.args[0], "/usr/bin/node");
         assert_eq!(expanded.env["KEY"], "/usr/bin/node");
         assert_eq!(expanded.headers["X"], "/usr/bin/node");
-        std::env::remove_var("CERSEI_MCP_CMD");
     }
 }

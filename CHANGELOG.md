@@ -2,6 +2,17 @@
 
 ## [0.6.0] — 2026-10-11
 
+### Changed — Rust edition 2024
+
+- The workspace (and `examples/benchmark`) moves from edition 2021 to **edition 2024**; a recent stable Rust is required (1.88 or later for let chains; tested with 1.98.1).
+- Migration by `cargo fix --edition`, then reviewed:
+  - `if let … else` with temporaries rewritten as `match` where the drop scope changes;
+  - `+ use<…>` on a few `impl Trait` returns;
+  - nested `if`s merged into let chains (Clippy).
+- Code formatted with the 2024 style (`cargo fmt`).
+- The remaining drop-order notes were checked; none changes a lock's purpose. The workspace writer gate keeps its guard for the whole tool call; LSP and controller guards are released earlier than before, after their use.
+- The MCP configuration tests no longer modify the process environment (`std::env::set_var` is `unsafe` in 2024, and tests run on several threads). `expand_env_vars_with` and `expand_server_config_with` take the variables from a lookup function; `expand_env_vars` and `expand_server_config` are unchanged.
+
 ### Added — interface and reliability (Sprint 12.5)
 
 - **`/effort`**: the reasoning profiles of the current model, from the providers file (ids, labels, parameters; no built-in list). `/effort <id>` selects one; `/effort default` goes back to the **model's declared default** (not "off", not an earlier choice). A profile whose id is `default` stays selectable in the picker. An unknown id is refused with the choices and changes nothing; a model without profiles says `No reasoning profiles configured for this model.`

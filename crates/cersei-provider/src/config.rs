@@ -549,7 +549,7 @@ impl ProvidersConfig {
                             .map(|e| format!("`.{e}`"))
                             .unwrap_or_else(|| "(none)".into())
                     ),
-                ))
+                ));
             }
         };
         let text = std::fs::read_to_string(&path).map_err(|e| {
@@ -924,16 +924,16 @@ fn validate_auth(
                 return Err((
                     "api_key",
                     "api_key and api_key_env are mutually exclusive".into(),
-                ))
+                ));
             }
             (None, None) => {
                 return Err((
                     "api_key_env",
                     format!(
-                    "auth = \"{}\" needs a key source: set api_key_env (recommended) or api_key",
-                    auth.as_str()
-                ),
-                ))
+                        "auth = \"{}\" needs a key source: set api_key_env (recommended) or api_key",
+                        auth.as_str()
+                    ),
+                ));
             }
             (Some(k), None) => {
                 if k.is_blank() {
@@ -967,15 +967,15 @@ fn validate_headers(headers: &BTreeMap<String, Secret>) -> Result<(), (String, S
 }
 
 fn validate_compat(c: &Compat) -> Result<(), (&'static str, String)> {
-    if let Some(f) = &c.max_tokens_field {
-        if f.trim().is_empty() {
-            return Err(("max_tokens_field", "must not be empty".into()));
-        }
+    if let Some(f) = &c.max_tokens_field
+        && f.trim().is_empty()
+    {
+        return Err(("max_tokens_field", "must not be empty".into()));
     }
-    if let Some(f) = &c.reasoning_field {
-        if f.trim().is_empty() {
-            return Err(("reasoning_field", "must not be empty".into()));
-        }
+    if let Some(f) = &c.reasoning_field
+        && f.trim().is_empty()
+    {
+        return Err(("reasoning_field", "must not be empty".into()));
     }
     Ok(())
 }
@@ -1134,13 +1134,13 @@ impl ModelConfig {
         // Parameters and reasoning profiles.
         let protocol = self.effective_protocol(provider);
         let protected = protocol.protected_fields();
-        if let Some(f) = &self.compat.max_tokens_field {
-            if protected.contains(&f.as_str()) {
-                return Err(e(
-                    "compat.max_tokens_field",
-                    format!("`{f}` is a reserved field"),
-                ));
-            }
+        if let Some(f) = &self.compat.max_tokens_field
+            && protected.contains(&f.as_str())
+        {
+            return Err(e(
+                "compat.max_tokens_field",
+                format!("`{f}` is a reserved field"),
+            ));
         }
         for key in self.parameters.keys() {
             if protected.contains(&key.as_str()) {
@@ -1189,13 +1189,13 @@ impl ModelConfig {
                 }
             }
         }
-        if let Some(def) = &self.reasoning.default {
-            if !profile_ids.contains(def.as_str()) {
-                return Err(e(
-                    "reasoning.default",
-                    format!("`{def}` is not one of this model's reasoning profiles"),
-                ));
-            }
+        if let Some(def) = &self.reasoning.default
+            && !profile_ids.contains(def.as_str())
+        {
+            return Err(e(
+                "reasoning.default",
+                format!("`{def}` is not one of this model's reasoning profiles"),
+            ));
         }
 
         // The endpoint must assemble.

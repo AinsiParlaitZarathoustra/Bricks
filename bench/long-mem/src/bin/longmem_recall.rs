@@ -32,14 +32,14 @@
 #[path = "../dataset.rs"]
 mod dataset;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use cersei_embeddings::{EmbeddingProvider, GeminiEmbeddings, HashingEmbeddings, OpenAiEmbeddings};
 use cersei_memory::structured::clock::parse_time;
 use cersei_memory::structured::{
     EpisodeInput, LlmExtractor, MemoryConfig, RecallQuery, StructuredMemory,
 };
 use clap::Parser;
-use dataset::{load_dataset, Question};
+use dataset::{Question, load_dataset};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;

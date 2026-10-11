@@ -53,7 +53,7 @@ impl Tool for FileEditTool {
                 return Some(crate::preview::ChangePreview::refused(format!(
                     "Failed to read {}: {e}",
                     input.file_path
-                )))
+                )));
             }
         };
         match crate::tool_primitives::replace::plan_edit(

@@ -308,13 +308,13 @@ pub fn parse_profile(text: &str, source: ProfileSource) -> Result<AgentProfile, 
     let model = ModelPref::parse(f.model.as_deref().unwrap_or("inherit"))?;
     let reasoning = ReasoningPref::parse(f.reasoning.as_deref().unwrap_or("inherit"))?;
     for (key, value) in [("permissions", &f.permissions), ("tools", &f.tools)] {
-        if let Some(v) = value {
-            if v.trim() != "inherit" {
-                return Err(format!(
-                    "{key} `{v}`: only `inherit` is implemented (a profile never widens or narrows \
+        if let Some(v) = value
+            && v.trim() != "inherit"
+        {
+            return Err(format!(
+                "{key} `{v}`: only `inherit` is implemented (a profile never widens or narrows \
                      the parent's {key}; the approval policy is in bricks.toml)"
-                ));
-            }
+            ));
         }
     }
     let isolation = Isolation::parse(f.isolation.as_deref().unwrap_or("auto"))?;
@@ -429,9 +429,11 @@ mod tests {
             );
         }
         assert!(parse_profile("no frontmatter", src()).is_err());
-        assert!(parse_profile("---\nname: a\n", src())
-            .unwrap_err()
-            .contains("not closed"));
+        assert!(
+            parse_profile("---\nname: a\n", src())
+                .unwrap_err()
+                .contains("not closed")
+        );
         assert!(parse_profile("---\nname: A B\ndescription: d\n---\n", src()).is_err());
         assert!(parse_profile("---\nname: a\ndescription: \"  \"\n---\n", src()).is_err());
     }

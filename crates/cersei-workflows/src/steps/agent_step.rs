@@ -7,7 +7,7 @@ use crate::step::{Step, StepContext, StepOutcome};
 use async_trait::async_trait;
 use cersei_agent::Agent;
 use cersei_types::Result;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 
 /// A step that runs an agent. Output JSON: `{ text, turns, stop_reason }`.

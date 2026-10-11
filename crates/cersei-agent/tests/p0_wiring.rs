@@ -13,7 +13,7 @@ use cersei_agent::Agent;
 mod common;
 use cersei_tools::{PermissionLevel, Tool, ToolCategory, ToolContext, ToolResult};
 use cersei_types::{ContentBlock, Message, MessageContent, ToolResultContent};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};

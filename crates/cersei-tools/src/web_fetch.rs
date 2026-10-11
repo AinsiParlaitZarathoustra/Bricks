@@ -22,7 +22,7 @@ use crate::web_runtime::{context, thousands};
 use cersei_web::extract::Unreadable;
 use cersei_web::fetch::FetchError;
 use cersei_web::rank::{self, Relevance};
-use cersei_web::{char_to_byte, PageDoc, PageError};
+use cersei_web::{PageDoc, PageError, char_to_byte};
 use serde::Deserialize;
 use std::fmt::Write as _;
 use std::time::Instant;
@@ -107,7 +107,7 @@ impl Tool for WebFetchTool {
                     return ToolResult::error(format!(
                         "no stored document `{id}` in this session (ids come from WebSearch or \
                          earlier WebFetch results)"
-                    ))
+                    ));
                 }
             },
             (None, Some(url)) => web.read(url.trim(), input.refresh.unwrap_or(false)).await,

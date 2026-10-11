@@ -2,7 +2,7 @@
 
 use cersei_lsp::mock::{self, MockConfig};
 use cersei_lsp::{LspClient, LspError, LspServerConfig};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;

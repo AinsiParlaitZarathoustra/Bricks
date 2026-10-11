@@ -3,8 +3,8 @@
 //! detected from model names and nothing is built in.
 
 use crate::config::{
-    AuthMode, Compat, ConfigError, Limits, ModelConfig, Protocol, ProviderConfig, ProvidersConfig,
-    ReasoningConfig, ResolvedCompat, Secret, DEFAULT_API_KEY_HEADER,
+    AuthMode, Compat, ConfigError, DEFAULT_API_KEY_HEADER, Limits, ModelConfig, Protocol,
+    ProviderConfig, ProvidersConfig, ReasoningConfig, ResolvedCompat, Secret,
 };
 use crate::modality::Capabilities;
 use crate::pricing::Pricing;
@@ -555,19 +555,21 @@ mod tests {
 
         // A named tariff exists where documented, and the contract example's
         // empty profile list is honoured.
-        assert!(reg
-            .resolve("multi/flash-chat")
-            .unwrap()
-            .pricing
-            .unwrap()
-            .tariff("offpeak")
-            .is_some());
-        assert!(reg
-            .resolve("custom/expert")
-            .unwrap()
-            .reasoning
-            .profiles
-            .is_empty());
+        assert!(
+            reg.resolve("multi/flash-chat")
+                .unwrap()
+                .pricing
+                .unwrap()
+                .tariff("offpeak")
+                .is_some()
+        );
+        assert!(
+            reg.resolve("custom/expert")
+                .unwrap()
+                .reasoning
+                .profiles
+                .is_empty()
+        );
         assert_eq!(
             reg.resolve("custom/flash")
                 .unwrap()

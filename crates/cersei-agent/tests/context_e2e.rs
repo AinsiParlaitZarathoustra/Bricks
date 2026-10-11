@@ -8,7 +8,7 @@ use cersei_agent::{Agent, CompactionOutcome, ContextPolicy, Provenance};
 use cersei_compression::CompressionLevel;
 use cersei_provider::ProviderRegistry;
 use cersei_types::*;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
@@ -220,15 +220,17 @@ async fn reported_usage_is_the_measured_base_and_totals_add_cache() {
     assert_eq!(st.totals.cache_read_tokens, 200);
     assert_eq!(st.total_tokens, 1034 + 200 + 50);
     assert_eq!(st.context_window.total, None);
-    assert!(st
-        .notes
-        .iter()
-        .any(|n| n.contains("no total context window")));
-    assert!(log
-        .lock()
-        .unwrap()
-        .iter()
-        .any(|e| matches!(e, AgentEvent::ContextUpdate(_))));
+    assert!(
+        st.notes
+            .iter()
+            .any(|n| n.contains("no total context window"))
+    );
+    assert!(
+        log.lock()
+            .unwrap()
+            .iter()
+            .any(|e| matches!(e, AgentEvent::ContextUpdate(_)))
+    );
 }
 
 #[tokio::test]
@@ -390,9 +392,10 @@ async fn a_request_that_cannot_fit_is_never_sent() {
             ..
         }
     )));
-    assert!(log
-        .iter()
-        .any(|e| matches!(e, AgentEvent::Status(s) if s.contains("Request not sent"))));
+    assert!(
+        log.iter()
+            .any(|e| matches!(e, AgentEvent::Status(s) if s.contains("Request not sent")))
+    );
 }
 
 #[tokio::test]
@@ -848,9 +851,11 @@ async fn originals_raw_history_and_snapshots_survive_a_restore() {
         .to_string();
     let files_dir = memory.session_files_dir("s1").unwrap();
     assert!(path.starts_with(files_dir.to_str().unwrap()), "{path}");
-    assert!(std::fs::read_to_string(&path)
-        .unwrap()
-        .starts_with(&format!("Exit code 101\n{log}")));
+    assert!(
+        std::fs::read_to_string(&path)
+            .unwrap()
+            .starts_with(&format!("Exit code 101\n{log}"))
+    );
 
     // The raw history holds the unreduced output and the earlier messages.
     let raw = b.raw_history();

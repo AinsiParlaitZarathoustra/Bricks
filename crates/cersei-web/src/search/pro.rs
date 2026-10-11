@@ -11,9 +11,9 @@
 //! error messages quote at most a short excerpt of the body with the key
 //! masked.
 
-use super::{excerpt, RawHit, SearchError};
+use super::{RawHit, SearchError, excerpt};
 use crate::config::{ProviderConfig, ProviderKind, Secret};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub(crate) async fn search(
     client: &reqwest::Client,

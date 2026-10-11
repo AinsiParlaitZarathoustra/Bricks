@@ -341,10 +341,10 @@ pub async fn run(global: &Global, launch: &std::path::Path, args: RunArgs) -> i3
     };
 
     // The session is open; its first event is ready.
-    if let Some(e) = events.next().await {
-        if !emit(&e) {
-            return exit::FAILED;
-        }
+    if let Some(e) = events.next().await
+        && !emit(&e)
+    {
+        return exit::FAILED;
     }
     if let Err(e) = ctl.send(Command::Submit {
         prompt: Prompt {
@@ -433,76 +433,75 @@ pub async fn run(global: &Global, launch: &std::path::Path, args: RunArgs) -> i3
     }
     // Background sub-agents admitted during the run: no daemon. Wait for
     // them (bounded), cancel what is left, report, then exit.
-    if let Some(rt) = ctl.agent_runtime() {
-        if !rt.pending(None).is_empty() {
-            let limit = rt.scheduler.limits.background_drain;
-            if !args.json {
+    if let Some(rt) = ctl.agent_runtime()
+        && !rt.pending(None).is_empty()
+    {
+        let limit = rt.scheduler.limits.background_drain;
+        if !args.json {
+            eprintln!(
+                "bricks: waiting for {} background sub-agent(s) (at most {})",
+                rt.pending(None).len(),
+                cersei_types::duration::display_ms(limit)
+            );
+        }
+        let deadline = tokio::time::Instant::now() + limit;
+        while !rt.pending(None).is_empty() && tokio::time::Instant::now() < deadline {
+            match tokio::time::timeout_at(
+                deadline.min(tokio::time::Instant::now() + std::time::Duration::from_millis(200)),
+                events.next(),
+            )
+            .await
+            {
+                Ok(Some(env)) => {
+                    let _ = emit(&env);
+                }
+                Ok(None) => break,
+                Err(_) => {}
+            }
+        }
+        let left: Vec<String> = rt
+            .pending(None)
+            .into_iter()
+            .map(|r| r.info.agent_id)
+            .collect();
+        if !left.is_empty() {
+            for id in &left {
+                rt.cancel(id);
+            }
+            rt.settle(&left, std::time::Duration::from_secs(10)).await;
+        }
+        // The last events (terminal states, final usage).
+        while let Ok(Some(env)) =
+            tokio::time::timeout(std::time::Duration::from_millis(300), events.next()).await
+        {
+            let _ = emit(&env);
+        }
+        let bg: Vec<_> = rt.records().into_iter().filter(|r| r.background).collect();
+        let not_completed = bg
+            .iter()
+            .filter(|r| r.result.as_ref().is_none_or(|x| x.status != "completed"))
+            .count();
+        if !args.json {
+            eprintln!("bricks: background sub-agents:");
+            for r in &bg {
                 eprintln!(
-                    "bricks: waiting for {} background sub-agent(s) (at most {})",
-                    rt.pending(None).len(),
-                    cersei_types::duration::display_ms(limit)
+                    "  {} ({}) {}{}",
+                    r.info.agent_id,
+                    r.info.profile,
+                    r.result
+                        .as_ref()
+                        .map(|x| x.status.as_str())
+                        .unwrap_or(r.state.as_str()),
+                    r.result
+                        .as_ref()
+                        .and_then(|x| x.changeset.as_deref())
+                        .map(|c| format!(", ChangeSet {c}"))
+                        .unwrap_or_default()
                 );
             }
-            let deadline = tokio::time::Instant::now() + limit;
-            while !rt.pending(None).is_empty() && tokio::time::Instant::now() < deadline {
-                match tokio::time::timeout_at(
-                    deadline
-                        .min(tokio::time::Instant::now() + std::time::Duration::from_millis(200)),
-                    events.next(),
-                )
-                .await
-                {
-                    Ok(Some(env)) => {
-                        let _ = emit(&env);
-                    }
-                    Ok(None) => break,
-                    Err(_) => {}
-                }
-            }
-            let left: Vec<String> = rt
-                .pending(None)
-                .into_iter()
-                .map(|r| r.info.agent_id)
-                .collect();
-            if !left.is_empty() {
-                for id in &left {
-                    rt.cancel(id);
-                }
-                rt.settle(&left, std::time::Duration::from_secs(10)).await;
-            }
-            // The last events (terminal states, final usage).
-            while let Ok(Some(env)) =
-                tokio::time::timeout(std::time::Duration::from_millis(300), events.next()).await
-            {
-                let _ = emit(&env);
-            }
-            let bg: Vec<_> = rt.records().into_iter().filter(|r| r.background).collect();
-            let not_completed = bg
-                .iter()
-                .filter(|r| r.result.as_ref().is_none_or(|x| x.status != "completed"))
-                .count();
-            if !args.json {
-                eprintln!("bricks: background sub-agents:");
-                for r in &bg {
-                    eprintln!(
-                        "  {} ({}) {}{}",
-                        r.info.agent_id,
-                        r.info.profile,
-                        r.result
-                            .as_ref()
-                            .map(|x| x.status.as_str())
-                            .unwrap_or(r.state.as_str()),
-                        r.result
-                            .as_ref()
-                            .and_then(|x| x.changeset.as_deref())
-                            .map(|c| format!(", ChangeSet {c}"))
-                            .unwrap_or_default()
-                    );
-                }
-            }
-            if not_completed > 0 && code == exit::OK {
-                code = exit::BACKGROUND;
-            }
+        }
+        if not_completed > 0 && code == exit::OK {
+            code = exit::BACKGROUND;
         }
     }
     ctl.close().await;

@@ -9,7 +9,7 @@
 
 use crate::configs::{Config, DEFAULT_TOP_K};
 use crate::dataset::Question;
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use async_trait::async_trait;
 use cersei_embeddings::EmbeddingProvider;
 use cersei_memory::structured::clock::parse_time;

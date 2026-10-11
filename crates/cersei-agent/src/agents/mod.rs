@@ -15,9 +15,9 @@ pub use registry::{
 };
 pub use runtime::{AgentRuntime, InstanceRecord, RunUsage, RuntimeHandle};
 pub use spawn::{
-    render_result, AgentIdentity, AgentResult, AgentSpawnRequest, AgentSpawner, BatchOptions,
-    ChildTools, Choice, CommandRun, DelegationSettings, InstanceState, ParentModel, SkillLoad,
-    SpawnError, SpawnInfo, Spawned, SubAgentEvent, SubAgentSink,
+    AgentIdentity, AgentResult, AgentSpawnRequest, AgentSpawner, BatchOptions, ChildTools, Choice,
+    CommandRun, DelegationSettings, InstanceState, ParentModel, SkillLoad, SpawnError, SpawnInfo,
+    Spawned, SubAgentEvent, SubAgentSink, render_result,
 };
 pub use tool::{AgentControlTool, AgentProfilesTool, AgentsTool, NativeAgentTool};
 pub use workspace::{ChangeSet, ChangeSetState, WorkspaceManager};

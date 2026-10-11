@@ -871,11 +871,13 @@ mod tests {
         let v = summary(&text);
         assert_eq!(v["sample"]["text"].as_str().unwrap().chars().count(), 200);
         assert_eq!(v["sample"]["esc"].as_str().unwrap().chars().count(), 200);
-        assert!(v["omitted"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|o| o["what"].as_str().unwrap().contains("of 500")));
+        assert!(
+            v["omitted"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|o| o["what"].as_str().unwrap().contains("of 500"))
+        );
     }
 
     #[test]

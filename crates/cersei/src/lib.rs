@@ -47,7 +47,7 @@ pub use cersei_workflows as workflows;
 // Providers are configuration, not types: load a registry and resolve
 // `provider_id/model_id` (see `docs/providers.md`).
 pub use cersei_provider::{
-    provider_from_config, ConfiguredProvider, ProviderRegistry, ResolvedModel,
+    ConfiguredProvider, ProviderRegistry, ResolvedModel, provider_from_config,
 };
 
 /// The prelude — import this for the most common types.
@@ -58,7 +58,7 @@ pub mod prelude {
 
     // Providers
     pub use crate::provider::{CompletionRequest, Provider, ProviderOptions};
-    pub use crate::{provider_from_config, ConfiguredProvider, ProviderRegistry};
+    pub use crate::{ConfiguredProvider, ProviderRegistry, provider_from_config};
 
     // Types
     pub use cersei_types::{

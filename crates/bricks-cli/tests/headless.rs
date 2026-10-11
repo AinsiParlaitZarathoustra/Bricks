@@ -290,15 +290,19 @@ fn skills_are_chosen_explicitly_and_project_skills_need_explicit_trust() {
         .iter()
         .find(|e| e["type"] == "command_rejected")
         .unwrap();
-    assert!(rejected["reason"]
-        .as_str()
-        .unwrap()
-        .contains("not approved"));
-    assert!(evs.iter().any(|e| e["type"] == "notice"
-        && e["message"]
+    assert!(
+        rejected["reason"]
             .as_str()
             .unwrap()
-            .contains("--trust-project-skills")));
+            .contains("not approved")
+    );
+    assert!(evs.iter().any(|e| {
+        e["type"] == "notice"
+            && e["message"]
+                .as_str()
+                .unwrap()
+                .contains("--trust-project-skills")
+    }));
     assert!(m.seen.lock().unwrap().is_empty(), "no request sent");
 
     // With trust and a personal skill: both activated, in order, before

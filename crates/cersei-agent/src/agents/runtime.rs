@@ -14,7 +14,7 @@
 //! * a full queue, an admission timeout or a hard limit is an explicit
 //!   error; the tools stay in the catalogue.
 
-use super::admission::{writers_for, WriterGuard};
+use super::admission::{WriterGuard, writers_for};
 use super::spawn::{AgentResult, InstanceState, SpawnInfo, SubAgentEvent};
 use crate::events::AgentEvent;
 use cersei_types::Usage;
@@ -22,8 +22,8 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_util::sync::CancellationToken;
@@ -59,7 +59,11 @@ impl std::fmt::Display for AdmissionError {
                 f,
                 "AgentDepthExceeded: a sub-agent at depth {depth} is beyond [agents] max_depth = {max}"
             ),
-            Self::TotalExceeded { admitted, asked, max } => write!(
+            Self::TotalExceeded {
+                admitted,
+                asked,
+                max,
+            } => write!(
                 f,
                 "AgentTotalExceeded: {admitted} sub-agent(s) already admitted in this run, {asked} more asked, [agents] max_total_per_run = {max}"
             ),
@@ -509,11 +513,11 @@ impl AgentRuntime {
     pub fn finish(&self, id: &str, result: AgentResult) {
         {
             let mut recs = self.records.lock();
-            if let Some(r) = recs.iter_mut().find(|r| r.info.agent_id == id) {
-                if r.result.is_none() {
-                    r.result = Some(result);
-                    r.updated_at_ms = now_ms();
-                }
+            if let Some(r) = recs.iter_mut().find(|r| r.info.agent_id == id)
+                && r.result.is_none()
+            {
+                r.result = Some(result);
+                r.updated_at_ms = now_ms();
             }
         }
         self.save();
@@ -573,11 +577,11 @@ impl AgentRuntime {
         let live = self.live.lock();
         let mut n = 0;
         for i in &ids {
-            if let Some(l) = live.get(i) {
-                if !*l.done.borrow() {
-                    l.cancel.cancel();
-                    n += 1;
-                }
+            if let Some(l) = live.get(i)
+                && !*l.done.borrow()
+            {
+                l.cancel.cancel();
+                n += 1;
             }
         }
         n

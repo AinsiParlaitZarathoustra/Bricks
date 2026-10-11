@@ -131,11 +131,7 @@ impl ContextFigures {
     }
 
     pub fn mark(&self) -> &'static str {
-        if self.approx {
-            "≈"
-        } else {
-            ""
-        }
+        if self.approx { "≈" } else { "" }
     }
 
     /// `≈1.9%`, `120.4%`, or `—` without a budget.
@@ -308,13 +304,13 @@ pub fn cost_details(rows: &[Usage], total: &Usage) -> Vec<Line<'static>> {
          opened or resumed (compaction calls not listed).",
         rows.len()
     )));
-    if let CostState::Partial { unpriced, .. } = CostState::of(total) {
-        if !unpriced.is_empty() {
-            out.push(Line::from(format!(
-                "Categories without a price: {}.",
-                unpriced.join(", ")
-            )));
-        }
+    if let CostState::Partial { unpriced, .. } = CostState::of(total)
+        && !unpriced.is_empty()
+    {
+        out.push(Line::from(format!(
+            "Categories without a price: {}.",
+            unpriced.join(", ")
+        )));
     }
     out
 }

@@ -106,11 +106,7 @@ fn sanitize(s: &str, max: usize) -> String {
         })
         .take(max)
         .collect();
-    if out.is_empty() {
-        "output".into()
-    } else {
-        out
-    }
+    if out.is_empty() { "output".into() } else { out }
 }
 
 #[cfg(test)]
@@ -124,13 +120,14 @@ mod tests {
         let r = store.put("Bash toolu_01/../x", "a\nb\nc\n").unwrap();
         assert_eq!((r.lines, r.bytes), (3, 6));
         assert_eq!(std::fs::read_to_string(&r.path).unwrap(), "a\nb\nc\n");
-        assert!(r
-            .path
-            .file_name()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .starts_with("00001-Bash_toolu_01____x"));
+        assert!(
+            r.path
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("00001-Bash_toolu_01____x")
+        );
         assert!(store.contains(r.path.to_str().unwrap()));
         assert!(!store.contains("/etc/hosts"));
         assert!(r.hint().contains("3 lines"));
@@ -138,13 +135,14 @@ mod tests {
         // Reopened on the same directory: numbering continues.
         let again = RawStore::new(dir.path().join("raw"));
         let r2 = again.put("Bash", "other").unwrap();
-        assert!(r2
-            .path
-            .file_name()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .starts_with("00002-"));
+        assert!(
+            r2.path
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("00002-")
+        );
         assert_eq!(std::fs::read_to_string(&r.path).unwrap(), "a\nb\nc\n");
     }
 }

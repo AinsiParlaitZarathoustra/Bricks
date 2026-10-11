@@ -10,8 +10,7 @@ use cersei_types::Message;
 use std::sync::Arc;
 use std::time::Instant;
 
-const ANSWERER_BASE_SYSTEM: &str =
-    "You are a helpful assistant. Answer the user's question using ONLY the information provided. \
+const ANSWERER_BASE_SYSTEM: &str = "You are a helpful assistant. Answer the user's question using ONLY the information provided. \
 If the information does not contain the answer, say so plainly — do NOT guess. \
 Be concise: one or two short sentences is ideal. Do NOT quote or restate the context.";
 

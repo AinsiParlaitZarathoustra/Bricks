@@ -65,13 +65,13 @@ pub fn parse(status: u16, body: &str, endpoint: &Url) -> Result<Vec<RawHit>, Sea
             return Err(SearchError::Http {
                 status,
                 detail: "the service refused the request".into(),
-            })
+            });
         }
         s => {
             return Err(SearchError::Http {
                 status: s,
                 detail: super::excerpt(body, None),
-            })
+            });
         }
     }
     let doc = Document::from(body);

@@ -224,13 +224,14 @@ pub fn compress_log_with_exit(
         if !lines[i].alive || lines[i].class == Class::Fixed {
             continue;
         }
-        if let Some(p) = prev {
-            if lines[p].text == lines[i].text && !lines[i].text.trim().is_empty() {
-                lines[p].repeat += 1;
-                lines[i].alive = false;
-                report.filtered_lines += 1;
-                continue;
-            }
+        if let Some(p) = prev
+            && lines[p].text == lines[i].text
+            && !lines[i].text.trim().is_empty()
+        {
+            lines[p].repeat += 1;
+            lines[i].alive = false;
+            report.filtered_lines += 1;
+            continue;
         }
         prev = Some(i);
     }
@@ -320,11 +321,7 @@ pub fn compress_log_with_exit(
 }
 
 fn plural(n: usize) -> &'static str {
-    if n == 1 {
-        "line"
-    } else {
-        "lines"
-    }
+    if n == 1 { "line" } else { "lines" }
 }
 
 /// Collapse runs of lines matching the same `summarize_lines` pattern into
@@ -561,10 +558,11 @@ mod tests {
         };
         let r = compress_log(&raw, None, &limits);
         assert!(r.omitted_blocks > 0);
-        assert!(r
-            .notes
-            .iter()
-            .any(|n| n.contains("diagnostic blocks did not fit")));
+        assert!(
+            r.notes
+                .iter()
+                .any(|n| n.contains("diagnostic blocks did not fit"))
+        );
         assert!(
             r.text.contains("diagnostic]"),
             "omission must be visible in place"

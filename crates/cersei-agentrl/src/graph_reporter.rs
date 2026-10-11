@@ -3,7 +3,7 @@
 //! flow, Reporters record what happened.
 
 use crate::graph::{
-    summarize_input, EdgeRel, ExecutionGraph, NodeDetail, NodeId, NodeKind, NodeStatus,
+    EdgeRel, ExecutionGraph, NodeDetail, NodeId, NodeKind, NodeStatus, summarize_input,
 };
 use async_trait::async_trait;
 use cersei_agent::events::AgentEvent;

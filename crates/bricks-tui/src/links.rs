@@ -133,15 +133,15 @@ pub fn draw_rich(buf: &mut Buffer, area: Rect, lines: &[RichLine]) -> Vec<Placed
                 break;
             }
             let (nx, _) = buf.set_span(x, y, span, area.right() - x);
-            if let Some(Some(url)) = rl.links.get(i) {
-                if nx > x {
-                    placed.push(Placed {
-                        y,
-                        x0: x,
-                        x1: nx,
-                        url: Arc::clone(url),
-                    });
-                }
+            if let Some(Some(url)) = rl.links.get(i)
+                && nx > x
+            {
+                placed.push(Placed {
+                    y,
+                    x0: x,
+                    x1: nx,
+                    url: Arc::clone(url),
+                });
             }
             x = nx;
         }

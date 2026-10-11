@@ -243,15 +243,15 @@ impl LspManager {
             self.working_dir.join(path)
         };
         let uri = client::path_to_uri(&abs);
-        if client.capabilities().is_some_and(|c| c.diagnostic_pull) {
-            if let Ok(raw) = client.pull_diagnostics(&uri, DIAGNOSTICS_WAIT).await {
-                let file = abs.display().to_string();
-                let items = raw
-                    .iter()
-                    .filter_map(|d| client::parse_diagnostic(d, &file))
-                    .collect();
-                return Ok((DiagnosticsFreshness::Analyzed, items));
-            }
+        if client.capabilities().is_some_and(|c| c.diagnostic_pull)
+            && let Ok(raw) = client.pull_diagnostics(&uri, DIAGNOSTICS_WAIT).await
+        {
+            let file = abs.display().to_string();
+            let items = raw
+                .iter()
+                .filter_map(|d| client::parse_diagnostic(d, &file))
+                .collect();
+            return Ok((DiagnosticsFreshness::Analyzed, items));
         }
         let entry = client
             .wait_diagnostics(&uri, DIAGNOSTICS_WAIT, |e| is_for_version(e, version, seq))

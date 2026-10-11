@@ -12,7 +12,7 @@ use rmcp::model::{
 use rmcp::service::{MaybeSendFuture, RequestContext};
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
-use rmcp::{tool, tool_handler, tool_router, Peer, RoleServer, ServerHandler};
+use rmcp::{Peer, RoleServer, ServerHandler, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use std::sync::Arc;

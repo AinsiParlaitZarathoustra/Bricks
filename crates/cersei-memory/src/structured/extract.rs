@@ -17,7 +17,7 @@
 
 use super::clock::parse_time;
 use super::config::ExtractionConfig;
-use super::model::{normalize_name, normalize_predicate, Millis};
+use super::model::{Millis, normalize_name, normalize_predicate};
 use async_trait::async_trait;
 use cersei_provider::{CompletionRequest, Provider};
 use cersei_types::Message;
@@ -243,13 +243,13 @@ pub fn validate(
         };
         let valid_from = date(&f.valid_from, "valid_from", &mut v.notes);
         let valid_until = date(&f.valid_until, "valid_until", &mut v.notes);
-        if let (Some(a), Some(b)) = (valid_from, valid_until) {
-            if b <= a {
-                v.notes.push(format!(
-                    "fact `{predicate}` dropped: validity ends before it starts"
-                ));
-                continue;
-            }
+        if let (Some(a), Some(b)) = (valid_from, valid_until)
+            && b <= a
+        {
+            v.notes.push(format!(
+                "fact `{predicate}` dropped: validity ends before it starts"
+            ));
+            continue;
         }
         let confidence = f
             .confidence

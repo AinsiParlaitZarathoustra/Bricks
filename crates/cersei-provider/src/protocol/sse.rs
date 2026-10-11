@@ -340,9 +340,10 @@ mod tests {
     #[test]
     fn the_name_counts_too() {
         let mut d = SseDecoder::with_limit(32);
-        assert!(d
-            .push(format!("event: {}\n", "n".repeat(20)).as_bytes())
-            .is_ok());
+        assert!(
+            d.push(format!("event: {}\n", "n".repeat(20)).as_bytes())
+                .is_ok()
+        );
         assert!(d.push(b"data: 0123456789abcdef\n").is_err());
     }
 

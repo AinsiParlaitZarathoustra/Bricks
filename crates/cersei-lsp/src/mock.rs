@@ -7,7 +7,7 @@
 
 use crate::client::normalize_uri;
 use crate::jsonrpc;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
@@ -246,9 +246,9 @@ async fn publish_after_change(
     version: i64,
     text: &str,
 ) {
-    if let Some(p) = &config.publisher {
-        if let Some((v, items)) = p(uri, version, text) {
-            h.publish(uri, v, items).await;
-        }
+    if let Some(p) = &config.publisher
+        && let Some((v, items)) = p(uri, version, text)
+    {
+        h.publish(uri, v, items).await;
     }
 }

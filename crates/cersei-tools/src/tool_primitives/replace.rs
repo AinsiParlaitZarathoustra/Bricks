@@ -133,9 +133,9 @@ pub fn describe_failure(err: &ReplaceError, file: &str) -> String {
         ReplaceError::NoChange => {
             "old_string and new_string are identical, so the edit would do nothing.".into()
         }
-        ReplaceError::EmptyOldString => format!(
-            "old_string is empty but {file} is not: an empty anchor cannot locate an edit."
-        ),
+        ReplaceError::EmptyOldString => {
+            format!("old_string is empty but {file} is not: an empty anchor cannot locate an edit.")
+        }
     }
 }
 
@@ -228,13 +228,14 @@ fn sensitive_lines(lines: &[Line], ext: Option<&str>) -> Vec<bool> {
                 break;
             }
         }
-        if active.is_none() && (shellish || text.trim_end().ends_with(char::is_uppercase)) {
-            if let Some(c) = heredoc.captures(text) {
-                let word = c[2].to_string();
-                if shellish || word.chars().all(|ch| ch.is_ascii_uppercase() || ch == '_') {
-                    out[i] = true;
-                    active = Some((word, true));
-                }
+        if active.is_none()
+            && (shellish || text.trim_end().ends_with(char::is_uppercase))
+            && let Some(c) = heredoc.captures(text)
+        {
+            let word = c[2].to_string();
+            if shellish || word.chars().all(|ch| ch.is_ascii_uppercase() || ch == '_') {
+                out[i] = true;
+                active = Some((word, true));
             }
         }
     }

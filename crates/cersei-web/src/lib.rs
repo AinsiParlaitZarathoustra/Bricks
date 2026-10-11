@@ -294,10 +294,8 @@ impl WebContext {
     /// One page as a document: from the store unless `refresh`, else
     /// downloaded and extracted (and stored).
     pub async fn read(&self, url: &str, refresh: bool) -> Result<PageDoc, PageError> {
-        if !refresh {
-            if let Some(doc) = self.stored_url(url) {
-                return Ok(doc);
-            }
+        if !refresh && let Some(doc) = self.stored_url(url) {
+            return Ok(doc);
         }
         let page = self.fetcher.fetch(url).await.map_err(PageError::Fetch)?;
         let extracted = self.extract_page(&page).await?;

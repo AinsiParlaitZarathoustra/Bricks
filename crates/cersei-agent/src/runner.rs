@@ -555,61 +555,61 @@ async fn run_loop(
     }
     let event_tx = event_tx.clone();
     // Load session history (skip if messages were pre-populated via with_messages)
-    if agent.messages.lock().is_empty() {
-        if let (Some(memory), Some(session_id)) = (&agent.memory, &agent.session_id) {
-            let history = memory.load(session_id).await?;
-            if !history.is_empty() {
-                let count = history.len();
-                // The raw history is stored next to the session; an older
-                // session without one starts from the active history.
-                let raw = memory
-                    .load(&cersei_memory::session_keys::raw_history(session_id))
-                    .await
-                    .ok()
-                    .filter(|r| !r.is_empty())
-                    .unwrap_or_else(|| history.clone());
-                *agent.raw_history.lock() = raw;
-                // Pre-compaction snapshots, numbered from 1 without gaps; later
-                // compactions continue the numbering instead of overwriting.
-                let mut snapshots = Vec::new();
-                loop {
-                    let number = snapshots.len() + 1;
-                    let key = cersei_memory::session_keys::snapshot(session_id, number);
-                    match memory.load(&key).await {
-                        Ok(messages) if !messages.is_empty() => {
-                            snapshots.push(crate::CompactionSnapshot {
-                                number,
-                                messages,
-                                memory_key: Some(key),
-                            })
-                        }
-                        _ => break,
+    if agent.messages.lock().is_empty()
+        && let (Some(memory), Some(session_id)) = (&agent.memory, &agent.session_id)
+    {
+        let history = memory.load(session_id).await?;
+        if !history.is_empty() {
+            let count = history.len();
+            // The raw history is stored next to the session; an older
+            // session without one starts from the active history.
+            let raw = memory
+                .load(&cersei_memory::session_keys::raw_history(session_id))
+                .await
+                .ok()
+                .filter(|r| !r.is_empty())
+                .unwrap_or_else(|| history.clone());
+            *agent.raw_history.lock() = raw;
+            // Pre-compaction snapshots, numbered from 1 without gaps; later
+            // compactions continue the numbering instead of overwriting.
+            let mut snapshots = Vec::new();
+            loop {
+                let number = snapshots.len() + 1;
+                let key = cersei_memory::session_keys::snapshot(session_id, number);
+                match memory.load(&key).await {
+                    Ok(messages) if !messages.is_empty() => {
+                        snapshots.push(crate::CompactionSnapshot {
+                            number,
+                            messages,
+                            memory_key: Some(key),
+                        })
                     }
+                    _ => break,
                 }
-                agent.compaction_state.lock().applied = snapshots.len();
-                *agent.snapshots.lock() = snapshots;
-                agent.messages.lock().extend(history);
-                agent
-                    .context
-                    .lock()
-                    .invalidate("the session was restored from storage");
-                let _ = event_tx
-                    .send(AgentEvent::SessionLoaded {
-                        session_id: session_id.clone(),
-                        message_count: count,
-                    })
-                    .await;
-                agent.emit(AgentEvent::SessionLoaded {
+            }
+            agent.compaction_state.lock().applied = snapshots.len();
+            *agent.snapshots.lock() = snapshots;
+            agent.messages.lock().extend(history);
+            agent
+                .context
+                .lock()
+                .invalidate("the session was restored from storage");
+            let _ = event_tx
+                .send(AgentEvent::SessionLoaded {
                     session_id: session_id.clone(),
                     message_count: count,
-                });
-                // The session's skills: checked against their sources before
-                // anything of them is used again.
-                for ev in agent.restore_skills() {
-                    send(agent, Some(&event_tx), ev).await;
-                }
-                agent.readd_missing_skills();
+                })
+                .await;
+            agent.emit(AgentEvent::SessionLoaded {
+                session_id: session_id.clone(),
+                message_count: count,
+            });
+            // The session's skills: checked against their sources before
+            // anything of them is used again.
+            for ev in agent.restore_skills() {
+                send(agent, Some(&event_tx), ev).await;
             }
+            agent.readd_missing_skills();
         }
     } // end session load guard
 
@@ -835,14 +835,14 @@ async fn run_loop(
                         })
                     });
                     match saved {
-                    Some(r) => format!(
-                        "[tool result removed from the active context to save space ({len} chars);                          full output: {}]",
-                        r.hint()
-                    ),
-                    None => format!(
-                        "[tool result removed from the active context to save space ({len} chars);                          it could not be saved — run the tool again if you need it]"
-                    ),
-                }
+                        Some(r) => format!(
+                            "[tool result removed from the active context to save space ({len} chars);                          full output: {}]",
+                            r.hint()
+                        ),
+                        None => format!(
+                            "[tool result removed from the active context to save space ({len} chars);                          it could not be saved — run the tool again if you need it]"
+                        ),
+                    }
                 },
             )
         };
@@ -1263,18 +1263,18 @@ async fn run_loop(
             }
             // A final answer ends the run. Only the explicit benchmark mode
             // may ask for a verification first, a bounded number of times.
-            if agent.benchmark_mode {
-                if let Some((message, status)) = benchmark_nudge(
+            if agent.benchmark_mode
+                && let Some((message, status)) = benchmark_nudge(
                     prompt,
                     &tool_calls,
                     turn,
                     &mut completion_verified,
                     &mut benchmark_retries,
-                ) {
-                    push_message(agent, Message::user(message));
-                    send(agent, Some(&event_tx), AgentEvent::Status(status)).await;
-                    continue;
-                }
+                )
+            {
+                push_message(agent, Message::user(message));
+                send(agent, Some(&event_tx), AgentEvent::Status(status)).await;
+                continue;
             }
             termination = crate::Termination::Completed;
             break;
@@ -1585,11 +1585,12 @@ async fn run_loop(
                 };
                 // A file counts as read only when the model saw its exact
                 // text: a skeleton or a summary is not enough to edit it.
-                if (tool_name == "Read" || tool_name == "read") && !result.is_error && !partial_view
+                if (tool_name == "Read" || tool_name == "read")
+                    && !result.is_error
+                    && !partial_view
+                    && let Some(path) = tool_input.get("file_path").and_then(|v| v.as_str())
                 {
-                    if let Some(path) = tool_input.get("file_path").and_then(|v| v.as_str()) {
-                        files_read.insert(resolve_path(&tool_ctx.working_dir, path));
-                    }
+                    files_read.insert(resolve_path(&tool_ctx.working_dir, path));
                 }
                 let capped_content = report.render(&tool_name, duration, Some(&context_text));
                 let full_text = report.render(&tool_name, duration, None);
@@ -1844,7 +1845,7 @@ async fn run_compaction(
     force: bool,
     tx: Option<&mpsc::Sender<AgentEvent>>,
 ) -> crate::compact::CompactionOutcome {
-    use crate::compact::{compact_history, CompactionOutcome, CompactionPlan};
+    use crate::compact::{CompactionOutcome, CompactionPlan, compact_history};
 
     let messages = agent.messages.lock().clone();
     let version = agent.context.lock().version();
@@ -1935,19 +1936,19 @@ async fn run_compaction(
             // Active skills whose text was summarised away come back whole,
             // after the summary (never twice: only the missing ones).
             let readd = agent.skills_to_readd(&new);
-            if !readd.is_empty() {
-                if let Some(first) = new.first_mut() {
-                    let mut blocks = first.content_blocks();
-                    let at = blocks
-                        .iter()
-                        .position(|b| !matches!(b, ContentBlock::Text { .. }))
-                        .unwrap_or(blocks.len())
-                        .min(1);
-                    for (i, text) in readd.into_iter().enumerate() {
-                        blocks.insert(at + i, ContentBlock::Text { text });
-                    }
-                    first.content = MessageContent::Blocks(blocks);
+            if !readd.is_empty()
+                && let Some(first) = new.first_mut()
+            {
+                let mut blocks = first.content_blocks();
+                let at = blocks
+                    .iter()
+                    .position(|b| !matches!(b, ContentBlock::Text { .. }))
+                    .unwrap_or(blocks.len())
+                    .min(1);
+                for (i, text) in readd.into_iter().enumerate() {
+                    blocks.insert(at + i, ContentBlock::Text { text });
                 }
+                first.content = MessageContent::Blocks(blocks);
             }
             let number = {
                 let mut st = agent.compaction_state.lock();
@@ -2692,13 +2693,15 @@ mod guard_tests {
     fn creating_a_new_file_needs_no_prior_read() {
         let tmp = tempfile::tempdir().unwrap();
         let p = tmp.path().join("brand_new.rs");
-        assert!(read_before_edit_block(
-            "Write",
-            &json!({ "file_path": p.to_str().unwrap() }),
-            &seen(tmp.path(), &[]),
-            tmp.path()
-        )
-        .is_none());
+        assert!(
+            read_before_edit_block(
+                "Write",
+                &json!({ "file_path": p.to_str().unwrap() }),
+                &seen(tmp.path(), &[]),
+                tmp.path()
+            )
+            .is_none()
+        );
     }
 
     #[test]
@@ -2707,13 +2710,15 @@ mod guard_tests {
         let f = tmp.path().join("a.rs");
         std::fs::write(&f, "x\n").unwrap();
         for tool in ["Read", "Grep", "Glob", "Bash", "CodeSearch"] {
-            assert!(read_before_edit_block(
-                tool,
-                &json!({ "file_path": f.to_str().unwrap() }),
-                &seen(tmp.path(), &[]),
-                tmp.path()
-            )
-            .is_none());
+            assert!(
+                read_before_edit_block(
+                    tool,
+                    &json!({ "file_path": f.to_str().unwrap() }),
+                    &seen(tmp.path(), &[]),
+                    tmp.path()
+                )
+                .is_none()
+            );
         }
     }
 
@@ -2855,13 +2860,15 @@ mod guard_tests {
         let ps = p.to_str().unwrap().to_string();
 
         // Turn 1: creating it is allowed.
-        assert!(read_before_edit_block(
-            "Write",
-            &json!({ "file_path": ps }),
-            &seen(tmp.path(), &[]),
-            tmp.path()
-        )
-        .is_none());
+        assert!(
+            read_before_edit_block(
+                "Write",
+                &json!({ "file_path": ps }),
+                &seen(tmp.path(), &[]),
+                tmp.path()
+            )
+            .is_none()
+        );
         std::fs::write(&p, "v1\n").unwrap();
 
         // The runner records write targets the same way it records reads.

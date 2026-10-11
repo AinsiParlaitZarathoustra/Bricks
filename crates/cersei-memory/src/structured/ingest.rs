@@ -19,10 +19,10 @@
 //! Embedding is separate and idempotent: records whose `embed_model` is not
 //! the current model are embedded (again) by [`StructuredMemory::process`].
 
-use super::extract::{bounded, validate, ExtractError, ExtractionRequest, Validated};
+use super::extract::{ExtractError, ExtractionRequest, Validated, bounded, validate};
 use super::index::Item;
 use super::model::*;
-use super::store::{alias_key, as_i64, as_str, as_strings, q, P, W};
+use super::store::{P, W, alias_key, as_i64, as_str, as_strings, q};
 use super::{MemoryError, MemoryResult, StructuredMemory};
 use std::collections::{HashMap, HashSet};
 use tokio_util::sync::CancellationToken;

@@ -12,9 +12,9 @@
 //! again when a session is restored. Nothing is ever cut: an activation
 //! that does not fit is refused.
 
-use crate::events::AgentEvent;
 use crate::Agent;
-use bricks_skills::{render_activation, Activation, Origin, StoredActivation, StoredLedger};
+use crate::events::AgentEvent;
+use bricks_skills::{Activation, Origin, StoredActivation, StoredLedger, render_activation};
 use cersei_tools::skill_tool::SkillSession;
 use cersei_types::*;
 use std::collections::HashSet;
@@ -168,7 +168,7 @@ impl Agent {
             Err(e) => {
                 return vec![AgentEvent::Status(format!(
                     "The session's skills could not be read ({e}); none is active."
-                ))]
+                ))];
             }
         };
         let mut events = Vec::new();

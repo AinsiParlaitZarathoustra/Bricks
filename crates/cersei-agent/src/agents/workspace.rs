@@ -82,7 +82,10 @@ impl std::fmt::Display for WsError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NotARepo(d) => write!(f, "worktree isolation needs a git repository ({d})"),
-            Self::NoHead => write!(f, "worktree isolation needs a first commit (HEAD does not exist)"),
+            Self::NoHead => write!(
+                f,
+                "worktree isolation needs a first commit (HEAD does not exist)"
+            ),
             Self::Unsupported(m) => write!(f, "worktree isolation not supported here: {m}"),
             Self::Collision(m) => write!(f, "already exists, not overwritten: {m}"),
             Self::Inconsistent(m) => write!(f, "inconsistent snapshot: {m}"),
@@ -94,7 +97,11 @@ impl std::fmt::Display for WsError {
             Self::Conflict { files, detail } => write!(
                 f,
                 "WorktreeConflict: the change no longer applies to {} (nothing was written): {detail}",
-                if files.is_empty() { "the destination".to_string() } else { files.join(", ") }
+                if files.is_empty() {
+                    "the destination".to_string()
+                } else {
+                    files.join(", ")
+                }
             ),
         }
     }
@@ -324,10 +331,10 @@ impl WorkspaceManager {
         for (p, size) in untracked {
             h.update(p.as_bytes());
             h.update(size.to_le_bytes());
-            if let Ok(m) = std::fs::metadata(root.join(p)).and_then(|m| m.modified()) {
-                if let Ok(d) = m.duration_since(std::time::UNIX_EPOCH) {
-                    h.update(d.as_nanos().to_le_bytes());
-                }
+            if let Ok(m) = std::fs::metadata(root.join(p)).and_then(|m| m.modified())
+                && let Ok(d) = m.duration_since(std::time::UNIX_EPOCH)
+            {
+                h.update(d.as_nanos().to_le_bytes());
             }
         }
         h.finalize()

@@ -8,8 +8,8 @@
 
 use super::*;
 use bricks_semantic::{
-    compiler, render, CodeQuery, ContextPolicy, Detail, Intent, MatchMode, Requester,
-    SemanticConfig, SemanticEngine, SemanticRegistry, Target,
+    CodeQuery, ContextPolicy, Detail, Intent, MatchMode, Requester, SemanticConfig, SemanticEngine,
+    SemanticRegistry, Target, compiler, render,
 };
 use serde::Deserialize;
 
@@ -146,7 +146,7 @@ impl Tool for CodeScoutTool {
             Some(other) => {
                 return ToolResult::error(format!(
                     "unknown context `{other}`: use auto, none, lines, block, function or type"
-                ))
+                ));
             }
         };
         let base = |text: String, intent: Intent, target: Option<Target>| {

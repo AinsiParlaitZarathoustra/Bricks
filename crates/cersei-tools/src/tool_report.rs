@@ -265,9 +265,10 @@ mod tests {
     fn empty_success_timeouts_and_file_tools() {
         let mut ok = ToolReport::new(ToolStatus::Success, streams("", ""));
         ok.exit_code = Some(0);
-        assert!(ok
-            .render("Bash", Duration::from_millis(10), None)
-            .ends_with("(Commande exécutée avec succès sans sortie)"));
+        assert!(
+            ok.render("Bash", Duration::from_millis(10), None)
+                .ends_with("(Commande exécutée avec succès sans sortie)")
+        );
 
         let mut t = ToolReport::new(ToolStatus::TimedOut, streams("partial", ""));
         t.timeout = Some(Duration::from_secs(120));
@@ -292,16 +293,18 @@ mod tests {
     #[test]
     fn combined_output_is_announced_and_running_tasks_are_not_success() {
         let c = ToolReport::new(ToolStatus::Success, ToolBody::Combined("both".into()));
-        assert!(c
-            .render_output()
-            .starts_with("--- sortie (stdout et stderr combinés) ---"));
+        assert!(
+            c.render_output()
+                .starts_with("--- sortie (stdout et stderr combinés) ---")
+        );
         let r = ToolReport::new(
             ToolStatus::Running,
             ToolBody::Text("task bg-1 started".into()),
         );
-        assert!(r
-            .render("Bash", Duration::from_millis(50), None)
-            .starts_with("… [Bash] En cours"));
+        assert!(
+            r.render("Bash", Duration::from_millis(50), None)
+                .starts_with("… [Bash] En cours")
+        );
         assert!(!ToolStatus::Running.is_error());
     }
 }

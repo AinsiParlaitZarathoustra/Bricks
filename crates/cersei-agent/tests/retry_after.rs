@@ -3,8 +3,8 @@
 //! local backoff, the notice says the same duration, five retries at most,
 //! cancellation during a wait, definitive errors, and the stream boundary.
 
-use cersei_agent::events::AgentEvent;
 use cersei_agent::Agent;
+use cersei_agent::events::AgentEvent;
 use cersei_provider::{CompletionRequest, CompletionStream, Provider};
 use cersei_types::{CerseiError, StreamEvent};
 use std::collections::VecDeque;
@@ -110,10 +110,10 @@ fn run_with(steps: Vec<Step>) -> Run {
         .model("spy")
         .cancel_token(cancel.clone())
         .on_event(move |e| {
-            if let AgentEvent::Status(s) = e {
-                if s.contains("Retrying") {
-                    cb.lock().unwrap().push(s.clone());
-                }
+            if let AgentEvent::Status(s) = e
+                && s.contains("Retrying")
+            {
+                cb.lock().unwrap().push(s.clone());
             }
         })
         .build()

@@ -6,7 +6,7 @@ use serde_json::Value;
 use std::time::Duration;
 
 mod media;
-pub use media::{detect_mime, MediaKind};
+pub use media::{MediaKind, detect_mime};
 pub mod duration;
 pub mod http;
 pub mod tokens;

@@ -134,7 +134,9 @@ async fn main() -> anyhow::Result<()> {
     //     .run_with("Hello from Ollama!")
     //     .await?;
 
-    println!("(Add a provider entry to ~/.bricks/providers.toml and uncomment the section above to test with a local LLM)");
+    println!(
+        "(Add a provider entry to ~/.bricks/providers.toml and uncomment the section above to test with a local LLM)"
+    );
 
     Ok(())
 }

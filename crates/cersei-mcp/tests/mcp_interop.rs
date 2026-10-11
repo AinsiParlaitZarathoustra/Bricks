@@ -10,11 +10,11 @@ use rmcp::model::{
     RequestMetaObject,
 };
 use rmcp::service::RequestContext;
-use rmcp::{tool, tool_handler, tool_router, Json, Peer, RoleServer, ServerHandler, ServiceExt};
+use rmcp::{Json, Peer, RoleServer, ServerHandler, ServiceExt, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 #[derive(Deserialize, JsonSchema)]

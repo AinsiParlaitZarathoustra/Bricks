@@ -150,16 +150,16 @@ fn expand_includes(
             }
 
             // Size check
-            if let Ok(meta) = std::fs::metadata(&expanded_path) {
-                if meta.len() > MAX_INCLUDE_SIZE as u64 {
-                    result.push_str(&format!(
-                        "<!-- @include too large: {} ({} bytes, max {}) -->\n",
-                        include_path,
-                        meta.len(),
-                        MAX_INCLUDE_SIZE
-                    ));
-                    continue;
-                }
+            if let Ok(meta) = std::fs::metadata(&expanded_path)
+                && meta.len() > MAX_INCLUDE_SIZE as u64
+            {
+                result.push_str(&format!(
+                    "<!-- @include too large: {} ({} bytes, max {}) -->\n",
+                    include_path,
+                    meta.len(),
+                    MAX_INCLUDE_SIZE
+                ));
+                continue;
             }
 
             // Load and recurse

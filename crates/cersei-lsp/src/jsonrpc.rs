@@ -106,10 +106,10 @@ pub async fn read_message<R: tokio::io::AsyncRead + Unpin>(
             break; // End of headers
         }
 
-        if let Some((name, value)) = trimmed.split_once(':') {
-            if name.trim().eq_ignore_ascii_case("content-length") {
-                content_length = value.trim().parse().ok();
-            }
+        if let Some((name, value)) = trimmed.split_once(':')
+            && name.trim().eq_ignore_ascii_case("content-length")
+        {
+            content_length = value.trim().parse().ok();
         }
     }
 

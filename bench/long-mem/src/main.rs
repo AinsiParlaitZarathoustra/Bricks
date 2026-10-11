@@ -25,7 +25,7 @@ mod query_expand;
 mod report;
 mod runner;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
 use cersei_embeddings::{EmbeddingError, EmbeddingProvider, GeminiEmbeddings, OpenAiEmbeddings};
 use cersei_provider::{

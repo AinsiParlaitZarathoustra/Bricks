@@ -7,14 +7,14 @@
 //! (never a delegation tool), it is cancelled with the parent's run, and a
 //! child stopped at a limit is reported as incomplete.
 
-use crate::delegate::{ToolsetFactory, MAX_DEPTH};
-use crate::subagent;
 use crate::Agent;
+use crate::delegate::{MAX_DEPTH, ToolsetFactory};
+use crate::subagent;
 use async_trait::async_trait;
 use cersei_provider::Provider;
 use cersei_tools::{PermissionLevel, Tool, ToolContext, ToolResult};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 
 /// The AgentTool — spawns independent sub-agents.
@@ -90,8 +90,7 @@ struct AgentInput {
     model: Option<String>,
 }
 
-const CHILD_SYSTEM_PROMPT: &str =
-    "You are a sub-agent working on one task given by another agent. \
+const CHILD_SYSTEM_PROMPT: &str = "You are a sub-agent working on one task given by another agent. \
 Do that task, within its scope, then reply with your result: what you did, what you found, \
 and anything left undone. Stop as soon as the task is done; do not widen it.";
 

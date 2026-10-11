@@ -166,7 +166,10 @@ async fn main() {
             let (p50, p95) = (pct(v, 0.5), pct(v, 0.95));
             if i == 0 {
                 println!("| {n} | {facts} | {ingest:.2} | {reopen:.0} | {name} | {p50} | {p95} |");
-                println!("| | | | | (items per recall: {:.1}; expansions stopped early: {stopped}) | | |", items as f64 / 200.0);
+                println!(
+                    "| | | | | (items per recall: {:.1}; expansions stopped early: {stopped}) | | |",
+                    items as f64 / 200.0
+                );
             } else {
                 println!("| | | | | {name} | {p50} | {p95} |");
             }

@@ -80,10 +80,10 @@ struct Cli {
 }
 
 fn resolve_task(cli: &Cli) -> anyhow::Result<String> {
-    if let Some(t) = cli.prompt.clone().or_else(|| cli.task.clone()) {
-        if !t.trim().is_empty() {
-            return Ok(t);
-        }
+    if let Some(t) = cli.prompt.clone().or_else(|| cli.task.clone())
+        && !t.trim().is_empty()
+    {
+        return Ok(t);
     }
     // fall back to stdin
     let mut buf = String::new();

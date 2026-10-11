@@ -2,7 +2,7 @@
 //! outputs) belong to it: they are not listed as sessions and are deleted
 //! with it.
 
-use cersei_memory::{session_keys, JsonlMemory, Memory};
+use cersei_memory::{JsonlMemory, Memory, session_keys};
 use cersei_types::Message;
 
 async fn put(m: &JsonlMemory, key: &str) {

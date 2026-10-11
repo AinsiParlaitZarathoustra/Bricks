@@ -110,10 +110,12 @@ impl Termination {
             Termination::OutputTruncated { continuations } => format!(
                 "the answer was cut by the output-token limit ({continuations} continuation(s) allowed)"
             ),
-            Termination::NoProgress { repeats } => format!(
-                "stopped: the same tool calls returned the same results {repeats} times"
-            ),
-            Termination::ContentFiltered => "the provider stopped the answer (content filter)".into(),
+            Termination::NoProgress { repeats } => {
+                format!("stopped: the same tool calls returned the same results {repeats} times")
+            }
+            Termination::ContentFiltered => {
+                "the provider stopped the answer (content filter)".into()
+            }
             Termination::EmptyResponse => "the model returned an empty response".into(),
         }
     }
@@ -482,16 +484,16 @@ impl Agent {
 
     /// An owned emitter, for callbacks that outlive a borrow of the agent
     /// (tool progress).
-    pub(crate) fn emit_handle(&self) -> impl Fn(AgentEvent) + Send + Sync + 'static {
+    pub(crate) fn emit_handle(&self) -> impl Fn(AgentEvent) + Send + Sync + 'static + use<> {
         let filter = self.event_filter.clone();
         let handler = self.event_handler.clone();
         let broadcast = self.broadcast_tx.clone();
         let reporters = self.reporters.clone();
         move |event: AgentEvent| {
-            if let Some(filter) = &filter {
-                if !filter(&event) {
-                    return;
-                }
+            if let Some(filter) = &filter
+                && !filter(&event)
+            {
+                return;
             }
             if let Some(handler) = &handler {
                 handler(&event);

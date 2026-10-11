@@ -140,12 +140,12 @@ fn norm(s: &str) -> String {
 
 /// Plural `s`/`x` of longer alphabetic words (both languages).
 fn stem(t: &str) -> String {
-    if t.chars().count() > 4 && t.chars().all(|c| c.is_alphabetic()) {
-        if let Some(s) = t.strip_suffix('s') {
-            if !s.ends_with('s') {
-                return s.to_string();
-            }
-        }
+    if t.chars().count() > 4
+        && t.chars().all(|c| c.is_alphabetic())
+        && let Some(s) = t.strip_suffix('s')
+        && !s.ends_with('s')
+    {
+        return s.to_string();
     }
     t.to_string()
 }

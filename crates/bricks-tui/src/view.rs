@@ -6,11 +6,11 @@ use crate::composer::Composer;
 use crate::markdown;
 use crate::state::{App, CallStatus, Cell, ToolCall};
 use cersei_agent::control::{DecidedBy, Decision, RunOutcome};
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
-use ratatui::Frame;
 use std::path::Path;
 
 /// Hits listed in the transcript; the rest are counted.
@@ -515,7 +515,7 @@ pub fn draw_live(f: &mut Frame, app: &App, composer: &Composer, o: &Overlay) {
         .min(rows.len().saturating_sub(shown_rows));
     let chips = !composer.attachments().is_empty();
     let composer_h = shown_rows + usize::from(chips) + 1; // + separator
-                                                          // The totals line, then the status line.
+    // The totals line, then the status line.
     let status_h = 2usize;
     let popup_h = o
         .popup

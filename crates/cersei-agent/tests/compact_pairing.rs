@@ -18,7 +18,7 @@
 //! entry points rather than a copy of the formula.
 
 use cersei_agent::compact::{
-    find_orphaned_tool_results, pair_aware_split, snip_compact, KEEP_RECENT_MESSAGES,
+    KEEP_RECENT_MESSAGES, find_orphaned_tool_results, pair_aware_split, snip_compact,
 };
 use cersei_types::*;
 

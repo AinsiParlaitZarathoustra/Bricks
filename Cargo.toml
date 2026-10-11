@@ -30,7 +30,7 @@ members = [
 
 [workspace.package]
 version = "0.6.0"
-edition = "2021"
+edition = "2024"
 authors = ["Adib Mohsin"]
 license = "MPL-2.0"
 description = "A modular Rust SDK for building coding agents"

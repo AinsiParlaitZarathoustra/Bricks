@@ -25,7 +25,7 @@ use cersei_types::*;
 use std::path::Path;
 
 // Re-export migration utilities
-pub use crate::graph_migrate::{self, effective_confidence, VersionCheck, CURRENT_SCHEMA_VERSION};
+pub use crate::graph_migrate::{self, CURRENT_SCHEMA_VERSION, VersionCheck, effective_confidence};
 
 /// Graph-backed memory store.
 pub struct GraphMemory {
@@ -101,7 +101,8 @@ impl GraphMemory {
             } => {
                 tracing::warn!(
                     "Graph schema v{} is newer than code v{}. Forward-compatible reads will be used.",
-                    graph_version, code_version
+                    graph_version,
+                    code_version
                 );
             }
         }

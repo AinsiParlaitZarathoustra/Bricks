@@ -70,7 +70,7 @@ impl Tool for ApplyPatchTool {
             Err(e) => {
                 return Some(crate::preview::ChangePreview::refused(format!(
                     "The patch would not be applied: {e}"
-                )))
+                )));
             }
         };
         let files = actions
@@ -180,7 +180,7 @@ fn header_path(rest: &str) -> std::result::Result<Option<String>, String> {
                         return Err(format!(
                             "unsupported escape `\\{}` in a quoted path",
                             other.unwrap_or(' ')
-                        ))
+                        ));
                     }
                 },
                 Some(c) => {
@@ -266,15 +266,15 @@ fn parse_patch(patch: &str) -> std::result::Result<Vec<FilePatch>, String> {
                 && new.as_deref().is_some_and(|n| n.starts_with("b/"));
             let one_sided = old.is_none() || new.is_none();
             if git_header || both_git || one_sided {
-                if let Some(o) = old.as_mut() {
-                    if let Some(s) = o.strip_prefix("a/") {
-                        *o = s.to_string();
-                    }
+                if let Some(o) = old.as_mut()
+                    && let Some(s) = o.strip_prefix("a/")
+                {
+                    *o = s.to_string();
                 }
-                if let Some(n) = new.as_mut() {
-                    if let Some(s) = n.strip_prefix("b/") {
-                        *n = s.to_string();
-                    }
+                if let Some(n) = new.as_mut()
+                    && let Some(s) = n.strip_prefix("b/")
+                {
+                    *n = s.to_string();
                 }
             }
             if old.is_none() && new.is_none() {
@@ -330,7 +330,7 @@ fn parse_patch(patch: &str) -> std::result::Result<Vec<FilePatch>, String> {
                              found {seen_old} / {seen_new})",
                             hunk.header,
                             i + 1
-                        ))
+                        ));
                     }
                 };
                 match kind {
@@ -417,7 +417,7 @@ fn resolve(root: &Path, rel: &str) -> std::result::Result<PathBuf, String> {
                 return Err(format!(
                     "`{rel}`: goes through a symbolic link ({}), which is refused",
                     cur.display()
-                ))
+                ));
             }
             Ok(_) => {
                 let canon = std::fs::canonicalize(&cur).map_err(|e| format!("`{rel}`: {e}"))?;

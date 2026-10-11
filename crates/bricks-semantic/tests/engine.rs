@@ -6,9 +6,9 @@ mod common;
 use bricks_semantic::*;
 use cersei_lsp::mock::MockConfig;
 use common::*;
-use serde_json::{json, Value};
-use std::sync::atomic::Ordering;
+use serde_json::{Value, json};
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio_util::sync::CancellationToken;
 
@@ -64,10 +64,11 @@ async fn text_search_is_lexical_exact_and_complete() {
     q.limits.max_matches = Some(2);
     let r = e.query(q, &req(d.path())).await;
     assert_eq!(r.status, ResultStatus::Partial);
-    assert!(r
-        .omissions
-        .iter()
-        .any(|o| matches!(o, Omission::LimitReached { limit, .. } if limit == "max_matches")));
+    assert!(
+        r.omissions
+            .iter()
+            .any(|o| matches!(o, Omission::LimitReached { limit, .. } if limit == "max_matches"))
+    );
     // Exclusions and extensions.
     let mut q = CodeQuery::text("run").intent(Intent::TextSearch);
     q.scope.extensions = vec!["md".into()];
@@ -447,10 +448,11 @@ async fn scope_limits_results_and_cache_does_not_leak() {
         )
         .await;
     assert!(r.items.is_empty());
-    assert!(r
-        .omissions
-        .iter()
-        .any(|o| matches!(o, Omission::ItemsOmitted { reason, .. } if reason.contains("scope"))));
+    assert!(
+        r.omissions.iter().any(
+            |o| matches!(o, Omission::ItemsOmitted { reason, .. } if reason.contains("scope"))
+        )
+    );
     // The same query from the wider client is not served from that answer.
     let r = e
         .query(
@@ -540,11 +542,12 @@ async fn timeout_cancellation_and_crash_restart() {
     };
     // Timeout → the syntactic fallback, said so.
     let r = e.query(q(), &req(&root)).await;
-    assert!(r
-        .plan
-        .steps
-        .iter()
-        .any(|s| s.backend == Backend::Lsp && s.outcome == StepOutcome::Failed));
+    assert!(
+        r.plan
+            .steps
+            .iter()
+            .any(|s| s.backend == Backend::Lsp && s.outcome == StepOutcome::Failed)
+    );
     assert!(
         r.plan.fallbacks[0].contains("timed out"),
         "{:?}",
@@ -599,10 +602,11 @@ async fn understand_combines_scope_hover_and_definition_within_budget() {
     assert_eq!(r.status, ResultStatus::Complete, "{:?}", r.plan);
     assert_eq!(r.items[0].relation, Relation::Context);
     assert_eq!(r.items[0].documentation.as_deref(), Some("fn run()"));
-    assert!(r
-        .items
-        .iter()
-        .any(|i| i.relation == Relation::Definition && i.path == "src/beta.rs"));
+    assert!(
+        r.items
+            .iter()
+            .any(|i| i.relation == Relation::Definition && i.path == "src/beta.rs")
+    );
     let text = render::render_response(&r);
     assert!(text.contains("src/beta.rs:2:8"), "{text}");
     // A tiny budget: fewer items, said so, the estimate under the limit.
@@ -680,10 +684,12 @@ async fn workspace_and_document_symbols() {
         .await;
     assert_eq!(r.items.len(), 2, "homonyms still both listed");
     assert!(r.items.iter().all(|i| i.certainty == Certainty::Confirmed));
-    assert!(r.items[0]
-        .provenance
-        .iter()
-        .any(|p| p.method == "workspace/symbol"));
+    assert!(
+        r.items[0]
+            .provenance
+            .iter()
+            .any(|p| p.method == "workspace/symbol")
+    );
     assert_eq!(r.status, ResultStatus::Complete);
     assert!(r.ambiguity.is_some());
     // Without a server: the syntax outline, said so.
@@ -725,11 +731,12 @@ async fn answers_while_the_server_indexes_are_partial() {
     e.notify_any_change();
     let r = e.query(cfg_q, &req(d.path())).await;
     assert_eq!(r.status, ResultStatus::Partial, "{:?}", r.plan);
-    assert!(r
-        .plan
-        .fallbacks
-        .iter()
-        .any(|f| f.contains("still indexing (Indexing)")));
+    assert!(
+        r.plan
+            .fallbacks
+            .iter()
+            .any(|f| f.contains("still indexing (Indexing)"))
+    );
     // Indexing ends while a query waits: it proceeds, complete.
     let e2 = Arc::clone(&e);
     let root = canonical(&d);
@@ -742,11 +749,12 @@ async fn answers_while_the_server_indexes_are_partial() {
     .await;
     let r = waiting.await.unwrap();
     assert_eq!(r.status, ResultStatus::Complete, "{:?}", r.plan);
-    assert!(r
-        .plan
-        .steps
-        .iter()
-        .any(|s| s.action == "wait for indexing" && s.outcome == StepOutcome::Ok));
+    assert!(
+        r.plan
+            .steps
+            .iter()
+            .any(|s| s.action == "wait for indexing" && s.outcome == StepOutcome::Ok)
+    );
     // rust-analyzer's own status notification counts too.
     srv.notify(
         "experimental/serverStatus",

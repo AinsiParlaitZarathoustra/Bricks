@@ -9,7 +9,7 @@ use cersei_provider::{
 };
 use cersei_types::*;
 use common::*;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 const KEY: &str = "sk-test-key-123456";
 
@@ -864,11 +864,13 @@ async fn unknown_profile_and_empty_profile_lists_never_send_a_request() {
     assert!(mock.requests().is_empty(), "nothing was sent");
 
     // Builder-level selection fails at build time, not mid-run.
-    assert!(model(&reg, "mock/think")
-        .provider()
-        .reasoning_profile("mythic")
-        .build()
-        .is_err());
+    assert!(
+        model(&reg, "mock/think")
+            .provider()
+            .reasoning_profile("mythic")
+            .build()
+            .is_err()
+    );
     let built = model(&reg, "mock/think")
         .provider()
         .env(|_| Some(KEY.to_string()))

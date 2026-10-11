@@ -264,12 +264,11 @@ impl StreamableHttpClient for BoundedHttpClient {
             if let Some(r) = legacy_discover_response(&message, session_attached, status, &text) {
                 return Ok(r);
             }
-            if json {
-                if let Ok(m @ ServerJsonRpcMessage::Error(_)) =
+            if json
+                && let Ok(m @ ServerJsonRpcMessage::Error(_)) =
                     serde_json::from_str::<ServerJsonRpcMessage>(&text)
-                {
-                    return Ok(StreamableHttpPostResponse::Json(m, new_session));
-                }
+            {
+                return Ok(StreamableHttpPostResponse::Json(m, new_session));
             }
             let preview: String = text.chars().take(200).collect();
             return Err(StreamableHttpError::UnexpectedServerResponse(Cow::Owned(

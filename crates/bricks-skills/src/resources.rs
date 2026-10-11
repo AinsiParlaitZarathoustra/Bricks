@@ -117,7 +117,7 @@ pub fn resolve(dir: &Path, rel: &str) -> Result<PathBuf, ResourceError> {
                     "`..` and root components are refused: the path must stay in the skill's \
                      directory"
                         .into(),
-                ))
+                ));
             }
         }
     }

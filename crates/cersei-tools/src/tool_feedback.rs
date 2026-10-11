@@ -349,10 +349,10 @@ pub fn closest<'a>(target: &str, candidates: &[&'a str]) -> Option<&'a str> {
     }
 
     let tn = normalize(target);
-    if !tn.is_empty() {
-        if let Some(c) = candidates.iter().find(|c| normalize(c) == tn) {
-            return Some(c);
-        }
+    if !tn.is_empty()
+        && let Some(c) = candidates.iter().find(|c| normalize(c) == tn)
+    {
+        return Some(c);
     }
 
     if let Some(c) = candidates.iter().find(|c| {
@@ -447,14 +447,13 @@ fn type_of(p: &Value) -> String {
     }
     match p.get("type") {
         Some(Value::String(s)) => {
-            if s == "array" {
-                if let Some(it) = p
+            if s == "array"
+                && let Some(it) = p
                     .get("items")
                     .and_then(|i| i.get("type"))
                     .and_then(Value::as_str)
-                {
-                    return format!("array of {it}");
-                }
+            {
+                return format!("array of {it}");
             }
             s.clone()
         }
@@ -520,23 +519,21 @@ fn example_call(
         .map(|(n, _)| n.as_str())
         .collect();
 
-    if !wire_failure {
-        if let Some(obj) = sent.as_object() {
-            for (k, v) in obj {
-                if k.starts_with("__") {
-                    continue;
-                }
-                let target = if known.contains(&k.as_str()) {
-                    Some(k.clone())
-                } else {
-                    renames
-                        .iter()
-                        .find(|(from, _)| from == k)
-                        .map(|(_, to)| to.clone())
-                };
-                if let Some(t) = target {
-                    m.insert(t, example_value(v));
-                }
+    if !wire_failure && let Some(obj) = sent.as_object() {
+        for (k, v) in obj {
+            if k.starts_with("__") {
+                continue;
+            }
+            let target = if known.contains(&k.as_str()) {
+                Some(k.clone())
+            } else {
+                renames
+                    .iter()
+                    .find(|(from, _)| from == k)
+                    .map(|(_, to)| to.clone())
+            };
+            if let Some(t) = target {
+                m.insert(t, example_value(v));
             }
         }
     }

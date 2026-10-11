@@ -36,8 +36,7 @@ const PLANNER_SYS: &str = "You are a planning agent. A previous coding attempt f
 trace, propose a few DISTINCT recovery strategies that fix the specific failures. Respond with ONLY a \
 JSON array (no prose, no code fences) of objects: [{\"angle\": \"...\", \"goal\": \"...\"}].";
 
-const PROPOSAL_SYS: &str =
-    "You are a focused coding agent fixing a specific failure. Work only in the \
+const PROPOSAL_SYS: &str = "You are a focused coding agent fixing a specific failure. Work only in the \
 given working directory. Make the task pass.";
 
 /// Builds a fresh toolset for the GeneralAgent (lets callers restrict it — e.g.
@@ -275,7 +274,7 @@ impl AgentRlRunner for CerseiRunner {
                     solution: None,
                     summary: format!("agent build failed: {e}"),
                     artifact_dir: Some(dir),
-                }
+                };
             }
         };
 
@@ -362,10 +361,10 @@ impl SolutionReplayer for SubAgentReplayer {
 /// return that tool's id (the agent solved it via a cached tool).
 fn detect_used_tool(graph: &ExecutionGraph, available: &[RegistryEntry]) -> Option<String> {
     for node in &graph.nodes {
-        if node.kind == NodeKind::ToolCall {
-            if let Some(entry) = available.iter().find(|e| e.name == node.label) {
-                return Some(entry.tool_id.clone());
-            }
+        if node.kind == NodeKind::ToolCall
+            && let Some(entry) = available.iter().find(|e| e.name == node.label)
+        {
+            return Some(entry.tool_id.clone());
         }
     }
     None

@@ -19,7 +19,7 @@
 //! wins; if it is invalid or incompatible, the name fails: there is no
 //! silent fallback to a lower homonym.
 
-use crate::document::{normalize_name, parse_document, SkillDocument, MAX_SKILL_BYTES};
+use crate::document::{MAX_SKILL_BYTES, SkillDocument, normalize_name, parse_document};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::io::Read;
@@ -505,7 +505,7 @@ impl Registry {
         &self.roots[c.root]
     }
 
-    fn group(&self, key: &str) -> impl Iterator<Item = &Candidate> {
+    fn group(&self, key: &str) -> impl Iterator<Item = &Candidate> + use<'_> {
         let key = normalize_name(key);
         self.candidates.iter().filter(move |c| c.key == key)
     }

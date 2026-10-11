@@ -15,7 +15,7 @@ use crate::CompletionRequest;
 use cersei_types::{
     DocumentSource, ImageSource, MediaSource, Result, StopReason, StreamEvent, Usage,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::{BTreeMap, HashMap};
 
 const PROTOCOL: &str = "chat_completions";
@@ -107,7 +107,7 @@ fn push_user(out: &mut Vec<Value>, msg: &Message) -> Result<()> {
                 parts.push(file_part(source, title.as_deref())?)
             }
             ContentBlock::Video { .. } => {
-                return Err(unsupported("chat_completions cannot carry video input"))
+                return Err(unsupported("chat_completions cannot carry video input"));
             }
             _ => {}
         }
@@ -130,7 +130,7 @@ fn image_part(s: &ImageSource) -> Result<Value> {
         _ => {
             return Err(unsupported(
                 "chat_completions carries images only as data or URL",
-            ))
+            ));
         }
     };
     Ok(json!({ "type": "image_url", "image_url": { "url": url } }))
@@ -321,10 +321,10 @@ impl StreamState {
 
         let choice = &json["choices"][0];
         let delta = &choice["delta"];
-        if let Some(reason) = choice["finish_reason"].as_str() {
-            if let Some(sr) = stop_from_finish(reason) {
-                self.final_stop = Some(sr);
-            }
+        if let Some(reason) = choice["finish_reason"].as_str()
+            && let Some(sr) = stop_from_finish(reason)
+        {
+            self.final_stop = Some(sr);
         }
 
         // Reasoning text: `reasoning_content` (common) or `reasoning`.
@@ -560,8 +560,8 @@ pub(crate) fn response_to_events(json: &Value) -> Result<Vec<StreamEvent>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Compat;
     use crate::StreamAccumulator;
+    use crate::config::Compat;
     use cersei_types::ToolDefinition;
 
     fn ctx<'a>(compat: &'a ResolvedCompat, stream: bool) -> BuildCtx<'a> {
@@ -657,10 +657,12 @@ mod tests {
         // No tools -> no tool_choice even when requested.
         let mut r2 = req();
         r2.options.set("tool_choice", "required");
-        assert!(build_body(&ctx(&compat(), true), &r2)
-            .unwrap()
-            .get("tool_choice")
-            .is_none());
+        assert!(
+            build_body(&ctx(&compat(), true), &r2)
+                .unwrap()
+                .get("tool_choice")
+                .is_none()
+        );
     }
 
     #[test]
@@ -955,10 +957,11 @@ mod tests {
         ])
         .unwrap();
         assert_eq!(r.stop_reason, StopReason::ToolUse);
-        assert!(r
-            .message
-            .get_all_text()
-            .contains("dropped 1 unusable tool call"));
+        assert!(
+            r.message
+                .get_all_text()
+                .contains("dropped 1 unusable tool call")
+        );
         assert_eq!(r.message.get_tool_use_blocks().len(), 1);
         // Only unusable calls -> the turn fails loudly.
         let e = run(&[r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"","function":{"name":"x","arguments":"{}"}}]}}]}"#, "[DONE]"]).unwrap_err();

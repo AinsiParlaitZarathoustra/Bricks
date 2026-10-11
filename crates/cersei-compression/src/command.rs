@@ -124,7 +124,7 @@ pub fn analyze(line: &str) -> Analysis {
             return Analysis {
                 pipelines: Vec::new(),
                 ambiguous: Some(why),
-            }
+            };
         }
     };
     let mut analysis = Analysis::default();

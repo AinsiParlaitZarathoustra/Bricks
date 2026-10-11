@@ -153,8 +153,8 @@ impl MemoryManager {
         let mut results = Vec::new();
 
         for meta in metas.iter().take(limit * 2) {
-            if let Some(file) = memdir::load_memory_file(&meta.path) {
-                if file.content.to_lowercase().contains(&query_lower)
+            if let Some(file) = memdir::load_memory_file(&meta.path)
+                && (file.content.to_lowercase().contains(&query_lower)
                     || meta
                         .name
                         .as_deref()
@@ -166,12 +166,11 @@ impl MemoryManager {
                         .as_deref()
                         .unwrap_or("")
                         .to_lowercase()
-                        .contains(&query_lower)
-                {
-                    results.push(file.content);
-                    if results.len() >= limit {
-                        break;
-                    }
+                        .contains(&query_lower))
+            {
+                results.push(file.content);
+                if results.len() >= limit {
+                    break;
                 }
             }
         }

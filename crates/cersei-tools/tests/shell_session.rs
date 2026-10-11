@@ -6,7 +6,7 @@
 #![cfg(unix)]
 
 use cersei_tools::shell::bash::{RunOutcome, RunStatus};
-use cersei_tools::shell::{self, procs, ShellConfig, ShellSessions};
+use cersei_tools::shell::{self, ShellConfig, ShellSessions, procs};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;

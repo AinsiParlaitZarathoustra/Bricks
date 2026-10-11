@@ -327,10 +327,10 @@ fn parse_transcript_content(content: &str) -> Result<Vec<TranscriptEntry>> {
             TranscriptEntry::Unknown => None,
         };
 
-        if let Some(uuid) = uuid {
-            if tombstones.contains(uuid) {
-                continue;
-            }
+        if let Some(uuid) = uuid
+            && tombstones.contains(uuid)
+        {
+            continue;
         }
 
         entries.push(entry);

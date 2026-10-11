@@ -319,7 +319,7 @@ impl Ui {
                     return Vec::new();
                 }
                 KeyCode::Tab | KeyCode::Enter if n > 0 => {
-                    return self.accept_popup(key.code == KeyCode::Enter)
+                    return self.accept_popup(key.code == KeyCode::Enter);
                 }
                 _ => {}
             }

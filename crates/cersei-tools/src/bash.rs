@@ -16,7 +16,7 @@
 
 use super::*;
 use crate::shell::{self, ShellConfig};
-use crate::tool_report::{suggest, ToolBody, ToolReport, ToolStatus};
+use crate::tool_report::{ToolBody, ToolReport, ToolStatus, suggest};
 use serde::Deserialize;
 use std::time::Duration;
 
@@ -64,10 +64,10 @@ fn invoked_names(command: &str) -> Vec<String> {
         let word = segment
             .split_whitespace()
             .find(|w| !w.contains('=') || w.starts_with('='));
-        if let Some(w) = word {
-            if !names.iter().any(|n: &String| n == w) {
-                names.push(w.to_string());
-            }
+        if let Some(w) = word
+            && !names.iter().any(|n: &String| n == w)
+        {
+            names.push(w.to_string());
         }
     }
     names
@@ -606,7 +606,7 @@ impl Tool for BashTaskOutputTool {
             Some(other) => {
                 return ToolResult::error(format!(
                     "Unknown stream {other:?}: use stdout or stderr."
-                ))
+                ));
             }
         };
         let task = match find_task(ctx, &input.task_id) {

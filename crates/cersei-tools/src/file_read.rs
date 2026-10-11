@@ -80,21 +80,23 @@ impl Tool for FileReadTool {
                     "{} is a binary file ({mime}, {} bytes); its content is not shown as text.",
                     input.file_path, window.size
                 ))
-                .with_metadata(serde_json::json!({ "binary": true, "mime": mime, "size": window.size }));
+                .with_metadata(
+                    serde_json::json!({ "binary": true, "mime": mime, "size": window.size }),
+                );
             }
             pfs::FileKind::Utf16 => {
                 return ToolResult::error(format!(
                     "{} is text encoded in UTF-16, which Read does not decode (accepted: UTF-8, with or \
                      without a BOM). Convert it, e.g. `iconv -f UTF-16 -t UTF-8`.",
                     input.file_path
-                ))
+                ));
             }
             pfs::FileKind::OtherEncoding => {
                 return ToolResult::error(format!(
                     "{} is not valid UTF-8 (probably Latin-1 or Windows-1252); Read accepts UTF-8 \
                      text, with or without a BOM. Convert it, e.g. `iconv -f WINDOWS-1252 -t UTF-8`.",
                     input.file_path
-                ))
+                ));
             }
             pfs::FileKind::Text { .. } => {}
         }
@@ -381,10 +383,12 @@ mod tests {
             .flat_map(|c| c.to_le_bytes())
             .collect();
         std::fs::write(&u16, [&[0xFF, 0xFE][..], &text].concat()).unwrap();
-        assert!(read(&u16, serde_json::json!({}))
-            .await
-            .content
-            .contains("UTF-16"));
+        assert!(
+            read(&u16, serde_json::json!({}))
+                .await
+                .content
+                .contains("UTF-16")
+        );
         std::fs::write(&u16, &text).unwrap();
         assert!(
             read(&u16, serde_json::json!({}))
@@ -423,10 +427,12 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let p = tmp.path().join("e.txt");
         std::fs::write(&p, "").unwrap();
-        assert!(read(&p, serde_json::json!({}))
-            .await
-            .content
-            .contains("This file is empty"));
+        assert!(
+            read(&p, serde_json::json!({}))
+                .await
+                .content
+                .contains("This file is empty")
+        );
     }
 
     #[tokio::test]

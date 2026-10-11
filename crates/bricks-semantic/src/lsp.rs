@@ -20,8 +20,8 @@ use parking_lot::Mutex;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tokio::sync::{OnceCell, OwnedRwLockReadGuard, RwLock, Semaphore};
 use tokio_util::sync::CancellationToken;
@@ -420,10 +420,10 @@ impl LspPool {
         let excess = open.len() - max;
         for (_, uri, lock) in open.into_iter().filter(|(_, u, _)| u != keep).take(excess) {
             // Busy documents (a request holds them) stay open.
-            if let Ok(mut w) = lock.try_write() {
-                if inst.client.did_close(&uri).await.is_ok() {
-                    w.hash = None;
-                }
+            if let Ok(mut w) = lock.try_write()
+                && inst.client.did_close(&uri).await.is_ok()
+            {
+                w.hash = None;
             }
         }
     }

@@ -9,7 +9,7 @@
 //! gives the mean, min and max per operation.
 
 use cersei_memory::manager::MemoryManager;
-use cersei_memory::memdir::{load_memory_index, scan_memory_dir, MemoryType};
+use cersei_memory::memdir::{MemoryType, load_memory_index, scan_memory_dir};
 use cersei_types::Message;
 use std::time::{Duration, Instant};
 

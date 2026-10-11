@@ -288,12 +288,12 @@ impl ModelCatalog for ScriptedCatalog {
             .iter()
             .find(|m| m.selection == selection)
             .ok_or_else(|| format!("unknown model `{selection}`"))?;
-        if let Some(r) = reasoning {
-            if !m.profiles.iter().any(|p| p.id == r) {
-                return Err(format!(
-                    "model `{selection}` has no reasoning profile `{r}`"
-                ));
-            }
+        if let Some(r) = reasoning
+            && !m.profiles.iter().any(|p| p.id == r)
+        {
+            return Err(format!(
+                "model `{selection}` has no reasoning profile `{r}`"
+            ));
         }
         Ok(Box::new(ScriptedProvider::new(
             selection,

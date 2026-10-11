@@ -622,10 +622,12 @@ mod tests {
                 r.content
             );
         }
-        assert!(job(&b, json!({ "action": "list" }))
-            .await
-            .content
-            .contains("No background job"));
+        assert!(
+            job(&b, json!({ "action": "list" }))
+                .await
+                .content
+                .contains("No background job")
+        );
 
         let w = job(
             &a,
@@ -698,10 +700,12 @@ mod tests {
         let s = job(&a, json!({ "action": "stop", "job_id": id })).await;
         assert!(s.content.contains("stopped"), "{}", s.content);
         // Idempotent.
-        assert!(job(&a, json!({ "action": "stop", "job_id": id }))
-            .await
-            .content
-            .contains("stopped"));
+        assert!(
+            job(&a, json!({ "action": "stop", "job_id": id }))
+                .await
+                .content
+                .contains("stopped")
+        );
         tokio::time::sleep(Duration::from_millis(200)).await;
         for k in kids {
             assert!(!crate::shell::procs::is_running(k), "{k} survived");

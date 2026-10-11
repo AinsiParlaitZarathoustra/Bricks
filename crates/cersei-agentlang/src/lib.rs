@@ -18,8 +18,8 @@ pub mod spec;
 
 pub use ast::{Arg, Call, Chain, Expr, Literal, Program, Stmt};
 pub use error::{ParseError, ProgramError, RuntimeError, RuntimeErrorKind, Span};
-pub use interp::{run_program, EvalCtx, Limits};
+pub use interp::{EvalCtx, Limits, run_program};
 pub use parser::parse;
 pub use registry::{DispatchHandle, ToolDispatch, VecToolDispatch};
 pub use run_tool::RunAgentTemplateTool;
-pub use spec::{language_spec, AGENTLANG_SPEC};
+pub use spec::{AGENTLANG_SPEC, language_spec};

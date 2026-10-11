@@ -39,7 +39,7 @@ use cersei_embeddings::EmbeddingProvider;
 use index::{Item, Projection};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use store::{as_i64, as_str, as_strings, as_vector, q, Store, P, W};
+use store::{P, Store, W, as_i64, as_str, as_strings, as_vector, q};
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum MemoryError {

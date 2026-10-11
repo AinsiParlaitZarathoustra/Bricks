@@ -17,7 +17,7 @@ use crate::render;
 use crate::result::*;
 use crate::syntax::{self, Lang, ScopeClass, TreeCache};
 use crate::view::Document;
-use cersei_types::tokens::{estimate_text, ESTIMATION_METHOD};
+use cersei_types::tokens::{ESTIMATION_METHOD, estimate_text};
 use std::collections::HashSet;
 use std::path::Path;
 use std::time::Instant;
@@ -231,26 +231,25 @@ fn snippet_for(
     // A definition carries its own node.
     if let (Some((a, b, kind)), None | Some(ScopeClass::Function) | Some(ScopeClass::Type)) =
         (&c.scope, want)
+        && (want.is_none() || is_def)
     {
-        if want.is_none() || is_def {
-            let sig_end = ctx
-                .parse(doc)
-                .and_then(|p| syntax::enclosing(&p, c.start, c.end.max(c.start + 1), None))
-                .filter(|sc| sc.start == *a)
-                .map(|sc| sc.signature_end);
-            return (
-                scope_snippet(
-                    doc,
-                    (*a, *b),
-                    (c.start, c.end),
-                    sig_end,
-                    kind,
-                    s.detail,
-                    None,
-                ),
+        let sig_end = ctx
+            .parse(doc)
+            .and_then(|p| syntax::enclosing(&p, c.start, c.end.max(c.start + 1), None))
+            .filter(|sc| sc.start == *a)
+            .map(|sc| sc.signature_end);
+        return (
+            scope_snippet(
+                doc,
+                (*a, *b),
+                (c.start, c.end),
+                sig_end,
+                kind,
+                s.detail,
                 None,
-            );
-        }
+            ),
+            None,
+        );
     }
     match ctx.parse(doc) {
         Some(p) => match syntax::enclosing(&p, c.start, c.end, want) {
@@ -525,10 +524,12 @@ mod tests {
         };
         assert!(lines(&compact) < lines(&deep));
         assert!(compact.items[0].signature.is_none());
-        assert!(deep.items[0]
-            .signature
-            .as_deref()
-            .unwrap()
-            .starts_with("fn f5()"));
+        assert!(
+            deep.items[0]
+                .signature
+                .as_deref()
+                .unwrap()
+                .starts_with("fn f5()")
+        );
     }
 }

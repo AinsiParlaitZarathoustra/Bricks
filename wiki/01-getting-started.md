@@ -20,7 +20,7 @@ cersei = "0.1"
 
 ## Prerequisites
 
-- Rust 1.75+ (edition 2021)
+- A recent stable Rust: edition 2024, 1.88 or later (let chains); tested with 1.98
 - An LLM provider API key (Anthropic, OpenAI, or a local model)
 - For the `Grep` tool: `rg` (ripgrep) is preferred but falls back to `grep`
 

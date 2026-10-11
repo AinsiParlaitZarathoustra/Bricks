@@ -192,8 +192,10 @@ mod tests {
     fn enhanced_has_step_scaffolding() {
         assert!(RAG_PROMPT_ENHANCED.contains("STEP 1 — Scan ALL notes"));
         assert!(RAG_PROMPT_ENHANCED.contains("STEP 2 — If the topic appears in multiple notes"));
-        assert!(RAG_PROMPT_ENHANCED
-            .contains("STEP 3 — Answer using ONLY the value from the latest note"));
+        assert!(
+            RAG_PROMPT_ENHANCED
+                .contains("STEP 3 — Answer using ONLY the value from the latest note")
+        );
         assert!(RAG_PROMPT_ENHANCED.contains("SUPERSEDED and WRONG"));
     }
 

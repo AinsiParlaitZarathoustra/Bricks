@@ -15,14 +15,14 @@ pub mod settings;
 
 pub use approval::{ApprovalBroker, ApprovalGate, ApprovalRequest, DecidedBy, Decision};
 pub use controller::{
-    list_sessions, list_sessions_in, Activity, Controller, EngineConfig, EventStream, ModelCatalog,
-    ModelChoice, OpenOptions, ProfileChoice, ProjectContext, ProjectLoader, SessionChoice,
-    SkillsSetup, Snapshot, ToolFactory, ToolInfo,
+    Activity, Controller, EngineConfig, EventStream, ModelCatalog, ModelChoice, OpenOptions,
+    ProfileChoice, ProjectContext, ProjectLoader, SessionChoice, SkillsSetup, Snapshot,
+    ToolFactory, ToolInfo, list_sessions, list_sessions_in,
 };
 pub use protocol::{
     AttachmentInfo, Command, Envelope, Event, FailureKind, MaintenanceOutcome, Prompt, PromptBlock,
-    RunOutcome, SearchHit, SkillListing, SkillSourceInfo, SkillsListing, WrittenFile,
-    SCHEMA_VERSION,
+    RunOutcome, SCHEMA_VERSION, SearchHit, SkillListing, SkillSourceInfo, SkillsListing,
+    WrittenFile,
 };
-pub use session::{same_workspace, SessionMeta, SessionScope, SessionSummary};
+pub use session::{SessionMeta, SessionScope, SessionSummary, same_workspace};
 pub use settings::{Action, AgentSettings, ApprovalRules};

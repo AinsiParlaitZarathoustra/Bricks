@@ -2,14 +2,14 @@
 //! foreground delegation, validation before anything is built, inherited
 //! policy, fresh context, admission, limits, cancellation, compaction.
 
+use cersei_agent::BricksConfig;
 use cersei_agent::agents::{InstanceState, ProfileSources};
 use cersei_agent::control::scripted::{Reply, Script, ScriptedCatalog};
 use cersei_agent::control::*;
-use cersei_agent::BricksConfig;
 use cersei_provider::{CompletionRequest, Provider};
 use serde_json::json;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 /// Counts the providers built (each child builds one).
@@ -233,16 +233,19 @@ async fn a_profile_runs_in_the_foreground_with_a_fresh_context_and_a_compact_res
         !whole.contains("SECRET-XYZ-42"),
         "a secret of the parent leaked"
     );
-    assert!(c.messages[0]
-        .get_text()
-        .unwrap_or("")
-        .contains("Find where parse is defined."));
+    assert!(
+        c.messages[0]
+            .get_text()
+            .unwrap_or("")
+            .contains("Find where parse is defined.")
+    );
     // The profile's instructions, the parent's tools, never a delegation tool.
-    assert!(c
-        .system
-        .as_deref()
-        .unwrap()
-        .contains("Profile `inspecteur`"));
+    assert!(
+        c.system
+            .as_deref()
+            .unwrap()
+            .contains("Profile `inspecteur`")
+    );
     let names: Vec<&str> = c.tools.iter().map(|t| t.name.as_str()).collect();
     assert!(names.contains(&"CodeScout") && names.contains(&"Bash"));
     // 10.5: the delegation tools pass on (recursion is bounded by the
@@ -445,11 +448,13 @@ async fn allowing_agent_once_does_not_allow_the_childs_commands() {
     assert_eq!(approvals[0].level, "execute");
     assert!(approvals[0].agent_id.is_none());
     assert_eq!(approvals[1].tool, "Bash");
-    assert!(approvals[1]
-        .agent_id
-        .as_deref()
-        .unwrap()
-        .starts_with("agent_"));
+    assert!(
+        approvals[1]
+            .agent_id
+            .as_deref()
+            .unwrap()
+            .starts_with("agent_")
+    );
 }
 
 /// No turn limit for sub-agents (formerly 30 by default, 100 at most):

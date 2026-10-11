@@ -30,7 +30,7 @@ pub struct Termination {
 #[cfg(unix)]
 mod imp {
     use super::Termination;
-    use nix::sys::signal::{kill, killpg, Signal};
+    use nix::sys::signal::{Signal, kill, killpg};
     use nix::unistd::Pid;
     use std::collections::HashMap;
     use std::time::{Duration, Instant};
@@ -46,10 +46,10 @@ mod imp {
         let Ok(out) = out else { return map };
         for line in String::from_utf8_lossy(&out.stdout).lines() {
             let mut it = line.split_whitespace();
-            if let (Some(pid), Some(ppid)) = (it.next(), it.next()) {
-                if let (Ok(pid), Ok(ppid)) = (pid.parse::<u32>(), ppid.parse::<u32>()) {
-                    map.entry(ppid).or_default().push(pid);
-                }
+            if let (Some(pid), Some(ppid)) = (it.next(), it.next())
+                && let (Ok(pid), Ok(ppid)) = (pid.parse::<u32>(), ppid.parse::<u32>())
+            {
+                map.entry(ppid).or_default().push(pid);
             }
         }
         map

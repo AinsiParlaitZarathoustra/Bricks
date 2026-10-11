@@ -3,12 +3,12 @@
 
 mod common;
 
-use cersei_agent::events::AgentEvent;
 use cersei_agent::Agent;
+use cersei_agent::events::AgentEvent;
 use cersei_compression::CompressionLevel;
 use cersei_testkit::{Reply, TestServer};
 use cersei_types::*;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};

@@ -20,7 +20,7 @@
 //! (model, messages/input, system prompt, tools, tool choice, streaming
 //! control) cannot be set or removed.
 
-use crate::config::{pointer_root, Protocol, ReasoningConfig, ReasoningProfile};
+use crate::config::{Protocol, ReasoningConfig, ReasoningProfile, pointer_root};
 use serde_json::{Map, Value};
 
 /// Pick the profile for a request: an explicit id, else the model's default,
@@ -96,10 +96,10 @@ pub fn remove_pointer(root: &mut Value, pointer: &str) {
             map.remove(&last);
         }
         Value::Array(items) => {
-            if let Ok(i) = last.parse::<usize>() {
-                if i < items.len() {
-                    items.remove(i);
-                }
+            if let Ok(i) = last.parse::<usize>()
+                && i < items.len()
+            {
+                items.remove(i);
             }
         }
         _ => {}
@@ -252,14 +252,16 @@ mod tests {
         .unwrap();
         assert_eq!(body, json!({"temperature": 1}));
         // Structural fields cannot be removed at model level either.
-        assert!(apply(
-            &mut json!({"messages": []}),
-            Protocol::ChatCompletions,
-            &Map::new(),
-            &["/messages".to_string()],
-            None
-        )
-        .is_err());
+        assert!(
+            apply(
+                &mut json!({"messages": []}),
+                Protocol::ChatCompletions,
+                &Map::new(),
+                &["/messages".to_string()],
+                None
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -292,32 +294,38 @@ mod tests {
         }
         let mut body = json!({"messages": []});
         let p = profile("p", json!({}), &["/messages"]);
-        assert!(apply(
-            &mut body,
-            Protocol::ChatCompletions,
-            &Map::new(),
-            &[],
-            Some(&p)
-        )
-        .is_err());
+        assert!(
+            apply(
+                &mut body,
+                Protocol::ChatCompletions,
+                &Map::new(),
+                &[],
+                Some(&p)
+            )
+            .is_err()
+        );
         let p = profile("p", json!({"input": []}), &[]);
-        assert!(apply(
-            &mut json!({}),
-            Protocol::Responses,
-            &Map::new(),
-            &[],
-            Some(&p)
-        )
-        .is_err());
+        assert!(
+            apply(
+                &mut json!({}),
+                Protocol::Responses,
+                &Map::new(),
+                &[],
+                Some(&p)
+            )
+            .is_err()
+        );
         // `input` is only structural for responses.
-        assert!(apply(
-            &mut json!({}),
-            Protocol::ChatCompletions,
-            &Map::new(),
-            &[],
-            Some(&p)
-        )
-        .is_ok());
+        assert!(
+            apply(
+                &mut json!({}),
+                Protocol::ChatCompletions,
+                &Map::new(),
+                &[],
+                Some(&p)
+            )
+            .is_ok()
+        );
     }
 
     #[test]
@@ -342,9 +350,11 @@ mod tests {
         // Empty list exposes nothing.
         let empty = cfg(None, vec![]);
         assert!(select_profile(&empty, None).unwrap().is_none());
-        assert!(select_profile(&empty, Some("x"))
-            .unwrap_err()
-            .contains("exposes no profiles"));
+        assert!(
+            select_profile(&empty, Some("x"))
+                .unwrap_err()
+                .contains("exposes no profiles")
+        );
     }
 
     #[test]

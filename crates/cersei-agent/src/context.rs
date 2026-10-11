@@ -687,10 +687,10 @@ impl ContextManager {
                     .to_string(),
             );
         }
-        if used.provenance == Provenance::Estimated {
-            if let Some(why) = &self.last_invalidation {
-                notes.push(format!("estimated since: {why}"));
-            }
+        if used.provenance == Provenance::Estimated
+            && let Some(why) = &self.last_invalidation
+        {
+            notes.push(format!("estimated since: {why}"));
         }
         ContextStatus {
             context_window: ContextWindow {
@@ -1002,10 +1002,11 @@ mod tests {
         let msgs = vec![Message::user("hi")];
         let st = mgr.status(&model(10_000, 1_000, None, true), &view(&msgs, &[]));
         assert_eq!(st.context_window.total, None);
-        assert!(st
-            .notes
-            .iter()
-            .any(|n| n.contains("no total context window")));
+        assert!(
+            st.notes
+                .iter()
+                .any(|n| n.contains("no total context window"))
+        );
     }
 
     #[test]

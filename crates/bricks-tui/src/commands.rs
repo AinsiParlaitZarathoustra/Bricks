@@ -115,8 +115,7 @@ pub const COMMANDS: &[SlashCommand] = &[
         name: "agents",
         aliases: &[],
         args: "[search words] | reload",
-        description:
-            "sub-agent profiles: project, user and built-in (reload: read the files again)",
+        description: "sub-agent profiles: project, user and built-in (reload: read the files again)",
         build: |arg| {
             let arg = arg.trim();
             if arg == "reload" {
@@ -131,7 +130,7 @@ pub const COMMANDS: &[SlashCommand] = &[
                         agent_id: None,
                         changeset_id: None,
                         job_id: None,
-                    }))
+                    }));
                 }
                 (Some(a @ ("status" | "result" | "cancel")), Some(id)) => {
                     return Ok(Action::Engine(Command::AgentControl {
@@ -139,7 +138,7 @@ pub const COMMANDS: &[SlashCommand] = &[
                         agent_id: Some(id.into()),
                         changeset_id: None,
                         job_id: None,
-                    }))
+                    }));
                 }
                 _ => {}
             }
@@ -193,7 +192,9 @@ pub const COMMANDS: &[SlashCommand] = &[
                 return Err("give a skill name (see /skills)".into());
             }
             if request.trim().is_empty() {
-                return Err(format!("give the request after the skill: /skill {name} <request>"));
+                return Err(format!(
+                    "give the request after the skill: /skill {name} <request>"
+                ));
             }
             Ok(Action::Engine(Command::Submit {
                 prompt: Prompt::text(request.trim()).with_skills(vec![name.to_string()]),
@@ -263,7 +264,9 @@ pub const COMMANDS: &[SlashCommand] = &[
         build: |arg| match arg.trim() {
             "" => present(Present::Context),
             "details" => present(Present::ContextDetails),
-            other => Err(format!("unknown argument `{other}`: /context or /context details")),
+            other => Err(format!(
+                "unknown argument `{other}`: /context or /context details"
+            )),
         },
     },
     SlashCommand {
@@ -274,7 +277,9 @@ pub const COMMANDS: &[SlashCommand] = &[
         build: |arg| match arg.trim() {
             "" => present(Present::Cost),
             "details" => present(Present::CostDetails),
-            other => Err(format!("unknown argument `{other}`: /cost or /cost details")),
+            other => Err(format!(
+                "unknown argument `{other}`: /cost or /cost details"
+            )),
         },
     },
     SlashCommand {
@@ -486,9 +491,11 @@ mod tests {
             Action::Present(Present::ContextDetails)
         );
         assert!(parse("/cost euros").unwrap_err().contains("/cost details"));
-        assert!(parse("/context all")
-            .unwrap_err()
-            .contains("/context details"));
+        assert!(
+            parse("/context all")
+                .unwrap_err()
+                .contains("/context details")
+        );
         assert!(parse("/skill").is_err());
         // Native commands keep their names; nothing is created per skill.
         assert_ne!(find("skill").unwrap().name, find("skills").unwrap().name);

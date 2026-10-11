@@ -108,11 +108,7 @@ pub fn from_text(output: &str) -> Vec<CompilerLocation> {
 /// Structured locations when the output has any, else the text heuristic.
 pub fn locations(output: &str) -> Vec<CompilerLocation> {
     let s = from_cargo_json(output);
-    if s.is_empty() {
-        from_text(output)
-    } else {
-        s
-    }
+    if s.is_empty() { from_text(output) } else { s }
 }
 
 #[cfg(test)]

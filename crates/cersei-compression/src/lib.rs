@@ -29,8 +29,8 @@ pub mod structured;
 
 pub use config::{CompressionConfig, CompressionSection};
 pub use dispatch::{
-    compress_tool_output, compress_tool_output_with_stats, CompressionStats, Compressor, Processed,
-    ToolOutput,
+    CompressionStats, Compressor, Processed, ToolOutput, compress_tool_output,
+    compress_tool_output_with_stats,
 };
 pub use level::CompressionLevel;
 pub use raw::{RawRef, RawStore};

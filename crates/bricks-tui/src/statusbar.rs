@@ -11,7 +11,7 @@
 //! state (a partial estimate is never shown as a total) and the context
 //! provenance (`≈` for estimates).
 
-use crate::diag::{compact, ContextFigures, CostState};
+use crate::diag::{ContextFigures, CostState, compact};
 use crate::state::App;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};

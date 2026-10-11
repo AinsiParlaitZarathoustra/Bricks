@@ -37,14 +37,14 @@ use std::collections::HashMap;
 use tokio::sync::mpsc;
 
 // Re-exports
-pub use adapt::{adapt_tools, SchemaDialect};
+pub use adapt::{SchemaDialect, adapt_tools};
 pub use config::{
-    default_config_path, AuthMode, ConfigError, ModelConfig, Protocol, ProviderConfig,
-    ProvidersConfig, Secret, SCHEMA_VERSION,
+    AuthMode, ConfigError, ModelConfig, Protocol, ProviderConfig, ProvidersConfig, SCHEMA_VERSION,
+    Secret, default_config_path,
 };
 pub use decimal::Decimal;
-pub use modality::{protocol_support, Capabilities, ProtocolSupport};
-pub use pricing::{Pricing, DEFAULT_TARIFF};
+pub use modality::{Capabilities, ProtocolSupport, protocol_support};
+pub use pricing::{DEFAULT_TARIFF, Pricing};
 pub use provider::{ConfiguredProvider, ProviderBuilder, REASONING_PROFILE_OPTION};
 pub use registry::{ModelRef, ProviderRegistry, ResolvedModel};
 pub use stream::StreamAccumulator;

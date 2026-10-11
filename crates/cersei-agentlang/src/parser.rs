@@ -16,7 +16,7 @@
 
 use crate::ast::*;
 use crate::error::{ParseError, Span};
-use crate::lexer::{lex, Tok, Token};
+use crate::lexer::{Tok, Token, lex};
 
 struct Parser {
     toks: Vec<Token>,
@@ -77,7 +77,7 @@ impl Parser {
                     return Err(ParseError {
                         message: format!("expected end of statement, found {other:?}"),
                         span: self.span(),
-                    })
+                    });
                 }
             }
         }
@@ -86,15 +86,15 @@ impl Parser {
 
     fn parse_stmt(&mut self) -> Result<Stmt, ParseError> {
         // assignment: VAR "=" expr  (one-token lookahead on '=')
-        if let Tok::Var(name) = self.peek() {
-            if matches!(self.peek_at(1), Tok::Eq) {
-                let name = name.clone();
-                let span = self.span();
-                self.bump(); // var
-                self.bump(); // =
-                let value = self.parse_expr()?;
-                return Ok(Stmt::Assign { name, value, span });
-            }
+        if let Tok::Var(name) = self.peek()
+            && matches!(self.peek_at(1), Tok::Eq)
+        {
+            let name = name.clone();
+            let span = self.span();
+            self.bump(); // var
+            self.bump(); // =
+            let value = self.parse_expr()?;
+            return Ok(Stmt::Assign { name, value, span });
         }
         Ok(Stmt::Expr(self.parse_expr()?))
     }
@@ -113,7 +113,7 @@ impl Parser {
                             return Err(ParseError {
                                 message: format!("expected method name after '.', found {other:?}"),
                                 span,
-                            })
+                            });
                         }
                     };
                     let args = self.parse_call_args()?;
@@ -214,7 +214,7 @@ impl Parser {
                 return Err(ParseError {
                     message: format!("expected identifier, found {other:?}"),
                     span,
-                })
+                });
             }
         }
         // Extend path while the next two tokens are `.` IDENT (namespace), but
@@ -256,14 +256,14 @@ impl Parser {
 
     fn parse_arg(&mut self) -> Result<Arg, ParseError> {
         // named arg: IDENT ":" expr
-        if let Tok::Ident(name) = self.peek().clone() {
-            if matches!(self.peek_at(1), Tok::Colon) {
-                let span = self.span();
-                self.bump(); // ident
-                self.bump(); // :
-                let value = self.parse_expr()?;
-                return Ok(Arg::Named { name, value, span });
-            }
+        if let Tok::Ident(name) = self.peek().clone()
+            && matches!(self.peek_at(1), Tok::Colon)
+        {
+            let span = self.span();
+            self.bump(); // ident
+            self.bump(); // :
+            let value = self.parse_expr()?;
+            return Ok(Arg::Named { name, value, span });
         }
         Ok(Arg::Positional(self.parse_expr()?))
     }

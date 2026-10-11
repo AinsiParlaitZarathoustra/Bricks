@@ -126,10 +126,10 @@ pub fn score(
                 Certainty::Textual => 0.0,
             };
         }
-        if let (Some(q), Some(sym)) = (query_name, &c.symbol) {
-            if sym.name == q {
-                s += 0.10;
-            }
+        if let (Some(q), Some(sym)) = (query_name, &c.symbol)
+            && sym.name == q
+        {
+            s += 0.10;
         }
         if let Some(a) = active {
             if c.doc.path == a {

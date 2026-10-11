@@ -5,7 +5,7 @@
 //! [`ToolContext`] before it runs, and a step budget bounds total work.
 
 use crate::ast::*;
-use crate::builtins::{resolve, Op};
+use crate::builtins::{Op, resolve};
 use crate::error::{ProgramError, RuntimeError, RuntimeErrorKind, Span};
 use crate::parser::parse;
 use crate::registry::ToolDispatch;
@@ -345,7 +345,7 @@ impl<'a> EvalCtx<'a> {
                     RuntimeErrorKind::TypeMismatch,
                     format!("unknown permission mode '{other}' (use r|w|rw|x)"),
                     span,
-                ))
+                ));
             }
         };
         let req = PermissionRequest {

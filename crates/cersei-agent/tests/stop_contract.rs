@@ -14,7 +14,7 @@
 
 use async_trait::async_trait;
 use cersei_agent::agent_tool::AgentTool;
-use cersei_agent::delegate::{run_batch, DelegateConfig, DelegateTask, ToolsetFactory};
+use cersei_agent::delegate::{DelegateConfig, DelegateTask, ToolsetFactory, run_batch};
 use cersei_agent::delegate_tool::DelegateTool;
 use cersei_agent::subagent::{ChildStatus, DelegationDepth, RunCancellation};
 use cersei_agent::{Agent, Termination, UserInput};
@@ -24,10 +24,10 @@ use cersei_tools::{
     CostTracker, Extensions, PermissionLevel, Tool, ToolCategory, ToolContext, ToolResult,
 };
 use cersei_types::*;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
@@ -84,7 +84,7 @@ impl Spy {
         self.built.fetch_add(1, Ordering::SeqCst);
         SpyProvider(self.clone())
     }
-    fn factory(self: &Arc<Self>) -> impl Fn() -> Box<dyn Provider> + Send + Sync + 'static {
+    fn factory(self: &Arc<Self>) -> impl Fn() -> Box<dyn Provider> + Send + Sync + 'static + use<> {
         let spy = self.clone();
         move || Box::new(spy.provider()) as Box<dyn Provider>
     }
@@ -548,11 +548,12 @@ async fn different_calls_of_one_tool_are_progress() {
     let out = a.run("lis douze").await.unwrap();
     assert_eq!(out.termination, Termination::Completed);
     assert_eq!(spy.sent(), 13);
-    assert!(!a
-        .messages()
-        .iter()
-        .flat_map(|m| m.content_blocks())
-        .any(|b| matches!(b, ContentBlock::Text { text } if text.contains("repeated earlier"))));
+    assert!(
+        !a.messages()
+            .iter()
+            .flat_map(|m| m.content_blocks())
+            .any(|b| matches!(b, ContentBlock::Text { text } if text.contains("repeated earlier")))
+    );
 }
 
 #[tokio::test]

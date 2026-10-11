@@ -36,14 +36,14 @@ pub mod resources;
 pub mod security;
 pub mod service;
 
-pub use document::{parse_document, AllowedTools, DocumentError, SkillDocument};
+pub use document::{AllowedTools, DocumentError, SkillDocument, parse_document};
 pub use ledger::{ActiveSkill, Ledger, Origin, StoredActivation, StoredLedger};
 pub use registry::{
-    standard_roots, BuiltinSkill, Candidate, CandidateState, Diagnostic, ProjectDecision, Registry,
-    ResolveError, Scope, SkillRoot, Trust,
+    BuiltinSkill, Candidate, CandidateState, Diagnostic, ProjectDecision, Registry, ResolveError,
+    Scope, SkillRoot, Trust, standard_roots,
 };
 pub use resources::Resource;
 pub use service::{
-    render_activation, Activation, ActivationError, Catalog, CatalogEntry, SkillAccess,
-    SkillsService,
+    Activation, ActivationError, Catalog, CatalogEntry, SkillAccess, SkillsService,
+    render_activation,
 };

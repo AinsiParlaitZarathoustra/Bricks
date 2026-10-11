@@ -288,9 +288,11 @@ mod tests {
             }],
             skills: Vec::new(),
         };
-        assert!(convert(&gone, dir.path(), limits)
-            .unwrap_err()
-            .contains("missing.rs"));
+        assert!(
+            convert(&gone, dir.path(), limits)
+                .unwrap_err()
+                .contains("missing.rs")
+        );
         assert!(convert(&Prompt::text("  "), dir.path(), limits).is_err());
         // A real PNG (1×1) becomes an image block, with its digest.
         let png: [u8; 67] = [
@@ -336,8 +338,10 @@ mod tests {
             }],
             skills: Vec::new(),
         };
-        assert!(convert(&image, dir.path(), limits)
-            .unwrap_err()
-            .contains("unsupported image"));
+        assert!(
+            convert(&image, dir.path(), limits)
+                .unwrap_err()
+                .contains("unsupported image")
+        );
     }
 }

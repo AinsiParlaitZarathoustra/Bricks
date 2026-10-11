@@ -126,7 +126,7 @@ impl Lexer {
                             return Err(ParseError {
                                 message: format!("unexpected character '{other}'"),
                                 span,
-                            })
+                            });
                         }
                     };
                     self.bump();
@@ -147,7 +147,7 @@ impl Lexer {
                     return Err(ParseError {
                         message: "unterminated string literal".into(),
                         span: start,
-                    })
+                    });
                 }
                 Some('\\') => match self.bump() {
                     Some('n') => s.push('\n'),
@@ -163,7 +163,7 @@ impl Lexer {
                         return Err(ParseError {
                             message: "unterminated escape in string".into(),
                             span: start,
-                        })
+                        });
                     }
                 },
                 Some(c) if c == quote => break,

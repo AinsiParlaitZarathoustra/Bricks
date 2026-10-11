@@ -81,10 +81,10 @@ pub fn should_extract(messages: &[Message], state: &SessionMemoryState) -> bool 
     }
 
     // Don't extract if the last assistant message has pending tool calls
-    if let Some(last) = messages.iter().rev().find(|m| m.role == Role::Assistant) {
-        if last.has_tool_use() {
-            return false;
-        }
+    if let Some(last) = messages.iter().rev().find(|m| m.role == Role::Assistant)
+        && last.has_tool_use()
+    {
+        return false;
     }
 
     true

@@ -2,9 +2,9 @@
 //! successful structured change, with the counts of the complete diff;
 //! never for a refusal, a denial or a failed write.
 
+use cersei_agent::BricksConfig;
 use cersei_agent::control::scripted::{Reply, Script, ScriptedCatalog};
 use cersei_agent::control::*;
-use cersei_agent::BricksConfig;
 use serde_json::json;
 use std::time::Duration;
 

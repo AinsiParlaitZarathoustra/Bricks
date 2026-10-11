@@ -84,13 +84,13 @@ impl EventQueue {
                     return;
                 }
                 let it = item.take().expect("pushed once");
-                if it.event.is_delta() {
-                    if let Some(last) = st.items.back_mut() {
-                        if last.run_id == it.run_id && merge(&mut last.event, &it.event) {
-                            st.merged += 1;
-                            return;
-                        }
-                    }
+                if it.event.is_delta()
+                    && let Some(last) = st.items.back_mut()
+                    && last.run_id == it.run_id
+                    && merge(&mut last.event, &it.event)
+                {
+                    st.merged += 1;
+                    return;
                 }
                 let over = st.items.len() >= self.capacity;
                 let unbounded = cancel.is_some_and(|c| c.is_cancelled()) || it.event.is_delta();

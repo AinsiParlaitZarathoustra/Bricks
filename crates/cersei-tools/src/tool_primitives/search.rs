@@ -88,8 +88,8 @@ fn grep_blocking(
     opts: GrepOptions,
 ) -> Result<Vec<SearchMatch>, SearchError> {
     use grep::regex::RegexMatcherBuilder;
-    use grep::searcher::sinks::UTF8;
     use grep::searcher::SearcherBuilder;
+    use grep::searcher::sinks::UTF8;
     use ignore::WalkState;
 
     let matcher = RegexMatcherBuilder::new()
@@ -153,10 +153,10 @@ fn grep_blocking(
 
             let mut guard = results.lock().unwrap();
             guard.extend(local);
-            if let Some(max) = max {
-                if guard.len() >= max {
-                    return WalkState::Quit;
-                }
+            if let Some(max) = max
+                && guard.len() >= max
+            {
+                return WalkState::Quit;
             }
             WalkState::Continue
         })

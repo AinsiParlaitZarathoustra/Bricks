@@ -4,10 +4,10 @@
 //! filesystem and spawn real processes via `tokio::process`. The host
 //! reaches them via a Unix socket.
 
-use crate::envd::protocol::{methods, Request, Response};
+use crate::envd::protocol::{Request, Response, methods};
 use crate::types::{FileEntry, FileKind, RunOutput, RunRequest};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::io::AsyncReadExt;

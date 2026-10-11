@@ -203,7 +203,7 @@ impl StreamAccumulator {
                     "stream ended without a terminal event (no stop_reason, no message_stop); \
                      the response is incomplete ({} content block(s) accumulated)",
                     self.content_blocks.len()
-                )))
+                )));
             }
         };
 

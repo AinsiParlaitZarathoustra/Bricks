@@ -202,7 +202,7 @@ pub fn extract(src: &Source<'_>, cfg: &ExtractConfig) -> Result<Extracted, Unrea
                 bytes: src.body.len(),
                 truncated: src.truncated,
                 declared: src.declared_length,
-            })
+            });
         }
     };
     let (text, charset, mut notes) = decode(src.body, src.content_type, kind == DocKind::Html)?;
@@ -240,7 +240,7 @@ fn classify(mime: Option<&str>, body: &[u8]) -> Result<DocKind, String> {
         Some("text/html" | "application/xhtml+xml") => return Ok(DocKind::Html),
         Some("text/markdown" | "text/x-markdown") => return Ok(DocKind::Markdown),
         Some(m) if m == "application/json" || m.ends_with("+json") || m == "text/json" => {
-            return Ok(DocKind::Json)
+            return Ok(DocKind::Json);
         }
         Some(m) if m.starts_with("text/") => return Ok(DocKind::Text),
         Some(m)
@@ -252,7 +252,7 @@ fn classify(mime: Option<&str>, body: &[u8]) -> Result<DocKind, String> {
                 || m == "application/zip"
                 || m == "application/gzip" =>
         {
-            return Err(m.to_string())
+            return Err(m.to_string());
         }
         _ => {}
     }
@@ -500,10 +500,10 @@ fn conservative(text: &str, url: &Url) -> (String, String, String) {
     doc.select("body > header").remove();
     for (attr, sel) in [("href", "a[href]"), ("src", "img[src]")] {
         for node in doc.select(sel).iter() {
-            if let Some(v) = node.attr(attr) {
-                if let Ok(abs) = url.join(v.trim()) {
-                    node.set_attr(attr, abs.as_str());
-                }
+            if let Some(v) = node.attr(attr)
+                && let Ok(abs) = url.join(v.trim())
+            {
+                node.set_attr(attr, abs.as_str());
             }
         }
     }

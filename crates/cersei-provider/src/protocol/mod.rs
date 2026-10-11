@@ -13,8 +13,8 @@ pub mod sse;
 
 use crate::config::ResolvedCompat;
 use cersei_types::{
-    CerseiError, ContentBlock, Message, MessageContent, Role, ToolResultContent,
-    SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+    CerseiError, ContentBlock, Message, MessageContent, Role, SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+    ToolResultContent,
 };
 
 /// Inputs every request builder needs besides the request itself.
@@ -67,7 +67,7 @@ pub(crate) fn tool_result_text(
                             "a tool result holds a {} block, which `{protocol}` cannot carry in a \
                              tool result",
                             other.modality().map(|m| m.as_str()).unwrap_or("non-text")
-                        )))
+                        )));
                     }
                 }
             }

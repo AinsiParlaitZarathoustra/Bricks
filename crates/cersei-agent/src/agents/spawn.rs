@@ -1056,7 +1056,7 @@ impl AgentSpawner {
                     return Err(match e {
                         SpawnError::Invalid(m) => SpawnError::Invalid(format!("agents[{i}]: {m}")),
                         other => other,
-                    })
+                    });
                 }
                 Err(e) => return Err(e),
             }
@@ -1174,10 +1174,15 @@ impl AgentSpawner {
             });
             if info.background {
                 self.runtime.attach_task(&agent_id, handle);
-            } else if let Some(live) = ctx.extensions.get::<LiveChildren>() {
-                live.0.lock().push(handle);
             } else {
-                self.runtime.attach_task(&agent_id, handle);
+                match ctx.extensions.get::<LiveChildren>() {
+                    Some(live) => {
+                        live.0.lock().push(handle);
+                    }
+                    _ => {
+                        self.runtime.attach_task(&agent_id, handle);
+                    }
+                }
             }
             ids.push(agent_id);
             receivers.push(rx);
@@ -1302,7 +1307,7 @@ impl AgentSpawner {
             Err(e) => {
                 return self
                     .close_isolated(fail(&self, &info, "failed", e), iso)
-                    .await
+                    .await;
             }
         };
 
@@ -1330,12 +1335,12 @@ impl AgentSpawner {
                         fail(&self, &info, "cancelled", "cancelled while queued".into()),
                         iso,
                     )
-                    .await
+                    .await;
             }
             Err(e) => {
                 return self
                     .close_isolated(fail(&self, &info, "failed", e.to_string()), iso)
-                    .await
+                    .await;
             }
         };
 
@@ -1672,10 +1677,10 @@ impl AgentSpawner {
         let ext = subagent::child_extensions(pc.depth);
         // Services: the code engine only within the same workspace (a
         // worktree gets its own), the web context. The shell is the child's.
-        if iso == Isolation::Shared {
-            if let Some(h) = &pc.semantic {
-                ext.insert(h.clone());
-            }
+        if iso == Isolation::Shared
+            && let Some(h) = &pc.semantic
+        {
+            ext.insert(h.clone());
         }
         if let Some(w) = &pc.web {
             ext.insert(w.clone());

@@ -17,10 +17,10 @@ use crate::dataset::Question;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use cersei_embeddings::{EmbeddingProvider, Metric};
+use cersei_memory::Memory;
 use cersei_memory::embedding_memory::EmbeddingMemory;
 use cersei_memory::graph::GraphMemory;
 use cersei_memory::memdir::MemoryType;
-use cersei_memory::Memory;
 use cersei_provider::{CompletionRequest, Provider};
 use cersei_types::Message;
 use std::collections::HashMap;
@@ -104,10 +104,8 @@ pub struct HybridConfig<P: EmbeddingProvider + Send + Sync, E: Provider + Send +
     extracted_fact_count: usize,
 }
 
-impl<
-        P: EmbeddingProvider + Send + Sync + 'static,
-        E: Provider + Send + Sync + ?Sized + 'static,
-    > HybridConfig<P, E>
+impl<P: EmbeddingProvider + Send + Sync + 'static, E: Provider + Send + Sync + ?Sized + 'static>
+    HybridConfig<P, E>
 {
     pub fn new(
         provider_factory: impl Fn() -> P + Send + Sync + 'static,
@@ -178,10 +176,10 @@ impl<
         req.system = Some(crate::mastra_prompts::observer_system_prompt());
         req.messages.push(Message::user(user_prompt));
         req.temperature = Some(0.3); // matches Mastra's observation.modelSettings.temperature
-                                     // Generous ceiling — Gemini 2.5 Flash burns thinking tokens before
-                                     // output, and the Observer prompt asks for multi-observation dense
-                                     // output. 8k is what Mastra budgets (`maxOutputTokens: 100_000` in
-                                     // their config, scaled down to our per-session batches).
+        // Generous ceiling — Gemini 2.5 Flash burns thinking tokens before
+        // output, and the Observer prompt asks for multi-observation dense
+        // output. 8k is what Mastra budgets (`maxOutputTokens: 100_000` in
+        // their config, scaled down to our per-session batches).
         req.max_tokens = 8192;
 
         let resp = extractor
@@ -217,10 +215,8 @@ impl<
 }
 
 #[async_trait]
-impl<
-        P: EmbeddingProvider + Send + Sync + 'static,
-        E: Provider + Send + Sync + ?Sized + 'static,
-    > Config for HybridConfig<P, E>
+impl<P: EmbeddingProvider + Send + Sync + 'static, E: Provider + Send + Sync + ?Sized + 'static>
+    Config for HybridConfig<P, E>
 {
     async fn ingest(&mut self, q: &Question) -> Result<()> {
         let provider = (self.provider_factory)();

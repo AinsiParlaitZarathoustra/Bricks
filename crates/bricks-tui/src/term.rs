@@ -8,10 +8,10 @@ use ratatui::crossterm::event::{
     PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
 };
 use ratatui::crossterm::execute;
-use ratatui::crossterm::terminal::{disable_raw_mode, enable_raw_mode, LeaveAlternateScreen};
-use std::io::{stdout, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
+use ratatui::crossterm::terminal::{LeaveAlternateScreen, disable_raw_mode, enable_raw_mode};
+use std::io::{Write, stdout};
 use std::sync::Once;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 static ENHANCED: AtomicBool = AtomicBool::new(false);
 static ACTIVE: AtomicBool = AtomicBool::new(false);

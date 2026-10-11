@@ -8,9 +8,9 @@ use bricks_tui::statusbar;
 use bricks_tui::view::{self, Overlay as LiveOverlay};
 use cersei_agent::control::*;
 use cersei_tools::preview::ChangeKind;
+use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::style::Color;
-use ratatui::Terminal;
 
 const GREEN: Color = Color::Rgb(152, 205, 170);
 const RED: Color = Color::Rgb(224, 153, 153);

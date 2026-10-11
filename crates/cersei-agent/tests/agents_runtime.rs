@@ -6,16 +6,16 @@
 //! task (`[barrier]`, `[delegate:…]`, `[write:file=content]`, `[fail]`,
 //! `[hold]`), with fixed usage (7 in / 3 out per response).
 
+use cersei_agent::BricksConfig;
 use cersei_agent::agents::{InstanceState, ProfileSources};
 use cersei_agent::control::scripted::{Reply, Script, ScriptedProvider};
 use cersei_agent::control::*;
-use cersei_agent::BricksConfig;
 use cersei_provider::{CompletionRequest, CompletionStream, Provider};
 use cersei_types::{Message, MessageContent, Role, Usage};
 use serde_json::json;
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 // ─── Test model ──────────────────────────────────────────────────────────────
@@ -1140,11 +1140,13 @@ async fn a_background_child_gets_its_profile_skills_too() {
     let rs = results(&evs);
     assert_eq!(rs[0].skills[0].state, "loaded");
     let reqs = env.shared.child_requests.lock().clone();
-    assert!(reqs[0]
-        .system
-        .as_deref()
-        .unwrap()
-        .contains("SKILL-MARKER-42"));
+    assert!(
+        reqs[0]
+            .system
+            .as_deref()
+            .unwrap()
+            .contains("SKILL-MARKER-42")
+    );
 }
 
 #[tokio::test]
@@ -1374,9 +1376,10 @@ async fn background_jobs_are_owned_scoped_and_stopped_as_a_tree() {
             _ => None,
         })
         .expect("job_started");
-    assert!(job
-        .1
-        .ends_with(env.dir.path().file_name().unwrap().to_str().unwrap()));
+    assert!(
+        job.1
+            .ends_with(env.dir.path().file_name().unwrap().to_str().unwrap())
+    );
     let (_, out) = tool_out(&evs, "b1");
     assert!(out.contains(&job.0));
     // Its children exist.

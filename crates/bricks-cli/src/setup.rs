@@ -8,11 +8,11 @@
 //! not the one Bricks was started in.
 
 use crate::args::Global;
+use cersei_agent::BricksConfig;
 use cersei_agent::control::{
     EngineConfig, OpenOptions, ProjectContext, ProjectLoader, SessionChoice, SkillsSetup,
 };
-use cersei_agent::system_prompt::{build_system_prompt, SystemPromptOptions};
-use cersei_agent::BricksConfig;
+use cersei_agent::system_prompt::{SystemPromptOptions, build_system_prompt};
 use cersei_embeddings::{EmbeddingProvider, GeminiEmbeddings, HashingEmbeddings, OpenAiEmbeddings};
 use cersei_memory::structured::extract::LlmExtractor;
 use cersei_memory::structured::{MemoryConfig, StructuredMemory};
@@ -81,7 +81,7 @@ pub fn resolve_workspace(
             return Err(format!(
                 "the workspace {} does not exist (nothing is created)",
                 given.display()
-            ))
+            ));
         }
         Err(e) => return Err(format!("workspace {}: {e}", given.display())),
     };
@@ -323,9 +323,11 @@ mod tests {
         // Not expanded: `~user`, variables, a `~` that is not first.
         let e = r(Some("~bob/x")).unwrap_err();
         assert!(e.contains("~user"), "{e}");
-        assert!(r(Some("$HOME/Documents"))
-            .unwrap_err()
-            .contains("does not exist"));
+        assert!(
+            r(Some("$HOME/Documents"))
+                .unwrap_err()
+                .contains("does not exist")
+        );
         assert!(r(Some("sub/~")).unwrap_err().contains("does not exist"));
         // No home folder: a clear error.
         let e = resolve_workspace(&launch, Some(Path::new("~/x")), None).unwrap_err();

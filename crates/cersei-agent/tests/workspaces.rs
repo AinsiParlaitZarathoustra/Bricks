@@ -120,11 +120,12 @@ async fn children_start_from_the_parents_dirty_state_without_touching_it() {
     assert!(patch.contains("+four by child"));
     assert!(!patch.contains("bee unstaged") && !patch.contains("untracked"));
     // An unchanged child leaves nothing behind.
-    assert!(m
-        .finalize("agent_two", "task", vec![])
-        .await
-        .unwrap()
-        .is_none());
+    assert!(
+        m.finalize("agent_two", "task", vec![])
+            .await
+            .unwrap()
+            .is_none()
+    );
     assert!(!w2.root.exists());
     assert!(git(p, &["branch", "--list", &w2.branch]).trim().is_empty());
 
@@ -297,10 +298,11 @@ async fn binary_files_deletions_and_modes_survive_the_round_trip() {
     }
     let cs = m.finalize("agent_bin", "t", vec![]).await.unwrap().unwrap();
     assert!(cs.files.iter().any(|f| f.path == "img.bin" && f.binary));
-    assert!(cs
-        .files
-        .iter()
-        .any(|f| f.path == "gone.txt" && f.status == "D"));
+    assert!(
+        cs.files
+            .iter()
+            .any(|f| f.path == "gone.txt" && f.status == "D")
+    );
     m.apply(&cs.id, p).await.unwrap();
     assert_eq!(
         std::fs::read(p.join("img.bin")).unwrap(),

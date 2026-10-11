@@ -11,8 +11,8 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 use tree_sitter::{InputEdit, Node, ParseOptions, Parser, Point, Tree};
 
@@ -172,14 +172,14 @@ impl TreeCache {
             text: Arc::clone(&doc.text),
         };
         let mut entries = self.entries.lock();
-        if entries.len() >= self.capacity && !entries.contains_key(&doc.path) {
-            if let Some(oldest) = entries
+        if entries.len() >= self.capacity
+            && !entries.contains_key(&doc.path)
+            && let Some(oldest) = entries
                 .iter()
                 .min_by_key(|(_, e)| e.used)
                 .map(|(p, _)| p.clone())
-            {
-                entries.remove(&oldest);
-            }
+        {
+            entries.remove(&oldest);
         }
         entries.insert(
             doc.path.clone(),
@@ -390,10 +390,10 @@ pub fn enclosing(
 fn scope_of(parsed: &Parsed, node: Node, class: ScopeClass) -> Scope {
     // Python decorators and TS/JS export wrappers belong to the definition.
     let mut outer = node;
-    if let Some(p) = node.parent() {
-        if matches!(p.kind(), "decorated_definition" | "export_statement") {
-            outer = p;
-        }
+    if let Some(p) = node.parent()
+        && matches!(p.kind(), "decorated_definition" | "export_statement")
+    {
+        outer = p;
     }
     let body = node.child_by_field_name("body").or_else(|| {
         node.child_by_field_name("value")
@@ -533,40 +533,40 @@ pub fn definitions(parsed: &Parsed) -> Vec<Definition> {
     while let Some((node, container, in_type)) = stack.pop() {
         let mut child_container = container.clone();
         let mut child_in_type = in_type;
-        if is_definition(parsed.lang, node) {
-            if let Some(name) = name_of(parsed, node) {
-                let name_node = match node.kind() {
-                    "impl_item" => node.child_by_field_name("type"),
-                    "arrow_function" | "function_expression" => {
-                        node.parent().and_then(|p| p.child_by_field_name("name"))
-                    }
-                    _ => node.child_by_field_name("name"),
-                };
-                let scope = scope_of(parsed, node, ScopeClass::Function);
-                let sig = std::str::from_utf8(&text[node.start_byte()..scope.signature_end])
-                    .unwrap_or("")
-                    .split_whitespace()
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                let sig = truncate_chars(&sig, 240);
-                let (ns, ne) = name_node
-                    .map(|n| (n.start_byte(), n.end_byte()))
-                    .unwrap_or((node.start_byte(), node.start_byte()));
-                out.push(Definition {
-                    kind: kind_label(parsed.lang, node.kind(), in_type).to_string(),
-                    node_kind: node.kind().to_string(),
-                    start: scope.start,
-                    end: node.end_byte(),
-                    name_start: ns,
-                    name_end: ne,
-                    signature: sig,
-                    container: container.clone(),
-                    name: name.clone(),
-                });
-                if matches!(class_of(parsed.lang, node.kind()), Some(ScopeClass::Type)) {
-                    child_container = Some(name);
-                    child_in_type = true;
+        if is_definition(parsed.lang, node)
+            && let Some(name) = name_of(parsed, node)
+        {
+            let name_node = match node.kind() {
+                "impl_item" => node.child_by_field_name("type"),
+                "arrow_function" | "function_expression" => {
+                    node.parent().and_then(|p| p.child_by_field_name("name"))
                 }
+                _ => node.child_by_field_name("name"),
+            };
+            let scope = scope_of(parsed, node, ScopeClass::Function);
+            let sig = std::str::from_utf8(&text[node.start_byte()..scope.signature_end])
+                .unwrap_or("")
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ");
+            let sig = truncate_chars(&sig, 240);
+            let (ns, ne) = name_node
+                .map(|n| (n.start_byte(), n.end_byte()))
+                .unwrap_or((node.start_byte(), node.start_byte()));
+            out.push(Definition {
+                kind: kind_label(parsed.lang, node.kind(), in_type).to_string(),
+                node_kind: node.kind().to_string(),
+                start: scope.start,
+                end: node.end_byte(),
+                name_start: ns,
+                name_end: ne,
+                signature: sig,
+                container: container.clone(),
+                name: name.clone(),
+            });
+            if matches!(class_of(parsed.lang, node.kind()), Some(ScopeClass::Type)) {
+                child_container = Some(name);
+                child_in_type = true;
             }
         }
         let mut cursor = node.walk();
@@ -688,10 +688,26 @@ mod tests {
     fn definitions_per_language() {
         let cache = TreeCache::new(8);
         let cases = [
-            ("a.py", "class K:\n    def m(self):\n        pass\n\ndef f():\n    return 1\n", vec!["K", "m", "f"]),
-            ("a.go", "package p\n\ntype T struct{}\n\nfunc (t T) M() {}\n\nfunc F() {}\n", vec!["T", "M", "F"]),
-            ("a.ts", "export class C { m(): void {} }\ninterface I {}\nconst g = () => 1;\nfunction h() {}\n", vec!["C", "m", "I", "g", "h"]),
-            ("a.tsx", "export function View() { return <p/>; }\n", vec!["View"]),
+            (
+                "a.py",
+                "class K:\n    def m(self):\n        pass\n\ndef f():\n    return 1\n",
+                vec!["K", "m", "f"],
+            ),
+            (
+                "a.go",
+                "package p\n\ntype T struct{}\n\nfunc (t T) M() {}\n\nfunc F() {}\n",
+                vec!["T", "M", "F"],
+            ),
+            (
+                "a.ts",
+                "export class C { m(): void {} }\ninterface I {}\nconst g = () => 1;\nfunction h() {}\n",
+                vec!["C", "m", "I", "g", "h"],
+            ),
+            (
+                "a.tsx",
+                "export function View() { return <p/>; }\n",
+                vec!["View"],
+            ),
         ];
         for (name, src, want) in cases {
             let (p, _) = cache.parse(&doc(name, src), far()).unwrap();

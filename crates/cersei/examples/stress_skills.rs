@@ -11,7 +11,7 @@
 //! ```
 
 use cersei::prelude::*;
-use cersei::skills::{standard_roots, ProjectDecision, ResolveError, SkillAccess, SkillsService};
+use cersei::skills::{ProjectDecision, ResolveError, SkillAccess, SkillsService, standard_roots};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;

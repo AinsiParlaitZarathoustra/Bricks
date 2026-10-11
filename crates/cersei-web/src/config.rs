@@ -423,10 +423,10 @@ impl WebConfig {
             set(&mut c.passages.budget_chars, p.budget_chars);
             set(&mut c.passages.per_source, p.per_source);
         }
-        if let Some(s) = web.store {
-            if let Some(v) = s.max_session_bytes {
-                c.store.max_session_bytes = v;
-            }
+        if let Some(s) = web.store
+            && let Some(v) = s.max_session_bytes
+        {
+            c.store.max_session_bytes = v;
         }
         c.validate()?;
         c.resolve_keys(&env, &mut diagnostics);
@@ -453,18 +453,17 @@ impl WebConfig {
         }
         for p in &s.providers {
             check_endpoint(p)?;
-            if let Some(var) = &p.api_key_env {
-                if var.is_empty()
+            if let Some(var) = &p.api_key_env
+                && (var.is_empty()
                     || !var
                         .chars()
-                        .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
-                {
-                    return Err(format!(
-                        "web.search.{}.api_key_env must be an environment variable name \
+                        .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_'))
+            {
+                return Err(format!(
+                    "web.search.{}.api_key_env must be an environment variable name \
                          (A-Z, 0-9, _), not a key",
-                        p.kind
-                    ));
-                }
+                    p.kind
+                ));
             }
         }
         for k in s.chain() {
@@ -590,7 +589,7 @@ fn check_endpoint(p: &ProviderConfig) -> Result<(), String> {
             return Err(format!(
                 "web.search.{}.endpoint must use https (plain http only to a loopback address)",
                 p.kind
-            ))
+            ));
         }
     }
     if !u.username().is_empty() || u.password().is_some() {
@@ -669,7 +668,10 @@ mode = "advanced"
     #[test]
     fn invalid_values_are_reported() {
         for (toml, needle) in [
-            ("[web.search]\nprovider = \"brave\"\n", "api_key_env is not set"),
+            (
+                "[web.search]\nprovider = \"brave\"\n",
+                "api_key_env is not set",
+            ),
             ("[web.fetch]\nper_host = 9\n", "per_host"),
             ("[web.fetch]\nmax_page_bytes = 0\n", "max_page_bytes"),
             ("[web.passages]\nmin_chars = 2000\n", "min_chars"),

@@ -6,9 +6,9 @@ use bricks_tui::overlay::Overlay;
 use bricks_tui::ui::Ui;
 use bricks_tui::view::short_path;
 use cersei_agent::control::SessionSummary;
+use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::Terminal;
 use std::path::{Path, PathBuf};
 
 fn summary(id: &str, title: &str, dir: Option<&Path>) -> SessionSummary {

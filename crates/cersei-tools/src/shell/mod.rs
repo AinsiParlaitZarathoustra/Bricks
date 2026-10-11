@@ -25,8 +25,8 @@ pub mod powershell;
 pub mod procs;
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 /// Called with progress messages while a command runs.
@@ -298,15 +298,15 @@ impl ShellSessions {
             t.kill_now();
         }
         #[cfg(unix)]
-        if let Ok(mut slot) = self.bash.try_lock() {
-            if let Some(b) = slot.take() {
-                b.kill_now();
-            }
+        if let Ok(mut slot) = self.bash.try_lock()
+            && let Some(b) = slot.take()
+        {
+            b.kill_now();
         }
-        if let Ok(mut slot) = self.pwsh.try_lock() {
-            if let Some(p) = slot.take() {
-                p.kill_now();
-            }
+        if let Ok(mut slot) = self.pwsh.try_lock()
+            && let Some(p) = slot.take()
+        {
+            p.kill_now();
         }
         let _ = std::fs::remove_dir_all(&self.dir);
     }

@@ -2,9 +2,9 @@
 //! folder loads that folder's project (rules, prompt, semantic settings)
 //! before anything is switched; a failure leaves the open session intact.
 
+use cersei_agent::BricksConfig;
 use cersei_agent::control::scripted::{Reply, Script, ScriptedCatalog};
 use cersei_agent::control::*;
-use cersei_agent::BricksConfig;
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

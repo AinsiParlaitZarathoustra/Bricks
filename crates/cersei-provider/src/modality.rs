@@ -483,9 +483,11 @@ mod tests {
         ] {
             assert!(validate_messages(&pdf, &[], false, &c, p).is_ok());
             assert!(validate_messages(&txt, &[], false, &c, p).is_ok());
-            assert!(validate_messages(&zip, &[], false, &c, p)
-                .unwrap_err()
-                .contains("document_mime_types"));
+            assert!(
+                validate_messages(&zip, &[], false, &c, p)
+                    .unwrap_err()
+                    .contains("document_mime_types")
+            );
         }
         // No media_type -> cannot be checked.
         let untyped = user(vec![ContentBlock::document_url("https://x/d")]);
@@ -519,9 +521,11 @@ mod tests {
     fn tools_require_the_declaration() {
         let mut c = caps(&[Text], &[Text], &[]);
         c.tool_calls = false;
-        assert!(validate_messages(&[], &[], true, &c, Protocol::Responses)
-            .unwrap_err()
-            .contains("tool_calls"));
+        assert!(
+            validate_messages(&[], &[], true, &c, Protocol::Responses)
+                .unwrap_err()
+                .contains("tool_calls")
+        );
         assert!(validate_messages(&[], &[], false, &c, Protocol::Responses).is_ok());
     }
 

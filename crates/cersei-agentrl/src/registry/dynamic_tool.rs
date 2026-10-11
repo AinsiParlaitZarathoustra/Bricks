@@ -6,7 +6,7 @@
 use super::{RegistryEntry, ToolRegistry};
 use async_trait::async_trait;
 use cersei_tools::{PermissionLevel, Tool, ToolCategory, ToolContext, ToolResult};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::sync::Arc;
 
 /// Strategy for re-applying a registered solution. The default (production) impl

@@ -19,7 +19,7 @@ use cersei_tools::Extensions;
 use cersei_types::{CerseiError, Result};
 use dashmap::DashMap;
 use parking_lot::Mutex;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
@@ -285,11 +285,9 @@ impl Workflow {
             .unwrap_or(false);
 
         // Memoized replay: a completed, non-target node returns its cached output.
-        if !is_resume_target {
-            if let Some(cached) = rctx.outputs.get(node_id) {
-                let out = cached.clone();
-                return self.continue_from(rctx, node_id, out, stop_at).await;
-            }
+        if !is_resume_target && let Some(cached) = rctx.outputs.get(node_id) {
+            let out = cached.clone();
+            return self.continue_from(rctx, node_id, out, stop_at).await;
         }
 
         let step = self
@@ -461,17 +459,17 @@ impl Workflow {
         let edges = self.outgoing.get(node_id).cloned().unwrap_or_default();
 
         for edge in &edges {
-            if let EdgeKind::When { condition } = &edge.kind {
-                if condition.eval(&scope) {
-                    let _ = rctx
-                        .events
-                        .send(WorkflowEvent::BranchTaken {
-                            node_id: node_id.to_string(),
-                            edge_to: edge.to.clone(),
-                        })
-                        .await;
-                    return self.walk(rctx, &edge.to, input, stop_at).await;
-                }
+            if let EdgeKind::When { condition } = &edge.kind
+                && condition.eval(&scope)
+            {
+                let _ = rctx
+                    .events
+                    .send(WorkflowEvent::BranchTaken {
+                        node_id: node_id.to_string(),
+                        edge_to: edge.to.clone(),
+                    })
+                    .await;
+                return self.walk(rctx, &edge.to, input, stop_at).await;
             }
         }
         // No arm matched — fall through a `Then` (else) edge if present.

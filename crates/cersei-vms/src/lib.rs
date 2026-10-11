@@ -39,6 +39,9 @@ pub use types::{
 
 pub mod prelude {
     //! `use cersei_vms::prelude::*;` for the common surface.
+    #[cfg(feature = "backend-docker")]
+    pub use crate::DockerRuntime;
+    pub use crate::LocalProcessRuntime;
     pub use crate::commands::{Commands, StreamChunk};
     pub use crate::error::{Result, VmError};
     pub use crate::filesystem::Filesystem;
@@ -48,7 +51,4 @@ pub mod prelude {
         FileEntry, MailboxEnvelope, RunOutput, RunRequest, SandboxId, SandboxOpts, Signal,
         SnapshotId, VolumeId, VolumeMount,
     };
-    #[cfg(feature = "backend-docker")]
-    pub use crate::DockerRuntime;
-    pub use crate::LocalProcessRuntime;
 }

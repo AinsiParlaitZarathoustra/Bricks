@@ -16,14 +16,14 @@
 
 use crate::config::{AuthMode, Secret};
 use crate::modality::validate_messages;
-use crate::protocol::{self, sse::SseDecoder, BuildCtx};
+use crate::protocol::{self, BuildCtx, sse::SseDecoder};
 use crate::reasoning;
 use crate::registry::{KeySource, ResolvedModel};
 use crate::{CompletionRequest, CompletionStream, Provider};
 use async_trait::async_trait;
 use cersei_types::{CerseiError, Modality, Result, StreamEvent, Usage};
 use futures::StreamExt;
-use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE};
+use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
@@ -93,12 +93,12 @@ impl ProviderBuilder {
                     return Err(CerseiError::Config(format!(
                         "{who}: unknown tariff `{name}`; available: {}",
                         p.tariff_names().collect::<Vec<_>>().join(", ")
-                    )))
+                    )));
                 }
                 None => {
                     return Err(CerseiError::Config(format!(
                         "{who}: tariff `{name}` requested but the model declares no pricing"
-                    )))
+                    )));
                 }
             }
         }
@@ -120,7 +120,7 @@ impl ProviderBuilder {
                                 "provider \"{}\": environment variable `{var}` (api_key_env) is \
                                  not set or empty",
                                 m.provider_id
-                            )))
+                            )));
                         }
                     }
                 }
@@ -129,7 +129,7 @@ impl ProviderBuilder {
                         "provider \"{}\": auth = \"{}\" but no key source is configured",
                         m.provider_id,
                         m.auth.as_str()
-                    )))
+                    )));
                 }
             }
         };

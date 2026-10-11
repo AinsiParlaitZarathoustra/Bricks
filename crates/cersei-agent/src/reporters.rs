@@ -7,8 +7,8 @@ use std::io::Write;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::events::AgentEvent;
 use crate::AgentOutput;
+use crate::events::AgentEvent;
 
 // ─── Reporter trait ──────────────────────────────────────────────────────────
 

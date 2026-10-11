@@ -65,31 +65,34 @@ pub fn check_version(db: &GrafeoDB) -> VersionCheck {
 
     match session.execute(queries::READ_VERSION) {
         Ok(result) => {
-            if let Some(row) = result.iter().next() {
-                // Try to extract version as i64 then cast
-                let graph_ver = row
-                    .first()
-                    .and_then(|v| format!("{}", v).parse::<u32>().ok())
-                    .unwrap_or(0);
+            match result.iter().next() {
+                Some(row) => {
+                    // Try to extract version as i64 then cast
+                    let graph_ver = row
+                        .first()
+                        .and_then(|v| format!("{}", v).parse::<u32>().ok())
+                        .unwrap_or(0);
 
-                if graph_ver == CURRENT_SCHEMA_VERSION {
-                    VersionCheck::UpToDate
-                } else if graph_ver < CURRENT_SCHEMA_VERSION {
-                    VersionCheck::NeedsMigration {
-                        from: graph_ver,
-                        to: CURRENT_SCHEMA_VERSION,
-                    }
-                } else {
-                    VersionCheck::CodeBehind {
-                        graph_version: graph_ver,
-                        code_version: CURRENT_SCHEMA_VERSION,
+                    if graph_ver == CURRENT_SCHEMA_VERSION {
+                        VersionCheck::UpToDate
+                    } else if graph_ver < CURRENT_SCHEMA_VERSION {
+                        VersionCheck::NeedsMigration {
+                            from: graph_ver,
+                            to: CURRENT_SCHEMA_VERSION,
+                        }
+                    } else {
+                        VersionCheck::CodeBehind {
+                            graph_version: graph_ver,
+                            code_version: CURRENT_SCHEMA_VERSION,
+                        }
                     }
                 }
-            } else {
-                // No SchemaVersion node → pre-versioning (v0)
-                VersionCheck::NeedsMigration {
-                    from: 0,
-                    to: CURRENT_SCHEMA_VERSION,
+                _ => {
+                    // No SchemaVersion node → pre-versioning (v0)
+                    VersionCheck::NeedsMigration {
+                        from: 0,
+                        to: CURRENT_SCHEMA_VERSION,
+                    }
                 }
             }
         }

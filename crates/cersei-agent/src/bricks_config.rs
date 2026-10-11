@@ -6,7 +6,7 @@
 //! disables itself (see [`cersei_compression::rules`]). Changes apply the next
 //! time the configuration is loaded (normally at start).
 
-use crate::context::{policy_from_bricks_toml, ContextPolicy};
+use crate::context::{ContextPolicy, policy_from_bricks_toml};
 use cersei_compression::{
     CompressionConfig, CompressionLevel, CompressionSection, RuleSet, RuleSources,
 };
@@ -199,10 +199,10 @@ fn without_removed_turn_keys(text: &str) -> (std::borrow::Cow<'_, str>, Vec<Stri
     };
     let mut found = Vec::new();
     for (table, key) in REMOVED_TURN_KEYS {
-        if let Some(t) = doc.get_mut(*table).and_then(|t| t.as_table_mut()) {
-            if t.remove(*key).is_some() {
-                found.push(format!("[{table}] {key}"));
-            }
+        if let Some(t) = doc.get_mut(*table).and_then(|t| t.as_table_mut())
+            && t.remove(*key).is_some()
+        {
+            found.push(format!("[{table}] {key}"));
         }
     }
     if found.is_empty() {

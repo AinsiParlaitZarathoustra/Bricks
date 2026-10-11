@@ -11,10 +11,10 @@ use cersei_web::policy::PolicyError;
 use cersei_web::rank::{self, Relevance};
 use cersei_web::search::{SearchError, Searcher};
 use cersei_web::store::WebStore;
-use cersei_web::{chunk, PageError, ResearchOptions, WebContext};
+use cersei_web::{PageError, ResearchOptions, WebContext, chunk};
 use std::io::Write;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 use url::Url;
 
@@ -449,9 +449,10 @@ async fn the_byte_budget_of_a_call_is_shared_and_private_hosts_need_an_exception
         .map(|p| p.body.len())
         .sum();
     assert!(total <= 300_000, "{total}");
-    assert!(out
-        .iter()
-        .any(|r| matches!(r, Ok(p) if p.truncated) || matches!(r, Err(FetchError::Budget))));
+    assert!(
+        out.iter()
+            .any(|r| matches!(r, Ok(p) if p.truncated) || matches!(r, Err(FetchError::Budget)))
+    );
 
     let mut public = c.fetch.clone();
     public.allow_private.clear();

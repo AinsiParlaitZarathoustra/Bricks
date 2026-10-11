@@ -193,10 +193,11 @@ impl Compressor {
             return self.cap_exact(content, "shell", "no rule");
         };
 
-        if json_view::looks_like_json(content) && content.len() >= self.json_threshold(level) {
-            if let Some(o) = self.json(content, None, &rule.id) {
-                return o;
-            }
+        if json_view::looks_like_json(content)
+            && content.len() >= self.json_threshold(level)
+            && let Some(o) = self.json(content, None, &rule.id)
+        {
+            return o;
         }
         if rule.mode == RuleMode::Exact {
             let mut o = self.cap_exact(content, "shell-exact", &rule.id);
@@ -304,52 +305,51 @@ impl Compressor {
                 .is_some_and(|n| json_view::looks_like_json(&n.text));
         if is_json {
             let full = self.whole_file(path, numbered.as_ref());
-            if let Some(text) = full {
-                if text.len() >= self.json_threshold(level) {
-                    let hint = format!(
-                        "Read file_path=\"{path}\" with offset/limit (offset = first line − 1)"
-                    );
-                    match json_view::summarize(&text, &self.config.json, &hint) {
-                        Ok(s) => {
-                            return Outcome {
-                                headline: format!(
-                                    "JSON summary of {path} ({} bytes, root {}) — a view, not the document",
-                                    text.len(),
-                                    s.root_type
-                                ),
-                                text: s.text,
-                                transformed: true,
-                                partial_view: true,
-                                strategy: "json",
-                                detail: path.to_string(),
-                                notes: Vec::new(),
-                                diagnostic: false,
-                                original: Some(Some(hint)),
-                            }
-                        }
-                        Err(e @ JsonViewError::Invalid { .. }) => {
-                            let mut o = self.page_exact(content, path);
-                            o.notes.push(format!("not valid JSON ({e}); shown as text"));
-                            if o.headline.is_empty() {
-                                o.headline = format!("{path} shown as text");
-                                o.text = content.to_string();
-                                o.transformed = true;
-                            }
-                            o.diagnostic = true;
-                            return o;
-                        }
-                        Err(_) => {}
+            if let Some(text) = full
+                && text.len() >= self.json_threshold(level)
+            {
+                let hint = format!(
+                    "Read file_path=\"{path}\" with offset/limit (offset = first line − 1)"
+                );
+                match json_view::summarize(&text, &self.config.json, &hint) {
+                    Ok(s) => {
+                        return Outcome {
+                            headline: format!(
+                                "JSON summary of {path} ({} bytes, root {}) — a view, not the document",
+                                text.len(),
+                                s.root_type
+                            ),
+                            text: s.text,
+                            transformed: true,
+                            partial_view: true,
+                            strategy: "json",
+                            detail: path.to_string(),
+                            notes: Vec::new(),
+                            diagnostic: false,
+                            original: Some(Some(hint)),
+                        };
                     }
+                    Err(e @ JsonViewError::Invalid { .. }) => {
+                        let mut o = self.page_exact(content, path);
+                        o.notes.push(format!("not valid JSON ({e}); shown as text"));
+                        if o.headline.is_empty() {
+                            o.headline = format!("{path} shown as text");
+                            o.text = content.to_string();
+                            o.transformed = true;
+                        }
+                        o.diagnostic = true;
+                        return o;
+                    }
+                    Err(_) => {}
                 }
             }
         }
 
-        if level == CompressionLevel::Aggressive {
-            if let Some(lang) = SkeletonLanguage::from_path(path) {
-                if let Some(o) = self.skeleton_view(path, lang, numbered.as_ref()) {
-                    return o;
-                }
-            }
+        if level == CompressionLevel::Aggressive
+            && let Some(lang) = SkeletonLanguage::from_path(path)
+            && let Some(o) = self.skeleton_view(path, lang, numbered.as_ref())
+        {
+            return o;
         }
         self.page_exact(content, path)
     }
@@ -435,10 +435,11 @@ impl Compressor {
     }
 
     fn whole_file(&self, path: &str, numbered: Option<&Numbered>) -> Option<String> {
-        if let Some(n) = numbered {
-            if n.first_line == 1 && !n.windowed {
-                return Some(n.text.clone());
-            }
+        if let Some(n) = numbered
+            && n.first_line == 1
+            && !n.windowed
+        {
+            return Some(n.text.clone());
         }
         let meta = std::fs::metadata(path).ok()?;
         if !meta.is_file() || meta.len() as usize > self.config.max_file_bytes {
@@ -485,10 +486,11 @@ impl Compressor {
         if level.is_off() {
             return self.cap_exact(content, "web-off", "");
         }
-        if json_view::looks_like_json(content) && content.len() >= self.json_threshold(level) {
-            if let Some(o) = self.json(content, None, "web") {
-                return o;
-            }
+        if json_view::looks_like_json(content)
+            && content.len() >= self.json_threshold(level)
+            && let Some(o) = self.json(content, None, "web")
+        {
+            return o;
         }
         let rule = self.rules.fallback();
         let report = log::compress_log(content, rule, &self.config.log);
@@ -516,10 +518,9 @@ impl Compressor {
         if !level.is_off()
             && json_view::looks_like_json(content)
             && content.len() >= self.json_threshold(level)
+            && let Some(o) = self.json(content, None, "tool")
         {
-            if let Some(o) = self.json(content, None, "tool") {
-                return o;
-            }
+            return o;
         }
         self.cap_exact(content, "passthrough", "")
     }

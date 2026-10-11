@@ -16,7 +16,7 @@ pub mod http;
 pub mod stdio;
 
 pub use client::{Era, McpCallResult, McpClient, McpContent, McpToolDef, ProgressFn, ServerInfo};
-pub use config::{expand_env_vars, expand_server_config, McpLimits, McpServerConfig, ProtocolMode};
+pub use config::{McpLimits, McpServerConfig, ProtocolMode, expand_env_vars, expand_server_config};
 
 use cersei_types::ToolDefinition;
 use std::collections::HashMap;

@@ -185,14 +185,13 @@ impl Searcher {
                         break 'chain;
                     }
                     Err(e) => {
-                        if !retried {
-                            if let Some(wait) = e.retry_after(self.cfg.max_retry_wait) {
-                                if Instant::now() + wait < deadline {
-                                    retried = true;
-                                    tokio::time::sleep(wait).await;
-                                    continue;
-                                }
-                            }
+                        if !retried
+                            && let Some(wait) = e.retry_after(self.cfg.max_retry_wait)
+                            && Instant::now() + wait < deadline
+                        {
+                            retried = true;
+                            tokio::time::sleep(wait).await;
+                            continue;
                         }
                         if !e.allows_fallback() {
                             break 'chain;

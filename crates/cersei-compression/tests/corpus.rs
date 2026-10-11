@@ -7,7 +7,7 @@
 
 #[path = "support/cases.rs"]
 mod cases;
-use cases::{fixture, CASES};
+use cases::{CASES, fixture};
 use cersei_compression::{
     CompressionConfig, CompressionLevel, Compressor, RawStore, RuleSet, ToolOutput,
 };

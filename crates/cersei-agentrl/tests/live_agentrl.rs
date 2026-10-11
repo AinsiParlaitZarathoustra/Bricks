@@ -107,7 +107,9 @@ async fn agentrl_solves_a_real_coding_task() {
     match &outcome.how {
         Some(Solved::Directly) => eprintln!("→ GeneralAgent solved it on the first pass."),
         Some(Solved::ByNewTool(id)) => {
-            eprintln!("→ RL loop fired: GeneralAgent failed, a sandboxed proposal passed and was registered as {id}.")
+            eprintln!(
+                "→ RL loop fired: GeneralAgent failed, a sandboxed proposal passed and was registered as {id}."
+            )
         }
         Some(Solved::ByCachedTool(id)) => eprintln!("→ Solved via a cached tool {id}."),
         None => eprintln!("→ NOT solved."),

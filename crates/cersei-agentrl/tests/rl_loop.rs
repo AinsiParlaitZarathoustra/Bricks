@@ -10,8 +10,8 @@ use cersei_agentrl::orchestrator::{
 };
 use cersei_agentrl::planner::proposals_from_trace;
 use cersei_agentrl::{FailureTrace, SolutionSpec, Solved, ToolRegistry};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn failing_graph() -> ExecutionGraph {
     let mut g = ExecutionGraph::new();

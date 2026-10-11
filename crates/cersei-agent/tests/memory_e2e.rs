@@ -4,13 +4,13 @@
 mod common;
 
 use async_trait::async_trait;
-use cersei_agent::events::AgentEvent;
 use cersei_agent::Agent;
+use cersei_agent::events::AgentEvent;
 use cersei_embeddings::HashingEmbeddings;
+use cersei_memory::LongTermMemory;
 use cersei_memory::structured::extract::{ExtractError, ExtractionRequest, Extractor};
 use cersei_memory::structured::{MemoryConfig, StructuredMemory};
-use cersei_memory::LongTermMemory;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::sync::{Arc, Mutex};

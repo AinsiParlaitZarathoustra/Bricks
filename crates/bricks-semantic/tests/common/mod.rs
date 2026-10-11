@@ -9,10 +9,10 @@ use cersei_lsp::mock::{self, MockConfig, MockDocs, MockHandle};
 use cersei_lsp::{LspClient, LspResult, LspServerConfig};
 use futures::future::BoxFuture;
 use parking_lot::Mutex;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 pub fn workspace() -> tempfile::TempDir {

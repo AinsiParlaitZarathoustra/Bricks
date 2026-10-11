@@ -82,9 +82,11 @@ mod tests {
         let filtered = filter_tools_for_mode(tools, AgentMode::Worker);
         // Workers should have fewer tools (coordinator-only removed)
         assert!(filtered.len() <= original_count);
-        assert!(filtered
-            .iter()
-            .all(|t| !COORDINATOR_ONLY_TOOLS.contains(&t.name())));
+        assert!(
+            filtered
+                .iter()
+                .all(|t| !COORDINATOR_ONLY_TOOLS.contains(&t.name()))
+        );
     }
 
     #[test]

@@ -263,7 +263,7 @@ impl PositionMapper {
                     return Err(PositionError::LineOutOfRange {
                         line: point.row as u32,
                         lines: bytes.iter().filter(|&&b| b == b'\n').count() as u32 + 1,
-                    })
+                    });
                 }
             }
         }
@@ -351,15 +351,16 @@ mod tests {
             .unwrap(),
             0
         );
-        assert!(pm
-            .from_lsp(
+        assert!(
+            pm.from_lsp(
                 &cersei_lsp::Position {
                     line: 1,
                     character: 0
                 },
                 PositionEncoding::Utf16
             )
-            .is_err());
+            .is_err()
+        );
     }
 
     #[test]

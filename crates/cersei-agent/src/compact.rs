@@ -210,10 +210,10 @@ pub fn find_orphaned_tool_results(msgs: &[Message]) -> Vec<String> {
             }
         }
         for b in blocks {
-            if let ContentBlock::ToolResult { tool_use_id, .. } = b {
-                if !seen.contains(tool_use_id.as_str()) {
-                    orphaned.push(tool_use_id.clone());
-                }
+            if let ContentBlock::ToolResult { tool_use_id, .. } = b
+                && !seen.contains(tool_use_id.as_str())
+            {
+                orphaned.push(tool_use_id.clone());
             }
         }
     }
@@ -245,10 +245,10 @@ pub fn find_unanswered_tool_uses(msgs: &[Message]) -> Vec<String> {
             continue;
         };
         for b in blocks {
-            if let ContentBlock::ToolUse { id, .. } = b {
-                if !answered.contains(id.as_str()) {
-                    unanswered.push(id.clone());
-                }
+            if let ContentBlock::ToolUse { id, .. } = b
+                && !answered.contains(id.as_str())
+            {
+                unanswered.push(id.clone());
             }
         }
     }
@@ -351,15 +351,15 @@ pub fn collapse_read_tool_results(messages: Vec<Message>) -> Vec<Message> {
                     } = b
                     {
                         // Check if this is a file read result we've already seen
-                        if let ToolResultContent::Text(text) = content {
-                            if text.contains('\t') {
-                                // Line-numbered output = file read
-                                let key = tool_use_id.clone();
-                                if seen_files.contains(&key) {
-                                    return true; // dominated, skip
-                                }
-                                seen_files.insert(key);
+                        if let ToolResultContent::Text(text) = content
+                            && text.contains('\t')
+                        {
+                            // Line-numbered output = file read
+                            let key = tool_use_id.clone();
+                            if seen_files.contains(&key) {
+                                return true; // dominated, skip
                             }
+                            seen_files.insert(key);
                         }
                         false
                     } else {
@@ -432,11 +432,19 @@ impl CompactionOutcome {
 impl std::fmt::Display for CompactionOutcome {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            CompactionOutcome::Compacted { messages_before, messages_after, tokens_before, tokens_after } => write!(
+            CompactionOutcome::Compacted {
+                messages_before,
+                messages_after,
+                tokens_before,
+                tokens_after,
+            } => write!(
                 f,
                 "compacted: {messages_before} → {messages_after} messages, ~{tokens_before} → ~{tokens_after} tokens"
             ),
-            CompactionOutcome::InsufficientGain { tokens_before, tokens_after } => write!(
+            CompactionOutcome::InsufficientGain {
+                tokens_before,
+                tokens_after,
+            } => write!(
                 f,
                 "not applied: the summary would only bring ~{tokens_before} to ~{tokens_after} tokens"
             ),
@@ -468,8 +476,7 @@ impl CompactionRun {
 }
 
 /// System prompt of the summary call.
-pub const SUMMARY_SYSTEM_PROMPT: &str =
-    "You compact the history of a coding agent's session so the \
+pub const SUMMARY_SYSTEM_PROMPT: &str = "You compact the history of a coding agent's session so the \
 agent can continue the same work with less context. Be factual and complete; never invent.";
 
 /// Opening tag of a compaction summary in the history.
@@ -814,7 +821,7 @@ pub async fn compact_history(
         Err(reason) => {
             return CompactionRun::without_call(CompactionOutcome::Failed {
                 reason: format!("summary call failed: {reason}"),
-            })
+            });
         }
     };
     let usage = Some(response.usage.clone());

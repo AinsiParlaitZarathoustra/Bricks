@@ -95,18 +95,18 @@ impl ModelCatalog for cersei_provider::ProviderRegistry {
 
     fn build(&self, selection: &str, reasoning: Option<&str>) -> Result<Box<dyn Provider>, String> {
         let r = self.resolve(selection).map_err(|e| e.to_string())?;
-        if let Some(p) = reasoning {
-            if !r.reasoning.profiles.iter().any(|x| x.id == p) {
-                let known: Vec<&str> = r.reasoning.profiles.iter().map(|x| x.id.as_str()).collect();
-                return Err(format!(
-                    "model `{selection}` has no reasoning profile `{p}`; its profiles: {}",
-                    if known.is_empty() {
-                        "(none)".to_string()
-                    } else {
-                        known.join(", ")
-                    }
-                ));
-            }
+        if let Some(p) = reasoning
+            && !r.reasoning.profiles.iter().any(|x| x.id == p)
+        {
+            let known: Vec<&str> = r.reasoning.profiles.iter().map(|x| x.id.as_str()).collect();
+            return Err(format!(
+                "model `{selection}` has no reasoning profile `{p}`; its profiles: {}",
+                if known.is_empty() {
+                    "(none)".to_string()
+                } else {
+                    known.join(", ")
+                }
+            ));
         }
         Ok(Box::new(r.build_provider().map_err(|e| e.to_string())?))
     }

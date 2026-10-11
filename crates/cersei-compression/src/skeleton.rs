@@ -370,12 +370,11 @@ fn body_range(node: Node, lang: SkeletonLanguage) -> Option<(usize, usize)> {
                 return None; // `def f(): return 1`
             }
             // Keep the docstring: it documents the contract.
-            if let Some(first) = body.named_child(0) {
-                if first.kind() == "expression_statement"
-                    && first.named_child(0).is_some_and(|s| s.kind() == "string")
-                {
-                    start = first.end_position().row + 1;
-                }
+            if let Some(first) = body.named_child(0)
+                && first.kind() == "expression_statement"
+                && first.named_child(0).is_some_and(|s| s.kind() == "string")
+            {
+                start = first.end_position().row + 1;
             }
             let end = body.end_position().row;
             (end >= start && end - start >= 1).then_some((start, end))

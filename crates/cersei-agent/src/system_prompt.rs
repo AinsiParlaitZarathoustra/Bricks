@@ -72,10 +72,18 @@ pub enum OutputStyle {
 impl OutputStyle {
     pub fn prompt_suffix(self) -> Option<&'static str> {
         match self {
-            Self::Explanatory => Some("When explaining code or concepts, be thorough and educational. Include reasoning, alternatives considered, and potential pitfalls. Err on the side of over-explaining."),
-            Self::Learning => Some("This user is learning. Explain concepts as you implement them. Point out patterns, best practices, and why you made each decision. Use analogies when helpful."),
-            Self::Concise => Some("Be maximally concise. Skip preamble, summaries, and filler. Lead with the answer. One sentence is better than three."),
-            Self::Formal => Some("Maintain a formal, professional tone. Use precise technical language."),
+            Self::Explanatory => Some(
+                "When explaining code or concepts, be thorough and educational. Include reasoning, alternatives considered, and potential pitfalls. Err on the side of over-explaining.",
+            ),
+            Self::Learning => Some(
+                "This user is learning. Explain concepts as you implement them. Point out patterns, best practices, and why you made each decision. Use analogies when helpful.",
+            ),
+            Self::Concise => Some(
+                "Be maximally concise. Skip preamble, summaries, and filler. Lead with the answer. One sentence is better than three.",
+            ),
+            Self::Formal => {
+                Some("Maintain a formal, professional tone. Use precise technical language.")
+            }
             Self::Casual => Some("Use a casual, conversational tone."),
             Self::Default => None,
         }
@@ -117,7 +125,9 @@ impl SystemPromptPrefix {
     pub fn attribution_text(self) -> &'static str {
         match self {
             Self::Interactive => "You are a coding agent built with the Cersei SDK.",
-            Self::SdkPreset => "You are a coding agent built with the Cersei SDK, running with custom instructions.",
+            Self::SdkPreset => {
+                "You are a coding agent built with the Cersei SDK, running with custom instructions."
+            }
             Self::Sdk => "You are an agent built on the Cersei SDK.",
             Self::SubAgent => "You are a specialized sub-agent.",
         }
@@ -173,10 +183,10 @@ pub struct SystemPromptOptions {
 
 pub fn build_system_prompt(opts: &SystemPromptOptions) -> String {
     // Replace mode
-    if opts.replace_system_prompt {
-        if let Some(custom) = &opts.custom_system_prompt {
-            return format!("{}\n\n{}", custom, SYSTEM_PROMPT_DYNAMIC_BOUNDARY);
-        }
+    if opts.replace_system_prompt
+        && let Some(custom) = &opts.custom_system_prompt
+    {
+        return format!("{}\n\n{}", custom, SYSTEM_PROMPT_DYNAMIC_BOUNDARY);
     }
 
     let prefix = opts.prefix.unwrap_or_else(|| {

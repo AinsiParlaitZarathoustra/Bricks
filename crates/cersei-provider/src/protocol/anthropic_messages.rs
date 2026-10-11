@@ -12,11 +12,11 @@
 //! blocks with their signatures and redacted-thinking data are echoed back.
 
 use super::*;
-use crate::pricing::CACHE_WRITE_BY_VARIANT;
 use crate::CompletionRequest;
+use crate::pricing::CACHE_WRITE_BY_VARIANT;
 use base64::Engine;
 use cersei_types::{DocumentSource, ImageSource, Result, StopReason, StreamEvent, Usage};
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 // ─── Request ─────────────────────────────────────────────────────────────────
 
@@ -47,10 +47,10 @@ pub(crate) fn build_body(ctx: &BuildCtx, req: &CompletionRequest) -> Result<Valu
     if !req.tools.is_empty() {
         let mut tools =
             crate::adapt::adapt_tools(&req.tools, crate::adapt::SchemaDialect::AnthropicNative);
-        if ctx.compat.prompt_cache_markers {
-            if let Some(last) = tools.last_mut() {
-                last["cache_control"] = json!({ "type": "ephemeral" });
-            }
+        if ctx.compat.prompt_cache_markers
+            && let Some(last) = tools.last_mut()
+        {
+            last["cache_control"] = json!({ "type": "ephemeral" });
         }
         body["tools"] = Value::Array(tools);
         if req.options.get::<String>("tool_choice").as_deref() == Some("required") {
@@ -174,10 +174,10 @@ fn convert_block(block: &ContentBlock) -> Result<Option<Value>> {
             json!({ "type": "redacted_thinking", "data": data })
         }
         ContentBlock::Audio { .. } => {
-            return Err(unsupported("anthropic_messages cannot carry audio input"))
+            return Err(unsupported("anthropic_messages cannot carry audio input"));
         }
         ContentBlock::Video { .. } => {
-            return Err(unsupported("anthropic_messages cannot carry video input"))
+            return Err(unsupported("anthropic_messages cannot carry video input"));
         }
         ContentBlock::ProtocolItem { .. } | ContentBlock::Opaque => return Ok(None),
     }))
@@ -211,7 +211,9 @@ fn document_source(s: &DocumentSource) -> Result<Value> {
         return Err(unsupported("a document block has no data, url or file_id"));
     };
     match s.media_type.as_deref().unwrap_or("application/pdf") {
-        "application/pdf" => Ok(json!({ "type": "base64", "media_type": "application/pdf", "data": data })),
+        "application/pdf" => {
+            Ok(json!({ "type": "base64", "media_type": "application/pdf", "data": data }))
+        }
         // Plain text documents travel as text, not base64.
         "text/plain" => {
             let bytes = base64::engine::general_purpose::STANDARD
@@ -250,10 +252,9 @@ pub(crate) fn parse_usage(u: &Value) -> Usage {
             if let Some(label) = key
                 .strip_prefix("ephemeral_")
                 .and_then(|k| k.strip_suffix("_input_tokens"))
+                && let Some(tokens) = val.as_u64().filter(|t| *t > 0)
             {
-                if let Some(tokens) = val.as_u64().filter(|t| *t > 0) {
-                    variants.insert(label.to_string(), json!(tokens));
-                }
+                variants.insert(label.to_string(), json!(tokens));
             }
         }
         if !variants.is_empty() {
@@ -439,8 +440,8 @@ pub(crate) fn response_to_events(json: &Value) -> Result<Vec<StreamEvent>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Compat;
     use crate::StreamAccumulator;
+    use crate::config::Compat;
     use cersei_types::{ToolDefinition, ToolResultContent};
 
     fn body_with(r: &CompletionRequest, compat: Compat) -> Result<Value> {
@@ -660,9 +661,11 @@ mod tests {
         );
         let v = &u.provider_usage[CACHE_WRITE_BY_VARIANT];
         assert_eq!((v["5m"].as_u64(), v["1h"].as_u64()), (Some(100), Some(200)));
-        assert!(parse_usage(&json!({"input_tokens": 1, "output_tokens": 1}))
-            .provider_usage
-            .is_null());
+        assert!(
+            parse_usage(&json!({"input_tokens": 1, "output_tokens": 1}))
+                .provider_usage
+                .is_null()
+        );
     }
 
     #[test]
@@ -730,11 +733,13 @@ mod tests {
         .unwrap();
         assert_eq!(r.stop_reason, StopReason::ContentFilter);
         // Cut stream.
-        assert!(sse(&[(
-            "message_start",
-            json!({"type":"message_start","message":{"id":"m","model":"x"}})
-        )])
-        .is_err());
+        assert!(
+            sse(&[(
+                "message_start",
+                json!({"type":"message_start","message":{"id":"m","model":"x"}})
+            )])
+            .is_err()
+        );
     }
 
     #[test]

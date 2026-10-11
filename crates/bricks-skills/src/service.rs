@@ -2,7 +2,7 @@
 //! demand, never per turn), a trust state per session, activation and the
 //! catalog.
 
-use crate::document::{parse_document, AllowedTools};
+use crate::document::{AllowedTools, parse_document};
 use crate::registry::{
     BuiltinSkill, Candidate, CandidateState, Limits, ProjectDecision, Registry, ResolveError,
     Scope, SkillRoot, Trust,

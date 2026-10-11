@@ -2,8 +2,8 @@
 //! history on resume). It holds what to draw, never what the engine owns:
 //! the conversation itself stays in the session store.
 
-use cersei_agent::control::*;
 use cersei_agent::ContextStatus;
+use cersei_agent::control::*;
 use cersei_types::Usage;
 use std::time::Instant;
 
@@ -438,12 +438,10 @@ impl App {
                         request,
                         resolution,
                     } = c
-                    {
-                        if &request.approval_id == approval_id {
+                        && &request.approval_id == approval_id {
                             *resolution = Some((*decision, *by));
                             break;
                         }
-                    }
                 }
             }
             Event::EditApplied {
@@ -571,11 +569,10 @@ impl App {
                             t.output = "interrupted".into();
                         }
                     }
-                    if let Cell::Approval { resolution, .. } = c {
-                        if resolution.is_none() {
+                    if let Cell::Approval { resolution, .. } = c
+                        && resolution.is_none() {
                             *resolution = Some((Decision::Deny, DecidedBy::Cancelled));
                         }
-                    }
                 }
                 self.pending.clear();
                 let elapsed = self

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use cersei_tools::{Tool, ToolContext, ToolResult};
 use cersei_workflows::prelude::*;
 use cersei_workflows::{Condition, JoinStrategy, StepOutcome, WorkflowEvent};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -64,10 +64,12 @@ async fn sequential_pipeline_runs_in_order() {
     );
     // Both steps recorded.
     assert_eq!(result.steps.len(), 2);
-    assert!(result
-        .steps
-        .values()
-        .all(|s| s.status == RunStatus::Success));
+    assert!(
+        result
+            .steps
+            .values()
+            .all(|s| s.status == RunStatus::Success)
+    );
 }
 
 // ─── 3. Parallel + join ───────────────────────────────────────────────────────

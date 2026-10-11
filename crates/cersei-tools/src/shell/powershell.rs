@@ -17,10 +17,10 @@
 //! its own: the session is replaced.
 
 use super::capture::{Captured, StreamCapture};
-use super::{procs, Progress, ShellConfig};
+use super::{Progress, ShellConfig, procs};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 

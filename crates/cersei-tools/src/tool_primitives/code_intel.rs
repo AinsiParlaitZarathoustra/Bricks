@@ -114,134 +114,134 @@ pub fn analyze_file(path: &Path, source: &str) -> Option<FileIntel> {
                     }
                 }
                 "function_item" => {
-                    if let Some(name) = node.child_by_field_name("name") {
-                        if let Ok(n) = name.utf8_text(bytes) {
-                            symbols.push(Symbol {
-                                name: n.to_string(),
-                                kind: SymbolKind::Function,
-                                line: node.start_position().row + 1,
-                            });
-                        }
+                    if let Some(name) = node.child_by_field_name("name")
+                        && let Ok(n) = name.utf8_text(bytes)
+                    {
+                        symbols.push(Symbol {
+                            name: n.to_string(),
+                            kind: SymbolKind::Function,
+                            line: node.start_position().row + 1,
+                        });
                     }
                 }
                 "struct_item" => {
-                    if let Some(name) = node.child_by_field_name("name") {
-                        if let Ok(n) = name.utf8_text(bytes) {
-                            symbols.push(Symbol {
-                                name: n.to_string(),
-                                kind: SymbolKind::Struct,
-                                line: node.start_position().row + 1,
-                            });
-                        }
+                    if let Some(name) = node.child_by_field_name("name")
+                        && let Ok(n) = name.utf8_text(bytes)
+                    {
+                        symbols.push(Symbol {
+                            name: n.to_string(),
+                            kind: SymbolKind::Struct,
+                            line: node.start_position().row + 1,
+                        });
                     }
                 }
                 "enum_item" => {
-                    if let Some(name) = node.child_by_field_name("name") {
-                        if let Ok(n) = name.utf8_text(bytes) {
-                            symbols.push(Symbol {
-                                name: n.to_string(),
-                                kind: SymbolKind::Enum,
-                                line: node.start_position().row + 1,
-                            });
-                        }
+                    if let Some(name) = node.child_by_field_name("name")
+                        && let Ok(n) = name.utf8_text(bytes)
+                    {
+                        symbols.push(Symbol {
+                            name: n.to_string(),
+                            kind: SymbolKind::Enum,
+                            line: node.start_position().row + 1,
+                        });
                     }
                 }
                 "mod_item" => {
-                    if let Some(name) = node.child_by_field_name("name") {
-                        if let Ok(n) = name.utf8_text(bytes) {
-                            symbols.push(Symbol {
-                                name: n.to_string(),
-                                kind: SymbolKind::Module,
-                                line: node.start_position().row + 1,
-                            });
-                        }
+                    if let Some(name) = node.child_by_field_name("name")
+                        && let Ok(n) = name.utf8_text(bytes)
+                    {
+                        symbols.push(Symbol {
+                            name: n.to_string(),
+                            kind: SymbolKind::Module,
+                            line: node.start_position().row + 1,
+                        });
                     }
                 }
                 "trait_item" => {
-                    if let Some(name) = node.child_by_field_name("name") {
-                        if let Ok(n) = name.utf8_text(bytes) {
-                            symbols.push(Symbol {
-                                name: n.to_string(),
-                                kind: SymbolKind::Interface,
-                                line: node.start_position().row + 1,
-                            });
-                        }
+                    if let Some(name) = node.child_by_field_name("name")
+                        && let Ok(n) = name.utf8_text(bytes)
+                    {
+                        symbols.push(Symbol {
+                            name: n.to_string(),
+                            kind: SymbolKind::Interface,
+                            line: node.start_position().row + 1,
+                        });
                     }
                 }
                 "type_item" => {
-                    if let Some(name) = node.child_by_field_name("name") {
-                        if let Ok(n) = name.utf8_text(bytes) {
-                            symbols.push(Symbol {
-                                name: n.to_string(),
-                                kind: SymbolKind::Type,
-                                line: node.start_position().row + 1,
-                            });
-                        }
+                    if let Some(name) = node.child_by_field_name("name")
+                        && let Ok(n) = name.utf8_text(bytes)
+                    {
+                        symbols.push(Symbol {
+                            name: n.to_string(),
+                            kind: SymbolKind::Type,
+                            line: node.start_position().row + 1,
+                        });
                     }
                 }
                 _ => {}
             },
             Language::TypeScript | Language::JavaScript => match kind {
                 "import_statement" => {
-                    if let Some(source_node) = node.child_by_field_name("source") {
-                        if let Ok(text) = source_node.utf8_text(bytes) {
-                            imports.push(text.trim_matches(|c| c == '"' || c == '\'').to_string());
-                        }
+                    if let Some(source_node) = node.child_by_field_name("source")
+                        && let Ok(text) = source_node.utf8_text(bytes)
+                    {
+                        imports.push(text.trim_matches(|c| c == '"' || c == '\'').to_string());
                     }
                 }
                 "function_declaration" => {
-                    if let Some(name) = node.child_by_field_name("name") {
-                        if let Ok(n) = name.utf8_text(bytes) {
-                            symbols.push(Symbol {
-                                name: n.to_string(),
-                                kind: SymbolKind::Function,
-                                line: node.start_position().row + 1,
-                            });
-                        }
+                    if let Some(name) = node.child_by_field_name("name")
+                        && let Ok(n) = name.utf8_text(bytes)
+                    {
+                        symbols.push(Symbol {
+                            name: n.to_string(),
+                            kind: SymbolKind::Function,
+                            line: node.start_position().row + 1,
+                        });
                     }
                 }
                 "class_declaration" => {
-                    if let Some(name) = node.child_by_field_name("name") {
-                        if let Ok(n) = name.utf8_text(bytes) {
-                            symbols.push(Symbol {
-                                name: n.to_string(),
-                                kind: SymbolKind::Class,
-                                line: node.start_position().row + 1,
-                            });
-                        }
+                    if let Some(name) = node.child_by_field_name("name")
+                        && let Ok(n) = name.utf8_text(bytes)
+                    {
+                        symbols.push(Symbol {
+                            name: n.to_string(),
+                            kind: SymbolKind::Class,
+                            line: node.start_position().row + 1,
+                        });
                     }
                 }
                 "interface_declaration" => {
-                    if let Some(name) = node.child_by_field_name("name") {
-                        if let Ok(n) = name.utf8_text(bytes) {
-                            symbols.push(Symbol {
-                                name: n.to_string(),
-                                kind: SymbolKind::Interface,
-                                line: node.start_position().row + 1,
-                            });
-                        }
+                    if let Some(name) = node.child_by_field_name("name")
+                        && let Ok(n) = name.utf8_text(bytes)
+                    {
+                        symbols.push(Symbol {
+                            name: n.to_string(),
+                            kind: SymbolKind::Interface,
+                            line: node.start_position().row + 1,
+                        });
                     }
                 }
                 "type_alias_declaration" => {
-                    if let Some(name) = node.child_by_field_name("name") {
-                        if let Ok(n) = name.utf8_text(bytes) {
-                            symbols.push(Symbol {
-                                name: n.to_string(),
-                                kind: SymbolKind::Type,
-                                line: node.start_position().row + 1,
-                            });
-                        }
+                    if let Some(name) = node.child_by_field_name("name")
+                        && let Ok(n) = name.utf8_text(bytes)
+                    {
+                        symbols.push(Symbol {
+                            name: n.to_string(),
+                            kind: SymbolKind::Type,
+                            line: node.start_position().row + 1,
+                        });
                     }
                 }
                 "enum_declaration" => {
-                    if let Some(name) = node.child_by_field_name("name") {
-                        if let Ok(n) = name.utf8_text(bytes) {
-                            symbols.push(Symbol {
-                                name: n.to_string(),
-                                kind: SymbolKind::Enum,
-                                line: node.start_position().row + 1,
-                            });
-                        }
+                    if let Some(name) = node.child_by_field_name("name")
+                        && let Ok(n) = name.utf8_text(bytes)
+                    {
+                        symbols.push(Symbol {
+                            name: n.to_string(),
+                            kind: SymbolKind::Enum,
+                            line: node.start_position().row + 1,
+                        });
                     }
                 }
                 "export_statement" => {
@@ -259,25 +259,25 @@ pub fn analyze_file(path: &Path, source: &str) -> Option<FileIntel> {
                     }
                 }
                 "function_definition" => {
-                    if let Some(name) = node.child_by_field_name("name") {
-                        if let Ok(n) = name.utf8_text(bytes) {
-                            symbols.push(Symbol {
-                                name: n.to_string(),
-                                kind: SymbolKind::Function,
-                                line: node.start_position().row + 1,
-                            });
-                        }
+                    if let Some(name) = node.child_by_field_name("name")
+                        && let Ok(n) = name.utf8_text(bytes)
+                    {
+                        symbols.push(Symbol {
+                            name: n.to_string(),
+                            kind: SymbolKind::Function,
+                            line: node.start_position().row + 1,
+                        });
                     }
                 }
                 "class_definition" => {
-                    if let Some(name) = node.child_by_field_name("name") {
-                        if let Ok(n) = name.utf8_text(bytes) {
-                            symbols.push(Symbol {
-                                name: n.to_string(),
-                                kind: SymbolKind::Class,
-                                line: node.start_position().row + 1,
-                            });
-                        }
+                    if let Some(name) = node.child_by_field_name("name")
+                        && let Ok(n) = name.utf8_text(bytes)
+                    {
+                        symbols.push(Symbol {
+                            name: n.to_string(),
+                            kind: SymbolKind::Class,
+                            line: node.start_position().row + 1,
+                        });
                     }
                 }
                 _ => {}
@@ -289,54 +289,54 @@ pub fn analyze_file(path: &Path, source: &str) -> Option<FileIntel> {
                     }
                 }
                 "function_declaration" => {
-                    if let Some(name) = node.child_by_field_name("name") {
-                        if let Ok(n) = name.utf8_text(bytes) {
-                            symbols.push(Symbol {
-                                name: n.to_string(),
-                                kind: SymbolKind::Function,
-                                line: node.start_position().row + 1,
-                            });
-                        }
+                    if let Some(name) = node.child_by_field_name("name")
+                        && let Ok(n) = name.utf8_text(bytes)
+                    {
+                        symbols.push(Symbol {
+                            name: n.to_string(),
+                            kind: SymbolKind::Function,
+                            line: node.start_position().row + 1,
+                        });
                     }
                 }
                 "method_declaration" => {
-                    if let Some(name) = node.child_by_field_name("name") {
-                        if let Ok(n) = name.utf8_text(bytes) {
-                            symbols.push(Symbol {
-                                name: n.to_string(),
-                                kind: SymbolKind::Function,
-                                line: node.start_position().row + 1,
-                            });
-                        }
+                    if let Some(name) = node.child_by_field_name("name")
+                        && let Ok(n) = name.utf8_text(bytes)
+                    {
+                        symbols.push(Symbol {
+                            name: n.to_string(),
+                            kind: SymbolKind::Function,
+                            line: node.start_position().row + 1,
+                        });
                     }
                 }
                 "type_declaration" => {
                     // Type declarations contain type_spec children
                 }
                 "type_spec" => {
-                    if let Some(name) = node.child_by_field_name("name") {
-                        if let Ok(n) = name.utf8_text(bytes) {
-                            let sk = if node
-                                .child_by_field_name("type")
-                                .map(|t| t.kind() == "struct_type")
-                                .unwrap_or(false)
-                            {
-                                SymbolKind::Struct
-                            } else if node
-                                .child_by_field_name("type")
-                                .map(|t| t.kind() == "interface_type")
-                                .unwrap_or(false)
-                            {
-                                SymbolKind::Interface
-                            } else {
-                                SymbolKind::Type
-                            };
-                            symbols.push(Symbol {
-                                name: n.to_string(),
-                                kind: sk,
-                                line: node.start_position().row + 1,
-                            });
-                        }
+                    if let Some(name) = node.child_by_field_name("name")
+                        && let Ok(n) = name.utf8_text(bytes)
+                    {
+                        let sk = if node
+                            .child_by_field_name("type")
+                            .map(|t| t.kind() == "struct_type")
+                            .unwrap_or(false)
+                        {
+                            SymbolKind::Struct
+                        } else if node
+                            .child_by_field_name("type")
+                            .map(|t| t.kind() == "interface_type")
+                            .unwrap_or(false)
+                        {
+                            SymbolKind::Interface
+                        } else {
+                            SymbolKind::Type
+                        };
+                        symbols.push(Symbol {
+                            name: n.to_string(),
+                            kind: sk,
+                            line: node.start_position().row + 1,
+                        });
                     }
                 }
                 _ => {}
@@ -629,14 +629,18 @@ enum Mode { Fast, Slow }
         let intel = analyze_file(Path::new("test.rs"), source).unwrap();
         assert_eq!(intel.language, Language::Rust);
         assert!(intel.imports.len() >= 2);
-        assert!(intel
-            .symbols
-            .iter()
-            .any(|s| s.name == "Config" && s.kind == SymbolKind::Struct));
-        assert!(intel
-            .symbols
-            .iter()
-            .any(|s| s.name == "load_config" && s.kind == SymbolKind::Function));
+        assert!(
+            intel
+                .symbols
+                .iter()
+                .any(|s| s.name == "Config" && s.kind == SymbolKind::Struct)
+        );
+        assert!(
+            intel
+                .symbols
+                .iter()
+                .any(|s| s.name == "load_config" && s.kind == SymbolKind::Function)
+        );
     }
 
     #[test]
@@ -658,14 +662,18 @@ export type Config = { name: string };
         let intel = analyze_file(Path::new("test.ts"), source).unwrap();
         assert_eq!(intel.language, Language::TypeScript);
         assert!(intel.imports.iter().any(|i| i.contains("react")));
-        assert!(intel
-            .symbols
-            .iter()
-            .any(|s| s.name == "AppState" && s.kind == SymbolKind::Interface));
-        assert!(intel
-            .symbols
-            .iter()
-            .any(|s| s.name == "increment" && s.kind == SymbolKind::Function));
+        assert!(
+            intel
+                .symbols
+                .iter()
+                .any(|s| s.name == "AppState" && s.kind == SymbolKind::Interface)
+        );
+        assert!(
+            intel
+                .symbols
+                .iter()
+                .any(|s| s.name == "increment" && s.kind == SymbolKind::Function)
+        );
     }
 
     #[test]
@@ -683,14 +691,18 @@ def train():
         let intel = analyze_file(Path::new("test.py"), source).unwrap();
         assert_eq!(intel.language, Language::Python);
         assert!(intel.imports.len() >= 2);
-        assert!(intel
-            .symbols
-            .iter()
-            .any(|s| s.name == "MyModel" && s.kind == SymbolKind::Class));
-        assert!(intel
-            .symbols
-            .iter()
-            .any(|s| s.name == "train" && s.kind == SymbolKind::Function));
+        assert!(
+            intel
+                .symbols
+                .iter()
+                .any(|s| s.name == "MyModel" && s.kind == SymbolKind::Class)
+        );
+        assert!(
+            intel
+                .symbols
+                .iter()
+                .any(|s| s.name == "train" && s.kind == SymbolKind::Function)
+        );
     }
 
     #[test]

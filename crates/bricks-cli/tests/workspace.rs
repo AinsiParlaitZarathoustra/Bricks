@@ -5,7 +5,7 @@
 mod common;
 
 use common::*;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 

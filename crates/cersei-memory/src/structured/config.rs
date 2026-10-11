@@ -226,12 +226,12 @@ impl MemoryConfig {
                 self.embeddings
             ));
         }
-        if let Some(m) = &self.extractor_model {
-            if !m.contains('/') {
-                return Err(format!(
-                    "memory.extractor_model `{m}` must be `provider_id/model_id`"
-                ));
-            }
+        if let Some(m) = &self.extractor_model
+            && !m.contains('/')
+        {
+            return Err(format!(
+                "memory.extractor_model `{m}` must be `provider_id/model_id`"
+            ));
         }
         let e = &self.extraction;
         range("extraction.max_facts", e.max_facts, 1, 500)?;

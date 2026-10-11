@@ -5,9 +5,9 @@
 //! project, cancellation. Project and home folders are temporary; no skill
 //! of the machine is read.
 
+use cersei_agent::BricksConfig;
 use cersei_agent::control::scripted::{Reply, Script, ScriptedCatalog};
 use cersei_agent::control::*;
-use cersei_agent::BricksConfig;
 use cersei_provider::CompletionRequest;
 use cersei_types::{ContentBlock, ToolResultContent};
 use serde_json::json;
@@ -596,9 +596,10 @@ async fn an_activation_that_does_not_fit_is_refused_whole() {
     let (is_error, out) = tool_output(&evs, "s1");
     assert!(is_error && out.contains("was not activated"), "{out}");
     assert!(out.contains("not shortened"));
-    assert!(evs
-        .iter()
-        .any(|e| e.event.kind() == "skill_activation_failed"));
+    assert!(
+        evs.iter()
+            .any(|e| e.event.kind() == "skill_activation_failed")
+    );
     assert!(env.ctl.agent().active_skills().is_empty());
     let last = messages_text(&env.script.requests().last().unwrap().1);
     assert!(!last.contains("BIG-LINE"), "no fragment of the body");
@@ -909,23 +910,26 @@ async fn no_skills_configured_means_no_tool_and_a_clear_refusal() {
     next(&mut events).await;
     assert!(ctl.agent().tool_by_name("Skill").is_none());
     assert!(ctl.send(Command::ReloadSkills).is_err());
-    assert!(ctl
-        .send(Command::Submit {
+    assert!(
+        ctl.send(Command::Submit {
             prompt: Prompt::text("x").with_skills(vec!["debug".into()]),
         })
-        .is_err());
+        .is_err()
+    );
     ctl.send(Command::Submit {
         prompt: Prompt::text("plain"),
     })
     .unwrap();
     let evs = until_finished(&mut events).await;
     assert_eq!(outcome(&evs), RunOutcome::Succeeded);
-    assert!(!script.requests()[0]
-        .1
-        .system
-        .clone()
-        .unwrap_or_default()
-        .contains("available_skills"));
+    assert!(
+        !script.requests()[0]
+            .1
+            .system
+            .clone()
+            .unwrap_or_default()
+            .contains("available_skills")
+    );
 }
 
 #[tokio::test]
