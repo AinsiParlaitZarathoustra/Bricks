@@ -1,5 +1,5 @@
 """
-cersei-tbench agent adapter for terminal-bench 2.0 (harbor framework).
+cersei-tbench agent adapter for terminal-bench 4.0 (harbor framework).
 
 A purpose-built Terminal-Bench coding agent on the Cersei SDK + AgentRL —
 distinct from the general `abstract` CLI. Uploads a prebuilt static `tbench-agent`
@@ -10,7 +10,7 @@ Usage:
     GOOGLE_API_KEY=<key> PYTHONPATH=. uv run harbor run \
         --agent-import-path tbench_agent:CerseiTBenchAgent \
         --model google/gemini-3.1-pro-preview \
-        --dataset terminal-bench@2.0 \
+        --dataset terminal-bench@4.0.0 \
         --n-concurrent 8
 
 Tuning (host env, forwarded as flags):

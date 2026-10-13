@@ -1,9 +1,10 @@
 # Linux binaries for Terminal-Bench
 
 The harnesses of this folder upload a static Linux binary into each task
-container. These binaries are build outputs: since Sprint 11.1 they are no
-longer tracked by Git (they are ignored), and each harness looks for them at
-its usual path or at the path given by an environment variable.
+container. These binaries are build outputs: since Sprint 11.1 (commit
+`54079af`, 0.5.0) they are no longer tracked by Git (they are ignored), and each
+harness looks for them at its usual path or at the path given by an environment
+variable.
 
 | binary | used by | variable to point elsewhere |
 |---|---|---|
@@ -14,9 +15,9 @@ its usual path or at the path given by an environment variable.
 
 ## Build `tbench-agent` (current harness)
 
-`tbench-agent` is the `[[bin]]` of `crates/cersei-tbench`. It must be static
-(musl) to run in both Alpine and Debian containers. From the repository root,
-with the lockfile:
+`tbench-agent` is the `[[bin]]` of `crates/cersei-tbench`. It must be a static
+(musl) build, as the install error message of `tbench_agent.py` asks. From the
+repository root, with the lockfile:
 
 ```bash
 rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
@@ -28,13 +29,15 @@ cp target/aarch64-unknown-linux-musl/release/tbench-agent bench/term-bench/tbenc
 
 Cross-compiling from macOS also needs a musl linker for each target (for
 example `cargo zigbuild`, or a Linux container such as `rust:alpine`); none is
-installed by these scripts. On a Linux host of the same architecture, the
-first command alone is enough.
+installed by these scripts.
 
 ## Recover the historical binaries
 
-The binaries tracked until Sprint 11.1 are still in the history (last
-changed in commit `54999e4`). To get one back without rebuilding:
+The binaries were tracked until Sprint 11.1: `tbench-agent-*` were added in
+commit `54999e4`, `abstract-*` in commit `f5b577d` (last changed in `54999e4`),
+and all four were removed in commit `54079af`. Their blobs are still reachable
+from `54999e4`, which holds the versions listed below. To get one back without
+rebuilding:
 
 ```bash
 git show 54999e4:bench/term-bench/tbench-agent-linux-amd64 > bench/term-bench/tbench-agent-linux-amd64
@@ -56,7 +59,8 @@ Compare the checksum with the table below before running it.
 `abstract` was the binary of the old `abstract-cli` crate (Cersei era); it no
 longer exists in this workspace, and the exact sources and options of the two
 recorded binaries are unknown. `abstract_tbench.py`, `run_dry_tb.sh`,
-`run_tb_full.sh` and `runner-google.sh` (which calls `run_dry_tb.sh`) are kept
-to read or reproduce old results only. A checksum identifies the recorded file;
-it does not prove where it comes from. Run it only in the benchmark's
-disposable containers.
+`run_tb_full.sh`, `run_tb_agentrl.sh` (which calls `run_tb_full.sh`), `run.sh`
+(local runs, which expects `target/release/abstract`) and `runner-google.sh`
+(which calls `run_dry_tb.sh`) are kept to read or reproduce old results only.
+A checksum identifies the recorded file; it does not prove where it comes
+from. Run it only in the benchmark's disposable containers.

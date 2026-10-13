@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# ─── Dry run: Abstract on Terminal-Bench 2.0 (single task smoke test) ──────
+# ─── Dry run: Abstract on Terminal-Bench 4.0 (single task smoke test) ──────
 #
 # Usage:
-#   ./bench/run_dry_tb.sh                                        # defaults
-#   ./bench/run_dry_tb.sh --model google/gemini-3.1-pro-preview  # Gemini
-#   ./bench/run_dry_tb.sh --task build-cython-ext                # different task
-#   ./bench/run_dry_tb.sh --local                                # use local Docker instead of Daytona
+#   ./bench/term-bench/run_dry_tb.sh                                        # defaults
+#   ./bench/term-bench/run_dry_tb.sh --model google/gemini-3.1-pro-preview  # Gemini
+#   ./bench/term-bench/run_dry_tb.sh --task build-cython-ext                # different task
+#   ./bench/term-bench/run_dry_tb.sh --local                                # use local Docker instead of Daytona
 #
 # Prerequisites:
 #   - uv installed
-#   - bench/.env with DAYTONA_API_KEY and model API keys
+#   - bench/term-bench/.env with DAYTONA_API_KEY and model API keys
 
 set -euo pipefail
 
@@ -26,7 +26,7 @@ fi
 # ─── Defaults ──────────────────────────────────────────────────────────────
 MODEL="${MODEL:-google/gemini-3.1-pro-preview}"
 TASK="break-filter-js-from-html"
-DATASET="terminal-bench@2.0"
+DATASET="terminal-bench@4.0.0"
 OUTPUT_DIR="$SCRIPT_DIR/tb-results/dry-run"
 TIMEOUT_MULT="${TIMEOUT_MULT:-1.0}"
 USE_DAYTONA=true
@@ -69,7 +69,7 @@ warn()  { echo -e "${YELLOW}!${RESET} $*"; }
 
 # ─── Preflight ─────────────────────────────────────────────────────────────
 echo ""
-echo -e "${BOLD}Abstract × Terminal-Bench 2.0 — Dry Run${RESET}"
+echo -e "${BOLD}Abstract × Terminal-Bench 4.0 — Dry Run${RESET}"
 echo -e "${DIM}─────────────────────────────────────────${RESET}"
 
 if ! command -v uv &>/dev/null; then
@@ -95,7 +95,7 @@ fi
 ENV_FLAG=""
 if $USE_DAYTONA; then
   if [[ -z "${DAYTONA_API_KEY:-}" ]]; then
-    fail "DAYTONA_API_KEY not set. Add it to bench/.env or use --local"
+    fail "DAYTONA_API_KEY not set. Add it to bench/term-bench/.env or use --local"
     exit 1
   fi
   ENV_FLAG="--env daytona"
@@ -129,7 +129,7 @@ for key in "${KEY_ORDER[@]}"; do
 done
 
 if ! $HAS_KEY; then
-  fail "No API key for provider '$PROVIDER'. Add ${KEY_ORDER[0]} to bench/.env"
+  fail "No API key for provider '$PROVIDER'. Add ${KEY_ORDER[0]} to bench/term-bench/.env"
   exit 1
 fi
 pass "API key ($KEY_NAME)"

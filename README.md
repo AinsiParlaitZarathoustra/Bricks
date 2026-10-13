@@ -354,7 +354,7 @@ API cost is not the reason these evaluations remain pending.
 | Evaluation | Requirements | Entry point |
 |---|---|---|
 | LongMemEval | Dataset, answerer, judge and embeddings | `bench/long-mem` |
-| Terminal-Bench 2.0 | Daytona sandboxes and a configured model | `./bench/term-bench/run.sh` |
+| Terminal-Bench 4.0 | Daytona sandboxes and a configured model | `./bench/term-bench/run_tb_cersei.sh` |
 | Compression savings with a real model | A configured live model | Command below |
 | Memory recall vs Claude Code / Codex | Each agent running with its configured model | Comparative evaluation pending |
 

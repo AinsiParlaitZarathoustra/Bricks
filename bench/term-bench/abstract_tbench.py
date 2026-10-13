@@ -1,5 +1,5 @@
 """
-Abstract agent adapter for terminal-bench 2.0 (harbor framework).
+Abstract agent adapter for terminal-bench 4.0 (harbor framework).
 
 HISTORICAL: it drives the former `abstract` CLI, which no longer exists in
 this repository; the `abstract-cli` build below cannot be reproduced from it,
@@ -7,18 +7,20 @@ and the provenance of the old binaries is unknown (see BINARIES.md). It is
 kept for reference. For Bricks, use tbench_agent.py (tbench-agent).
 
 Usage (no harbor patching required):
-    cd bench && uv sync
+    cd bench/term-bench && uv sync
     OPENAI_API_KEY=<key> PYTHONPATH=. uv run harbor run \
         --agent-import-path abstract_tbench:AbstractAgent \
         --model openai/gpt-5.4-2026-03-05 \
-        --dataset terminal-bench@2.0 \
+        --dataset terminal-bench@4.0.0 \
         --n-concurrent 8
 
-To rebuild the Linux binary:
-    docker run --rm -v $(pwd)/..:/src -w /src rust:1.94-bookworm bash -c "
+Not reproducible from this repository: no `abstract-cli` package exists in the
+workspace (see the members of Cargo.toml). The commands below are kept for
+reference only:
+    docker run --rm -v $(pwd)/../..:/src -w /src rust:1.94-bookworm bash -c "
       apt-get update -qq && apt-get install -y -qq pkg-config libssl-dev git >/dev/null 2>&1
       CARGO_TARGET_DIR=/tmp/tgt cargo build --release -p abstract-cli
-      cp /tmp/tgt/release/abstract /src/bench/abstract-linux-arm64
+      cp /tmp/tgt/release/abstract /src/bench/term-bench/abstract-linux-arm64
     "
 """
 

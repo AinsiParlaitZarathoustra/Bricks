@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# ─── Full run: Abstract on Terminal-Bench 2.0 ─────────────────────────────
+# ─── Full run: Abstract on Terminal-Bench 4.0 ─────────────────────────────
 #
 # Usage:
-#   ./bench/run_tb_full.sh                                        # Gemini + embeddings + Daytona
-#   ./bench/run_tb_full.sh --model openai/gpt-5.4-2026-03-05      # OpenAI
-#   ./bench/run_tb_full.sh --no-embedding                          # disable embedding search
-#   ./bench/run_tb_full.sh --local                                 # local Docker
+#   ./bench/term-bench/run_tb_full.sh                                        # Gemini + embeddings + Daytona
+#   ./bench/term-bench/run_tb_full.sh --model openai/gpt-5.4-2026-03-05      # OpenAI
+#   ./bench/term-bench/run_tb_full.sh --no-embedding                          # disable embedding search
+#   ./bench/term-bench/run_tb_full.sh --local                                 # local Docker
 #
 # Prerequisites:
 #   - uv installed
-#   - bench/.env with DAYTONA_API_KEY and model API keys
+#   - bench/term-bench/.env with DAYTONA_API_KEY and model API keys
 
 set -euo pipefail
 
@@ -26,7 +26,7 @@ fi
 # ─── Defaults ──────────────────────────────────────────────────────────────
 MODEL="${MODEL:-google/gemini-3.1-pro-preview}"
 CONCURRENT="${CONCURRENT:-20}"
-DATASET="terminal-bench@2.0"
+DATASET="terminal-bench@4.0.0"
 OUTPUT_DIR="$SCRIPT_DIR/tb-results"
 JOB_NAME="abstract-$(date +%Y%m%d-%H%M%S)"
 TIMEOUT_MULT="${TIMEOUT_MULT:-1.0}"
@@ -58,7 +58,7 @@ while [[ $# -gt 0 ]]; do
       echo "Options:"
       echo "  --model <provider/model>  Model (default: google/gemini-3.1-pro-preview)"
       echo "  --concurrent <N>          Parallel tasks (default: 20)"
-      echo "  --timeout-mult <N>        Timeout multiplier (default: 1.5)"
+      echo "  --timeout-mult <N>        Timeout multiplier (default: 1.0)"
       echo "  --no-embedding            Disable embedding-enhanced CodeSearch"
       echo "  --local                   Use local Docker instead of Daytona"
       echo "  --include <pattern>       Include task name pattern"
@@ -87,7 +87,7 @@ warn()  { echo -e "${YELLOW}!${RESET} $*"; }
 
 # ─── Preflight ─────────────────────────────────────────────────────────────
 echo ""
-echo -e "${BOLD}Abstract × Terminal-Bench 2.0${RESET}"
+echo -e "${BOLD}Abstract × Terminal-Bench 4.0${RESET}"
 echo -e "${DIM}═══════════════════════════════════════════════════${RESET}"
 
 if ! command -v uv &>/dev/null; then fail "'uv' not found."; exit 1; fi
