@@ -1,6 +1,6 @@
 ---
 title: Memory (cersei-memory)
-description: Three-tier memory system — graph DB, flat files, CLAUDE.md hierarchy, session persistence.
+description: Session persistence, flat memory files, CLAUDE.md hierarchy, optional graph index, and structured long-term memory.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -9,10 +9,10 @@ import { TypeTable } from 'fumadocs-ui/components/type-table';
 
 # cersei-memory
 
-Three-tier memory system designed to outperform Claude Code's file-based approach. An embedded graph database (Grafeo) handles relationship-aware recall in 98 microseconds — replacing the LLM call that Claude Code makes every turn.
+Memory backends for sessions and for knowledge that outlives a session. The `Memory` trait stores session transcripts; `MemoryManager` composes flat memory files, the CLAUDE.md hierarchy and an optional graph index (Grafeo); and the `LongTermMemory` trait, implemented by the structured store, gives an agent recall across sessions.
 
 <Callout type="info">
-Graph memory is a compile-time feature. Enable it with `cersei-memory = { features = ["graph"] }`. It's ON by default in the `cersei` facade and the Abstract CLI.
+Two features are compile-time options, both off by default in `cersei-memory` (`default = []`). `graph` enables the Grafeo graph index (`cersei-memory = { features = ["graph"] }`). `structured` enables the structured long-term memory (episodes, entities, temporal facts), which the `bricks` CLI turns on. The `cersei` facade declares neither feature, so enable them on `cersei-memory` directly.
 </Callout>
 
 ---
@@ -20,24 +20,51 @@ Graph memory is a compile-time feature. Enable it with `cersei-memory = { featur
 ## Architecture
 
 ```
-Tier 1: Graph Memory (Grafeo)     — Relationship-aware indexed recall
-Tier 2: Flat Files (memdir)       — Claude Code compatible .md files
-Tier 3: CLAUDE.md Hierarchy       — 4-level instruction loading
-       + Session Storage (JSONL)  — Append-only transcripts
+Sessions        — Memory trait: JsonlMemory (files), InMemory (tests); append-only JSONL transcripts
+Flat files      — memdir: Claude Code compatible .md files, scanned by MemoryManager
+Instructions    — CLAUDE.md hierarchy: 4 levels, merged into one context string
+Graph (optional)— GraphMemory on Grafeo (feature `graph`): indexed recall when enabled
+Long-term       — LongTermMemory / StructuredMemory (feature `structured`): hybrid recall
 ```
 
-When you call `recall()`, the MemoryManager queries the graph first. If the graph returns results, they're used directly. If not (or if graph isn't enabled), it falls back to scanning flat files with text matching.
+When you call `MemoryManager::recall()`, the graph is queried first if it is enabled. If it returns nothing, or no graph is enabled, the flat files are scanned with text matching.
+
+---
+
+## Memory and LongTermMemory Traits
+
+```rust
+#[async_trait]
+pub trait Memory: Send + Sync {
+    async fn store(&self, session_id: &str, messages: &[Message]) -> Result<()>;
+    async fn load(&self, session_id: &str) -> Result<Vec<Message>>;
+    async fn search(&self, query: &str, limit: usize) -> Result<Vec<MemoryEntry>>;
+    async fn sessions(&self) -> Result<Vec<SessionInfo>>;
+    async fn delete(&self, session_id: &str) -> Result<()>;
+    fn session_files_dir(&self, session_id: &str) -> Option<PathBuf> { None }
+}
+
+#[async_trait]
+pub trait LongTermMemory: Send + Sync {
+    async fn recall_context(&self, query: &str, max_tokens: usize) -> Result<Option<RecalledContext>>;
+    async fn record_turns(&self, session_id: Option<&str>, turns: &[MemoryTurn]) -> Result<()>;
+    async fn maintain(&self, cancel: &CancellationToken) -> Result<MaintenanceReport>;
+}
+```
+
+`Memory` persists sessions. `JsonlMemory::new(dir)` stores them as files and `InMemory::new()` keeps them in process. `LongTermMemory` is what an agent uses across sessions: `record_turns` stores an exchange durably and quickly, and `maintain` does the model and embedding work later, resumably.
 
 ---
 
 ## MemoryManager
 
-The unified interface that composes all three tiers.
+The unified interface that composes the flat files, the CLAUDE.md hierarchy and the optional graph.
 
 ```rust
+use std::path::Path;
 use cersei::memory::manager::MemoryManager;
 
-let mm = MemoryManager::new(project_root)
+let mm = MemoryManager::new(Path::new("."))
     .with_graph(Path::new("./memory.grafeo"))?;
 ```
 
@@ -46,24 +73,24 @@ let mm = MemoryManager::new(project_root)
 <TypeTable
   type={{
     'MemoryManager::new(root)': {
-      type: 'impl AsRef<Path>',
-      description: 'Create with default paths derived from project root.',
+      type: '&Path',
+      description: 'Create with default paths derived from the project root: ~/.claude/projects/<sanitized-root>/.',
       required: true,
     },
     '.with_graph(path)': {
-      type: 'impl AsRef<Path>',
-      description: 'Enable persistent graph memory at the given file path.',
+      type: '&Path -> Result<Self>',
+      description: 'Enable persistent graph memory at the given file path (feature graph).',
     },
     '.with_graph_in_memory()': {
-      type: '()',
+      type: '() -> Result<Self>',
       description: 'Enable in-memory graph. Lost on restart — useful for tests.',
     },
     '.with_memory_dir(dir)': {
-      type: 'impl Into<PathBuf>',
-      description: 'Override the memory directory. Default: auto-discovered from project root.',
+      type: 'PathBuf',
+      description: 'Override the memory directory. Default: auto-discovered from the project root (CERSEI_MEMORY_PATH_OVERRIDE, when set, takes precedence).',
     },
     '.with_sessions_dir(dir)': {
-      type: 'impl Into<PathBuf>',
+      type: 'PathBuf',
       description: 'Override the sessions directory.',
     },
   }}
@@ -77,7 +104,7 @@ These methods build the memory content that gets injected into the system prompt
 |--------|---------|-------------|
 | `build_context()` | `String` | Full system prompt section: CLAUDE.md hierarchy + MEMORY.md index merged |
 | `scan()` | `Vec<MemoryFileMeta>` | All memory files with frontmatter metadata, sorted by recency |
-| `load_file(path)` | `Option<MemoryFile>` | Load a specific memory file with content (frontmatter stripped) |
+| `load_file(path: &Path)` | `Option<MemoryFile>` | Load a specific memory file with content (frontmatter stripped) |
 
 ```rust
 // Build the complete memory context for the system prompt
@@ -93,12 +120,12 @@ for meta in mm.scan() {
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `recall(query, limit)` | `Vec<String>` | Query-based recall. Graph first, text fallback. |
+| `recall(query, limit)` | `Vec<String>` | Query-based recall. Graph first when enabled, text fallback over the flat files. |
 | `by_type(MemoryType)` | `Vec<String>` | Filter by type (graph only, empty without graph) |
 | `by_topic(topic)` | `Vec<String>` | Filter by topic tag (graph only) |
 
 ```rust
-// Recall — graph indexed lookup in 98us, or text scan in 1.3ms
+// Recall: graph lookup when enabled, otherwise a text scan of the flat files
 let results = mm.recall("testing preferences", 5);
 
 // Filter by type
@@ -114,18 +141,18 @@ These only work when graph is enabled. They're no-ops otherwise.
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `store_memory(content, type, confidence)` | `Option<String>` | Store a memory node. Returns UUID. |
+| `store_memory(content, type, confidence)` | `Option<String>` | Store a memory node. Returns its id. |
 | `tag_memory(id, topic)` | `()` | Associate a memory with a topic. Creates the topic if needed. |
 | `link_memories(from, to, relationship)` | `()` | Create a RELATES_TO edge between two memories. |
 | `has_graph()` | `bool` | Whether graph is enabled. |
-| `graph_stats()` | `GraphStats` | Counts: memories, topics, relationships, sessions. |
+| `graph_stats()` | `GraphStats` | Counts: `memory_count`, `topic_count`, `relationship_count`, `session_count`. |
 
 ```rust
 // Store a memory
 let id = mm.store_memory(
     "User prefers functional patterns over OOP",
     MemoryType::User,
-    0.9,  // confidence 0.0 to 1.0
+    0.9,  // confidence, from 0.0 to 1.0
 );
 
 // Tag it
@@ -147,8 +174,8 @@ println!("{} memories, {} topics, {} relationships", stats.memory_count, stats.t
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `write_user_message(session_id, msg)` | `io::Result<String>` | Append user message to JSONL. Returns UUID. |
-| `write_assistant_message(session_id, msg, parent)` | `io::Result<String>` | Append assistant message. Optionally links to parent UUID. |
+| `write_user_message(session_id, msg)` | `io::Result<String>` | Append user message to JSONL. Returns its UUID. |
+| `write_assistant_message(session_id, msg, parent)` | `io::Result<String>` | Append assistant message. `parent` is the UUID of the message it answers, if any. |
 | `load_session_messages(session_id)` | `Result<Vec<Message>>` | Load all messages, applying tombstones. |
 | `list_sessions()` | `Vec<SessionInfo>` | List all session files. |
 | `session_path(session_id)` | `PathBuf` | Get the JSONL file path for a session. |
@@ -167,7 +194,7 @@ assert_eq!(messages.len(), 2);
 
 ## Graph Schema
 
-The Grafeo graph stores three node types and three edge types:
+When the graph is enabled, the Grafeo graph stores three node types and three edge types:
 
 ```
 Node Types:
@@ -180,6 +207,8 @@ Edge Types:
   (:Topic)  -[:TAGGED]->                              (:Memory)
   (:Session) -[:PRODUCED]->                           (:Memory)
 ```
+
+The structured long-term memory (below) uses its own store and schema.
 
 ### Memory Types
 
@@ -206,6 +235,8 @@ Edge Types:
 
 ### Performance
 
+These figures come from the graph benchmark on the earlier graph implementation. They have not been measured again for this page; see [Graph Benchmarks](/docs/bench-graph) for the current measurements.
+
 | Operation | Latency |
 |-----------|---------|
 | Store single node | 30us |
@@ -216,15 +247,13 @@ Edge Types:
 | Recall (indexed) | 98us |
 | Stats | 480us |
 
-Graph recall is **92.5% faster** than text-matching recall because it queries an index instead of scanning every file. See [Graph Benchmarks](/docs/bench-graph).
-
 ---
 
 ## Memdir (Flat Files)
 
 Compatible with Claude Code's memory directory format.
 
-**Location:** `~/.claude/projects/<sanitized-root>/memory/`
+**Location:** `~/.claude/projects/<sanitized-root>/memory/`, or the path in `CERSEI_MEMORY_PATH_OVERRIDE`. `MemoryManager::with_memory_dir` sets it explicitly.
 
 **File format:**
 ```markdown
@@ -238,7 +267,7 @@ Actual memory content here.
 ```
 
 **Limits:**
-- `MEMORY.md` index: max 200 lines or 25KB
+- `MEMORY.md` index: max 200 lines or 25,000 bytes
 - Memory files scanned: max 200, sorted newest-first
 - Types: `user`, `feedback`, `project`, `reference`
 
@@ -255,7 +284,7 @@ Loaded in priority order (highest to lowest):
 | Project | `{root}/CLAUDE.md` | Project-level instructions |
 | Local | `{root}/.claude/CLAUDE.md` | Local overrides (gitignored) |
 
-All levels are merged into a single context string. Supports `@include <path>` directives (max depth 10, max 40KB per include, circular reference detection). Frontmatter is stripped automatically.
+All levels are merged into a single context string by `load_all_memory_files(project_root)`. Supports `@include <path>` directives (max depth 10, max 40KB per include, circular reference detection). Frontmatter is stripped automatically.
 
 ---
 
@@ -263,7 +292,7 @@ All levels are merged into a single context string. Supports `@include <path>` d
 
 Append-only JSONL transcripts compatible with Claude Code's session format.
 
-**Entry types:**
+**Entry types** (`TranscriptEntry`):
 
 | Type | Description |
 |------|-------------|
@@ -273,31 +302,33 @@ Append-only JSONL transcripts compatible with Claude Code's session format.
 | `Summary` | Compaction summary (replaces multiple messages) |
 | `Tombstone` | Soft-delete marker (skipped on load) |
 
-**Location:** `~/.claude/projects/<sanitized-root>/<session-id>.jsonl`
+**Location:** `<sessions dir>/<session-id>.jsonl`. With `MemoryManager`, the default is `~/.claude/projects/<sanitized-root>/`.
 
-Max 50MB per session file. Malformed lines are skipped silently.
+Each file part is at most 50 MB, and a session's parts total at most 200 MB. Malformed lines are skipped silently.
 
 ---
 
 ## Auto-Dream (Background Consolidation)
 
-Three-gate system that runs after each agent turn to decide if memory consolidation is needed:
+`AutoDream` lives in `cersei_agent::auto_dream`. It decides whether memory consolidation is due, using three gates. Nothing in the agent runner calls it in this version; only an example does (`cersei/examples/stress_memory.rs`):
 
 | Gate | Condition | Default |
 |------|-----------|---------|
-| Time | Hours since last consolidation | 24 hours |
-| Session | New sessions since last run | 5 sessions |
+| Time | Hours since last consolidation | 24 hours (`AutoDreamConfig::min_hours`) |
+| Session | New sessions since last run | 5 sessions (`AutoDreamConfig::min_sessions`) |
 | Lock | No concurrent consolidation | Stale after 1 hour |
 
-All three gates must pass before consolidation triggers. The process runs as a background task — it doesn't block the user.
+All three gates must pass before consolidation is due. `AutoDream` starts nothing: the caller runs the consolidation, between `acquire_lock()` and `release_lock()`, with the prompt from `consolidation_prompt()` (`crates/cersei-agent/src/auto_dream.rs`).
 
 ```rust
-let dreamer = AutoDream::new(memory_dir, conversations_dir);
+use cersei_agent::auto_dream::AutoDream;
+
+let dreamer = AutoDream::new(memory_dir, conversations_dir);  // PathBuf, PathBuf
 
 if dreamer.should_consolidate() {
     dreamer.acquire_lock()?;
-    // Run consolidation agent...
-    dreamer.update_state()?;
+    // Run the consolidation agent with dreamer.consolidation_prompt()...
+    dreamer.update_state()?;   // records the run for the time and session gates
     dreamer.release_lock()?;
 }
 ```
@@ -306,19 +337,21 @@ if dreamer.should_consolidate() {
 
 ## Session Memory Extraction
 
-Automatic extraction of memories from conversations. Triggers after 20+ messages and 3+ tool calls since last extraction.
+Extraction of memories from conversations, in `cersei_agent::session_memory`. The functions are available to callers; the agent runner does not call them in this version. Extraction is due after at least 20 messages and 3 tool calls since the last extraction (`crates/cersei-agent/src/session_memory.rs:13-14`).
 
-**Categories extracted:**
+**Categories extracted** (`MemoryCategory`):
 
-| Category | Confidence Range | Example |
-|----------|-----------------|---------|
-| UserPreference | 0.7-1.0 | "Prefers functional patterns" |
-| ProjectFact | 0.8-1.0 | "API uses REST with JSON" |
-| CodePattern | 0.5-0.8 | "Uses builder pattern for config" |
-| Decision | 0.7-0.9 | "Chose PostgreSQL over SQLite" |
-| Constraint | 0.8-1.0 | "Must support Python 3.8+" |
+| Category | Example |
+|----------|---------|
+| `UserPreference` | "Prefers functional patterns" |
+| `ProjectFact` | "API uses REST with JSON" |
+| `CodePattern` | "Uses builder pattern for config" |
+| `Decision` | "Chose PostgreSQL over SQLite" |
+| `Constraint` | "Must support Python 3.8+" |
 
 ```rust
+use cersei_agent::session_memory;
+
 // Check if extraction should run
 if session_memory::should_extract(&messages, &state) {
     // Parse extraction output from the model
@@ -328,3 +361,30 @@ if session_memory::should_extract(&messages, &state) {
     session_memory::persist_memories(&memories, &memory_path)?;
 }
 ```
+
+---
+
+## Structured Long-Term Memory (feature `structured`)
+
+`StructuredMemory` implements `LongTermMemory`. It keeps sourced, immutable **episodes**, scoped **entities** and temporal **facts** (each with evidence and a status) in a Grafeo store. Recall is hybrid: vector search, lexical search and a bounded relational expansion, fused by weighted reciprocal rank fusion, and rendered within a token budget.
+
+Ingestion is resumable. An episode is stored first; extraction (by an `Extractor`, such as `LlmExtractor`, which calls a configured model) is cached before anything is applied; a failed step leaves the episode pending for the next `maintain` pass.
+
+```rust
+use std::sync::Arc;
+use cersei_memory::structured::StructuredMemory;
+
+let memory = StructuredMemory::builder(embedder)   // Arc<dyn EmbeddingProvider>
+    .path("./memory.grafeo")
+    .config(config)                                 // MemoryConfig, e.g. MemoryConfig::from_bricks_toml(text)?
+    .extractor(extractor)                           // Arc<dyn Extractor>
+    .open()?;
+
+let agent = Agent::builder()
+    .provider(provider)
+    .long_term_memory(Arc::new(memory))             // recall is added to each run's system prompt
+    .memory_recall_tokens(1200)                     // default budget of the recalled context
+    .build()?;
+```
+
+`MemoryConfig::enabled` defaults to `false`: nothing is recorded until it is set. In `bricks.toml`, the same settings are under `[memory]`.

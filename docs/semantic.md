@@ -168,9 +168,14 @@ Only responses that used a language server are cached (lexical searches
 re-read the disk each time). A semantic answer can depend on other files
 than its own, so **any** change notification drops all cached responses.
 Notifications come from the agent runner after every non-read-only tool
-call (Write, Edit, Bash…) and from `engine.notify_changed`. Edits made
-outside Bricks are not observed: they are caught by the TTL, by the content
-hash of the documents a query reads, and by the server's own file watching.
+call (Write, Edit, Bash…), through `cersei_tools::code_scout::notify_workspace_changed`
+(which calls `notify_any_change`). `SemanticEngine::notify_changed(paths)`
+drops the same cached responses; the tests and the bench call it. Edits made
+outside Bricks are not observed. A cached response is bounded only by its TTL
+(`result_cache_ttl_ms`, 30 000 ms by default, `crates/bricks-semantic/src/config.rs`):
+its cache key (`crates/bricks-semantic/src/engine.rs`, the fingerprint of the
+query) contains no document hash. Language-server documents are re-synchronised
+before each request (`crates/bricks-semantic/src/lsp.rs`, module header).
 
 Memory: the engine bounds its own caches (`tree_cache_entries`,
 `result_cache_entries`, `max_open_documents`); it cannot bound a language

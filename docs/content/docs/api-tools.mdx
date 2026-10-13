@@ -1,6 +1,6 @@
 ---
 title: Tools (cersei-tools)
-description: Tool trait, 34 built-in tools, permission system, bash safety analysis, skill discovery.
+description: Tool trait, 39 built-in tools, permission system, bash safety analysis, Agent Skills.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -9,13 +9,13 @@ import { TypeTable } from 'fumadocs-ui/components/type-table';
 
 # cersei-tools
 
-Tool execution system with 34 built-in tools, a granular permission model, a bash command safety analysis (SDK primitive), and skill discovery from Claude Code and OpenCode formats.
+Tool execution system with 39 built-in tools, a granular permission model, a bash command safety analysis (SDK primitive), and Agent Skills (`SKILL.md`) served by `bricks-skills`.
 
 ---
 
 ## Tool Trait
 
-Every tool implements this trait. The `#[derive(Tool)]` macro generates the boilerplate for you.
+Every tool implements this trait. The `#[derive(Tool)]` macro generates the boilerplate for tools that implement `ToolExecute` (see [Custom Tools](#custom-tools)).
 
 ```rust
 #[async_trait]
@@ -31,6 +31,9 @@ pub trait Tool: Send + Sync {
 
     /// Permission level required
     fn permission_level(&self) -> PermissionLevel { PermissionLevel::None }
+
+    /// Permission level for this specific input (default: permission_level())
+    fn permission_level_for(&self, _input: &Value) -> PermissionLevel { self.permission_level() }
 
     /// Category for grouping
     fn category(&self) -> ToolCategory { ToolCategory::Custom }
@@ -86,7 +89,7 @@ Passed to every tool execution. Provides environment and shared state.
     },
     extensions: {
       type: 'Extensions',
-      description: 'Type-map for injecting custom data into the tool context.',
+      description: 'Type-map for injecting custom data into the tool context (insert, then get by type).',
       required: true,
     },
   }}
@@ -100,10 +103,10 @@ Convenience functions that return pre-configured tool collections:
 
 | Function | Count | Tools Included |
 |----------|-------|----------------|
-| `cersei::tools::all()` | 34 | Everything below |
-| `cersei::tools::coding()` | 10 | filesystem + shell + web |
-| `cersei::tools::filesystem()` | 6 | Read, Write, Edit, Glob, Grep, NotebookEdit |
-| `cersei::tools::shell()` | 2 | Bash, PowerShell |
+| `cersei::tools::all()` | 39 | Everything below, plus `AskUserQuestion`, `SyntheticOutput`, `Config` and `ToolSearch` |
+| `cersei::tools::coding()` | 18 | filesystem + shell + web |
+| `cersei::tools::filesystem()` | 10 | Read, Write, Edit, MultiEdit, ApplyPatch, Glob, Grep, CodeSearch, CodeScout, NotebookEdit |
+| `cersei::tools::shell()` | 6 | Bash, BashTaskStatus, BashTaskOutput, BashTaskStop, Job, PowerShell |
 | `cersei::tools::web()` | 2 | WebFetch, WebSearch |
 | `cersei::tools::planning()` | 3 | EnterPlanMode, ExitPlanMode, TodoWrite |
 | `cersei::tools::scheduling()` | 5 | CronCreate, CronList, CronDelete, Sleep, RemoteTrigger |
@@ -112,30 +115,40 @@ Convenience functions that return pre-configured tool collections:
 
 ### Tool Catalog
 
-**Filesystem (6 tools)**
+The permission level is the one each tool declares in code (`permission_level()`).
+
+**Filesystem (10 tools)**
 
 | Tool | Permission | Description |
 |------|-----------|-------------|
-| `FileReadTool` | ReadOnly | Read files with optional line offset/limit. Returns `cat -n` format. |
+| `FileReadTool` | ReadOnly | Read files with optional line offset/limit. Numbered lines, binary and encoding detection. |
 | `FileWriteTool` | Write | Create or overwrite files. Creates parent directories automatically. |
-| `FileEditTool` | Write | String replacement edits. Requires unique match in the file. |
-| `GlobTool` | ReadOnly | Pattern matching across directories. Returns matching paths sorted by mtime. |
-| `GrepTool` | ReadOnly | Regex search using `rg` (ripgrep) with fallback to system `grep`. |
+| `FileEditTool` | Write | String replacement edits. Tolerates indentation drift; refuses ambiguous matches. |
+| `MultiEditTool` | Write | Several ordered replacements in one file, applied all or nothing. |
+| `ApplyPatchTool` | Write | Apply a patch with strict parsing and rollback on failure. |
+| `GlobTool` | ReadOnly | Pattern matching across directories. |
+| `GrepTool` | ReadOnly | Regex search with ripgrep's libraries, gitignore-aware. No external `rg` binary is needed. |
+| `CodeSearchTool` | ReadOnly | Search the workspace's code index. |
+| `CodeScoutTool` | ReadOnly | Code understanding queries (symbols, definitions, references, diagnostics) on the shared engine (`bricks-semantic`). |
 | `NotebookEditTool` | Write | Edit Jupyter notebook cells by index. |
 
-**Shell (2 tools)**
+**Shell (6 tools)**
 
 | Tool | Permission | Description |
 |------|-----------|-------------|
-| `BashTool` | Execute | Execute shell commands. Persistent `cwd` and `env` across calls. Configurable timeout. |
-| `PowerShellTool` | Execute | Windows PowerShell execution. Same persistence model as Bash. |
+| `BashTool` | Execute | Run a command in the session's persistent shell. Timeout, output bounded. `background: true` starts a background task. |
+| `BashTaskStatusTool` | ReadOnly | Status of a background task started by `Bash`. |
+| `BashTaskOutputTool` | ReadOnly | Output of a background task, with a cursor. |
+| `BashTaskStopTool` | Execute | Stop a background task. |
+| `JobTool` | Execute | List, inspect, read, wait for and stop background jobs of the calling agent. |
+| `PowerShellTool` | Execute | Windows PowerShell execution, with one interpreter per session. |
 
 **Web (2 tools)**
 
 | Tool | Permission | Description |
 |------|-----------|-------------|
-| `WebFetchTool` | ReadOnly | Fetch and process URLs. HTML is converted to text. |
-| `WebSearchTool` | ReadOnly | Web search. Requires `CERSEI_SEARCH_API_KEY`. |
+| `WebFetchTool` | ReadOnly | Fetch a URL as paged Markdown, with a question, or read a stored document. |
+| `WebSearchTool` | ReadOnly | Web search. DuckDuckGo by default; Brave, Tavily or Exa when `bricks.toml` names them in `[web.search]`. |
 
 **Planning (3 tools)**
 
@@ -145,29 +158,29 @@ Convenience functions that return pre-configured tool collections:
 | `ExitPlanModeTool` | None | Exit planning mode with approval. |
 | `TodoWriteTool` | None | Create and manage task lists. |
 
-**Scheduling (5 tools)** — see [Background Tasks](/docs/background-tasks) for cron format, one-shot timers, and integration patterns.
+**Scheduling (5 tools)**: see [Background Tasks](/docs/background-tasks) for cron format, one-shot timers, and integration patterns.
 
 | Tool | Permission | Description |
 |------|-----------|-------------|
 | `CronCreateTool` | Execute | Create a scheduled job. |
-| `CronListTool` | ReadOnly | List scheduled jobs. |
+| `CronListTool` | None | List scheduled jobs. |
 | `CronDeleteTool` | Execute | Delete a scheduled job. |
 | `SleepTool` | None | Async sleep for a duration. |
 | `RemoteTriggerTool` | Execute | Invoke a remote trigger. |
 
-**Orchestration (9 tools)** — see [Background Tasks](/docs/background-tasks) for input schemas, state machine, and usage patterns.
+**Orchestration (9 tools)**: see [Background Tasks](/docs/background-tasks) for input schemas, state machine, and usage patterns.
 
 | Tool | Permission | Description |
 |------|-----------|-------------|
 | `SendMessageTool` | None | Send messages between agents. |
-| `TaskCreateTool` | Execute | Create a long-running background task. |
-| `TaskGetTool` | ReadOnly | Get task status. |
-| `TaskUpdateTool` | Execute | Update a running task. |
-| `TaskListTool` | ReadOnly | List all tasks. |
-| `TaskStopTool` | Execute | Stop a running task. |
-| `TaskOutputTool` | ReadOnly | Get task output. |
-| `EnterWorktreeTool` | Execute | Create a git worktree for isolated work. |
-| `ExitWorktreeTool` | Execute | Exit and clean up worktree. |
+| `TaskCreateTool` | None | Create a long-running background task. |
+| `TaskGetTool` | None | Get task status. |
+| `TaskUpdateTool` | None | Update a running task. |
+| `TaskListTool` | None | List all tasks. |
+| `TaskStopTool` | None | Stop a running task. |
+| `TaskOutputTool` | None | Get task output. |
+| `EnterWorktreeTool` | Write | Create a git worktree for isolated work. |
+| `ExitWorktreeTool` | Write | Exit and clean up worktree. Never forces removal. |
 
 ---
 
@@ -179,6 +192,8 @@ The fastest way to create a tool. The macro generates `Tool` impl, JSON schema, 
 
 ```rust
 use cersei::prelude::*;
+use schemars::JsonSchema;   // the prelude exports the crates, not the derive names
+use serde::Deserialize;
 
 #[derive(Tool)]
 #[tool(name = "search", description = "Search the documentation", permission = "read_only")]
@@ -216,13 +231,16 @@ fn default_limit() -> usize { 10 }
 | `description` | any string | Shown to the model in the tool list |
 | `permission` | `none`, `read_only`, `write`, `execute`, `dangerous` | Required permission level |
 
-The `Input` type must derive `Deserialize` (serde) and `JsonSchema` (schemars). Field doc comments become parameter descriptions in the schema.
+The `Input` type must derive `Deserialize` (serde) and `JsonSchema` (schemars). Field doc comments become parameter descriptions in the schema. An input field the tool does not declare is an error, with a message that suggests the correct name.
 
 ### Manual Implementation
 
 For full control, implement `Tool` directly:
 
 ```rust
+use cersei::prelude::*;
+use serde_json::Value;
+
 struct ManualTool;
 
 #[async_trait]
@@ -258,8 +276,8 @@ impl Tool for ManualTool {
 
 ```rust
 let agent = Agent::builder()
-    .provider(Anthropic::from_env()?)
-    .tools(cersei::tools::coding())  // 10 built-in tools
+    .provider(cersei::provider_from_config(None, "my-provider/my-model")?)
+    .tools(cersei::tools::coding())  // 18 built-in tools
     .tool(SearchTool)                // + your custom tool
     .tool(ManualTool)                // + another
     .build()?;
@@ -295,7 +313,7 @@ Every tool declares a permission level. The agent's `PermissionPolicy` checks th
     },
     Forbidden: {
       type: 'PermissionLevel::Forbidden',
-      description: 'Never allowed. Blocked regardless of policy.',
+      description: 'The SDK runner passes it to the policy like any other level (crates/cersei-agent/src/runner.rs:1377). The bricks CLI denies it (crates/cersei-agent/src/control/settings.rs:83). A policy you write must deny it itself.',
     },
   }}
 />
@@ -307,17 +325,19 @@ Every tool declares a permission level. The agent's `PermissionPolicy` checks th
 | `AllowAll` | Permit everything. For trusted environments and testing. |
 | `AllowReadOnly` | Only `None` and `ReadOnly` tools. Safe for analysis tasks. |
 | `DenyAll` | Block everything. For pure chat agents. |
-| `RuleBased::new(rules)` | Custom rules matching tool names and actions. |
+| `RuleBased { rules }` | Ordered rules matching a tool name (`"all"` matches any tool). The first matching rule decides; when no rule matches, the call is allowed. `path_pattern` is not evaluated by `check` (`crates/cersei-tools/src/permissions.rs:76-111`). |
 | `InteractivePolicy::new(handler)` | Defer to a callback function for decisions. |
 
 ```rust
 // Rule-based example
 let rules = vec![
-    PermissionRule { tool_name: Some("Bash".into()), action: PermissionAction::Deny },
-    PermissionRule { tool_name: Some("Read".into()), action: PermissionAction::Allow },
+    PermissionRule { tool_name: Some("Bash".into()), path_pattern: None, action: PermissionAction::Deny },
+    PermissionRule { tool_name: Some("Read".into()), path_pattern: None, action: PermissionAction::Allow },
 ];
-Agent::builder().permission_policy(RuleBased::new(rules))
+Agent::builder().permission_policy(RuleBased { rules })
 ```
+
+Policies implement `PermissionPolicy::check`, which returns a `PermissionDecision`: `Allow`, `Deny(reason)`, `AllowOnce` or `AllowForSession`.
 
 ---
 
@@ -329,39 +349,45 @@ the command text.
 
 `cersei_tools::tool_primitives::bash_safety::analyze_command` is a separate
 primitive: it parses a command with tree-sitter and reports a risk level
-(`Safe`, `Moderate`, `High`, `Forbidden`), the commands seen and the paths
+(`BashRiskLevel`: `Safe`, `Moderate`, `High`, `Forbidden`), the commands seen and the paths
 written. A caller may use it, for example to show a warning; it is not wired
 into the tool's permissions. See
 [Code intelligence](/docs/code-intelligence#bash-command-safety-analysis).
 
 The heuristic `cersei_tools::bash_classifier` module (`classify_bash_command`,
-its `BashRiskLevel` with `Low`/`Medium`/`Critical`) was removed in the
-Sprint 11.1 cleanup; use `bash_safety` instead.
+its `BashRiskLevel` with `Low`/`Medium`/`Critical`) was removed in 0.5.0;
+use `bash_safety` instead.
 
 ---
 
 ## Skills
 
-Skills are [Agent Skills](https://agentskills.io/specification) (`SKILL.md`), served by the `bricks-skills` crate (`cersei::skills`). Give an agent a service and the `Skill` tool is registered once, the catalog goes into its system prompt, and its activations are its own:
+Skills are [Agent Skills](https://agentskills.io/specification) (`SKILL.md`), served by the `bricks-skills` crate (`cersei::skills`). Give an agent a skills service and the `Skill` tool is registered, the catalog goes into its system prompt, and its activations are its own:
 
 ```rust
+use std::sync::Arc;
 use cersei::skills::{SkillAccess, SkillsService};
 
-let access = SkillAccess::new(Arc::new(SkillsService::standard(project, home)));
-let agent = Agent::builder().provider(p).tools(cersei::tools::coding()).skills(access).build()?;
+let service = Arc::new(SkillsService::standard(project_dir, home_dir));   // project: &Path, home: Option<&Path>
+let access = SkillAccess::new(service);
+let agent = Agent::builder()
+    .provider(provider)
+    .tools(cersei::tools::coding())
+    .skills(access)
+    .build()?;
 ```
 
-Sources by priority: `<project>/.agents/skills`, `<project>/.claude/skills` (both need an explicit approval), `~/.agents/skills`, `~/.claude/skills`, then the built-in `commit`, `debug`, `remember`, `simplify`, `stuck`, `verify`. `.claude/commands/*.md` and `$ARGUMENTS` templates are no longer supported. See `docs/skills.md` in the repository.
+Sources by priority: `<project>/.agents/skills`, `<project>/.claude/skills`, `~/.agents/skills`, `~/.claude/skills`, then the built-in `commit`, `debug`, `remember`, `simplify`, `stuck`, `verify`. Project skills reach the model only after a trust decision for the session. `.claude/commands/*.md` and `$ARGUMENTS` templates are not read. See `docs/skills.md` in the repository.
 
-## Shell State Persistence
+## Persistent Shell
 
-The `BashTool` and `PowerShellTool` maintain persistent state across invocations within a session:
+`BashTool` and `PowerShellTool` keep one live shell per agent session. The working directory, variables, `PATH`, aliases and functions persist across calls while the shell lives; a shell that ends is reported and replaced, never faked. Stdin is empty unless an `input` is given, and the shell has no controlling terminal.
 
 ```rust
 // First call: cd /tmp
-// Second call: pwd → /tmp (remembers cwd)
+// Second call: pwd → /tmp (the working directory persists)
 // Third call: export FOO=bar
-// Fourth call: echo $FOO → bar (remembers env vars)
+// Fourth call: echo $FOO → bar (variables persist)
 ```
 
-State is stored in a global registry keyed by `session_id`. Call `clear_session_shell_state(id)` to reset.
+Closing the agent (`agent.close().await`, async) or dropping it stops the session's processes. Dropping does it synchronously and forced (`crates/cersei-agent/src/lib.rs:515-518`).

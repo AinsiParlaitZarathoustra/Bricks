@@ -11,7 +11,7 @@ import { Cards, Card } from 'fumadocs-ui/components/card';
 Practical, runnable recipes. All examples assume the `agentrl` feature:
 
 ```toml
-cersei = { version = "0.1", features = ["agentrl"] }
+cersei = { version = "0.6", features = ["agentrl"] }
 ```
 
 ## 1. A self-improving coding agent
@@ -21,7 +21,6 @@ Hand AgentRL a real task with an **independent** verifier and let it solve, regi
 ```rust
 use cersei::prelude::*;
 use cersei::agentrl::{CerseiRunner, CommandVerifier, Orchestrator, ToolRegistry, Verifier};
-use cersei::provider::Gemini;
 use std::sync::Arc;
 
 #[tokio::main]
@@ -32,12 +31,17 @@ async fn main() -> anyhow::Result<()> {
         "python3 gcd.py 48 36 | grep -qx 12 && python3 gcd.py 0 7 | grep -qx 7",
     ));
 
-    let key = std::env::var("GEMINI_API_KEY")?;
-    let provider_factory = Arc::new(move || Box::new(Gemini::new(key.clone())) as Box<dyn Provider>);
+    // The model comes from ~/.bricks/providers.toml as provider_id/model_id
+    // (`my_provider` is an id defined in that file).
+    let model = ProviderRegistry::load(None)?.resolve("my_provider/gemini-3.1-pro-preview")?;
+    let selection = model.selection();
+    let provider_factory = Arc::new(move || {
+        model.build_provider().expect("provider builds").into_boxed() as Box<dyn Provider>
+    });
 
     let runner = Arc::new(
         CerseiRunner::new(provider_factory, "./work", registry.clone(), verifier)
-            .with_model("gemini-3.1-pro-preview"),
+            .with_model(&selection),
     );
 
     let orchestrator = Orchestrator::new(runner, registry.clone());
@@ -70,7 +74,7 @@ let readonly: ToolsFactory = Arc::new(|| {
 
 let runner = Arc::new(
     CerseiRunner::new(provider_factory, "./work", registry.clone(), verifier)
-        .with_model("gemini-3.1-pro-preview")
+        .with_model(&selection)
         .with_general_tools(readonly),
 );
 
@@ -90,12 +94,15 @@ for e in registry.all() {
 ```
 
 <Callout type="info">
-This is exactly the shape of the live end-to-end test in `crates/cersei-agentrl/tests/live_gemini.rs`. Run it with:
+This is the same shape as the live end-to-end test in `crates/cersei-agentrl/tests/live_agentrl.rs`, which takes its model from `BRICKS_LIVE_MODEL` instead of a hard-coded name. Run it with:
 
 ```bash
 set -a; . ./.env; set +a
-cargo test -p cersei-agentrl --test live_gemini -- --ignored --nocapture
+BRICKS_LIVE_MODEL=provider_id/model_id \
+  cargo test -p cersei-agentrl --test live_agentrl -- --ignored --nocapture
 ```
+
+`BRICKS_LIVE_CONFIG` selects a providers file other than `~/.bricks/providers.toml`.
 </Callout>
 
 ## 3. The cache hit (self-improvement)
@@ -186,8 +193,10 @@ Let a model write a short [AgentTemplate](/docs/agentrl-template) program, run i
 ```rust
 use cersei::agentlang::{AGENTLANG_SPEC, RunAgentTemplateTool};
 
+let model = ProviderRegistry::load(None)?.resolve("my_provider/<model_id>")?;
+
 let agent = Agent::builder()
-    .provider(Anthropic::from_env()?)
+    .provider_boxed(model.build_provider()?.into_boxed())
     .tool(RunAgentTemplateTool)
     .append_system_prompt(AGENTLANG_SPEC)  // teach the model the DSL
     .extensions(ext)                       // DispatchHandle (+ Mailbox/KvStore)

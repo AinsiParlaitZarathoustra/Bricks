@@ -134,7 +134,7 @@ synchronously with forced signals.
 Process groups alone do not contain every descendant (`setsid` escapes a
 group); Bricks follows parent links instead, with the limits above. No
 administrator privilege is required. Job Objects are not used yet on
-Windows (see §8).
+Windows (see §9).
 
 ## 3. Background tasks
 
@@ -190,7 +190,11 @@ Three stages, the first unique match wins:
    whitespace, one constant indentation shift for the whole block (tabs or
    spaces, tab = 4, 8 or 2 columns) — relative indentation must match, which
    protects Python. Lines inside multi-line strings, template literals, Rust
-   raw strings and here-documents must match exactly.
+   raw strings and here-documents must match exactly. Exception to the
+   line-based rule: a single-line `old_string` also matches its trimmed text
+   when that text occurs once in the file, ignoring its surrounding
+   whitespace (`crates/cersei-tools/src/tool_primitives/replace.rs`, lines
+   386–412). This is a substring match, not a line match.
 3. **Relocation** (bounded: files ≤ 100 000 lines, blocks ≤ 400 lines): the
    same lines allowing only blank lines and runs of spaces *outside quoted
    text* to differ, with the same constant indentation shift. It finds a block

@@ -25,26 +25,25 @@ let sandbox: Arc<dyn Sandbox> = runtime
     .create(SandboxOpts::image("cersei/sandbox-base:latest"))
     .await?;
 
-// Inject the sandbox into the agent's ToolContext.extensions. Until the
-// `AgentBuilder::with_sandbox(...)` helper lands in 0.1.10, do this at the
-// call site that constructs the context:
-let ctx: cersei::tools::ToolContext = build_context_however_you_normally_do();
-ctx.extensions.insert::<Arc<dyn Sandbox>>(sandbox.clone());
+// Put the sandbox in the extensions that the agent's tools receive, and pass
+// them to the builder with `.extensions(...)`.
+let extensions = cersei::tools::Extensions::default();
+extensions.insert::<Arc<dyn Sandbox>>(sandbox.clone());
 
 // From this point on, every BashTool call routes through the sandbox.
 let agent = Agent::builder()
-    .provider(Anthropic::from_env()?)
+    .provider(cersei::provider_from_config(None, "my-provider/my-model")?)
     .tools(cersei::tools::coding())
+    .extensions(extensions)
     .build()?;
 let out = agent.run("ls -la /work").await?;
 println!("{}", out.text());
 # Ok(())
 # }
-# fn build_context_however_you_normally_do() -> cersei::tools::ToolContext { todo!() }
 ```
 
 <Callout type="info">
-The fallback path is preserved: if no `Arc<dyn Sandbox>` is present, `BashTool` runs on the host exactly as before. This makes the `vms` feature **safe to enable** without changing existing behaviour for code that doesn't inject a sandbox.
+The fallback path is preserved: if no `Arc<dyn Sandbox>` is present in the extensions, `BashTool` runs on the host exactly as before. This makes the `vms` feature **safe to enable** without changing existing behaviour for code that doesn't inject a sandbox.
 </Callout>
 
 ---
@@ -86,7 +85,7 @@ b.kill().await?;
 ```
 
 <Callout type="info">
-`VolumeId` here is set directly to the host path because we're targeting `docker -v <host>:<container>` semantics. In Phase 2, when the host broker takes over volume mediation more strictly, this will become `VolumeId::new()` and the runtime will look up `host_path` from the registry. For now, treat `volume_id` as opaque to Docker — the path travels through to the `-v` flag.
+`VolumeId` here is set directly to the host path because we're targeting `docker -v <host>:<container>` semantics. When the host broker mediates volumes more strictly (planned), this is expected to become `VolumeId::new()` and the runtime will look up `host_path` from the registry. For now, treat `volume_id` as opaque to Docker — the path travels through to the `-v` flag.
 </Callout>
 
 ---
@@ -172,7 +171,7 @@ let _ = bump(&kv)?;
 # }
 ```
 
-The same pattern works from agent-land via `SharedStateSet` with an `expected_version` field. CAS failures come back as `ToolResult::error("cas failed: version mismatch")` — the agent retries.
+The same pattern works from agent-land via `SharedStateSet` with an `expected_version` field. A CAS failure comes back to the agent as the tool error `cas failed: version mismatch`, and the agent can retry.
 
 ---
 
@@ -201,15 +200,21 @@ scout_tools.extend(cersei::tools::vm_tools::all_vm_tools());
 let mut worker_tools = cersei::tools::coding();
 worker_tools.extend(cersei::tools::vm_tools::all_vm_tools());
 
-// In your context-construction code:
-//   ctx.extensions.insert::<Arc<dyn Sandbox>>(scout.clone());
-//   ctx.extensions.insert::<Mailbox>(mailbox.clone());
-//   ctx.extensions.insert::<KvStore>(kv.clone());
-//
-// The scout agent should be prompted to call SendVmMessage("plans/v1", {...}).
-// The worker agent should be prompted to RecvVmMessage("plans/v1", timeout_ms=10000).
-//
-// Both agents share the *same* mailbox + kv, so messages propagate live.
+// Each agent gets its own sandbox, and both share the same mailbox and KV store:
+let scout_ext = cersei::tools::Extensions::default();
+scout_ext.insert::<Arc<dyn Sandbox>>(scout.clone());
+scout_ext.insert::<Mailbox>(mailbox.clone());
+scout_ext.insert::<KvStore>(kv.clone());
+
+let worker_ext = cersei::tools::Extensions::default();
+worker_ext.insert::<Arc<dyn Sandbox>>(worker.clone());
+worker_ext.insert::<Mailbox>(mailbox.clone());
+worker_ext.insert::<KvStore>(kv.clone());
+
+// Pass `scout_tools` / `scout_ext` and `worker_tools` / `worker_ext` to each agent's
+// builder (`.tools(...)`, `.extensions(...)`). The scout should be prompted to call
+// SendVmMessage("plans/v1", {...}); the worker, RecvVmMessage("plans/v1", timeout_ms=10000).
+// Messages propagate live, because both agents use the same mailbox.
 # Ok(())
 # }
 ```
@@ -270,12 +275,13 @@ docker build \
     --build-arg ENVD_BIN=target/release/cersei-envd \
     crates/cersei-vms/docker/
 
-# 3. Smoke test from the CLI.
-docker run --rm cersei/sandbox-base:latest /usr/local/bin/cersei-envd --help || true
+# 3. Check that the binary is in the image. cersei-envd takes no arguments and
+#    starts serving on $CERSEI_ENVD_SOCKET, so do not run it bare.
+docker run --rm --entrypoint /bin/sh cersei/sandbox-base:latest -c 'test -x /usr/local/bin/cersei-envd && echo ok'
 
-# 4. Smoke test from Rust.
-cargo run --release --example vms_docker_smoke   # in 0.1.10
 ```
+
+No example program ships with the crate yet: the examples above are the smoke tests.
 
 The `bricks` CLI does not allocate a sandbox (the `abstract --sandbox` flag planned in the Cersei era was never part of Bricks): instantiate `DockerRuntime` and call `.create(...)` from your own glue code.
 
@@ -313,4 +319,4 @@ assert_ne!(out.exit_code, 0); // read-only mount rejects the write
 
 - [VMs Overview](/docs/vms-overview) — concepts and architecture.
 - [VMs API](/docs/vms-api) — complete type and method reference.
-- [Changelog](/docs/changelog) — what landed in **0.1.9** vs what's coming in **0.1.10**.
+- [Changelog](/docs/changelog) — release history (the crate was introduced in **0.1.9**).

@@ -8,7 +8,7 @@ import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
 
 # cersei-compression
 
-`cersei-compression` sits between a tool's raw `execute()` result and the agent's built-in `cap_tool_result()` truncation, trimming the part of every tool output that is ANSI codes, blank lines, `Compiling …` progress spam, boilerplate comments, and unchanged function bodies.
+`cersei-compression` sits between a tool's raw `execute()` result and the agent's tool-result budget (`apply_tool_result_budget`), trimming the part of every tool output that is ANSI codes, blank lines, `Compiling …` progress spam, boilerplate comments, and unchanged function bodies.
 
 Savings are **measurable on real provider bills** — `gpt-4o-mini` billed us 29.1% fewer input tokens on a `cargo test` turn, `gemini-2.5-flash` billed 62.1% fewer on the same fixture. Full numbers with reproduction commands live on the [Compression Benchmarks](/docs/compression-benchmarks) page.
 
@@ -20,22 +20,22 @@ Savings are **measurable on real provider bills** — `gpt-4o-mini` billed us 29
 
 | Level | Behaviour |
 |---|---|
-| `Off` | Byte-for-byte passthrough. **Default** — zero behavioural change for existing users on 0.1.7. |
+| `Off` | Byte-for-byte passthrough. **Default** — zero behavioural change for existing users. |
 | `Minimal` | Strip ANSI, collapse blank runs, drop non-doc comments in source files. Safe for JSON/YAML/TOML (never code-stripped). |
-| `Aggressive` | Minimal **+** function body stubbing (keeps signatures + imports), command-specific TOML rules for `git`, `cargo`, `npm`, `pnpm`, `pytest`, `docker`, plus a generic catch-all. |
+| `Aggressive` | Minimal **+** function body stubbing for source files (keeps signatures + imports). The command rules described under [Built-in rule files](#built-in-rule-files) apply at every level above `Off`. |
 
 ## How it decides what to do
 
-Dispatch is routed by **tool name** and, for shell-like tools, by the **first word of the command**:
+Dispatch is routed by **tool name** (case-insensitive) and, for shell-like tools, by the **program and sub-command** that ran:
 
 ```
-tool_name        input hint                   strategy
-──────────────── ──────────────────────────── ────────────────────────
-Bash, Exec       first word of .command       TOML rules DSL
-Read, ReadFile   file extension of .file_path language-aware code filter
-Grep, Glob, Ls   —                            passthrough
-WebFetch, Fetch  —                            ANSI strip + generic rule
-everything else  —                            passthrough (Aggressive: safety cap)
+tool name (case-insensitive)            strategy
+─────────────────────────────────────── ──────────────────────────────────────────
+Bash, Exec, Shell, Run, PowerShell, …   command rules (TOML), chosen by program + sub-command
+Read, ReadFile, read_file, View         language-aware code filter
+WebFetch, WebSearch, web_fetch, …       hard size cap only (page windows stay whole)
+Fetch, Http                             ANSI strip + generic rule
+everything else                         JSON summary when the output is large JSON, otherwise size-capped passthrough
 ```
 
 Every call emits a structured `tracing::info!` event on the `cersei_compression` target so you can see exactly which rule fired, with before/after bytes, lines, and savings percent. More in the [Observability](#observability) section.
@@ -44,10 +44,10 @@ Every call emits a structured `tracing::info!` event on the `cersei_compression`
 
 ```toml
 [dependencies]
-cersei-compression = "0.1.7"
+cersei-compression = "0.6"
 ```
 
-The crate is pure Rust, depends only on workspace-shared crates (`regex`, `once_cell`, `serde`, `serde_json`, `toml`, `tracing`, `anyhow`), and links cleanly in `--release` with LTO.
+The crate is pure Rust. It depends on `cersei-types` and shared workspace crates (`regex`, `serde`, `serde_json`, `toml`, `tracing`), plus tree-sitter grammars for the code filter.
 
 ## 5-line quick start
 
@@ -92,7 +92,7 @@ level = "aggressive"
 
 ## Agent builder knob
 
-Added on `AgentBuilder` in 0.1.7, mirroring the existing `.tool_result_budget()` and `.auto_compact()` setters:
+`AgentBuilder` takes the level directly, alongside the `.tool_result_budget()` and `.auto_compact()` setters:
 
 ```rust
 use cersei_compression::CompressionLevel;
@@ -100,7 +100,7 @@ use cersei_compression::CompressionLevel;
 let agent = Agent::builder()
     .provider(provider)
     .tool(my_tool)
-    .compression_level(CompressionLevel::Aggressive)   // ← new in 0.1.7
+    .compression_level(CompressionLevel::Aggressive)
     .build()?;
 
 // Runtime change — takes effect on the next tool call
@@ -115,36 +115,40 @@ The field is a shared mutex, so an embedding application can flip the active age
 | Piece | Role |
 |---|---|
 | `CompressionLevel` | `Off` / `Minimal` / `Aggressive` enum, parseable from string. |
-| `compress_tool_output` | Infallible public entry point used by `cersei-agent`. |
-| `code::filter` | Language-aware comment + body stubbing (Rust, Python, JS/TS, Go, C/C++, Java, Ruby, Shell; Data formats never stripped). |
-| `truncate::smart_truncate` | Line-structure-aware fallback — keeps imports + signatures + braces. |
-| `toml_rules` | TOML DSL: `strip_ansi`, `replace`, `match_output`, `strip/keep_lines`, `truncate_lines_at`, `head/tail_lines`, `max_lines`, `on_empty`. |
-| `ansi::strip_ansi` + `ansi::truncate` | Unicode-safe character helpers. |
+| `compress_tool_output` / `Compressor::process` | Infallible entry points. `cersei-agent` calls `Compressor::process`, which also keeps the raw output so it can be read back. |
+| `rules` (`RuleSet`) | The TOML rule DSL: built-in rule files plus user and `bricks.toml` layers. |
+| `command` | Recognises the program and sub-command a shell line runs, to choose a rule. |
+| `skeleton` | Structural skeletons of source files, extracted with tree-sitter (imports, signatures, bodies stubbed). |
+| `json_view` | Structured summaries of large JSON documents. |
+| `log` | Compression of command logs: diagnostics first, then rules, then budget. |
+| `structured` | Machine-readable tool output (e.g. `cargo --message-format=json`) rendered back to text. |
+| `raw` | `RawStore`: where the full text of a reduced output can be read back. |
+| `ansi` | ANSI escape handling. |
 
 ## Built-in rule files
 
-Seven TOML rule files shipped embedded at compile time (via `include_str!`):
+Eight TOML rule files are embedded at compile time (via `include_str!`). Each file holds several named rules:
 
 | Rule file | Commands matched |
 |---|---|
-| `git.toml` | `git log`, `git status`, `git diff`, generic `git` |
-| `cargo.toml` | `cargo build`, `cargo check`, `cargo test`, `cargo clippy`, generic `cargo` |
-| `npm.toml` | `npm install`, `npm ci`, `npx`, generic `npm` |
-| `pnpm.toml` | `pnpm install`, `pnpm add`, generic `pnpm` |
-| `pytest.toml` | `pytest`, `py.test`, `python -m pytest` |
-| `docker.toml` | `docker build`, `docker buildx`, generic `docker` |
-| `generic.toml` | Catch-all fallback (blank-line collapse + long-line truncation) |
+| `generic.toml` | Fallback for any command without a specific rule: ANSI and progress cleaned, exact repeats collapsed, diagnostics kept, the rest capped. |
+| `exact.toml` | Values, file contents, search results and listings (`cat`, `head`, `tail`, `sed`, `jq`, `echo`, …): never filtered, only capped. |
+| `git.toml` | `git log`, `git status`, `git clone/fetch/pull/push`, diffs and plumbing (kept as written, capped), other `git` sub-commands. |
+| `rust.toml` | `cargo test` / `cargo nextest run`, `cargo build/check/clippy/doc`, `cargo run`, `cargo audit`, other `cargo` sub-commands. |
+| `go.toml` | `go test`, `go build/vet/run/mod`. |
+| `javascript.toml` | `npm`, `pnpm` and `yarn`: install and add commands, plus the other sub-commands. |
+| `python.toml` | `pytest` / `py.test`, `uv` package commands, `pip install`, `ruff`, `mypy`. |
+| `devops.toml` | `docker` (compose, build, other), `kubectl` (read, change, other). |
 
-Specific rules are alphabetically ordered so they win over the `zz-*-generic` catch-alls within each file. Rule precedence inside the registry is file order: `git → cargo → npm → pnpm → pytest → docker → generic`.
+Rules are layered. The built-in files load first, then user files in `~/.bricks/rules/*.toml` (in byte order of their names), then the `[compression.filters.<id>]` tables of `bricks.toml`. A rule with the id of an earlier one replaces it, and `disabled = true` removes it.
 
 ## Safety net
 
-Compression is a **pre-filter**. After it runs, `cersei-agent` still applies:
+Compression is a **pre-filter**. After it runs, `cersei-agent` still applies the tool-result budget:
 
-1. **`cap_tool_result`** — per-result head/tail truncation (80 + 80 lines, or 20k char char-based fallback for very long single lines).
-2. **`apply_tool_result_budget`** — global budget that truncates the oldest tool results when total context crosses the configured limit (50,000 chars default; keeps the most recent 6 messages intact).
+- **`apply_tool_result_budget`**: when the total size of tool results crosses `tool_result_budget` (50,000 characters by default), the oldest results are replaced by a placeholder that names their saved original, or says that none was saved. Results of active skills are kept.
 
-If the compression pipeline returns the raw input unchanged (because a level matched nothing, or a regex blew up internally), the safety net still fires. You can never end up with *more* context than `cap_tool_result` allows.
+If compression leaves a result unchanged (no rule matched, or an internal error), the budget still applies to it.
 
 ## Observability
 
@@ -176,7 +180,7 @@ Fields emitted per call:
 |---|---|
 | `tool` | The Tool name that produced the output (`Bash`, `Read`, …). |
 | `level` | `off` / `minimal` / `aggressive`. |
-| `strategy` | `shell` / `code` / `passthrough` / `web` / `unknown` / `unknown-capped`. |
+| `strategy` | The route taken, such as `shell`, `web` or `passthrough` (the full set is in `dispatch.rs`). |
 | `detail` | Matched rule name (e.g. `cargo-test`) or detected Language (e.g. `Rust`). Empty for passthrough. |
 | `before_bytes` / `after_bytes` | Raw byte counts. |
 | `before_lines` / `after_lines` | Line counts. |
@@ -186,4 +190,4 @@ Fields emitted per call:
 
 - **[Compression Benchmarks](/docs/compression-benchmarks)** — exact token counts from live OpenAI + Gemini runs, reproducible commands, per-call log dumps.
 - **[Changelog](/docs/changelog)** — the 0.1.7 release notes.
-- **[Abstract Commands](/docs/abstract-commands)** — `/compression` in the REPL.
+- **[Abstract Commands](/docs/abstract-commands)** — commands of the Cersei-era `abstract` CLI (historical).

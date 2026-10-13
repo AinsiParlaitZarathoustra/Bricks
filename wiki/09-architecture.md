@@ -62,7 +62,7 @@ src-cersei/
     ├── cersei-agent/             agent builder and runtime
     │   └── src/
     │       ├── lib.rs            Agent, AgentBuilder, AgentOutput
-    │       ├── events.rs         AgentEvent (26 variants), AgentStream, AgentControl
+    │       ├── events.rs         AgentEvent (36 variants), AgentStream, AgentControl
     │       ├── reporters.rs      Reporter trait + Console/Json/Collector/Metrics
     │       └── runner.rs         Agentic loop implementation
     │
@@ -79,31 +79,32 @@ src-cersei/
 ## Dependency Flow
 
 ```
-cersei-types          zero LLM-specific concepts
-    ↑                 Message, ContentBlock, Usage, CerseiError, StreamEvent
+cersei-types          shared types, CerseiError, shared HTTP client
+    ↑                 (no internal dependency)
     │
-cersei-provider       abstracts LLM communication
-    ↑                 Provider trait, Auth, CompletionRequest/Stream
-    │
-cersei-tools          what agents can do
-    ↑                 Tool trait, ToolContext, permissions, built-in tools
-    │
-cersei-mcp            external tool servers
-    ↑                 McpManager, McpServerConfig
-    │
-cersei-hooks          lifecycle interception
-    ↑                 Hook, HookEvent, HookAction, ShellHook
-    │
-cersei-memory         conversation persistence
-    ↑                 Memory trait, JsonlMemory, InMemory
-    │
-cersei-agent          the runtime
-    ↑                 Agent, AgentBuilder, agentic loop, events, reporters
-    │
-cersei                facade + prelude
+cersei-provider       LLM communication: depends on cersei-types only
+cersei-hooks          lifecycle interception: depends on cersei-types only
+cersei-mcp            MCP client: depends on cersei-types only
+cersei-compression, cersei-web, cersei-embeddings
+                      depend on cersei-types only
+cersei-lsp, bricks-semantic
+                      bricks-semantic depends on cersei-lsp and cersei-types
+    ↑
+cersei-tools          tool system: depends on cersei-mcp, cersei-web,
+                      cersei-compression, cersei-embeddings, bricks-semantic,
+                      bricks-skills, cersei-lsp, cersei-vms
+cersei-memory         sessions: depends on cersei-types, and on cersei-provider
+                      and cersei-embeddings only with the `structured` / `embed`
+                      features
+    ↑
+cersei-agent          the runtime: depends on cersei-hooks, cersei-memory,
+                      cersei-provider, cersei-tools, cersei-mcp, cersei-compression,
+                      cersei-web, bricks-semantic, bricks-skills
+    ↑
+cersei                facade + prelude: re-exports the crates above
 ```
 
-Each layer depends only on the layers below it. The `cersei` facade crate re-exports everything for convenience.
+The lists are the internal dependencies declared in each `Cargo.toml`. The `cersei` facade re-exports the crates as modules (for example `cersei::hooks`, `cersei::memory`, `cersei::tools`).
 
 ## Data Flow
 
@@ -135,29 +136,31 @@ Agent::run("prompt")
 │    ├── PostModelTurn hooks                        │
 │    │                                              │
 │    ▼                                              │
-│  Stop reason?                                     │
-│    ├── EndTurn → BREAK                            │
-│    ├── ToolUse → dispatch tools ──┐               │
+│  Answer has tool calls?                           │
+│    ├── none: final answer, BREAK                  │
+│    ├── some: dispatch tools ──┐                   │
 │    │                              │               │
 │    │   For each tool:             │               │
-│    │     PreToolUse hooks         │               │
 │    │     PermissionPolicy check   │               │
+│    │     PreToolUse hooks         │               │
 │    │     Tool.execute()           │               │
-│    │     PostToolUse hooks        │               │
 │    │     Record ToolCallRecord    │               │
 │    │                              │               │
 │    │   Append results ────────────┘               │
 │    │   CONTINUE loop                              │
 │    │                                              │
-│    └── MaxTokens → inject continuation, CONTINUE  │
+│    └── MaxTokens → retry up to a limit, then the  │
+│         run ends as OutputTruncated               │
 │                                                   │
 └───────────────────────────────────────────────────┘
     │
     ├── Save session to Memory (if configured)
     │
     ▼
-AgentOutput { message, usage, stop_reason, turns, tool_calls }
+AgentOutput { message, usage, stop_reason, turns, tool_calls, termination }
 ```
+
+A denied call returns `Permission denied: <reason>` to the model as a tool error. A call stopped by a `PreToolUse` hook returns `Blocked by hook: <reason>`. `PostToolUse` is declared but never fired in 0.6.0 (see [Hooks](07-hooks.md)), so it does not appear in the loop.
 
 ## Event Distribution
 
@@ -183,7 +186,7 @@ Agent loop emits AgentEvent
 
 2. **Builder pattern** — `AgentBuilder` with `self -> Self` chaining. Validates at `build()` time, not at method call time.
 
-3. **No global state** — except `ShellState` registry (keyed by session_id, cleaned up on session end). All configuration flows through the builder.
+3. **Few process-wide registries** — `cersei-tools` keeps some global registries (for example for shell sessions, tasks, todos, cron jobs and inboxes). `ShellSessions` holds one entry per tool-context session id, and its entry is removed by the cleanup functions. Agent configuration flows through the builder.
 
 4. **Streaming-first** — providers emit `StreamEvent`s. The accumulator is a separate concern. Consumers (callback, broadcast, stream) get events as they arrive.
 

@@ -5,16 +5,16 @@ description: Middleware system for intercepting agent lifecycle events.
 
 # cersei-hooks
 
-Hooks intercept agent lifecycle events — pre/post tool use, model turns, and custom events.
+Hooks intercept agent lifecycle events. The runner fires `PreToolUse` (after the permission check), `PostModelTurn` and `TurnsElapsed` (`crates/cersei-agent/src/runner.rs:1159`, `1172`, `1410`). `PostToolUse`, `PreModelTurn`, `Stop` and `Error` are declared in `cersei-hooks` but no code path fires them.
 
 ## Hook Trait
 
 ```rust
 #[async_trait]
 pub trait Hook: Send + Sync {
-    fn name(&self) -> &str;
     fn events(&self) -> &[HookEvent];
     async fn on_event(&self, ctx: &HookContext) -> HookAction;
+    fn name(&self) -> &str { "unnamed-hook" }   // optional, for logs
 }
 ```
 
@@ -22,26 +22,52 @@ pub trait Hook: Send + Sync {
 
 ```rust
 pub enum HookEvent {
-    PreToolUse,
-    PostToolUse,
-    PreModelTurn,
-    PostModelTurn,
+    PreToolUse,     // fired by the runner, after the permission check
+    PostToolUse,    // declared; not fired by the runner
+    PreModelTurn,   // declared; not fired by the runner
+    PostModelTurn,  // fired by the runner after each model response
+    Stop,           // declared; not fired by the runner
+    Error,          // declared; not fired by the runner
+    TurnsElapsed,   // fired every N turns (cadence set by the agent, default 10); turn is in HookContext
 }
 ```
+
+## HookContext
+
+```rust
+pub struct HookContext {
+    pub event: HookEvent,
+    pub tool_name: Option<String>,
+    pub tool_input: Option<Value>,
+    pub tool_result: Option<String>,
+    pub tool_is_error: Option<bool>,
+    pub turn: u32,
+    pub cumulative_cost_usd: f64,
+    pub message_count: usize,
+}
+```
+
+`tool_*` fields are set for tool events only. `ctx.cumulative_cost_usd()` returns the same value as the field.
 
 ## HookAction
 
 ```rust
 pub enum HookAction {
-    Continue,
-    Block(String),
-    ModifyInput(Value),
+    Continue,                  // go on
+    Block(String),             // PreToolUse: the tool does not run and the model gets "Blocked by hook: …".
+                               // PostModelTurn: the run fails with CerseiError::Provider("Blocked by hook: …")
+    ModifyInput(Value),        // PreToolUse: the tool runs with the new input
+    InjectMessage(Box<Message>), // returned by the hook API, but the runner does not apply it (no arm in runner.rs)
 }
 ```
+
+Hooks run in registration order. The first action that is not `Continue` ends the chain; the others do not run for that event (`crates/cersei-hooks/src/lib.rs`, `run_hooks`). The runner acts on `Block` at `PreToolUse` and `PostModelTurn`, and on `ModifyInput` at `PreToolUse` only.
 
 ## Examples
 
 ### Cost Guard
+
+A `Block` at `PostModelTurn` ends the run with an error (`crates/cersei-agent/src/runner.rs:1159-1163`).
 
 ```rust
 pub struct CostGuard { pub max_usd: f64 }
@@ -49,7 +75,7 @@ pub struct CostGuard { pub max_usd: f64 }
 #[async_trait]
 impl Hook for CostGuard {
     fn name(&self) -> &str { "cost-guard" }
-    fn events(&self) -> &[HookEvent] { &[HookEvent::PostToolUse] }
+    fn events(&self) -> &[HookEvent] { &[HookEvent::PostModelTurn] }
 
     async fn on_event(&self, ctx: &HookContext) -> HookAction {
         if ctx.cumulative_cost_usd() > self.max_usd {
@@ -69,10 +95,10 @@ pub struct AuditLogger;
 #[async_trait]
 impl Hook for AuditLogger {
     fn name(&self) -> &str { "audit" }
-    fn events(&self) -> &[HookEvent] { &[HookEvent::PreToolUse, HookEvent::PostToolUse] }
+    fn events(&self) -> &[HookEvent] { &[HookEvent::PreToolUse] }
 
     async fn on_event(&self, ctx: &HookContext) -> HookAction {
-        eprintln!("[audit] {} tool={}", ctx.event, ctx.tool_name.as_deref().unwrap_or("?"));
+        eprintln!("[audit] {:?} tool={}", ctx.event, ctx.tool_name.as_deref().unwrap_or("?"));
         HookAction::Continue
     }
 }
@@ -90,7 +116,10 @@ impl Hook for BlockDangerous {
 
     async fn on_event(&self, ctx: &HookContext) -> HookAction {
         if ctx.tool_name.as_deref() == Some("Bash") {
-            if let Some(cmd) = ctx.tool_input.get("command").and_then(|v| v.as_str()) {
+            if let Some(cmd) = ctx.tool_input.as_ref()
+                .and_then(|input| input.get("command"))
+                .and_then(|v| v.as_str())
+            {
                 if cmd.contains("rm -rf") {
                     return HookAction::Block("Destructive command blocked".into());
                 }
@@ -103,12 +132,13 @@ impl Hook for BlockDangerous {
 
 ## Shell Hooks
 
-Execute shell commands at hook points:
+`ShellHook` runs a shell command at hook points. Its constructor takes the command as a string; no crate in this workspace builds one yet, so an embedder wires it. The command receives the event as JSON in `CERSEI_HOOK_CONTEXT`. With `blocking = true`, a non-zero exit becomes a `Block`:
 
 ```rust
-use cersei_hooks::ShellHook;
+use cersei_hooks::{HookEvent, ShellHook};
 
-let hook = ShellHook::new("notify", HookEvent::PostToolUse, "echo 'Tool used'");
+// command, events, blocking
+let hook = ShellHook::new("echo 'Tool used'", &[HookEvent::PreToolUse], false);
 ```
 
 ## Registration
@@ -120,5 +150,3 @@ Agent::builder()
     .hook(BlockDangerous)
     .build()?;
 ```
-
-Hooks fire in registration order. A `Block` action stops the pipeline.

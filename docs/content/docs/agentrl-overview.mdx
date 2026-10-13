@@ -76,7 +76,6 @@ AgentRL is built to be driven, not just configured. Two seams make it fully prog
 ```rust
 use cersei::prelude::*;
 use cersei::agentrl::{CerseiRunner, CommandVerifier, Orchestrator, ToolRegistry, Verifier};
-use cersei::provider::Gemini;
 use std::sync::Arc;
 
 #[tokio::main]
@@ -88,14 +87,20 @@ async fn main() -> anyhow::Result<()> {
     let verifier: Arc<dyn Verifier> =
         Arc::new(CommandVerifier::new("python3 gcd.py 48 36 | grep -qx 12"));
 
+    // The model comes from ~/.bricks/providers.toml as provider_id/model_id
+    // (`my_provider` is an id defined in that file).
+    let model = ProviderRegistry::load(None)?.resolve("my_provider/gemini-3.1-pro-preview")?;
+    let selection = model.selection();
+
     // A fresh provider per agent (sub-agents get their own client).
-    let key = std::env::var("GEMINI_API_KEY")?;
-    let provider_factory = Arc::new(move || Box::new(Gemini::new(key.clone())) as Box<dyn Provider>);
+    let provider_factory = Arc::new(move || {
+        model.build_provider().expect("provider builds").into_boxed() as Box<dyn Provider>
+    });
 
     // The production runner: real agents + provider + sandboxed proposals.
     let runner = Arc::new(
         CerseiRunner::new(provider_factory, "./work", registry.clone(), verifier)
-            .with_model("gemini-3.1-pro-preview"), // required for non-Anthropic providers
+            .with_model(&selection), // required for non-Anthropic providers
     );
 
     let orchestrator = Orchestrator::new(runner, registry);
@@ -128,7 +133,7 @@ AgentRL is behind a feature flag (it pulls in the embeddings + sandbox crates):
 
 ```toml
 [dependencies]
-cersei = { version = "0.1", features = ["agentrl"] }
+cersei = { version = "0.6", features = ["agentrl"] }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 ```

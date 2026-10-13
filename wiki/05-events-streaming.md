@@ -1,13 +1,15 @@
 # Events & Streaming
 
-Cersei provides three mechanisms for real-time observation of agent activity, from simple to sophisticated.
+Three mechanisms observe agent activity, from simple to sophisticated: a callback, a broadcast channel and an event stream. Reporters are a structured consumer built on the same events. The variants of `AgentEvent` are listed at the end of this page.
 
-## 1. Callback (Simple)
+## 1. Callback (simple)
 
 A single closure attached at build time. Good for logging or simple TUI updates.
 
 ```rust
-Agent::builder()
+let agent = Agent::builder()
+    .provider(provider_from_config(None, "my-provider/my-model")?)
+    .tools(cersei::tools::coding())
     .on_event(|event: &AgentEvent| {
         match event {
             AgentEvent::TextDelta(t) => print!("{}", t),
@@ -22,32 +24,34 @@ Agent::builder()
     .build()?;
 ```
 
-The callback fires synchronously in the agent loop — keep it fast (no blocking I/O).
+The callback runs synchronously in the agent loop, so keep it fast (no blocking I/O).
 
-## 2. Broadcast Channel (Multi-Consumer)
+## 2. Broadcast channel (multi-consumer)
 
-Multiple independent listeners, each receiving every event. Uses `tokio::sync::broadcast` internally.
+Several independent listeners, each receiving every event (after the event filter, if any). Uses `tokio::sync::broadcast` internally.
 
 ```rust
-let agent = Agent::builder()
-    .provider(Anthropic::from_env()?)
-    .enable_broadcast(256)  // buffer capacity
-    .build()?;
+use std::sync::Arc;
+use tokio::sync::broadcast::error::RecvError;
 
-// Listener 1: Dashboard
-let mut rx1 = agent.subscribe().unwrap();
-tokio::spawn(async move {
-    while let Ok(event) = rx1.recv().await {
-        // update dashboard...
-    }
-});
+let agent = Arc::new(
+    Agent::builder()
+        .provider(provider_from_config(None, "my-provider/my-model")?)
+        .enable_broadcast(256)                 // buffer capacity
+        .build()?,
+);
 
-// Listener 2: Cost tracker
-let mut rx2 = agent.subscribe().unwrap();
+// Listener 1: cost tracker
+let mut costs = agent.subscribe().expect("enable_broadcast was called");
 tokio::spawn(async move {
-    while let Ok(event) = rx2.recv().await {
-        if let AgentEvent::CostUpdate { cumulative_cost, .. } = event {
-            println!("Cost: ${:.4}", cumulative_cost);
+    loop {
+        match costs.recv().await {
+            Ok(AgentEvent::CostUpdate { cumulative_cost, .. }) => {
+                println!("Cost: ${:.4}", cumulative_cost);
+            }
+            Ok(_) => {}
+            Err(RecvError::Lagged(n)) => eprintln!("skipped {n} events"),
+            Err(RecvError::Closed) => break,
         }
     }
 });
@@ -55,28 +59,29 @@ tokio::spawn(async move {
 agent.run("...").await?;
 ```
 
-Listeners that fall behind receive a `Lagged` error — the channel is lossy by design so the agent is never blocked.
+A listener that falls behind receives `RecvError::Lagged`; the channel is lossy by design so the agent is never blocked. Handle `Lagged` and keep receiving, as above. Returning from the loop on any error stops the listener.
 
-## 3. Event Stream (Async Iterator)
+`agent.subscribe()` returns `None` unless `enable_broadcast` was called.
 
-`agent.run_stream()` returns an `AgentStream` — an async iterator with bidirectional control.
+## 3. Event stream (async iterator)
+
+`run_stream` takes `self: &Arc<Self>`, so the agent must be held in an `Arc`. It returns an `AgentStream`:
 
 ```rust
+use std::sync::Arc;
+
+let agent = Arc::new(
+    Agent::builder()
+        .provider(provider_from_config(None, "my-provider/my-model")?)
+        .tools(cersei::tools::coding())
+        .build()?,
+);
+
 let mut stream = agent.run_stream("Deploy to staging");
 
 while let Some(event) = stream.next().await {
     match event {
         AgentEvent::TextDelta(t) => print!("{}", t),
-
-        AgentEvent::PermissionRequired(req) => {
-            // Interactive: pause, prompt user, resume
-            let ok = prompt_user(&req.description);
-            stream.respond_permission(
-                req.id,
-                if ok { PermissionDecision::Allow }
-                else { PermissionDecision::Deny("User rejected".into()) }
-            );
-        }
 
         AgentEvent::Complete(output) => {
             println!("\nDone: {} turns", output.turns);
@@ -93,18 +98,24 @@ while let Some(event) = stream.next().await {
 }
 ```
 
-### AgentStream Methods
+The stream ends with `Complete` or `Error`; memory maintenance events, if any, come after it.
+
+### AgentStream methods
 
 ```rust
 impl AgentStream {
-    async fn next(&mut self) -> Option<AgentEvent>;
-    fn respond_permission(&self, request_id: String, decision: PermissionDecision);
-    fn cancel(&self);
-    fn inject_message(&self, message: String);
-    async fn collect(self) -> Result<AgentOutput>;
-    async fn collect_text(self) -> Result<String>;
+    pub async fn next(&mut self) -> Option<AgentEvent>;
+    pub async fn collect(self) -> Result<AgentOutput>;
+    pub async fn collect_text(self) -> Result<String>;
+    pub fn cancel(&self);                                    // takes effect
+    pub fn respond_permission(&self, request_id: String, decision: PermissionDecision); // see limitation
+    pub fn inject_message(&self, message: String);           // see limitation
 }
 ```
+
+> **Current limitation (repository at 0.6.0).** `run_stream` acts on `cancel()` only. `respond_permission()` and `inject_message()` are accepted but ignored, and the engine never emits `AgentEvent::PermissionRequired`. `InteractivePolicy::via_stream()` returns a policy that allows every call. For approvals, use the approval policy described in [Permissions](08-permissions.md).
+
+The stream receives every event. `event_filter` does not apply to it (see below).
 
 ## Reporters
 
@@ -119,19 +130,21 @@ pub trait Reporter: Send + Sync {
 }
 ```
 
-### Built-in Reporters
+### Built-in reporters
 
 | Reporter | Description |
 |----------|-------------|
-| `ConsoleReporter` | Prints text and tool activity to stdout/stderr |
-| `JsonReporter<W>` | Writes JSON-lines to any `Write` impl |
-| `CollectorReporter` | Collects events into a `Vec` for post-hoc analysis |
-| `MetricsReporter` | Aggregates into `AgentMetrics` (turns, cost, histogram) |
+| `ConsoleReporter { verbose }` | Prints text and tool activity to stdout/stderr |
+| `JsonReporter<W>` | Writes JSON lines to any `Write` (`JsonReporter::new(w)`) |
+| `CollectorReporter` | Collects events into a `Vec` (`events()`) for post-hoc analysis |
+| `MetricsReporter` | Aggregates into `AgentMetrics` and hands them to a closure every interval |
 
 ```rust
+use std::{fs::File, time::Duration};
 use cersei::reporters::*;
 
-Agent::builder()
+let agent = Agent::builder()
+    .provider(provider_from_config(None, "my-provider/my-model")?)
     .reporter(ConsoleReporter { verbose: true })
     .reporter(JsonReporter::new(File::create("agent.jsonl")?))
     .reporter(MetricsReporter::new(Duration::from_secs(10), |m| {
@@ -140,7 +153,7 @@ Agent::builder()
     .build()?;
 ```
 
-### Custom Reporter
+### Custom reporter
 
 ```rust
 struct SlackNotifier { webhook_url: String }
@@ -149,15 +162,17 @@ struct SlackNotifier { webhook_url: String }
 impl Reporter for SlackNotifier {
     async fn on_event(&self, event: &AgentEvent) {
         if let AgentEvent::Error(e) = event {
-            // POST to Slack webhook
+            // POST `e` to self.webhook_url
         }
     }
 
     async fn on_complete(&self, output: &AgentOutput) {
-        // Notify Slack that the agent finished
+        // Notify that the agent finished
     }
 }
 ```
+
+Register it with `.reporter(SlackNotifier { webhook_url })`.
 
 ### AgentMetrics
 
@@ -173,9 +188,9 @@ pub struct AgentMetrics {
 }
 ```
 
-## Event Filtering
+## Event filtering
 
-Only deliver events matching a predicate:
+`event_filter` keeps only the events a predicate accepts. It applies to the callback, to broadcast listeners and to reporters. It does not apply to `AgentStream`, which receives every event.
 
 ```rust
 Agent::builder()
@@ -189,6 +204,21 @@ Agent::builder()
     })
 ```
 
-## Full AgentEvent Enum
+## Full AgentEvent enum
 
-See the [README](../README.md#agentevent--full-enum) for the complete 26-variant enum.
+The enum is defined in [`crates/cersei-agent/src/events.rs`](../crates/cersei-agent/src/events.rs). Its variants, grouped by theme:
+
+- **Streaming:** `TextDelta`, `ThinkingDelta`
+- **Tools:** `ToolStart`, `ToolProgress`, `ToolPermissionCheck`, `ToolEnd` (with `duration` and compression stats)
+- **Permissions and approvals:** `PermissionRequired` (declared, not emitted by the engine), `ApprovalRequested`, `ApprovalResolved` (with `decision` and `by`)
+- **Turns and model requests:** `TurnStart`, `TurnComplete`, `ModelRequestStart`, `ModelResponseStart`
+- **Context:** `TokenWarning`, `CompactStart`, `CompactEnd`, `CompactionResult`, `ContextUpdate`
+- **Sessions:** `SessionLoaded`, `SessionSaved`
+- **Cost:** `CostUpdate`
+- **Sub-agents and jobs:** `SubAgentSpawned`, `SubAgentComplete`, `SubAgent`, `Job`
+- **Hooks:** `HookFired`, `HookBlocked`
+- **Memory:** `MemoryRecalled`, `MemoryMaintenanceStarted`, `MemoryMaintenanceFinished`
+- **Edits and skills:** `EditApplied`, `SkillActivated`, `SkillNotActivated`
+- **Terminal:** `Status`, `Error`, `Complete`
+
+Consult the file for the fields of each variant; the enum evolves between releases.

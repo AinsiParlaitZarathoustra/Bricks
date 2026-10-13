@@ -1,45 +1,53 @@
 # Benchmarks
 
-Complete performance analysis of the Cersei SDK across tool I/O, memory operations, token consumption, and comparison with Claude Code CLI.
+> **Two sources, read them separately.**
+>
+> - **Current:** Bricks 0.4.6, measured on 2026-10-08 (commit `dee981e`; Apple A18 Pro, 6 cores, 8 GiB, macOS 27.2, Rust 1.98.1). The full report is [`docs/benchmarks-bricks-2026-10-08.md`](../docs/benchmarks-bricks-2026-10-08.md), and the summary is in the [Benchmarks](../README.md#benchmarks) section of the README. There is no benchmark report for 0.6.0 in the repository.
+> - **Historical:** the tables below are the "Latest Results" of [`examples/benchmark/README.md`](../examples/benchmark/README.md), a file whose only commit is the first one (`53b7aee`, 2026-04-02). They describe an earlier Cersei build. Do not compare them with the current numbers: Bash averages 15.64 ms there, and 39.695 ms in the 2026-10-08 report.
+>
+> Anything marked **[unverified]** does not appear in any file of the repository.
 
 ## How to Run
 
+From the repository root:
+
 ```bash
-# Quick: tool I/O benchmark (50 iterations)
-cargo run --example benchmark_io --release
+# Tool I/O benchmark (quick)
+cargo run --release -p cersei --example benchmark_io
 
-# Full: standalone suite with Markdown output (100 iterations)
-cd examples/benchmark && cargo run --release
+# Standalone suite, with its own manifest
+cargo run --release --manifest-path examples/benchmark/Cargo.toml
 
-# Stress tests (validates correctness + performance)
-cargo run --example stress_core_infrastructure --release
-cargo run --example stress_tools --release
-cargo run --example stress_orchestration --release
-cargo run --example stress_skills --release
-cargo run --example stress_memory --release
+# Stress tests (correctness + performance)
+cargo run --release -p cersei --example stress_core_infrastructure
+cargo run --release -p cersei --example stress_tools
+cargo run --release -p cersei --example stress_orchestration
+cargo run --release -p cersei --example stress_skills
+cargo run --release -p cersei --example stress_memory
 
-# Usage/cost tracking
-cargo run --example usage_report --release
+# Usage and cost tracking
+cargo run --release -p cersei --example usage_report
 ```
+
+The Python agent-framework comparisons are in `bench/general-agents`. LongMemEval (`bench/long-mem`) and Terminal-Bench (`bench/term-bench`) need a dataset or a live model; the README lists them under "Not re-run yet".
 
 ---
 
 ## Methodology
 
-- **Machine**: Apple Silicon (macOS), release build (`--release`)
-- **Iterations**: 100 per test (50 for quick benchmark)
-- **Warmup**: 3 runs excluded from timing
-- **Clock**: `std::time::Instant` (monotonic)
-- **Temp dir**: fresh tmpdir per run (no filesystem caching between runs)
-- **Targets**: tool dispatch overhead, not LLM latency
+Historical (`examples/benchmark/README.md`):
+
+- **Machine**: Apple Silicon (macOS), release build
+- **Iterations**: 100 per tool in the standalone suite, 50 for the quick benchmark
+- **Scope**: raw tool I/O (per-tool dispatch speed)
+
+Not stated in the repository **[unverified]**: 3 warm-up runs, the `std::time::Instant` clock, and a fresh temp directory per run.
 
 ---
 
 ## Tool I/O Performance
 
-Measures the time from "agent decides to use a tool" to "tool result is ready". This is pure local execution — no network, no LLM.
-
-### Results (100 iterations, release build)
+### Results (historical, 100 iterations, release build)
 
 | Tool | Avg | Min | Max | What It Measures |
 |------|-----|-----|-----|------------------|
@@ -52,22 +60,28 @@ Measures the time from "agent decides to use a tool" to "tool result is ready". 
 
 ### vs Raw `std::fs`
 
+The README defines `std::fs::read` and `std::fs::write` as baselines but gives no numbers for them. The figures below are **[unverified]**. The 2026-10-08 report measures `std::fs::read` at 0.010 ms and `std::fs::write` at 0.045 ms, on another build.
+
 | Operation | `std::fs` | Cersei | Overhead |
 |-----------|-----------|--------|----------|
-| Read | 0.012ms | 0.09ms | +0.078ms (JSON parsing + line numbering) |
-| Write | 0.071ms | 0.09ms | +0.019ms (JSON parsing + dir check) |
+| Read | 0.012ms **[unverified]** | 0.09ms | +0.078ms (JSON parsing + line numbering) **[unverified]** |
+| Write | 0.071ms **[unverified]** | 0.09ms | +0.019ms (JSON parsing + dir check) **[unverified]** |
 
-### vs Claude Code CLI
+### CLI startup: this ratio is not carried forward
 
-| Metric | Cersei | Claude Code |
-|--------|--------|-------------|
-| Tool dispatch (Read) | 0.09ms | — |
-| CLI startup (`--help`) | — | 323ms |
-| **Ratio** | **3,589x faster** | |
+The historical README compares a Read dispatch (0.09 ms) with `claude --help` (323 ms) and gives a ratio of 3,589x. The two operations are not the same, and the 2026-10-08 report does not reuse this comparison. Its current startup figures, for `--version` only, are:
 
-**Why**: Claude Code pays Node.js boot + module loading + config parsing on every invocation. Cersei tools are native Rust function calls — zero process overhead.
+| CLI | Version | Mean | Binary | Max RSS |
+|-----|---------|------|--------|---------|
+| Bricks | 0.4.6 | 4.8 ms | 29.4 MiB | 7.5 MiB |
+| Claude Code | 2.1.289 | 7.3 ms | 219.0 MiB | 24.6 MiB |
+| Codex CLI | 0.150.1 | 8.6 ms | 218.4 MiB | 16.9 MiB |
+
+Those figures do not measure the response time to a prompt. The reasons usually given for the gap (Node.js start-up and similar) are **[unverified]**.
 
 ### What This Means for Agents
+
+Computed from the 0.09 ms Read figure above; not measured as a whole:
 
 | Scenario | Tool Calls | Cersei Overhead | Note |
 |----------|-----------|----------------|------|
@@ -76,22 +90,22 @@ Measures the time from "agent decides to use a tool" to "tool result is ready". 
 | Large refactor | 200 | 18ms | Invisible |
 | CI batch (1000 files) | 1000 | 90ms | Noticeable only in batch |
 
-The real bottleneck is **always** the LLM API (500ms-5s per turn). Tool dispatch overhead matters only for high-frequency automation.
+The LLM API latency per turn (500 ms to 5 s) is **[unverified]** here. Tool dispatch overhead matters mainly for high-frequency automation.
 
 ### Why Grep and Bash Are Slower
 
 | Tool | Bottleneck | Why |
 |------|-----------|-----|
-| Grep (~6ms) | `rg` subprocess | Process creation on macOS is ~5ms. In-process regex would be ~0.1ms. |
-| Bash (~19ms) | `sh -c` subprocess | Inherent `fork()`+`exec()` cost. Same for any agent framework. |
+| Grep (~6ms) | `rg` subprocess | The cost of process creation on macOS (~5 ms) and the in-process regex figure (~0.1 ms) are **[unverified]**. |
+| Bash (~16ms) | `sh -c` subprocess | The 15.64 ms in the table above. The cost is a process spawn; it is not broken down here. |
 
 ---
 
 ## Memory I/O Performance
 
-Measured with 100 memory files, each with YAML frontmatter.
+Historical, measured with 100 memory files (`examples/benchmark/README.md`):
 
-| Operation | Speed | Target | Headroom |
+| Operation | Speed | Target **[unverified]** | Headroom (computed) |
 |-----------|-------|--------|----------|
 | **MEMORY.md load** | **12μs** | <1000μs | 83x |
 | **Session write** (per entry) | **51μs** | <500μs | 10x |
@@ -101,18 +115,18 @@ Measured with 100 memory files, each with YAML frontmatter.
 
 ### What This Means
 
-- **Session writes at 51μs/entry** = 20,000 writes/second. Zero overhead during agent execution.
-- **Memory scanning at 1.4ms** for 100 files = fast enough for agent startup (most projects have <20 memory files).
-- **MEMORY.md in 12μs** = instant system prompt injection.
-- **Full Claude Code compatibility** with `~/.claude/projects/` directory structure (tested against 42 real project directories and 171 session transcripts).
+- **Session writes at 51μs/entry** = about 20,000 writes per second (1 / 51 μs, computed).
+- **Scanning 100 memory files takes 1.4 ms.** The claim that most projects have fewer than 20 memory files is **[unverified]**.
+- **Loading MEMORY.md takes 12μs.**
+- **Compatibility with the `~/.claude/projects/` layout** (tested against 42 project directories and 171 transcripts) is **[unverified]**: no file in the repository records this test.
 
 ---
 
 ## Token Consumption Estimates
 
-Simulated with realistic Claude token counts (based on actual API response patterns):
+Historical, simulated 4-turn session with 11,901 input and 2,110 output tokens (`examples/benchmark/README.md`). The README gives only session totals, so the per-turn breakdown below is **[unverified]**.
 
-### Per-Session Breakdown
+### Per-Session Breakdown **[unverified]**
 
 | Turn | Input Tokens | Output Tokens | Cost (Sonnet) |
 |------|-------------|---------------|---------------|
@@ -124,17 +138,17 @@ Simulated with realistic Claude token counts (based on actual API response patte
 
 ### Model Cost Comparison
 
-Same session (11,901 in / 2,110 out) across models:
+Same session (11,901 in / 2,110 out). The totals are in `examples/benchmark/README.md`. The per-model input and output splits are **[unverified]**, and the per-model prices are not in the repository: `docs/providers.example.toml` says its prices are illustrative.
 
-| Model | Input Cost | Output Cost | Total |
-|-------|-----------|-------------|-------|
-| Claude Sonnet 4.6 | $0.036 | $0.032 | **$0.067** |
-| Claude Opus 4.6 | $0.179 | $0.158 | **$0.337** |
-| Claude Haiku 4.5 | $0.010 | $0.008 | **$0.018** |
+| Model | Total |
+|-------|-------|
+| Claude Sonnet 4.6 | **$0.067** |
+| Claude Opus 4.6 | **$0.337** |
+| Claude Haiku 4.5 | **$0.018** |
 
 ### Projected Monthly Costs
 
-At Sonnet rates:
+Computed from the Sonnet 4.6 total of $0.067 per session, 30 days a month:
 
 | Usage | Daily Cost | Monthly Cost |
 |-------|-----------|-------------|
@@ -146,26 +160,28 @@ At Sonnet rates:
 
 | Metric | Value |
 |--------|-------|
-| Input/output ratio | 5.6:1 (typical for tool-heavy agents) |
-| Cost per turn | $0.020 |
-| Cost per tool call | $0.027 |
-| Tokens/second (throughput) | ~25,000 |
+| Input/output ratio | 5.6:1 (computed: 11,901 / 2,110) |
+| Cost per turn | about $0.017 (computed: $0.067 / 4 turns) |
+| Cost per tool call | $0.027 **[unverified]** |
+| Tokens/second (throughput) | ~25,000 **[unverified]** |
 
 ---
 
 ## Context Management Performance
 
-### Auto-Compact
+### Auto-Compact Thresholds
 
-| Threshold | Action | Validated |
+The thresholds are constants in `crates/cersei-agent/src/compact.rs`. Their names are shown below. The "Validated" column of the historical page is **[unverified]**: no file records how each threshold was tested.
+
+| Context used | Action | Constant |
 |-----------|--------|-----------|
-| <80% | No action | Yes |
-| 80-90% | Warning emitted | Yes |
-| 90%+ | Auto-compact triggers | Yes |
-| 95%+ | Critical warning | Yes |
-| 98%+ | Context collapse (emergency) | Yes |
+| <80% | No action | `WARNING_PCT = 0.80` (warning threshold) |
+| 80-90% | Warning | `WARNING_PCT` |
+| 90%+ | Auto-compact triggers | `AUTOCOMPACT_TRIGGER_FRACTION = 0.90` |
+| 95%+ | Critical warning | `CRITICAL_PCT = 0.95` |
+| 98%+ | Context collapse (emergency) | `should_context_collapse` (`>= 0.98`) |
 
-### Tool Result Budget
+### Tool Result Budget **[unverified]**
 
 | Scenario | Before | After | Reduction |
 |----------|--------|-------|-----------|
@@ -173,15 +189,20 @@ At Sonnet rates:
 | Recent results | Preserved | Preserved | — |
 | Truncated entries | — | 15 entries | "[truncated]" notice |
 
+No file in the repository holds these figures.
+
 ### Compact Circuit Breaker
 
-- 3 consecutive failures → auto-compact disabled
-- Prevents infinite compact-fail loops
-- Success resets counter
+Verified in `crates/cersei-agent/src/compact.rs`:
+
+- 3 consecutive failures (`MAX_CONSECUTIVE_FAILURES = 3`) disable auto-compact (`AutoCompactState::on_failure`).
+- A successful compaction resets the counter (`AutoCompactState::on_success`).
 
 ---
 
 ## Stress Test Results
+
+The check counts in the 2026-10-08 report are the current ones: Infrastructure 46, Tools 47, Orchestration 33, Skills 47, Memory 83, total 256, with no failure. The Skills (51) and Memory (85) figures below predate that report and do not match it. The per-subsystem rows in this section are **[unverified]**: no file in the repository records them.
 
 ### Core Infrastructure (46 checks)
 
@@ -218,7 +239,7 @@ At Sonnet rates:
 | Message passing | 5 | All pass |
 | Full orchestration (3 workers) | 2 | All pass |
 
-### Skills (51 checks)
+### Skills (51 checks, superseded: 47 in the 2026-10-08 report)
 
 | Subsystem | Checks | Status |
 |-----------|--------|--------|
@@ -230,7 +251,7 @@ At Sonnet rates:
 | Real user skills | 3 | All pass |
 | Formatting | 3 | All pass |
 
-### Memory (85 checks)
+### Memory (85 checks, superseded: 83 in the 2026-10-08 report)
 
 | Subsystem | Checks | Status |
 |-----------|--------|--------|
@@ -248,12 +269,12 @@ At Sonnet rates:
 
 ## Cumulative Totals
 
-| Metric | Value |
-|--------|-------|
-| Unit tests | **160** |
-| Stress checks | **262** |
-| Tools | **30+** |
-| Source files | **35+** |
-| Crates | **9** |
-| I/O regressions | **0** |
-| Test failures | **0** |
+| Metric | Value | Status |
+|--------|-------|--------|
+| Unit tests | **160** | `CHANGELOG.md`, release 0.1.0 (2026-04-02) |
+| Stress checks | **262** | `CHANGELOG.md`, release 0.1.0; the 2026-10-08 report has 256 |
+| Tools | **30+** | **[unverified]** |
+| Source files | **35+** | **[unverified]** |
+| Crates | **9** | Historical: the workspace has 24 members (`Cargo.toml`) |
+| I/O regressions | **0** | **[unverified]** |
+| Test failures | **0** | **[unverified]**; the 2026-10-08 report shows 0 failures among its stress checks |

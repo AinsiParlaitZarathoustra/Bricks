@@ -1,22 +1,27 @@
 ---
 title: MCP (cersei-mcp)
-description: Model Context Protocol client — JSON-RPC 2.0 over stdio transport.
+description: Model Context Protocol client, built on the official rmcp SDK — stdio and Streamable HTTP transports.
 ---
 
 # cersei-mcp
 
-MCP (Model Context Protocol) client for connecting to external tool servers.
+MCP (Model Context Protocol) client for connecting to external tool servers. It is built on the official `rmcp` SDK and supports the stdio and Streamable HTTP transports.
 
 ## McpServerConfig
 
 ```rust
-// Stdio transport
+// Stdio transport (the default)
 let config = McpServerConfig::stdio("db", "npx", &["-y", "@my/db-mcp"]);
 
 // With environment variables
 let mut config = McpServerConfig::stdio("github", "npx", &["@modelcontextprotocol/server-github"]);
-config.env.insert("GITHUB_TOKEN".into(), "ghp_...".into());
+config.env.insert("GITHUB_TOKEN".into(), "${GITHUB_TOKEN}".into());
+
+// Streamable HTTP transport
+let remote = McpServerConfig::http("docs", "https://mcp.example.com/mcp");
 ```
+
+Other fields: `headers` (HTTP), `cwd` (working directory of a stdio server), `protocol` and `limits` (timeouts, message size, requests in flight). Values in the configuration can reference environment variables with `${NAME}`; they are expanded when the server starts, and a secret should be referenced this way rather than written in the file.
 
 ## McpManager
 
@@ -24,34 +29,41 @@ config.env.insert("GITHUB_TOKEN".into(), "ghp_...".into());
 let mcp = McpManager::connect(&[
     McpServerConfig::stdio("db", "npx", &["-y", "@my/db-mcp"]),
     McpServerConfig::stdio("docs", "npx", &["-y", "@my/docs-mcp"]),
-]).await?;
+]).await;   // never fails as a whole: each server is connected or reported
 
-// Get tool definitions for the agent
+// Status of every configured server, including the ones that failed
+for (name, status) in mcp.statuses().await {
+    println!("{name}: {status:?}");
+}
+
+// Tool definitions for the agent
 let tools = mcp.tool_definitions().await;
-
-// Use with agent
-Agent::builder()
-    .tools(tools)
-    .mcp_server(McpServerConfig::stdio("db", "npx", &["-y", "@my/db-mcp"]))
-    .build()?;
 ```
+
+`connect` connects to every server concurrently, each within its own connect timeout. A server that fails is reported by `statuses()`; the others remain usable.
+
+`call(server, tool, arguments, progress)` runs a tool and returns an `McpCallResult` (content blocks, structured content, and `is_error`). Errors are `McpError`.
 
 ## Protocol
 
-- JSON-RPC 2.0 over stdio (stdin/stdout)
-- Tool discovery via `tools/list`
-- Tool execution via `tools/call`
-- Resource enumeration via `resources/list`
-- Environment variable expansion in server configs
+- Protocol 2026-07-28, with an automatic fallback to the 2025-11-25 `initialize` handshake
+- stdio and Streamable HTTP transports; the older HTTP+SSE transport is refused
+- Tool discovery and execution (`tools/list`, `tools/call`)
+- Progress tied to its request, idle and total timeouts, cancellation, and a limit on requests in flight
+- Server stderr is kept as a log, not mixed into results
+- No client capability is declared (no `roots`)
+- A connection that is lost is not replayed: the call fails and the next one reconnects
 
 ## Integration with Agent
 
 ```rust
-Agent::builder()
-    .provider(Anthropic::from_env()?)
+let agent = Agent::builder()
+    .provider(cersei::provider_from_config(None, "my-provider/my-model")?)
     .tools(cersei::tools::coding())
     .mcp_server(McpServerConfig::stdio("db", "npx", &["-y", "@my/db-mcp"]))
     .build()?;
 ```
 
-MCP tools are merged with built-in tools. The agent can call both seamlessly.
+MCP servers given to `mcp_server` are connected at the first run. Their tools are offered to the model as `mcp__<server>__<tool>`, alongside the built-in tools (`crates/cersei-tools/src/mcp_tool.rs:61`).
+
+`agent.close().await` is async: it stops the agent's shells and closes its MCP connections, unless they were adopted. `agent.adopt_mcp(manager).await` is async and takes an `Arc<McpManager>`: it offers another agent's connections without closing them. It has no effect once this agent's connections exist (`crates/cersei-agent/src/lib.rs:518-545`).

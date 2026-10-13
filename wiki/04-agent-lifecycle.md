@@ -4,7 +4,7 @@
 
 ```rust
 let agent = Agent::builder()      // 1. Create builder
-    .provider(Anthropic::from_env()?)   // 2. Configure
+    .provider(cersei::provider_from_config(None, "my-provider/my-model")?)   // 2. Configure
     .tools(cersei::tools::coding())
     .build()?;                          // 3. Build (validates config)
 
@@ -29,7 +29,7 @@ When you call `agent.run("prompt")`, this happens:
       - Collect conversation messages
       - Attach system prompt
       - Attach tool definitions
-      - Set model, max_tokens, temperature, thinking_budget
+      - Set model, max_tokens, temperature, reasoning profile
 
    b. SEND TO PROVIDER (streaming)
       - Provider.complete(request) → CompletionStream
@@ -43,12 +43,12 @@ When you call `agent.run("prompt")`, this happens:
 
    d. POST-MODEL HOOKS
       - Fire PostModelTurn hooks
-      - If any hook returns Block → stop loop
+      - If any hook returns Block → the run returns an error (`Blocked by hook: ...`)
 
    e. HANDLE STOP REASON
       ┌─ EndTurn → break (model is done)
       ├─ ToolUse → dispatch tools (see below)
-      ├─ MaxTokens → inject "Continue" message, retry
+      ├─ MaxTokens → inject a continue message and retry (at most 3 times, then the run ends with `Termination::OutputTruncated`)
       └─ Other → break
 
    f. DISPATCH TOOLS (if ToolUse)
@@ -83,11 +83,12 @@ When you call `agent.run("prompt")`, this happens:
 
 ```rust
 pub struct AgentOutput {
-    pub message: Message,              // final assistant message
-    pub usage: Usage,                  // cumulative token usage
-    pub stop_reason: StopReason,       // why the agent stopped
-    pub turns: u32,                    // number of model turns
+    pub message: Message,                // final assistant message
+    pub usage: Usage,                    // cumulative token usage
+    pub stop_reason: StopReason,         // provider's reason for its last response
+    pub turns: u32,                      // generation turns actually run
     pub tool_calls: Vec<ToolCallRecord>, // all tool calls made
+    pub termination: Termination,        // how the run ended (Completed, OutputTruncated, NoProgress, ...)
 }
 
 impl AgentOutput {
@@ -114,7 +115,7 @@ Use `agent.reply()` to continue a conversation:
 
 ```rust
 let agent = Agent::builder()
-    .provider(Anthropic::from_env()?)
+    .provider(cersei::provider_from_config(None, "my-provider/my-model")?)
     .build()?;
 
 // First turn
@@ -136,7 +137,7 @@ use tokio_util::sync::CancellationToken;
 
 let token = CancellationToken::new();
 let agent = Agent::builder()
-    .provider(Anthropic::from_env()?)
+    .provider(cersei::provider_from_config(None, "my-provider/my-model")?)
     .cancel_token(token.clone())
     .build()?;
 
@@ -165,7 +166,7 @@ Agent::builder()
 
 ### Tool Result Budget
 
-Large tool outputs (e.g., reading a 10K line file) are tracked against a character budget. When the budget is exceeded, older tool results are truncated with a notice.
+Large tool outputs (e.g., reading a 10K line file) are tracked against a character budget (default 50,000). When the budget is exceeded, older tool results are removed from the active context and replaced by a placeholder that states their size.
 
 ## Shorthand: run_with
 
@@ -173,7 +174,7 @@ For one-shot agents, skip the `build()` step:
 
 ```rust
 let output = Agent::builder()
-    .provider(Anthropic::from_env()?)
+    .provider(cersei::provider_from_config(None, "my-provider/my-model")?)
     .tools(cersei::tools::coding())
     .run_with("Fix the tests")  // build + run in one call
     .await?;

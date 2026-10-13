@@ -49,9 +49,8 @@ Text-matching recall scales linearly with file count. Graph recall is constant â
 
 ## Run
 
-Historical: this example lived in `abstract-cli`, which no longer exists in
-the Bricks workspace; the command below no longer runs.
+The example is in the `cersei-memory` crate (`crates/cersei-memory/examples/memory_bench.rs`) and needs the `graph` feature. It was previously part of the `abstract-cli` package, which no longer exists in the Bricks workspace.
 
 ```bash
-cargo run --release -p abstract-cli --example memory_bench
+cargo run --release -p cersei-memory --features graph --example memory_bench
 ```

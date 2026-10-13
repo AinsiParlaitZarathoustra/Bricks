@@ -1,11 +1,11 @@
 ---
 title: Provider (cersei-provider)
-description: Provider trait and built-in LLM clients — Anthropic, OpenAI, custom.
+description: Provider trait, providers configured in providers.toml, and the request and response types.
 ---
 
 # cersei-provider
 
-Abstraction over LLM backends. Every provider implements streaming completion, token counting, and capability discovery.
+Abstraction over LLM backends. A provider is one model declared in `~/.bricks/providers.toml` and driven by one of three wire protocols (`chat_completions`, `responses`, `anthropic_messages`). Every provider implements streaming completion and reports the context window of its model (`context_window`). A provider built from configuration also exposes the model's declared limits through `model_info()` (`crates/cersei-provider/src/lib.rs:204-235`).
 
 ## Provider Trait
 
@@ -14,58 +14,73 @@ Abstraction over LLM backends. Every provider implements streaming completion, t
 pub trait Provider: Send + Sync {
     fn name(&self) -> &str;
     fn context_window(&self, model: &str) -> u64;
-    fn capabilities(&self, model: &str) -> ProviderCapabilities;
+    fn model_info(&self) -> Option<ModelInfo> { None }
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionStream>;
-    async fn complete_blocking(&self, request: CompletionRequest) -> Result<CompletionResponse>;
-    async fn count_tokens(&self, messages: &[Message], model: &str) -> Result<u64>;
+    async fn complete_blocking(&self, request: CompletionRequest) -> Result<CompletionResponse>; // default: complete + collect
+    async fn count_request_tokens(&self, request: &CompletionRequest) -> Result<Option<u64>>;   // default: Ok(None)
 }
 ```
 
-## Anthropic
+`count_request_tokens` returns `Ok(None)` when no token-counting endpoint is configured for the model; callers then fall back to a local estimate.
+
+## Configured Providers
+
+Nothing is built in. Models are selected explicitly as `provider_id/model_id`, and the provider is never inferred from the model name.
 
 ```rust
-// From environment variable
-let provider = Anthropic::from_env()?;
+use cersei::provider::{provider_from_config, ProviderRegistry};
 
-// With explicit key
-let provider = Anthropic::new(Auth::ApiKey("sk-ant-...".into()));
+// Read ~/.bricks/providers.toml and build the provider for one model
+let provider = provider_from_config(None, "custom/flash")?;
 
-// Builder
-let provider = Anthropic::builder()
-    .api_key("sk-ant-...")
-    .model("claude-sonnet-4-6")
-    .thinking(8192)
-    .build()?;
+// Or resolve first, then choose a reasoning profile and a price tariff
+let registry = ProviderRegistry::load(Some("./providers.json".as_ref()))?;
+let model = registry.resolve("custom/flash")?;
+let provider = model
+    .provider()
+    .reasoning_profile("approfondi")   // a profile defined for this model in the file
+    .tariff("offpeak")                 // optional: a named price variant
+    .build()?;                         // reads api_key_env now
 ```
 
-Default model: `claude-sonnet-4-6`. Context window: 200,000 tokens. Supports streaming, tool use, vision, extended thinking, prompt caching.
+`ProviderRegistry::load(None)` reads `~/.bricks/providers.toml`; an explicit path replaces it. A missing or invalid file is an error, and there is no fallback.
 
-## OpenAI
+| Type | Role |
+|---|---|
+| `ProviderRegistry` | The loaded configuration. `models()` lists every model in file order; `resolve(selection)` returns a `ResolvedModel`. |
+| `ResolvedModel` | One configured model. `provider()` returns a `ProviderBuilder`; `build_provider()` builds with the defaults; `selection()` gives `provider_id/model_id`. |
+| `ProviderBuilder` | `reasoning_profile(id)`, `tariff(name)`, `env(lookup)`, `http_client(client)`, `build()`. |
+| `ConfiguredProvider` | The `Provider` implementation for one model. `model()` returns its `ResolvedModel`; `estimate_cost(&Usage)` returns `Option<CostEstimate>`, `None` when no price is known (`crates/cersei-provider/src/provider.rs:269`). |
+
+## Protocols
+
+| Protocol | Relative path | Conventional auth |
+|---|---|---|
+| `chat_completions` | `chat/completions` | `bearer` |
+| `responses` | `responses` | `bearer` |
+| `anthropic_messages` | `messages` | `api_key_header` (`x-api-key`) |
+
+The protocol is set per provider and can be overridden per model. The key is read from the environment variable named by `api_key_env`, or taken from an inline `api_key` for a local setup.
+
+## ModelInfo and Limits
 
 ```rust
-// From environment variable
-let provider = OpenAi::from_env()?;
+pub struct ModelInfo {
+    pub selection: String,           // provider_id/model_id
+    pub protocol: &'static str,
+    pub limits: ModelLimits,
+    pub reasoning_resent: bool,      // reasoning in the history is sent back, so it occupies the context
+    pub token_counting: bool,        // a counting endpoint is configured
+}
 
-// Builder (Ollama, Azure, vLLM, etc.)
-let provider = OpenAi::builder()
-    .base_url("http://localhost:11434/v1")
-    .model("llama3.1:70b")
-    .api_key("ollama")
-    .build()?;
-```
-
-Compatible with any OpenAI-format API. Default model: `gpt-4o`.
-
-## Auth
-
-```rust
-pub enum Auth {
-    ApiKey(String),
-    Bearer(String),
-    OAuth { client_id: String, token: OAuthToken },
-    Custom(Arc<dyn AuthProvider>),
+pub struct ModelLimits {
+    pub max_input_tokens: u64,
+    pub max_output_tokens: u64,
+    pub context_window_tokens: Option<u64>, // a window shared by input and output, when configured
 }
 ```
+
+The limits are declared in the configuration. They never change what the server enforces; Bricks uses them to cap `max_tokens` and to budget the prompt.
 
 ## CompletionRequest
 
@@ -79,12 +94,23 @@ pub struct CompletionRequest {
     pub temperature: Option<f32>,
     pub stop_sequences: Vec<String>,
     pub options: ProviderOptions,
+    pub output_modalities: Vec<Modality>,
 }
+
+let request = CompletionRequest::new("vendor-flash"); // max_tokens defaults to 16384
+```
+
+`ProviderOptions` carries the engine-level options an adapter understands: `tool_choice = "required"` (a forced tool call) and `reasoning_profile` (the profile id for this call). Everything else a model needs is configuration, not a request option.
+
+```rust
+let mut options = ProviderOptions::default();
+options.set("tool_choice", "required");
+options.set("reasoning_profile", "approfondi");
 ```
 
 ## Custom Provider
 
-Implement `Provider` for any LLM backend:
+Implement `Provider` for a backend that is not covered by the three protocols:
 
 ```rust
 struct MyProvider;
@@ -93,15 +119,14 @@ struct MyProvider;
 impl Provider for MyProvider {
     fn name(&self) -> &str { "my-llm" }
     fn context_window(&self, _model: &str) -> u64 { 128_000 }
-    fn capabilities(&self, _model: &str) -> ProviderCapabilities {
-        ProviderCapabilities {
-            streaming: true,
-            tool_use: true,
-            ..Default::default()
-        }
-    }
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionStream> {
         // Your implementation here
     }
 }
 ```
+
+`complete_blocking`, `count_request_tokens` and `model_info` have default implementations. For a service that speaks one of the three protocols, a `providers.toml` entry is enough and no code is needed.
+
+## Removed API
+
+The `Anthropic`, `OpenAi` and `Gemini` clients, `Auth`, `AuthProvider`, `OAuthToken`, `from_model_string` and the built-in model registry were removed in 0.3.6. There is no `from_env()` constructor and no environment-variable fallback. See [Providers](/docs/providers) and the migration table in `docs/providers.md` in the repository.

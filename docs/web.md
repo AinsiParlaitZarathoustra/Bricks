@@ -249,7 +249,7 @@ provenance in its README).
 | `dom_query` | 0.28 | DOM, selectors, Markdown writer (no second converter needed) | MIT |
 | `bm25` | 2.3.2, no default features | BM25 scoring (own tokenizer) | MIT |
 | `encoding_rs` | 0.8.42 | charsets | Apache-2.0/MIT + BSD-3 |
-| `hickory-resolver` | 0.25 | DNS with policy filtering (same resolver as reqwest here) | MIT/Apache-2.0 |
+| `hickory-resolver` | 0.26.3 | DNS of every HTTP client (`cersei_types::http`), so policy checks see the answers the client uses | MIT/Apache-2.0 |
 
 * **Evaluated, not added.** `htmd` (dom_query's writer was enough on the
   fixtures) and `text-splitter` (its Markdown feature brings a large

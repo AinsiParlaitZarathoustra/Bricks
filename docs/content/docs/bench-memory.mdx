@@ -93,7 +93,7 @@ The per-question wall time difference between embed (39.1 s) and hybrid (183.7 s
 ## Methodology (non-negotiable)
 
 - **Dataset:** [`xiaowu0162/longmemeval`](https://huggingface.co/datasets/xiaowu0162/longmemeval) — 500 questions, 6 question types (`single-session-user`, `single-session-assistant`, `single-session-preference`, `multi-session`, `temporal-reasoning`, `knowledge-update`) plus abstention cases (detected via `question_id.ends_with("_abs")`). Variants: `longmemeval_s` (~115k tokens/Q, headline), `longmemeval_m` (~1.5M tokens/Q), `longmemeval_oracle` (evidence-only control).
-- **Judge rubric:** **verbatim port** of Mastra's six question-type prompts (`_inspirations/mastra/explorations/longmemeval/src/evaluation/longmemeval-metric.ts`), which in turn copies from the official Python evaluator.
+- **Judge rubric:** **verbatim port** of Mastra's six question-type prompts (`explorations/longmemeval/src/evaluation/longmemeval-metric.ts` in Mastra's repository), which in turn copies from the official Python evaluator.
 - **Observer rubric:** **verbatim port** of [`OBSERVER_EXTRACTION_INSTRUCTIONS`](https://github.com/pacifio/cersei/blob/main/bench/long-mem/src/mastra_prompts.rs) from Mastra's `@mastra/memory` — temporal anchoring, user-assertions-beat-questions, state-change rules, preservation of specifics.
 - **Context-injection rubric:** **verbatim port** of [`OBSERVATION_CONTEXT_PROMPT` + `OBSERVATION_CONTEXT_INSTRUCTIONS`](https://github.com/pacifio/cersei/blob/main/bench/long-mem/src/mastra_prompts.rs) wrapped around retrieved context before it hits the answerer. Contains Mastra's `KNOWLEDGE UPDATES` / `PLANNED ACTIONS` / `MOST RECENT USER INPUT` guidance.
 - **Models:** answerer, judge, and observer all on `gemini-2.5-flash`, temperature 0 (0.3 for observer, matches Mastra's `observation.modelSettings.temperature`). Embeddings: `gemini-embedding-001`, 3072-dim, with Matryoshka truncation if requested.
@@ -145,9 +145,9 @@ cargo run --release -p longmem-bench -- \
 
 API keys have leaked from this repo **twice** before we tightened things up — a hardcoded one in `bench/term-bench/runner-google.sh` and, later, keys embedded in reqwest error messages (`?key=…` in the URL) that ended up in tracked `.log` and `rows-*.json` files. Permanent fixes applied:
 
-1. **Gemini calls now use `x-goog-api-key` header**, never query string — `crates/cersei-embeddings/src/gemini.rs` and `crates/cersei-provider/src/gemini.rs`.
+1. **Gemini calls now use `x-goog-api-key` header**, never query string — `crates/cersei-embeddings/src/gemini.rs`.
 2. **Error messages are scrubbed**: any string that could carry `key=<…>` runs through `redact_url_key` before it hits logs or result files.
-3. **`.gitignore`** blocks `bench/**/*.log`, `bench/**/results*/`, `bench/**/runner-*.sh`, `bench/**/abstract-output.jsonl`, and `.env*`.
+3. **`.gitignore`** blocks `bench/**/*.log`, `bench/long-mem/results/`, `bench/long-mem/results-*/`, `bench/term-bench/tb-results/`, `bench/**/runner-*.sh`, `bench/**/abstract-output.jsonl`, `.env`, and `.env.local`.
 4. **Runner scripts refuse to start without `GOOGLE_API_KEY`** in env — no more inline keys.
 5. **Pre-commit sanity check** (run manually): `git ls-files | xargs grep -l -E "AIza[A-Za-z0-9_-]{35}|sk-[A-Za-z0-9_-]{30,}"` must return zero files.
 
@@ -170,7 +170,7 @@ API keys have leaked from this repo **twice** before we tightened things up — 
 
 ## Raw results
 
-Full JSON (summary + per-question rows) in [`bench/long-mem/results/`](https://github.com/pacifio/cersei/tree/main/bench/long-mem/results):
+Full JSON (summary + per-question rows) is written by the runner to `./results/` (default `--results-dir`). It is git-ignored, so it is not in the repository:
 
 ```
 results/

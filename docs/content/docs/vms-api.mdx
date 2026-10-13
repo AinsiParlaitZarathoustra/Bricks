@@ -23,7 +23,7 @@ use cersei_vms::prelude::*;
 | `backend-docker` | ✅ | `DockerRuntime` and the per-container shell-out logic. |
 | `backend-firecracker` |   | Reserved — Phase 2 Linux microVM backend. |
 | `backend-e2b` |   | Reserved — Phase 2 remote E2B backend. |
-| `envd` | ✅ | Builds the `cersei-envd` binary target. |
+| `envd` | ✅ | Builds the `cersei-envd` binary of this crate (`src/bin/cersei_envd.rs`). |
 
 The corresponding `cersei` facade flag is `vms` (default-on), which in turn enables the `vms` feature on `cersei-tools` and re-exports the crate as `cersei::vms`.
 
@@ -69,7 +69,7 @@ pub struct RuntimeCaps {
 | `LocalProcessRuntime` | ✅ | ❌ | ❌ | ✅ | ❌ |
 | `DockerRuntime` | ✅ | ❌¹ | ✅ | ✅ | ❌ |
 
-¹ Phase 1 leaves `pause_resume` off on Docker. It's a one-line wrap of `docker pause` / `unpause`, lands in 0.1.10.
+`gpu` is `false` on both backends. ¹ The Docker backend implements `pause()` and `resume()` with `docker pause` / `docker unpause` (`crates/cersei-vms/src/backends/docker.rs`), but its `capabilities()` report `pause_resume: false`, so the table shows ❌.
 
 ### Backends
 
@@ -83,7 +83,7 @@ let rt = LocalProcessRuntime::new()?;          // ~/.cersei/vms/local
 let rt = LocalProcessRuntime::with_root(tmp)?; // arbitrary root, used in tests
 ```
 
-Use it for unit tests, dev mode (`--sandbox local`), and as the no-op fallback that keeps existing code paths working.
+Use it for unit tests and development. It is not wired to any `bricks` command-line flag.
 
 </Tab>
 <Tab value="DockerRuntime">
@@ -106,7 +106,7 @@ Lifecycle mapping:
 | `Filesystem::list/stat/mkdir/remove` | `docker exec /bin/sh -c '…'` |
 | `snapshot()` | `docker commit <name> cersei-snapshot:<snap_id>` + JSON manifest |
 | `restore(&snap)` | `create()` with the snapshot image tag |
-| `pause()` / `resume()` | **Phase 2** (`docker pause`/`unpause`) |
+| `pause()` / `resume()` | `docker pause` / `docker unpause` (capability `pause_resume` stays `false`) |
 | `kill()` | `docker rm -f <name>` |
 
 </Tab>
@@ -241,7 +241,7 @@ pub enum StreamChunk {
 ```
 
 <Callout type="info">
-Phase 1 streaming is host → sandbox **output-only**. Bi-directional stdin pumping (`Commands::stream_with_stdin(...)`) lands in 0.1.10.
+Phase 1 streaming is host → sandbox **output-only**. Bi-directional stdin pumping is not implemented yet: streams only carry output from the sandbox.
 </Callout>
 
 ### `Signal`
@@ -284,7 +284,7 @@ pub struct FileEntry {
 }
 ```
 
-`watch()` returns a `Pin<Box<dyn Stream<Item = FileEvent> + Send>>`. **Not implemented in Phase 1** — both backends return `VmError::Lifecycle("watch not implemented for ... (Phase 1)")`. It's wired up in 0.1.10.
+`watch()` returns a `Pin<Box<dyn Stream<Item = FileEvent> + Send>>`. **Not implemented yet** — both backends return `VmError::Lifecycle("watch not implemented for ... (Phase 1)")`.
 
 ---
 
@@ -360,7 +360,7 @@ pub struct SnapshotManifest {
 | Backend | `fs_pointer` |
 |---|---|
 | `local` | Relative path under `<root>/_snapshots/` containing a tree copy. |
-| `docker` | An image tag — `cersei-snapshot:<snap_id>` produced by `docker commit`. |
+| `docker` | A Docker image tag `cersei-snapshot:<snap_id>` produced by `docker commit`. `cersei-snapshot` is the repository name of these images: it is neither a crate nor a binary. |
 
 `SnapshotRegistry::open(path)` / `SnapshotRegistry::default_user()` opens (or creates) the host-side store. `SnapshotRegistry::list()` enumerates known manifests.
 
@@ -368,7 +368,7 @@ pub struct SnapshotManifest {
 
 ## envd protocol
 
-`cersei-envd` is a tiny Rust JSON-RPC 2.0 daemon designed to live **inside** sandbox container images. It listens on a Unix socket whose path is given by `$CERSEI_ENVD_SOCKET` (default `/run/cersei-envd.sock`). The wire format is **line-delimited JSON** — one request per line, one response per line. Multiple concurrent connections are supported.
+The `cersei-envd` binary (built from the `cersei-vms` crate, feature `envd`) is a tiny Rust JSON-RPC 2.0 daemon designed to live **inside** sandbox container images. It listens on a Unix socket whose path is given by `$CERSEI_ENVD_SOCKET` (default `/run/cersei-envd.sock`). The wire format is **line-delimited JSON** — one request per line, one response per line. Multiple concurrent connections are supported.
 
 Method names live in `cersei_vms::envd::protocol::methods`:
 
@@ -383,6 +383,8 @@ Method names live in `cersei_vms::envd::protocol::methods`:
 | `fs.stat` | `{ "path": "..." }` | `FileEntry` |
 | `fs.mkdir` | `{ "path": "...", "recursive": bool }` | `{ "ok": true }` |
 | `fs.remove` | `{ "path": "...", "recursive": bool }` | `{ "ok": true }` |
+
+`process.stream` and `process.signal` are declared in `methods`, but the daemon does not handle them yet: it answers `unknown method`.
 
 Build the daemon binary:
 

@@ -52,10 +52,10 @@ Per-turn overhead for memory gates: under 12 microseconds.
 
 ```bash
 # Tool I/O
-cargo run --example benchmark_io --release
+cargo run -p cersei --example benchmark_io --release
 
 # Memory + sessions
-cargo run --example stress_memory --release
+cargo run -p cersei --example stress_memory --release
 
 # Full standalone suite
 cd examples/benchmark && cargo run --release

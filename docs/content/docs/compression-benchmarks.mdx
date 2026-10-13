@@ -8,7 +8,7 @@ import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
 
 # Compression Benchmarks
 
-Two live-LLM integration tests ship with the SDK. They run the **same prompt, same tool, same fixture** twice — once with `CompressionLevel::Off`, once with `CompressionLevel::Aggressive` — and compare the provider-reported `input_tokens`. Off is a verified byte-for-byte passthrough, so the delta is the measured savings.
+A live-LLM integration test ships with the SDK (`crates/cersei-agent/tests/e2e_live_compression.rs`). It runs the **same prompt, same tool, same fixture** twice — once with `CompressionLevel::Off`, once with `CompressionLevel::Aggressive` — and compares the provider-reported `input_tokens`. Off is a verified byte-for-byte passthrough, so the delta is the measured savings.
 
 ## TL;DR
 
@@ -17,7 +17,7 @@ Two live-LLM integration tests ship with the SDK. They run the **same prompt, sa
 | **OpenAI** | `gpt-4o-mini` | **11,576 → 8,202** | **29.1%** | 15 → 13 | 5 → 5 |
 | **Google Gemini** | `gemini-2.5-flash` | **4,490 → 1,700** | **62.1%** | 1 → 1 | 5 → 3 |
 
-Both assertions pass: `aggressive < off` and `savings ≥ 10%` on real provider bills. Numbers above are from the runs captured on 2026-04-20.
+The test asserts `aggressive < off` and `savings ≥ 10%` on real provider bills. The numbers above were captured on 2026-04-20 with an earlier harness (`e2e_openai_compression`), which is no longer in the repository.
 
 <Callout type="info">
 Savings ratios are **not fixed** — they depend on how much of the turn's context is tool output versus system prompt + tool schemas + assistant turns. OpenAI's `gpt-4o-mini` happened to loop on 13–15 tool calls (each re-paying schema tax), Gemini's `gemini-2.5-flash` made a single clean tool call, so Gemini's ratio is closer to the raw byte-level win.
@@ -31,31 +31,30 @@ Fast, deterministic, no API key needed. Run:
 cargo test -p cersei-compression
 ```
 
-Enforced floors:
+The corpus tests check these properties:
 
-| Fixture | Level | Savings floor | Source |
-|---|---|---|---|
-| `git log` output | `Minimal` | ≥ 30% | `tests/savings.rs::git_log_saves_at_least_30pct_minimal` |
-| `cargo test` output | `Minimal` | ≥ 25% | `tests/savings.rs::cargo_test_saves_at_least_25pct_minimal` |
-| Rust source file | `Aggressive` | bodies dropped, signatures kept | `tests/savings.rs::rust_source_aggressive_drops_bodies` |
-| Any | `Off` | exact byte-for-byte identity | `tests/savings.rs::off_level_is_exact_passthrough` |
+| Check | Test (`crates/cersei-compression/tests/corpus.rs`) |
+|---|---|
+| Every captured and reconstructed fixture keeps the lines a reader needs, names its saved original, and does not grow | `every_fixture_keeps_what_matters_and_names_its_original` |
+| `Off` returns ordinary outputs byte for byte | `off_level_is_exact_passthrough_for_ordinary_outputs` |
+| Small outputs that barely shrink are returned unchanged | `small_outputs_that_barely_shrink_are_left_alone` |
 
-These protect against regressions in the rule files and in the code filter — if a PR drops below the floor, CI fails.
+No test asserts a minimum savings percentage on these fixtures; the savings figures on this page come from the live runs below.
 
 ## Live provider benchmarks
 
-Both tests are `#[ignore]` by default, so a `cargo test --workspace` with no keys is a no-op. They only run when you pass `-- --ignored` and the relevant API key is set.
+The live test is `#[ignore]` by default, so `cargo test --workspace` makes no paid calls. Without `BRICKS_LIVE_MODEL` it prints a notice and passes. With it, the test calls the model you name, as `provider_id/model_id` from your `providers.toml` (`BRICKS_LIVE_CONFIG` selects another file). The API key is read from the environment variable named by that provider's `api_key_env`.
 
-<Tabs items={['OpenAI', 'Gemini', 'Both']}>
+<Tabs items={['OpenAI', 'Gemini']}>
 <Tab value="OpenAI">
 ```bash
-OPENAI_API_KEY=sk-... \
-  cargo test -p cersei-agent --test e2e_openai_compression \
-    compression_reduces_real_openai_token_bill \
+BRICKS_LIVE_MODEL=<provider_id>/gpt-4o-mini \
+  cargo test -p cersei-agent --test e2e_live_compression \
+    compression_reduces_the_real_token_bill \
     -- --ignored --nocapture
 ```
 
-**What we got (2026-04-20, `gpt-4o-mini`):**
+**What we got (2026-04-20, `gpt-4o-mini`, earlier harness):**
 
 ```
 ── openai run 1: CompressionLevel::Off ──
@@ -69,13 +68,13 @@ OPENAI_API_KEY=sk-... \
 </Tab>
 <Tab value="Gemini">
 ```bash
-GOOGLE_API_KEY=... \
-  cargo test -p cersei-agent --test e2e_openai_compression \
-    compression_reduces_real_gemini_token_bill \
+BRICKS_LIVE_MODEL=<provider_id>/gemini-2.5-flash \
+  cargo test -p cersei-agent --test e2e_live_compression \
+    compression_reduces_the_real_token_bill \
     -- --ignored --nocapture
 ```
 
-**What we got (2026-04-20, `gemini-2.5-flash`):**
+**What we got (2026-04-20, `gemini-2.5-flash`, earlier harness):**
 
 ```
 ── gemini run 1: CompressionLevel::Off ──
@@ -88,24 +87,16 @@ GOOGLE_API_KEY=... \
 ```
 
 <Callout type="warn">
-`gemini-1.5-flash` has been removed from the `generateContent` v1beta endpoint. The test pins `gemini-2.5-flash` — if you reuse the harness, make sure your key has access to a current Gemini flash model.
+`gemini-1.5-flash` has been removed from the `generateContent` v1beta endpoint. The recorded run used `gemini-2.5-flash`; if you reuse the harness, make sure the model in your `providers.toml` is a current Gemini flash model.
 </Callout>
-</Tab>
-<Tab value="Both">
-Run both tests in one invocation:
-
-```bash
-OPENAI_API_KEY=sk-... \
-GOOGLE_API_KEY=... \
-  cargo test -p cersei-agent --test e2e_openai_compression \
-    -- --ignored --nocapture
-```
 </Tab>
 </Tabs>
 
+The test runs one configured model per invocation, so run it once per provider.
+
 ## Intercept per-call compression logs
 
-Every call into `compress_tool_output` emits a `tracing::info!` event on the `cersei_compression` target. The integration tests install a subscriber automatically, so `--nocapture` surfaces them. In your own binary:
+Every compression call emits a `tracing::info!` event on the `cersei_compression` target. The live test installs a subscriber itself, so `--nocapture` surfaces the events. In your own binary:
 
 install a `tracing` subscriber filtered on `cersei_compression=info` (see
 the [overview](/docs/compression-overview)). The `bricks` binary installs no
@@ -123,7 +114,7 @@ INFO cersei_compression: tool-output compressed
   savings_pct="45.9"
 ```
 
-Each call exposes: `tool`, `level`, `strategy` (`shell` / `code` / `passthrough` / `web` / `unknown` / `unknown-capped`), `detail` (rule name or detected `Language`), byte counts, line counts, and `savings_pct`. Full field reference on the [Compression Overview](/docs/compression-overview#observability).
+Each call exposes: `tool`, `level`, `strategy` (the route taken, such as `shell`, `web` or `passthrough`), `detail` (rule name or detected `Language`), byte counts, line counts, and `savings_pct`. Full field reference on the [Compression Overview](/docs/compression-overview#observability).
 
 ## Synthetic vs live — why they differ
 
@@ -141,7 +132,7 @@ For the OpenAI run:
 
 ## Regression guard
 
-`cersei-compression/tests/savings.rs::off_level_is_exact_passthrough` asserts **byte-for-byte identity** when the level is `Off`. This makes the feature opt-in — zero risk for users on 0.1.7 who don't change their builder chain, their CLI flags, or their config file.
+`cersei-compression/tests/corpus.rs::off_level_is_exact_passthrough_for_ordinary_outputs` checks **byte-for-byte identity** when the level is `Off`. This makes the feature opt-in: users who don't change their builder chain, their CLI flags, or their config file see no difference.
 
 ## Hardware + reproducibility caveats
 
@@ -152,6 +143,6 @@ For the OpenAI run:
 ## Reference
 
 - Source: `crates/cersei-compression/`
-- Live test: `crates/cersei-agent/tests/e2e_openai_compression.rs`
+- Live test: `crates/cersei-agent/tests/e2e_live_compression.rs`
 - Rule files: `crates/cersei-compression/src/rules/*.toml`
-- Integration point: `crates/cersei-agent/src/runner.rs` (line 708 — `compress_tool_output` runs before `cap_tool_result`).
+- Integration point: `crates/cersei-agent/src/runner.rs`, where each tool result goes through `agent.compressor.process` before the tool-result budget (`apply_tool_result_budget`) is applied.

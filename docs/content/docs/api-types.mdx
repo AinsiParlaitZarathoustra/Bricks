@@ -1,6 +1,6 @@
 ---
 title: Types (cersei-types)
-description: Provider-agnostic core types — messages, content blocks, errors, stream events.
+description: Provider-agnostic core types — messages, content blocks, usage, errors, stream events.
 ---
 
 # cersei-types
@@ -13,6 +13,7 @@ Provider-agnostic types shared across all Cersei crates.
 pub struct Message {
     pub role: Role,
     pub content: MessageContent,
+    pub id: Option<String>,
     pub metadata: Option<MessageMetadata>,
 }
 
@@ -20,6 +21,11 @@ pub enum Role {
     User,
     Assistant,
     System,
+}
+
+pub enum MessageContent {
+    Text(String),
+    Blocks(Vec<ContentBlock>),
 }
 ```
 
@@ -49,37 +55,48 @@ pub enum ContentBlock {
     Thinking { thinking: String, signature: String },
     RedactedThinking { data: String },
     Document { source: DocumentSource, title: Option<String>, context: Option<String>, citations: Option<CitationsConfig> },
+    Audio { source: MediaSource },
+    Video { source: MediaSource },
+    ProtocolItem { protocol: String, item: Value },  // an opaque item a protocol needs echoed back verbatim
     Opaque,
 }
 
-// Image / document payloads carry inline base64 *or* a URL.
+// Image, document, audio and video payloads carry inline base64, a URL, or a
+// file id from the provider's file store.
 pub struct ImageSource {
-    pub source_type: String,        // "base64" | "url"
-    pub media_type: Option<String>, // e.g. "image/png", "video/mp4"
+    pub source_type: String,        // "base64" | "url" | "file"
+    pub media_type: Option<String>, // e.g. "image/png"
     pub data: Option<String>,       // base64 (when source_type = "base64")
     pub url: Option<String>,        // remote URL (when source_type = "url")
+    pub file_id: Option<String>,    // provider file id
 }
-// DocumentSource has the same shape, for PDFs/text.
+// DocumentSource and MediaSource have the same shape.
 ```
 
 Build them with the high-level constructors instead of by hand:
 
 ```rust
-ContentBlock::from_path("photo.jpg")?;           // read file, sniff MIME, base64
+ContentBlock::from_path("photo.jpg")?;           // read file, sniff MIME, base64; audio and video get their own blocks
 ContentBlock::image_bytes("image/png", &bytes);  // from raw bytes you hold
 ContentBlock::image_url("https://x/y.png");      // remote image
 ContentBlock::document_bytes("application/pdf", &pdf);
 ```
 
+A block a provider cannot carry is refused before the request is sent, with `CerseiError::Unsupported`; it is never dropped silently.
+
 ## Usage
 
 ```rust
 pub struct Usage {
-    pub input_tokens: u64,
-    pub output_tokens: u64,
+    pub input_tokens: u64,                      // uncached prompt tokens
+    pub output_tokens: u64,                     // includes reasoning tokens
+    pub total_tokens: u64,
     pub cache_creation_input_tokens: u64,
     pub cache_read_input_tokens: u64,
-    pub cost_usd: Option<f64>,
+    pub reasoning_tokens: u64,                  // informational subset of output_tokens
+    pub cost_usd: Option<f64>,                  // None when no price is known: unknown, never free
+    pub cost_estimate: Option<CostEstimate>,    // how the estimate was made (tariff, partial)
+    pub provider_usage: Value,                  // the provider's own usage object, as received
 }
 ```
 
@@ -91,14 +108,19 @@ usage.merge(&other_usage);
 
 ## StopReason
 
+The provider's reason for its last response:
+
 ```rust
 pub enum StopReason {
     EndTurn,
     MaxTokens,
     ToolUse,
     StopSequence,
+    ContentFilter,
 }
 ```
+
+The result of a whole run is `Termination` in `cersei-agent` (`Completed`, `OutputTruncated`, `NoProgress`, `ContentFiltered`, `EmptyResponse`; `MaxTurns` exists only to read results stored before 0.4.8, `crates/cersei-agent/src/lib.rs:78-96`).
 
 ## StreamEvent
 
@@ -106,11 +128,13 @@ Events emitted during streaming completion:
 
 ```rust
 pub enum StreamEvent {
-    MessageStart { id: String, model: String },
+    MessageStart { id: String, model: String, usage: Option<Usage> },
     ContentBlockStart { index: usize, block_type: String, id: Option<String>, name: Option<String> },
     TextDelta { index: usize, text: String },
     InputJsonDelta { index: usize, partial_json: String },
     ThinkingDelta { index: usize, thinking: String },
+    SignatureDelta { index: usize, signature: String },  // must be echoed back verbatim
+    ProtocolItem { index: usize, protocol: String, item: Value },
     ContentBlockStop { index: usize },
     MessageDelta { stop_reason: Option<StopReason>, usage: Option<Usage> },
     MessageStop,
@@ -123,16 +147,25 @@ pub enum StreamEvent {
 
 ```rust
 pub enum CerseiError {
-    Auth(String),
     Provider(String),
+    ProviderStatus { status: u16, message: String, retry_after: Option<Duration> },
+    Auth(String),
     Tool(String),
-    Memory(String),
-    Http(reqwest::Error),
-    Json(serde_json::Error),
-    Io(std::io::Error),
+    Permission(String),
+    RateLimit { message: String, retry_after: Option<Duration> },
+    ContextOverflow { used: u64, limit: u64 },
     Cancelled,
+    Config(String),
+    Unsupported(String),     // a block or modality the model or its adapter cannot carry
+    InvalidInput(String),    // e.g. a blank prompt with no attachment
+    Mcp(String),
+    Io(std::io::Error),
+    Json(serde_json::Error),
+    Http(reqwest::Error),
     Other(anyhow::Error),
 }
 ```
+
+`CerseiError::retry_after()` and `http_status()` expose the server's answer for a failed request. A `ProviderStatus` error keeps the `Retry-After` value; whether a request is retried is decided by the error's kind, not by the header.
 
 All errors implement `std::error::Error`. Use `Result<T>` which is `std::result::Result<T, CerseiError>`.

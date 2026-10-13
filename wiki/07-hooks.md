@@ -1,8 +1,8 @@
 # Hooks
 
-Hooks intercept events in the agent lifecycle. They can log, block, modify inputs, or inject messages. Multiple hooks stack — the first non-`Continue` action wins.
+Hooks intercept events in the agent lifecycle. They can log, block or modify tool inputs. Several hooks can be registered; for a given event they run in registration order, and the first action other than `Continue` is the one returned.
 
-## The Hook Trait
+## The Hook trait
 
 ```rust
 #[async_trait]
@@ -13,25 +13,30 @@ pub trait Hook: Send + Sync {
 }
 ```
 
-## Hook Events
+## Hook events
 
-| Event | When | Can Block? |
-|-------|------|-----------|
-| `PreToolUse` | Before a tool executes | Yes |
-| `PostToolUse` | After a tool returns | No (informational) |
-| `PreModelTurn` | Before sending to the LLM | Yes |
-| `PostModelTurn` | After the LLM responds | Yes |
-| `Stop` | Agent run finishing | No |
-| `Error` | Error occurred | No |
+Only some events are fired by the engine in 0.6.0. The table says which.
 
-## Hook Actions
+| Event | Fired by the engine | What a non-`Continue` action does |
+|-------|---------------------|-----------------------------------|
+| `PreToolUse` | Yes: before each tool call the permission policy allowed, before execution | `Block`: the tool is not run; the model gets `Blocked by hook: <reason>` as a tool error. `ModifyInput`: the tool runs with the new input |
+| `PostModelTurn` | Yes: after each model response | `Block`: the run fails with an error, `Blocked by hook: <reason>` |
+| `TurnsElapsed` | Yes: every `turns_elapsed_cadence` turns (default 10) | Best effort; the action is ignored |
+| `PostToolUse` | No: declared, never fired | — |
+| `PreModelTurn` | No: declared, never fired | — |
+| `Stop` | No: declared, never fired | — |
+| `Error` | No: declared, never fired | — |
+
+Tool-call hooks run after the permission check, so a call the policy denies never reaches `PreToolUse`.
+
+## Hook actions
 
 | Action | Effect |
 |--------|--------|
 | `Continue` | Proceed normally |
-| `Block(reason)` | Stop the operation (`PreToolUse`: skip tool; `PostModelTurn`: stop loop) |
-| `ModifyInput(Value)` | Replace the tool's input JSON (`PreToolUse` only) |
-| `InjectMessage(Message)` | Add a message to the conversation |
+| `Block(reason)` | Stops the operation: on `PreToolUse`, the tool is skipped; on `PostModelTurn`, the run fails. Ignored elsewhere |
+| `ModifyInput(Value)` | Replaces the tool's input JSON. Only meaningful on `PreToolUse` |
+| `InjectMessage(Box<Message>)` | Declared, but the engine does not apply it in 0.6.0. It still counts as the first non-`Continue` action, so later hooks do not run for that event |
 
 ## HookContext
 
@@ -40,19 +45,19 @@ pub struct HookContext {
     pub event: HookEvent,
     pub tool_name: Option<String>,         // set for tool events
     pub tool_input: Option<Value>,         // set for PreToolUse
-    pub tool_result: Option<String>,       // set for PostToolUse
-    pub tool_is_error: Option<bool>,       // set for PostToolUse
+    pub tool_result: Option<String>,       // set only when PostToolUse fires (not in 0.6.0)
+    pub tool_is_error: Option<bool>,       // set only when PostToolUse fires (not in 0.6.0)
     pub turn: u32,                         // current turn number
-    pub cumulative_cost_usd: f64,          // running cost total
+    pub cumulative_cost_usd: f64,          // running cost total (also available as a method)
     pub message_count: usize,              // messages in conversation
 }
 ```
 
 ## Examples
 
-### Cost Guard
+### Cost guard
 
-Stop the agent when spending exceeds a budget:
+Stop the run when spending exceeds a budget. `Block` on `PostModelTurn` makes the run fail with an error:
 
 ```rust
 struct CostGuard { max_usd: f64 }
@@ -63,7 +68,7 @@ impl Hook for CostGuard {
     fn name(&self) -> &str { "cost-guard" }
 
     async fn on_event(&self, ctx: &HookContext) -> HookAction {
-        if ctx.cumulative_cost_usd() > self.max_usd {
+        if ctx.cumulative_cost_usd > self.max_usd {
             HookAction::Block(format!("Budget ${:.2} exceeded", self.max_usd))
         } else {
             HookAction::Continue
@@ -72,38 +77,26 @@ impl Hook for CostGuard {
 }
 ```
 
-### Audit Logger
+### Audit logger
 
-Record every tool invocation:
+Record every tool call before it runs. `PostToolUse` never fires, so results are not seen here; read them from `AgentEvent::ToolEnd` (see [Events](05-events-streaming.md)) or from `AgentOutput::tool_calls`:
 
 ```rust
 struct AuditLogger;
 
 #[async_trait]
 impl Hook for AuditLogger {
-    fn events(&self) -> &[HookEvent] {
-        &[HookEvent::PreToolUse, HookEvent::PostToolUse]
-    }
+    fn events(&self) -> &[HookEvent] { &[HookEvent::PreToolUse] }
     fn name(&self) -> &str { "audit" }
 
     async fn on_event(&self, ctx: &HookContext) -> HookAction {
-        match ctx.event {
-            HookEvent::PreToolUse => {
-                println!("[audit] PRE  {} turn={}", ctx.tool_name.as_deref().unwrap_or("?"), ctx.turn);
-            }
-            HookEvent::PostToolUse => {
-                let ok = !ctx.tool_is_error.unwrap_or(false);
-                println!("[audit] POST {} status={}", ctx.tool_name.as_deref().unwrap_or("?"),
-                    if ok { "OK" } else { "ERR" });
-            }
-            _ => {}
-        }
+        println!("[audit] PRE  {} turn={}", ctx.tool_name.as_deref().unwrap_or("?"), ctx.turn);
         HookAction::Continue
     }
 }
 ```
 
-### Tool Blocker
+### Tool blocker
 
 Prevent specific tools from running:
 
@@ -126,9 +119,9 @@ impl Hook for ToolBlocker {
 }
 ```
 
-### Input Sanitizer
+### Input sanitizer
 
-Redact sensitive data from tool inputs:
+Refuse a shell command that contains sensitive keywords:
 
 ```rust
 struct InputSanitizer;
@@ -150,38 +143,43 @@ impl Hook for InputSanitizer {
 }
 ```
 
-## Shell Hook
+A keyword check is a coarse filter, not a security boundary. Use the permission policy for real restrictions.
 
-For compatibility with Claude Code's `settings.json` hook format:
+## Shell hook
+
+`ShellHook` runs a shell command for an event, which is how Claude Code's `settings.json` hooks are reproduced:
 
 ```rust
 use cersei::hooks::ShellHook;
 
 Agent::builder()
     .hook(ShellHook::new(
-        "./scripts/pre-tool.sh",           // shell command
+        "./scripts/pre-tool.sh",           // command, run with `sh -c`
         &[HookEvent::PreToolUse],          // events
-        true,                               // blocking: non-zero exit = Block
+        true,                              // blocking: non-zero exit = Block
     ))
 ```
 
-The shell command receives a `CERSEI_HOOK_CONTEXT` environment variable with JSON context.
+- The command receives `CERSEI_HOOK_CONTEXT`, a JSON object with `event`, `tool_name` and `turn`. The tool input is not included.
+- The command runs in the process's current directory, not in the agent's `working_dir`.
+- With `blocking = true`, a non-zero exit blocks the operation, with the command's stderr (or stdout) as the reason. With `blocking = false`, a non-zero exit is logged and ignored.
+- A command that cannot be started is logged and ignored.
 
-## Stacking Hooks
-
-Hooks execute in registration order. The first non-`Continue` action wins:
+## Stacking hooks
 
 ```rust
 Agent::builder()
     .hook(CostGuard { max_usd: 5.0 })   // checked first
     .hook(ToolBlocker { blocked: vec!["Write".into()] })
-    .hook(AuditLogger)                    // always runs (returns Continue)
+    .hook(AuditLogger)                  // returns Continue
     .build()?;
 ```
 
-## Hook Execution
+For each event, hooks run in registration order until one returns an action other than `Continue`. Hooks registered after that one do not run for the event.
 
-Internally, `cersei_hooks::run_hooks()` iterates all hooks matching the event:
+## Hook execution
+
+`cersei_hooks::run_hooks()` implements the loop:
 
 ```rust
 pub async fn run_hooks(hooks: &[Arc<dyn Hook>], ctx: &HookContext) -> HookAction {

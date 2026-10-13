@@ -5,11 +5,11 @@ description: Adding Cersei to your Rust project.
 
 ## From crates.io
 
-Cersei is published on [crates.io](https://crates.io/crates/cersei) — the standard install path:
+The snippets below pin the workspace version, 0.6 (every crate inherits `version.workspace`, 0.6.0). If Cargo cannot resolve these versions from the registry, use the git source described under [Tracking `main`](#tracking-main).
 
 ```toml
 [dependencies]
-cersei = "0.1"
+cersei = "0.6"
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 ```
@@ -27,28 +27,30 @@ cargo add anyhow
 Enable the Grafeo graph backend for relationship-aware recall:
 
 ```toml
-cersei-memory = { version = "0.1", features = ["graph"] }
+cersei-memory = { version = "0.6", features = ["graph"] }
 ```
 
 ## Optional: Individual Crates
 
-Use specific crates if you only need parts of the SDK — every crate is published independently:
+Use specific crates if you only need parts of the SDK:
 
 ```toml
-cersei-types       = "0.1"   # Core types only
-cersei-provider    = "0.1"   # LLM providers
-cersei-tools       = "0.1"   # Tool system
-cersei-tools-derive = "0.1"  # #[derive(Tool)] proc macro
-cersei-agent       = "0.1"   # Agent runtime
-cersei-memory      = "0.1"   # Memory backends
-cersei-hooks       = "0.1"   # Hooks / middleware
-cersei-mcp         = "0.1"   # MCP client
-cersei-lsp         = "0.1"   # LSP client
-cersei-embeddings  = "0.1"   # Embeddings + vector index
-cersei-compression = "0.1"   # Token-killer compression
+cersei-types       = "0.6"   # Core types only
+cersei-provider    = "0.6"   # LLM providers
+cersei-tools       = "0.6"   # Tool system
+cersei-tools-derive = "0.6"  # #[derive(Tool)] proc macro
+cersei-agent       = "0.6"   # Agent runtime
+cersei-memory      = "0.6"   # Memory backends
+cersei-hooks       = "0.6"   # Hooks / middleware
+cersei-mcp         = "0.6"   # MCP client
+cersei-lsp         = "0.6"   # LSP client
+cersei-embeddings  = "0.6"   # Embeddings + vector index
+cersei-compression = "0.6"   # Token-killer compression
 bricks-skills      = "0.6"   # Agent Skills (formerly cersei-skills)
-cersei-vms         = "0.1"   # Sandbox / VM isolation
+cersei-vms         = "0.6"   # Sandbox / VM isolation
 ```
+
+`bricks-skills` can also be taken from this repository, by git or by path.
 
 ## Bricks CLI
 
@@ -59,9 +61,8 @@ cargo install --path crates/bricks-cli
 ```
 
 It reads its models from `~/.bricks/providers.toml`; see `docs/cli.md` and
-`docs/providers.md` in the repository. The `abstract-cli` crate and the
-`install-abstract.sh` installer of the Cersei era built the old `abstract`
-binary and do not install Bricks.
+`docs/providers.md` in the repository. The Cersei-era `abstract-cli` crate is no
+longer in this workspace, and `bricks` does not install it.
 
 ## Tracking `main`
 
@@ -73,15 +74,10 @@ cersei = { git = "https://github.com/pacifio/cersei" }
 
 ## Environment Variables
 
-| Variable | Provider | Required |
-|----------|----------|----------|
-| `ANTHROPIC_API_KEY` | Anthropic | For Claude models |
-| `OPENAI_API_KEY` | OpenAI | For GPT models |
-
-At least one provider key is needed. Both can be set simultaneously.
+No variable name is read implicitly. Each provider entry in `~/.bricks/providers.toml` names the environment variable that holds its key, with `api_key_env` (see `docs/providers.md` and `docs/providers.example.toml`).
 
 ## System Requirements
 
 - A recent stable Rust: edition 2024, 1.88 or later (let chains); tested with 1.98
-- `rg` (ripgrep) — optional, Grep tool falls back to system `grep`
+- No external search tool is needed: the `Grep` tool is built in (it uses the `grep` and `ignore` crates)
 - macOS, Linux, or Windows

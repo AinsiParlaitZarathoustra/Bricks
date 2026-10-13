@@ -8,6 +8,36 @@ SDK's `Edit` tool**. Read/Write/Grep/Glob/List/Bash were not touched by this
 change — migrate only the Edit abstraction (and only if the custom one exists
 purely to work around the exact-match bug).
 
+> **État au 2026-10-11.** This report describes the change as first shipped
+> (workspace 0.2.3). The code has changed since, and where it differs the code
+> is right:
+>
+> - The matcher is not a five-strategy ladder. `tool_primitives::replace` runs
+>   three stages: exact; normalised line by line (line endings, trailing
+>   whitespace, one constant indentation shift; a single-line `old_string` also
+>   ignores its surrounding whitespace when the trimmed text occurs once,
+>   `crates/cersei-tools/src/tool_primitives/replace.rs`, lines 386–412);
+>   bounded relocation that tolerates blank lines
+>   and spacing outside quoted text. The block-anchor, whitespace-normalised and
+>   indentation-flexible strategies no longer exist, and a block whose code
+>   differs is never accepted, however similar. A similarity of 0.5 or more
+>   only selects the candidate regions reported on failure. See
+>   `docs/shell.md` §5.
+> - `Edit` no longer accepts aliased parameter names (`path`, `old`, `new`,
+>   `search`, camelCase): unknown keys are refused. Type coercion stays
+>   (`"replace_all": "true"`), and a missing `new_string` still means a deletion.
+>   The "input coercion" item below no longer holds for field names.
+> - `EditError` has `Io`, `Refused(ReplaceError)` and `Changed`; it has no
+>   `NoChange` variant. `NoChange` is a variant of `ReplaceError`. `NotFound`
+>   carries the closest candidate regions (similarity 0.5 or more); `Ambiguous`
+>   carries the identical matches it found.
+> - The success message names the stage and the replaced line ranges
+>   (`EditResult` returns `stage` and `ranges`). `replacements_made` is exact
+>   after a fuzzy `replace_all`.
+> - The names used in the steps below (`replace`, `edit_file`, `FileEditTool`,
+>   the tool name `Edit`) still exist. Version and test counts are those of the
+>   first ship.
+
 ---
 
 ## Why this changed

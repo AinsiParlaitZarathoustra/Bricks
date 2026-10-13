@@ -12,7 +12,7 @@ Cersei provides two layers of code intelligence available as both SDK library AP
 - **`cersei-lsp`** — Language Server Protocol client for semantic operations (hover, definitions, references, symbols, diagnostics)
 - **Tree-sitter modules** in `cersei-tools` — AST-based import extraction, symbol discovery, dependency ranking, and bash command safety analysis
 
-Both are used by Abstract CLI to give the agent deep understanding of codebases without reading every file.
+Both are library APIs that let an agent understand a codebase without reading every file. `cersei-lsp` is used by `bricks-semantic`; the Cersei-era `abstract` CLI used both systems (see below).
 
 ---
 
@@ -24,7 +24,7 @@ A standalone LSP client crate with on-demand server management. Spawns language 
 
 ```toml
 [dependencies]
-cersei-lsp = "0.1.6"
+cersei-lsp = "0.6"
 ```
 
 ### Architecture
@@ -388,7 +388,7 @@ The analyzer detects these AST patterns:
 
 ## LSP Tool (Agent-Facing)
 
-The `LSP` tool is automatically registered in Abstract CLI and available to any agent built with `cersei-tools`. It exposes all 5 LSP operations to the model.
+The `LSP` tool in `cersei-tools` is available to any agent built with that crate. It exposes all 5 LSP operations to the model.
 
 ### Tool Schema
 
@@ -416,9 +416,9 @@ Agent: [calls LSP tool with action=hover, file=src/main.rs, line=15, column=10]
 
 ---
 
-## Integration in Abstract CLI
+## Integration in Abstract CLI (historical)
 
-Abstract automatically leverages both systems:
+The Cersei-era `abstract` CLI used both systems as follows. That crate is no longer in this workspace, and the Bricks CLI does not call these functions; they remain available to any agent built with `cersei-tools`.
 
 1. **At startup**: `scan_project()` runs tree-sitter analysis on top 20 files, injects dependency-ranked summaries into the system prompt as `project_intel`
 2. **During exploration**: The agent calls the `LSP` tool for semantic queries (hover, definitions, references)

@@ -32,6 +32,130 @@ export function Tag({ type }) {
   );
 }
 
+<Version version="0.6.0" date="2026-10-11">
+
+<Tag type="changed" /> **Rust edition 2024.** The workspace (and `examples/benchmark`) moves from edition 2021 to edition 2024. A recent stable Rust is required (1.88 or later for let chains; tested with 1.98.1). The migration was done with `cargo fix --edition` and reviewed by hand; the MCP configuration tests no longer modify the process environment.
+
+<Tag type="added" /> **`/effort` — reasoning profiles per model.** Lists and selects the reasoning profiles declared for the current model in the providers file (`/effort <id>`). `/effort default` returns to the model's declared default. An unknown id is refused with the available choices. The contract gains the command `set_reasoning` and the event `reasoning_changed`; `session_opened` and `model_changed` carry `effective_reasoning`. The JSONL schema stays at 5.
+
+<Tag type="changed" /> **`/cost` and `/context` are readable summaries**, with `/cost details` and `/context details` for the full view. Cost distinguishes an estimate, a known zero, `Not priced` and `Not priced (partial)`; cache reads and writes are shown apart from input. Context separates occupation from the session total.
+
+<Tag type="added" /> **Adaptive status bar.** Shows the model, the effective profile, context, cost, activity and project, chosen by the width actually available.
+
+<Tag type="added" /> **Agent Skills.** Bricks reads standard `SKILL.md` documents (agentskills.io) from `<project>/.agents/skills`, `<project>/.claude/skills`, `~/.agents/skills` and `~/.claude/skills`, then from its built-in set. Project skills need a trust decision per session (`/skills trust`, `/skills deny`, or `--trust-project-skills`). Activation is done with `/skill <name> <request>` or `bricks run --skill <name>`; the agent can also activate a skill through the `Skill` tool. Sub-agent profiles may preload skills. Events: `skill_activated`, `skill_activation_failed`, `skills`, `skills_trust_requested`, `skills_trust_resolved`. Documentation: `docs/skills.md`.
+
+<Tag type="changed" /> **Crate renamed `cersei-skills` → `bricks-skills`** (re-exported as `cersei::skills`). The former second skills system in `cersei-tools`, the old `SkillRegistry`, `.claude/commands/*.md` and `.cersei/skills` are no longer read, and the `loop` built-in is gone (Bricks has no scheduler).
+
+<Tag type="added" /> **Optional pre-commit hook** (`scripts/hooks/pre-commit`, enabled with `scripts/hooks/install.sh enable`). It checks staged content (whitespace, conflict markers, rustfmt, secrets) and never replaces an existing hook.
+
+<Tag type="fixed" /> **Concurrent model or profile switch.** Provider, model label and profile change together and are read as one snapshot per request; a request never mixes an old provider with a new profile. Usage of a response sent before a switch is counted once, but no longer becomes the context measurement of the new selection.
+
+<Tag type="fixed" /> **Shell tests** no longer hang on a reverse DNS lookup in the HTTP server fixture.
+
+<Tag type="changed" /> **Dependencies.** `uuid`, `serde_json`, `tokio-util`, `smallvec`, `indoc`, `zstd-sys`, `cc` and the `cxx` family are updated; `cargo audit` reports no vulnerabilities.
+
+</Version>
+
+<Version version="0.5.0" date="2026-10-10">
+
+<Tag type="fixed" /> **Security: dependencies.** `hickory-proto` 0.25.2 (RUSTSEC-2026-0118, RUSTSEC-2026-0119) is not in the graph: `Cargo.lock` locks `hickory-proto` 0.26.3 only, one Hickory 0.26 resolver is shared by every HTTP client through `cersei_types::http`, and SSRF filtering checks the same resolution. The graph uses `tantivy` 0.26.2, `notify` 8.2 and `portable-pty` 0.9. The unused `reqwest-eventsource` is removed.
+
+<Tag type="fixed" /> **SSE decoder.** An event with `event:` but no `data` is no longer dispatched, and its name no longer leaks into the next event. One event is bounded to 16 MiB; beyond that the response ends with an explicit protocol error.
+
+<Tag type="changed" /> **Bash analysis.** The `tool_primitives::bash_safety` analyser no longer reports writes (`>`, `tee`, `sed -i`), interpreters, `find -exec`, `xargs`, git mutations, recursive deletion of `/` or the home folder, or dynamic targets as safe. `rm -rf` of an ordinary folder is `High`, not `Forbidden`. It is an SDK primitive and is not wired into permissions; the Bash tool's approval is unchanged.
+
+<Tag type="fixed" /> **CodeSearch** indexed nothing when the workspace folder's name starts with a dot.
+
+<Tag type="removed" /> **`cersei_tools::bash_classifier`** (a second, substring-based classifier that nothing in production used). Use `tool_primitives::bash_safety::analyze_command`. The Linux benchmark binaries and `docs/bun.lock` are no longer tracked.
+
+<Tag type="changed" /> **Repository.** `Cargo.lock` is versioned and validations use `--locked`. `sync_cargo.sh` also publishes `bricks-semantic` and `cersei-web`, checked against `cargo metadata`. `scripts/check_secrets.py` finds key-shaped values in staged or tracked files without printing them. The documentation marks the pages of the old `abstract` CLI and provider system as historical.
+
+</Version>
+
+<Version version="0.4.8" date="2026-10-09">
+
+<Tag type="removed" /> **No agent has a turn limit any more.** `AgentBuilder::max_turns`, `AgentTool::with_max_turns`, `CerseiRunner::with_max_turns`, the `max_turns` argument of the `Agent` and `Agents` tools, and the related settings are removed. A run goes on until its answer and stops only on cancellation, definitive errors, lack of progress, refusals, or empty or cut answers. A `max_turns` key in `bricks.toml` or in a profile is accepted, ignored and reported as a diagnostic; a tool call that still passes `max_turns` is refused with a migration message.
+
+<Tag type="added" /> **`+N −N` above the status bar.** Counts the lines added and removed by the changes applied to the session's workspace since it was opened. It is a sum of operations, not a `git diff`, and it counts each change once, including applied ChangeSets. Added lines are shown in pale green and removed lines in pale red, in diffs, edit results, approval previews and the totals.
+
+<Tag type="changed" /> **`cost unknown (no price)` reads `Not priced`.**
+
+<Tag type="changed" /> **JSONL schema 5.** `agent_spawned` no longer has `max_turns`; `edit_applied` gains `agent_id`, `changeset_id` and `binary`.
+
+</Version>
+
+<Version version="0.4.7" date="2026-10-08">
+
+<Tag type="fixed" /> **Retries honour `Retry-After`.** The server's delay is read for every retryable status (not only 429), in seconds or as an HTTP date, and each retry waits `max(local backoff, Retry-After)`. Whether an error is retried does not change. Notices give the cause and the delay in milliseconds, for example `Service unavailable (HTTP 503)` and `Retrying in 12000 ms... (retry 1/5)`.
+
+<Tag type="changed" /> **Contract.** `CerseiError::ProviderStatus` gains `retry_after: Option<Duration>`, with `retry_after()` and `http_status()` accessors.
+
+<Tag type="added" /> **`--workspace <dir>`** (alias `--cd`) opens a project folder, resolved without a shell and refused before any session if it is missing or is a file. A session opens with the project of its own folder (`bricks.toml`, rules, system prompt, memory, profiles), including when resuming a session of another project.
+
+<Tag type="added" /> **History by project.** `bricks sessions [--json]` lists the sessions of the current project; `--all` lists every one. The session picker (`bricks resume`, `/sessions`, `/resume`) shows this project's sessions, and Tab shows all of them.
+
+<Tag type="added" /> **Clickable web links** (OSC 8) in the interface, controlled with `--hyperlinks auto|always|never`. Only `http` and `https` links are activated; the address stays written next to the text. Nothing is stored or sent in JSONL.
+
+<Tag type="changed" /> **`bricks sessions --json`** lists the project's sessions; `bricks sessions --all --json` gives the former global listing.
+
+</Version>
+
+<Version version="0.4.6" date="2026-10-07">
+
+<Tag type="added" /> **Native `Agent` tool and sub-agent profiles.** The `Agent` tool delegates one self-contained task to a sub-agent in the foreground, with a fresh context and the parent's approval policy. Profiles are Markdown files with a YAML frontmatter, read from `<workspace>/.bricks/agents`, then `~/.bricks/agents`, then the built-in set (`orchestrateur`, `web_searcher`, `inspecteur`, `backend_coder`, `frontend_coder`, `testeur`, `redactor`). `AgentProfiles` lists and searches them. See `docs/agents.md`.
+
+<Tag type="added" /> **Concurrent sub-agents: `Agents`.** Several sub-agents run in one call, within the session's `max_concurrent` slots, and their results come back in the order asked. `fail_fast` cancels the siblings; otherwise one failure leaves the others' results.
+
+<Tag type="added" /> **Bounded recursion.** Sub-agents may start their own, up to `max_depth`, with `max_total_per_run` descendants per top-level run. An agent waiting for its children releases its slot, so a parent, child and grandchild chain completes with `max_concurrent = 1`.
+
+<Tag type="added" /> **Background agents and `AgentControl`.** `background: true` returns a handle at once; the child keeps running after the parent's turn. `AgentControl` lists, reports, waits for, cancels, inspects, applies and discards agents and their work.
+
+<Tag type="added" /> **Worktree isolation.** Writers that would coexist work in `git worktree` checkouts started from a snapshot of the parent's effective state, uncommitted changes included, without touching the parent's index or files. Their work comes back as a ChangeSet, applied only on request and all or nothing; a conflict writes nothing.
+
+<Tag type="added" /> **Background commands.** `Bash` with `background: true` returns a `job_id`, and the `Job` tool lists, reports, waits for and stops jobs. Job output is bounded in memory and in the session's files.
+
+<Tag type="added" /> **Profile skills, usage and recovery.** Profiles can preload skills. `run_usage` reports the own, descendant and total usage of a run. Instances are recorded in the session's files; unfinished ones are marked `interrupted` on reopening, never replayed.
+
+<Tag type="added" /> **Headless drain.** After the answer, background children are waited for up to `[agents] background_drain_ms`, then cancelled; `bricks run` exits with code 6 if any did not complete.
+
+<Tag type="changed" /> **Durations are shown in milliseconds** everywhere in the interface (`Grep process_payment  12 ms`, `done in 12345 ms`).
+
+<Tag type="fixed" /> **Relative paths of `Write`, `Edit`, `MultiEdit` and `NotebookEdit`** resolve against the agent's working directory, not the process's; a sub-agent in a worktree could otherwise have written into the parent's tree. `ExitWorktree` no longer forces removal.
+
+<Tag type="changed" /> **Contract.** `PermissionRequest` and `ApprovalRequest` gain `agent_id`. `Agent::adopt_mcp` shares another agent's MCP connections without closing them.
+
+</Version>
+
+<Version version="0.3.6" date="2026-10-07">
+
+<Tag type="added" /> **`bricks-semantic`: shared code understanding engine.** One `SemanticEngine` per workspace answers code queries (text search, symbol, definition, references, understand, diagnostics) with exact ranges, certainty and freshness, and lists homonyms as ambiguous instead of choosing one silently. Syntax is handled by Tree-sitter (Rust, TypeScript, JavaScript, Python, Go). Optional language servers (for example rust-analyzer) are shared per project and never installed by Bricks; their results are used only when they are current. See `docs/semantic.md`.
+
+<Tag type="added" /> **`CodeScout` tool**, sharing the engine with sub-agents and the controller, and `/search` in the terminal interface. Compiler locations feed the `understand` intent without running anything.
+
+<Tag type="changed" /> **`cersei-lsp` reworked.** Server requests are answered, requests have timeouts and cancellation, diagnostics are kept with their version, and file contents that changed are resent. JSONL schema 3.
+
+<Tag type="added" /> **`bricks` CLI, command and event contract, and terminal interface.** The engine exposes typed commands and versioned events (`cersei_agent::control`), with approvals that show a change preview, sessions saved with their working directory and model, and attachments (files, folders, images). `bricks` provides `run`, `tui`, `sessions` and `resume`, with documented exit codes. The terminal interface (`crates/bricks-tui`) has a composer, `@` mentions, `/` commands, approvals with diffs, and pickers. Documentation: `docs/cli.md`.
+
+<Tag type="added" /> **Structured long-term memory and hybrid recall.** `cersei-memory` (feature `structured`) stores sourced, immutable episodes, entities and temporal facts with evidence, and recalls them by vector, lexical and relational search fused with weighted RRF. Ingestion is resumable. Configured in `[memory]` of `bricks.toml`. See `docs/memory.md`.
+
+<Tag type="changed" /> **Web search and page reading.** New crate `cersei-web`. `WebSearch` uses DuckDuckGo by default and Brave, Tavily or Exa when `bricks.toml` names them, with per-hop private-address refusal. `WebFetch` returns paged Markdown and can read stored documents. See `docs/web.md`.
+
+<Tag type="changed" /> **MCP rebuilt on the official SDK** (`rmcp`), with stdio and Streamable HTTP transports, timeouts and cancellation. The HTTP+SSE transport is refused. MCP servers given to an agent are connected at the first run.
+
+<Tag type="changed" /> **Shell, tool results and file tools.** One persistent bash per session, with its working directory and variables kept while it lives. Tool results are structured (status, exit code, duration, streams). `Edit` and `MultiEdit` tolerate indentation drift and refuse ambiguous matches; `ApplyPatch` validates and rolls back; `Read` numbers lines and detects binary files.
+
+<Tag type="changed" /> **Context and compression.** The context manager tracks occupation, window and session total separately, checks the budget before every request, and compacts with a verified gain. Tool output is compressed by command-aware rules, with the original saved and named in the output. Rules are configuration (`~/.bricks/rules/*.toml`, `[compression.filters]`). See `docs/context.md` and `docs/compression.md`.
+
+<Tag type="fixed" /> **Reliable stop.** A final answer ends the run; the relaunches that forced extra tool use are removed. Termination is explicit (`Completed`, `OutputTruncated`, `NoProgress`, `ContentFiltered`, `EmptyResponse`), and `bricks run` exits with 5 for an incomplete run. Sub-agents refuse blank tasks, inherit the parent's permission policy and are stopped with the parent's run.
+
+<Tag type="fixed" /> **Performance regressions found by re-running the benchmarks.** A Bash command no longer waits about one second on macOS (37.6 ms instead of 1 051 ms). Agent construction no longer re-parses the compression rules (33.9 µs instead of 29 ms).
+
+<Tag type="changed" /> **Providers are configuration (breaking).** A single file, `~/.bricks/providers.toml` (`schema_version = 1`), is the only catalogue of providers and models; selection is explicit (`provider_id/model_id`). Three protocol adapters replace the per-vendor providers: `chat_completions`, `responses` and `anthropic_messages`. The `Anthropic`, `OpenAi`, `Gemini` and `AnthropicVertex` providers, OAuth and `from_model_string` are removed. Prices are declared per model; an absent price is unknown, never free. See `docs/providers.md`.
+
+<Tag type="added" /> **Structured memory benchmarks.** `longmem-recall` and the `structured-vector` and `structured-hybrid` configurations of `longmem-bench` evaluate recall per question type.
+
+</Version>
+
 <Version version="0.2.5" date="2026-06-29">
 
 <Tag type="changed" /> **`Grep` is now native and in-process — no external `rg`/`grep` binary required.** It previously shelled out to ripgrep if `which` found it on `PATH`, else fell back to system `grep` (losing gitignore-awareness and speed); since `rg` is rarely preinstalled, models that reached for it failed on stock machines. `Grep` (and the `tool_primitives::search::grep` primitive) now use ripgrep's own library crates — [`ignore`](https://docs.rs/ignore) for a lock-free **parallel, gitignore-aware** recursive walk and [`grep`](https://docs.rs/grep) for the matcher/searcher. Behavior is identical on every machine, and the tool description steers models to `Grep` instead of running `rg` in Bash. Respects `.gitignore`/`.ignore` and skips hidden/binary files by default (gitignore honored even outside a git repo); output is sorted by `(file, line)` for deterministic results. New `GrepOptions` fields `no_ignore`/`hidden` (defaulting to prior behavior); the tool gains `case_insensitive`/`hidden` schema fields. New deps `ignore` + `grep` (Unlicense OR MIT).

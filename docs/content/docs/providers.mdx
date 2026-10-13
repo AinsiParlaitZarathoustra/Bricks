@@ -1,6 +1,6 @@
 ---
 title: Providers
-description: 13 built-in LLM providers — Anthropic, OpenAI, Google, Mistral, Groq, DeepSeek, xAI, Together, Fireworks, Perplexity, Cerebras, Ollama, OpenRouter.
+description: How Bricks selects LLM providers and models from providers.toml (provider_id/model_id), plus the historical Cersei-era catalogue of 13 built-in providers.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -16,74 +16,76 @@ import { TypeTable } from 'fumadocs-ui/components/type-table';
 
 # Providers
 
-Cersei supports 13 providers out of the box. Most use the OpenAI-compatible API format, which means adding a provider is just an env var — no new code.
+Bricks has no built-in providers. Which providers and models exist is decided by one configuration file, `~/.bricks/providers.toml` (or any explicit `.toml` or `.json` path), and a model is always selected explicitly as `provider_id/model_id`. Adding a provider, or a model that speaks one of the three supported wire protocols (`chat_completions`, `responses`, `anthropic_messages`), is a configuration change: no code and no recompilation.
 
 <Callout type="info">
 Beyond text, messages can carry **images, video, audio, and PDFs**. See [Multimodal Input](/docs/multimodal) for the file-passing API and which media each provider accepts.
 </Callout>
 
-## Model String Format
+## Selecting a Model
 
 ```
-provider/model
+provider_id/model_id
 ```
 
-Pass this to the Agent builder or the Abstract CLI:
+The string is split at the first `/`, so model ids may contain `/`. The provider is never inferred from the model name: a bare model name is an error. Pass the selection to the agent with `provider_from_config`:
 
 ```rust
-Agent::builder()
-    .provider(cersei_provider::from_model_string("groq/llama-3.1-70b-versatile")?.0)
+use cersei::prelude::*;
+
+let provider = cersei::provider_from_config(None, "my-provider/my-model")?; // ~/.bricks/providers.toml
+let agent = Agent::builder()
+    .provider(provider)
+    .tools(cersei::tools::coding())
+    .build()?;
 ```
+
+`None` reads `~/.bricks/providers.toml`; an explicit path replaces it. In the `bricks` CLI the same selection is given with `--model`, and the file with `--providers`:
 
 ```bash
-abstract "fix the tests" --model groq/llama-3.1-70b-versatile
+bricks --model my-provider/my-model run "fix the tests"
+bricks --providers ./providers.toml --model my-provider/my-model run "fix the tests"
 ```
 
-Bare model names auto-detect the provider from known prefixes:
-
-```bash
-abstract "fix the tests" --model gpt-4o          # → openai
-abstract "fix the tests" --model claude-sonnet-4-6  # → anthropic
-abstract "fix the tests" --model gemini-2.0-flash   # → google
-```
-
-## Model Router
+## Reading the Configuration
 
 ```rust
-use cersei_provider::from_model_string;
+use cersei::provider::ProviderRegistry;
 
-// Explicit: provider/model
-let (provider, model) = from_model_string("openai/gpt-4o")?;
+let registry = ProviderRegistry::load(None)?;             // ~/.bricks/providers.toml
+for model in registry.models() {
+    println!("{}", model.selection());                    // every provider_id/model_id, in file order
+}
 
-// Auto-detect from prefix
-let (provider, model) = from_model_string("gpt-4o")?;
-
-// List providers with valid auth
-let available = cersei_provider::router::available_providers();
-
-// List all known providers
-let all = cersei_provider::router::all_providers();
+let resolved = registry.resolve("my-provider/my-model")?;
+let provider = resolved.build_provider()?;                 // reads api_key_env now
 ```
 
 <TypeTable
   type={{
-    'from_model_string(model)': {
-      type: 'Result<(Box<dyn Provider>, String)>',
-      description: 'Parse a model string, construct the provider, return (provider, resolved_model_name).',
+    'ProviderRegistry::load(explicit)': {
+      type: 'Result<ProviderRegistry, ConfigError>',
+      description: 'Load the file at the explicit path, or ~/.bricks/providers.toml when None. A missing or invalid file is an error; there is no fallback catalogue.',
       required: true,
     },
-    'available_providers()': {
-      type: "Vec<&'static ProviderEntry>",
-      description: 'Providers with valid auth configured in the environment.',
+    'registry.models()': {
+      type: 'Vec<ModelRef>',
+      description: 'Every configured model, in file order. No cap is applied.',
     },
-    'all_providers()': {
-      type: "&'static [ProviderEntry]",
-      description: 'All 13 known providers regardless of auth.',
+    'registry.resolve(selection)': {
+      type: 'Result<ResolvedModel, ConfigError>',
+      description: 'Resolve a provider_id/model_id selection. An unknown provider or model is an error.',
     },
   }}
 />
 
 ---
+
+## Historical Catalogue (Cersei era)
+
+<Callout type="warn">
+The sections from here to [Adding Custom Providers](#adding-custom-providers) describe the built-in providers of the Cersei SDK: their default endpoints, the environment variables the old system read, and `abstract --model` commands. Bricks reads none of this, and the commands are not Bricks commands. To use one of these services today, write a `providers.toml` entry as shown in [Adding Custom Providers](#adding-custom-providers), with its `endpoint`, its `protocol` and an `api_key_env` naming the variable that holds the key.
+</Callout>
 
 ## Anthropic
 
@@ -395,77 +397,40 @@ abstract "fix the tests" --model openrouter/anthropic/claude-3.5-sonnet
 
 ---
 
-## Auto-Detection
+## Auto-Detection and Aliases (removed)
 
-When you pass a bare model name (no `/`), the router auto-detects the provider:
-
-| Prefix | Provider |
-|--------|----------|
-| `claude-*` | anthropic |
-| `gpt-*`, `o1*`, `o3*` | openai |
-| `gemini-*` | google |
-| `mistral-*`, `codestral-*` | mistral |
-| `deepseek-*` | deepseek |
-| `grok-*` | xai |
-| `llama*` | groq (if `GROQ_API_KEY` set), else together, else ollama |
-
-If no prefix matches, the router picks the first provider with a valid API key in the environment.
-
-## Aliases
-
-The Abstract CLI supports short aliases:
-
-| Alias | Resolves To |
-|-------|-------------|
-| `opus` | `anthropic/claude-opus-4-6` |
-| `sonnet` | `anthropic/claude-sonnet-4-6` |
-| `haiku` | `anthropic/claude-haiku-4-5` |
-| `4o`, `gpt4o` | `openai/gpt-4o` |
-| `gemini` | `google/gemini-3.1-pro-preview` |
-| `llama` | `groq/llama-3.1-70b-versatile` |
-| `deepseek` | `deepseek/deepseek-chat` |
-| `grok` | `xai/grok-2` |
-| `mistral` | `mistral/mistral-large-latest` |
+Bricks does not detect a provider from a model name and has no model aliases. The prefix table and the alias table of the Cersei CLI no longer apply: every model is selected as `provider_id/model_id`.
 
 ---
 
 ## Adding Custom Providers
 
-Any OpenAI-compatible endpoint works with the OpenAI provider directly:
+Any service that speaks one of the three protocols is added in `~/.bricks/providers.toml`, not in code. This example registers a local Ollama server, which needs no key:
+
+```toml
+schema_version = 1
+
+[[providers]]
+id = "ollama"
+name = "Ollama"
+endpoint = "http://localhost:11434/v1"
+protocol = "chat_completions"
+auth = "none"
+
+[[providers.models]]
+id = "llama"
+name = "Llama 3.1 70B"
+api_model = "llama3.1:70b"
+streaming = true
+tool_calls = true
+
+[providers.models.limits]
+max_input_tokens = 32000
+max_output_tokens = 8000
+```
 
 ```rust
-let provider = OpenAi::builder()
-    .base_url("https://my-custom-api.com/v1")
-    .api_key("my-key")
-    .model("my-model")
-    .build()?;
-
-let output = Agent::builder()
-    .provider(provider)
-    .tools(cersei::tools::coding())
-    .run_with("fix the tests")
-    .await?;
+let provider = cersei::provider_from_config(None, "ollama/llama")?;
 ```
 
-For the CLI, any OpenAI-compatible provider's base URL can be overridden with a
-`<PROVIDER>_BASE_URL` environment variable. The provider id is upper-cased, so:
-
-| Provider | Override variable |
-|----------|-------------------|
-| `openai` | `OPENAI_BASE_URL` (legacy alias: `OPENAI_API_BASE`) |
-| `deepseek` | `DEEPSEEK_BASE_URL` |
-| `openrouter` | `OPENROUTER_BASE_URL` |
-| …any OpenAI-compatible provider | `<ID>_BASE_URL` |
-
-```bash
-# Route the OpenAI provider at any OpenAI-compatible gateway:
-OPENAI_API_KEY=my-key OPENAI_BASE_URL=https://my-custom-api.com/v1 \
-  abstract "fix the tests" --provider openai --model my-model
-```
-
-When an override is in effect, Abstract prints a redacted target line before the
-first request — e.g. `provider=openai host=my-custom-api.com model=my-model
-key_present=true` — so a misrouted endpoint is obvious instead of surfacing as an
-opaque `401`. If you intend to talk to DeepSeek, prefer `--provider deepseek`
-with `DEEPSEEK_API_KEY`; only use the `openai` provider + `OPENAI_BASE_URL` route
-for endpoints without a dedicated provider entry.
+For a hosted service, use `auth = "bearer"` and `api_key_env = "MY_SERVICE_API_KEY"`: the value of `api_key_env` is the name of the environment variable, never the key itself. The base URL belongs in `endpoint`. The `<PROVIDER>_BASE_URL` and `<PROVIDER>_API_KEY` variables that the old system read implicitly are no longer used. Every field is described in `docs/providers.md` in the repository, and an annotated example is in `docs/providers.example.toml`.

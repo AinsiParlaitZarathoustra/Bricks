@@ -9,7 +9,7 @@ import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
 
 # cersei-vms
 
-`cersei-vms` is the 15th crate in the workspace. It introduces a pluggable **sandbox runtime layer** so Cersei agents don't have to execute shell commands and edit files directly on the host machine. The same crate provides three **cross-sandbox primitives** — `Volume`, `Mailbox`, `KvStore` — that let multiple parallel agents communicate and share state safely.
+`cersei-vms` is a crate of the workspace (`crates/cersei-vms`, added in 0.1.9). It introduces a pluggable **sandbox runtime layer** so Cersei agents don't have to execute shell commands and edit files directly on the host machine. The same crate provides three **cross-sandbox primitives** — `Volume`, `Mailbox`, `KvStore` — that let multiple parallel agents communicate and share state safely.
 
 <Callout type="info">
 **Inspired by E2B.** The trait shape (`Sandbox` / `Commands` / `Filesystem`) mirrors [E2B](https://e2b.dev/)'s SDK almost 1:1, so existing mental models port directly. Unlike E2B, `cersei-vms` is **first-party Rust**, runs **locally by default** (Docker), and ships **cross-sandbox primitives** out of the box.
@@ -20,7 +20,7 @@ import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
 Without one, Cersei has three structural weaknesses:
 
 1. **Unsafe for untrusted code.** A model that emits shellcode runs it with the user's full privileges.
-2. **No parallel-agent isolation.** When `cersei-agent::delegate` spawns N parallel sub-agents, they share one filesystem and process namespace — they trample each other on writes, `cd`, env vars.
+2. **No parallel-agent isolation.** When N parallel sub-agents run in the same workspace (shared isolation, as opposed to a git worktree), they share one filesystem and process namespace — they trample each other on writes, `cd`, env vars.
 3. **No cross-agent comms primitive.** There's `send_message` between coordinator/worker, but no shared state, no shared volumes, no message bus between independent agents.
 
 `cersei-vms` fixes all three.
@@ -187,28 +187,30 @@ Multiple sandboxes attach to **one** host broker for `Volume` / `Mailbox` / `KvS
 | Crate | Role |
 |---|---|
 | `cersei-types` | Foundation types (no change). |
-| **`cersei-vms`** | **Sandbox runtimes, traits, primitives, snapshots, envd daemon. New in 0.1.9.** |
+| **`cersei-vms`** | **Sandbox runtimes, traits, primitives, snapshots, and the `cersei-envd` binary (feature `envd`). Added in 0.1.9.** |
 | `cersei-tools` | Optional `vms` feature wires `BashTool` to route through a `Sandbox` when one is in `ToolContext.extensions`; ships new agent-facing tools in `cersei_tools::vm_tools`. |
 | `cersei` (facade) | `cersei::vms` re-export behind a default-on `vms` feature. |
 
-## What ships in 0.1.9 (Phase 1)
+## What the first release provides (0.1.9)
 
 - `SandboxRuntime`, `Sandbox`, `Commands`, `Filesystem` traits
 - `LocalProcessRuntime` and `DockerRuntime` backends
 - `Volume`, `Mailbox`, `KvStore` primitives
 - Snapshot/restore for both backends
-- `cersei-envd` binary + reference Dockerfile for `cersei/sandbox-base`
+- `cersei-envd` binary (of this crate) + reference Dockerfile for `cersei/sandbox-base`
 - Transparent routing in `BashTool` + new `vm_tools` module
 - `cersei::vms` facade re-export
-- 9 passing integration tests covering all primitives + snapshots
+- Integration tests in `crates/cersei-vms/tests` for the local backend, the mailbox and the KV store
 
-## What's coming in 0.1.10 (Phase 2)
+## Not implemented yet
 
-- `AgentBuilder::with_sandbox(handle)` / `with_sandbox_allocator(...)` — no more manual extension stuffing.
-- `cersei-agent::delegate` per-task allocator — every parallel worker lands in its own sandbox.
-- `abstract` CLI: `--sandbox <local|docker>` flag and `/vm` slash command.
-- `FirecrackerRuntime` (Linux microVMs), `E2bRuntime` (remote E2B), `VercelSandboxRuntime`.
-- `docker pause` / `unpause`, incremental snapshots, snapshot GC.
+These items are planned; none of them exists in the code today:
+
+- An `AgentBuilder` helper to inject a sandbox (today, insert `Arc<dyn Sandbox>` into the `Extensions` passed with `.extensions(...)`).
+- A per-task sandbox allocator wired into sub-agents (`SandboxAllocator` and `DefaultAllocator` exist in `cersei-vms`, but nothing in the agent uses them yet).
+- A command-line flag to choose a sandbox backend in `bricks`.
+- Firecracker (Linux microVM) and remote E2B runtimes. The `backend-firecracker` and `backend-e2b` features are reserved.
+- Incremental snapshots and snapshot garbage collection.
 
 ## Reading order
 

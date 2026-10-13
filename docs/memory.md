@@ -283,22 +283,31 @@ Schema v3 follows v2 (`graph_migrate`):
 ### Starting point: where the 6.6 % came from
 
 `CHANGELOG.md` (2026-04-24) reports 6.6 % for the `graph` configuration on
-`longmemeval_s` with `gemini-2.5-flash`. Its artefact, removed from the tree
-later and recovered from commit `f5b577d`
-(`bench/long-mem/results-gemini/c-graph-substring-*`), shows:
+`longmemeval_s` with `gemini-2.5-flash`. Its artefact,
+`bench/long-mem/results-gemini/c-graph-substring-longmemeval_s.json`, is not
+versioned: the directory `bench/long-mem/results-gemini/` was tracked up to
+commit `f5b577d`, removed in commit `251f0de`, and is excluded by the
+root `.gitignore` (`bench/long-mem/results-*/`). It is absent from the working
+tree; to read it, use `git show f5b577d:bench/long-mem/results-gemini/c-graph-substring-longmemeval_s.json`.
+It shows:
 
 * `overall_accuracy` 0.066, a macro average over question types without
   abstention, 46/500 correct;
 * abstention 30/30;
 * answerer input of 477–533 tokens on **every** question (median 487);
-* 347 answers saying the context does not contain the information.
+* 342 answers contain the phrase "does not contain"; the other 158 use
+  another negative wording (for example "I do not have information about ...").
 
-The answerer therefore received an almost empty context for every question.
+The answerer's input was therefore small on every question. The size of the
+prompt template is not measured in this file, so the retrieved context cannot
+be sized from it.
 `GraphMemory::recall_top_k` pulled its candidates with
-`m.content CONTAINS '<the whole question>'`: a turn had to contain the entire
-question text to be found. The synthetic check below reproduces this
-(`legacy`: 0 evidence found). It accounts for an empty retrieval. It does
-not prove that nothing else contributed.
+`m.content CONTAINS '<the whole question>'`
+(`crates/cersei-memory/src/graph.rs`, `RECALL` at line 72, `recall` at line 247):
+a turn had to contain the entire question text to be found. No `legacy`
+recall result is recorded in this repository. Reading the empty retrieval as
+the cause is therefore an inference, not a measurement; the `legacy` mode of
+`longmem-recall` (below) is the measurement.
 
 ### Evidence recall — harness
 
