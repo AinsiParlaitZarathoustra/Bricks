@@ -225,17 +225,28 @@ pub struct CliProjects {
     memories: OpenMemories,
 }
 
+/// The names of the tools the session agent announces to the model, as the
+/// controller builds it from the engine's tools (`cersei_tools::coding`):
+/// those, and the native sub-agent tools when `[agents] enabled`. The
+/// system prompt's conditional guidance is decided from this list. (`Skill`
+/// is left out: the skills catalog, added to the prompt by the agent, says
+/// how to use it.)
+fn announced_tools(bricks: &BricksConfig) -> Vec<String> {
+    let mut names: Vec<String> = cersei_tools::coding()
+        .iter()
+        .map(|t| t.name().to_string())
+        .collect();
+    if bricks.agents.enabled && !names.iter().any(|n| n == "Agent") {
+        names.extend(["Agent", "Agents", "AgentControl", "AgentProfiles"].map(String::from));
+    }
+    names
+}
+
 impl ProjectLoader for CliProjects {
     fn load(&self, wd: &Path) -> Result<ProjectContext, String> {
         let bricks = BricksConfig::load(wd);
         let memory = long_term_memory(wd, &self.registry, &self.memories)?;
-        let tools = cersei_tools::coding();
-        let mut tools_available: Vec<String> = tools.iter().map(|t| t.name().to_string()).collect();
-        // The controller adds the native sub-agent tools to the session agent.
-        if bricks.agents.enabled {
-            tools_available.push("Agent".into());
-            tools_available.push("AgentProfiles".into());
-        }
+        let tools_available = announced_tools(&bricks);
         let system = build_system_prompt(&SystemPromptOptions {
             is_non_interactive: !self.interactive,
             working_directory: Some(wd.display().to_string()),
@@ -359,5 +370,119 @@ mod tests {
             resolve_workspace(root.path(), Some(Path::new("alias")), None).unwrap(),
             real.canonicalize().unwrap()
         );
+    }
+}
+
+#[cfg(test)]
+mod prompt_tests {
+    use super::*;
+    use cersei_agent::control::scripted::{Reply, Script, ScriptedCatalog};
+    use cersei_agent::control::{Command, Controller, Event, OpenOptions, Prompt, SessionChoice};
+
+    const REFERENCE: &str = include_str!("../../cersei-agent/tests/fixtures/bricks_foundation.txt");
+
+    fn registry() -> Arc<ProviderRegistry> {
+        Arc::new(
+            ProviderRegistry::from_toml_str(
+                "schema_version = 1\n\n[[providers]]\nid = \"local\"\nname = \"L\"\nendpoint = \"http://127.0.0.1:9/v1\"\nprotocol = \"chat_completions\"\nauth = \"none\"\n\n[[providers.models]]\nid = \"m\"\nname = \"M\"\napi_model = \"m\"\nstreaming = true\n\n[providers.models.limits]\nmax_input_tokens = 100000\nmax_output_tokens = 4096\n",
+                "test.toml",
+            )
+            .unwrap(),
+        )
+    }
+
+    /// The system prompt of the first request of a session opened through
+    /// the real controller with the CLI's own project loader.
+    async fn sent(interactive: bool, extra: &str) -> (String, Vec<String>) {
+        let dir = tempfile::tempdir().unwrap();
+        let wd = std::fs::canonicalize(dir.path()).unwrap();
+        std::fs::write(
+            wd.join("bricks.toml"),
+            format!("[agent]\nmodel = \"test/a\"\n\n[semantic.lsp]\nenabled = false\n\n{extra}"),
+        )
+        .unwrap();
+        let script = Script::new(vec![Reply::text("ok")]);
+        let mut cfg = EngineConfig::new(
+            &wd,
+            ScriptedCatalog::new(&["a"], script.clone()),
+            BricksConfig::default(),
+            wd.join(".sessions"),
+        );
+        cfg.interactive = interactive;
+        cfg.project_loader = Some(Arc::new(CliProjects {
+            registry: registry(),
+            interactive,
+            memories: Default::default(),
+        }));
+        let (ctl, mut events) = Controller::open(
+            cfg,
+            OpenOptions {
+                session: SessionChoice::New,
+                model: None,
+                reasoning: None,
+            },
+        )
+        .await
+        .unwrap();
+        ctl.send(Command::Submit {
+            prompt: Prompt::text("go"),
+        })
+        .unwrap();
+        while let Some(e) = events.next().await {
+            if matches!(e.event, Event::RunFinished { .. }) {
+                break;
+            }
+        }
+        let req = script.requests()[0].1.clone();
+        ctl.close().await;
+        (
+            req.system.unwrap_or_default(),
+            req.tools.iter().map(|t| t.name.clone()).collect(),
+        )
+    }
+
+    fn without(line_start: &str) -> String {
+        REFERENCE
+            .trim_end_matches('\n')
+            .lines()
+            .filter(|l| !l.starts_with(line_start))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[tokio::test]
+    async fn interactive_and_headless_send_the_same_foundation() {
+        for interactive in [true, false] {
+            let (s, tools) = sent(interactive, "").await;
+            assert!(tools.iter().any(|t| t == "Agent") && tools.iter().any(|t| t == "CodeScout"));
+            assert!(s.starts_with(REFERENCE.trim_end_matches('\n')), "{s}");
+            assert_eq!(s.matches("Tu es Bricks").count(), 1);
+            assert!(!s.contains("Cersei SDK"));
+            assert!(s.contains("<working_directory>"));
+
+            let (s, tools) = sent(interactive, "[agents]\nenabled = false\n").await;
+            assert!(!tools.iter().any(|t| t == "Agent" || t == "Agents"));
+            assert!(s.starts_with(&without("- Délègue aux sous-agents")), "{s}");
+        }
+    }
+
+    /// The names the loader announces are the tools the controller gives
+    /// the session agent (for the two conditional bullets).
+    #[test]
+    fn announced_tools_follow_the_session_agent() {
+        let mut b = BricksConfig::default();
+        let names = announced_tools(&b);
+        for t in [
+            "CodeScout",
+            "Agent",
+            "Agents",
+            "AgentControl",
+            "AgentProfiles",
+        ] {
+            assert!(names.iter().any(|n| n == t), "{t}");
+        }
+        b.agents.enabled = false;
+        let names = announced_tools(&b);
+        assert!(!names.iter().any(|n| n.starts_with("Agent")));
     }
 }

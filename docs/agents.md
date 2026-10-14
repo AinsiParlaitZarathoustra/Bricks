@@ -215,8 +215,9 @@ system.
 
 ## Context and services
 
-The sub-agent receives: the engine's system prompt for its tools, its role
-(a sub-agent with a fresh context), the profile's instructions, and a user
+The sub-agent receives: the engine's system prompt for its tools (the Bricks
+foundation, whose CodeScout and delegation bullets follow the child's own
+tools), its role (a sub-agent with a fresh context), the profile's instructions, and a user
 message made of the task and the explicit `context`. It does **not** receive
 the parent's conversation, recalled long-term memory, tasks or anything not
 passed explicitly. Its tools are rebuilt from the parent's tool factory

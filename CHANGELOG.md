@@ -2,6 +2,18 @@
 
 ## [0.6.1] — 2026-10-14
 
+### Changed — system prompt (Sprint 13.2)
+
+- **New Bricks foundation.** The built-in prompt opens with one fixed text (in French): the Bricks introduction, then working with judgement, using the tools, acting within what is authorised, verifying in proportion, communicating clearly. It replaces, without keeping copies, the former blocks: the "built with/on the Cersei SDK" attributions (and the "running with custom instructions" variant), `CORE_CAPABILITIES`, `TOOL_USE_GUIDELINES`, `ACTIONS_SECTION`, `SAFETY_GUIDELINES`, `SECURITY_SECTION`, `SCOPE_AND_STOPPING`, `OUTPUT_EFFICIENCY`, `SUMMARIZE_TOOL_RESULTS`, `CODE_SCOUT_GUIDANCE` and `SESSION_AGENT_GUIDANCE`. Gone with them: the fixed 2-minute Bash timeout, "dedicated tools instead of Bash", "never delete files without confirmation", "one sub-agent at a time / a sub-agent cannot start another" (native children do have the delegation tools), and the requests to write tool results down in the answer.
+- **Two conditional bullets, one text.** The CodeScout bullet is kept only when `CodeScout` is announced to the model; the delegation bullet only when a tool that starts a sub-agent is (`Agent`, `Agents`, `delegate`: `system_prompt::SPAWNING_TOOLS`) — `AgentProfiles`, `AgentControl` or `TaskCreate` alone do not count. With both, the foundation is exactly the reference text (`crates/cersei-agent/tests/fixtures/bricks_foundation.txt`).
+- **Same identity in every standard mode**: interactive, non-interactive, non-interactive with appended instructions. `SystemPromptPrefix` stays; `attribution_text()` returns the Bricks introduction.
+- **Sub-agents** get the same foundation, decided by their own tools, then a `## Your role` section (moved from `CHILD_FRAMING` into the builder's cacheable part, `prefix: SubAgent`), then their profile's instructions and preloaded skills. One role section, not two.
+- Specialised sections reduced to what they describe: `TodoWrite`/`TaskCreate` (no obligation to keep a list), coordinator mode (orchestrator role, no parallel mandate, no tool named), context management (old results may be removed and name their saved original; no request to copy them). Skills, memory, output style, language, custom and appended instructions, extra sections, working directory, Git, memory content, MCP instructions and the dynamic boundary are unchanged.
+- `replace_system_prompt: true` keeps its contract: the integrator's text alone, then the boundary, without the foundation.
+- The CLI announces to the prompt builder the sub-agent tools the controller really adds (`Agent`, `Agents`, `AgentControl`, `AgentProfiles` when `[agents] enabled`).
+- No change to permissions, tool execution, stop, resume or delegation rules.
+- New public items: `system_prompt::BRICKS_INTRODUCTION`, `bricks_foundation`, `SPAWNING_TOOLS`.
+
 ### Added — interface (Sprint 13.1)
 
 - **Run timer next to `working`**: `⠦ working [12 s] (Ctrl+C to cancel)`, then `[1 min 05 s]`, `[1 h 02 min 03 s]`, `[1 d 02 h 03 min 04 s]` (SI symbols `s`, `min`, `h`, `d`, a space before the unit, two-digit sub-fields, rounded down: never `60 s` or `60 min`). It measures the run's wall time from `run_started` (tools, approvals, retries, compactions included), with the monotonic start the interface already kept; it is redrawn at the existing tick (no timer task), starts again with each run, disappears at the end or cancellation, and a session opened never inherits a start. Narrow bars keep activity, time and cancellation first (`working [1 min 05 s] (Ctrl+C)`, `[1 min 05 s] (Ctrl+C)`, `[1 min 05 s]`). A dedicated formatter (`statusbar::elapsed`); tool, command and event durations stay in milliseconds (`display_ms` unchanged).

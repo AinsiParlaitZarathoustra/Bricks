@@ -46,14 +46,19 @@ fn main() {
             "Contains boundary marker",
             prompt.contains(SYSTEM_PROMPT_DYNAMIC_BOUNDARY)
         );
-        check!("Contains attribution", prompt.contains("Cersei SDK"));
-        check!("Contains capabilities", prompt.contains("Capabilities"));
         check!(
-            "Contains tool guidelines",
-            prompt.contains("Tool use guidelines")
+            "Opens with the Bricks foundation",
+            prompt.starts_with(BRICKS_INTRODUCTION)
         );
-        check!("Contains safety", prompt.contains("Safety"));
-        check!("Contains security", prompt.contains("Security"));
+        check!(
+            "Foundation present once",
+            prompt.matches(BRICKS_INTRODUCTION).count() == 1
+        );
+        check!("No former attribution", !prompt.contains("Cersei SDK"));
+        check!(
+            "Delegation bullet only with a delegation tool",
+            !prompt.contains("Délègue aux sous-agents")
+        );
 
         // Verify caching boundary splits correctly
         let parts: Vec<&str> = prompt.split(SYSTEM_PROMPT_DYNAMIC_BOUNDARY).collect();
@@ -109,7 +114,7 @@ fn main() {
         let prompt = build_system_prompt(&opts);
         check!(
             "Replace mode strips default",
-            !prompt.contains("Capabilities")
+            !prompt.contains(BRICKS_INTRODUCTION)
         );
         check!(
             "Replace mode keeps custom",

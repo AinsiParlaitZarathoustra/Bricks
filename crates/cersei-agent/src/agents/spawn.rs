@@ -683,11 +683,6 @@ impl PermissionPolicy for ChildPolicy {
 /// Builds the tools of a child (the parent's real factory).
 pub type ChildTools = Arc<dyn Fn() -> Vec<Box<dyn Tool>> + Send + Sync>;
 
-const CHILD_FRAMING: &str = "\n\n## Your role\n\nYou are a sub-agent working on one task given by another agent, in a fresh context: \
-you do not see its conversation. Do that task within its scope, then reply with your result: \
-what you did, what you found (with file paths and evidence), what you verified and how, and \
-anything left undone. Stop as soon as the task is done; do not widen it.";
-
 /// How a batch runs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct BatchOptions {
@@ -1851,20 +1846,21 @@ fn commands_of(out: &AgentOutput) -> Vec<CommandRun> {
         .collect()
 }
 
-/// A fresh child's system prompt: the engine's prompt for its tools, the
-/// profile's instructions, and its role. Rebuilt for each child (never in
-/// the history, so no compaction removes it).
+/// A fresh child's system prompt: the engine's prompt for its tools (the
+/// Bricks foundation, with its conditional bullets decided by the child's
+/// own tools, then the sub-agent role), and the profile's instructions.
+/// Rebuilt for each child (never in the history, so no compaction removes
+/// it).
 pub fn child_system_prompt(profile: &AgentProfile, tools: &[String], wd: &Path) -> String {
-    let base =
+    let mut s =
         crate::system_prompt::build_system_prompt(&crate::system_prompt::SystemPromptOptions {
+            prefix: Some(crate::system_prompt::SystemPromptPrefix::SubAgent),
             is_non_interactive: true,
             working_directory: Some(wd.display().to_string()),
             tools_available: tools.to_vec(),
             has_auto_compact: true,
             ..Default::default()
         });
-    let mut s = base;
-    s.push_str(CHILD_FRAMING);
     if !subagent::is_blank(&profile.instructions) {
         s.push_str(&format!(
             "\n\n## Profile `{}` ({})\n\n{}",

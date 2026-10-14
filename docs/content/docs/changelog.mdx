@@ -34,6 +34,8 @@ export function Tag({ type }) {
 
 <Version version="0.6.1" date="2026-10-14">
 
+<Tag type="changed" /> **New system prompt.** The built-in prompt opens with one fixed Bricks foundation (in French), shared by the interactive and non-interactive modes and by sub-agents (which keep their own role section). Its CodeScout and delegation bullets appear only when those tools are announced to the model. The former general blocks and their obsolete injunctions are removed; custom instructions, context, skills, memory and `replace_system_prompt` are unchanged.
+
 <Tag type="added" /> **Run timer next to `working`**: `working [1 min 05 s] (Ctrl+C to cancel)`, the wall time of the run in SI symbols, kept first on narrow status bars. Tool and event durations stay in milliseconds. Ctrl+C also cancels a `/compact` in progress.
 
 <Tag type="changed" /> **Tool calls are published as they finish**: a fast call's `tool_finished` and `edit_applied` no longer wait for a slow sibling; the history keeps the order of the calls. A cancellation keeps the calls already finished.
