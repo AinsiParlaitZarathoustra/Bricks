@@ -464,28 +464,243 @@ fn repair_interrupted(agent: &Agent, why: &str) {
     }
     let blocks: Vec<ContentBlock> = unanswered
         .into_iter()
-        .map(|id| ContentBlock::ToolResult {
-            tool_use_id: id,
-            content: ToolResultContent::Text(format!(
-                "[the run was {why} before this tool call finished; any effect it already \
-                 had remains]"
-            )),
-            is_error: Some(true),
-        })
+        .map(|id| tool_result_block(&id, interrupted_text(why), true))
         .collect();
     push_message(agent, Message::user_blocks(blocks));
 }
 
-/// Store the active and raw histories under the session id.
+/// The result of a tool call stopped by the end of its run.
+fn interrupted_text(why: &str) -> String {
+    format!(
+        "[the run was {why} before this tool call finished; any effect it already \
+         had remains]"
+    )
+}
+
+fn tool_result_block(id: &str, text: String, is_error: bool) -> ContentBlock {
+    ContentBlock::ToolResult {
+        tool_use_id: id.to_string(),
+        content: ToolResultContent::Text(text),
+        is_error: Some(is_error),
+    }
+}
+
+/// A tool call of a round, as it finished.
+struct FinishedCall {
+    /// Its position in the response's calls.
+    index: usize,
+    id: String,
+    name: String,
+    input: serde_json::Value,
+    result: ToolResult,
+    /// Measured when the call ended.
+    duration: std::time::Duration,
+    /// The change an approval was given for.
+    change: Option<cersei_tools::preview::ChangePreview>,
+    /// The tool itself ran (refusals and denials did not).
+    executed: bool,
+}
+
+/// A finished call already published, waiting for the round's assembly.
+struct PublishedCall {
+    id: String,
+    name: String,
+    input: serde_json::Value,
+    result: ToolResult,
+    duration: std::time::Duration,
+    /// The tool's own output, before the engine adds notes to it.
+    own_output: String,
+    report: cersei_tools::tool_report::ToolReport,
+    /// The output as the active context shows it (possibly reduced).
+    context_text: String,
+}
+
+impl PublishedCall {
+    /// (active context text, raw history text).
+    fn render(&self) -> (String, String) {
+        (
+            self.report
+                .render(&self.name, self.duration, Some(&self.context_text)),
+            self.report.render(&self.name, self.duration, None),
+        )
+    }
+}
+
+enum CallSlot {
+    Published(PublishedCall),
+    /// A `Skill` proposal, published once its activation is decided.
+    Deferred(FinishedCall),
+}
+
+/// A successful `Skill` result proposing an activation (whether it is one
+/// of this agent's own is checked, once, when it is committed).
+fn is_skill_proposal(agent: &Agent, call: &FinishedCall) -> bool {
+    call.name == "Skill"
+        && !call.result.is_error
+        && agent.skill_session().is_some()
+        && call
+            .result
+            .metadata
+            .as_ref()
+            .and_then(|m| m.get(cersei_tools::skill_tool::ACTIVATION_KEY))
+            .is_some()
+}
+
+/// Publish a finished call: the change it applied, the files the model now
+/// knows, its output reduced for the active context (the original kept in
+/// the raw history and, when reduced, in the output store) and its tool end.
+/// Order-dependent parts (failure streaks, history) are left to the round.
+async fn publish_call(
+    agent: &Agent,
+    event_tx: &mpsc::Sender<AgentEvent>,
+    tool_ctx: &ToolContext,
+    files_read: &mut std::collections::HashSet<String>,
+    call: FinishedCall,
+    verified_skill: bool,
+) -> PublishedCall {
+    let FinishedCall {
+        id,
+        name,
+        input,
+        result,
+        duration,
+        change,
+        executed,
+        ..
+    } = call;
+    // Anything but a read may have changed files: cached code-understanding
+    // answers are dropped. A call refused or denied before running changed
+    // nothing.
+    if executed
+        && agent.tools.iter().any(|t| {
+            t.name() == name && t.permission_level() != cersei_tools::PermissionLevel::ReadOnly
+        })
+    {
+        cersei_tools::code_scout::notify_workspace_changed(tool_ctx);
+    }
+    let own_output = result.content.clone();
+    if let Some(change) = change.filter(|c| !result.is_error && !c.files.is_empty()) {
+        send(
+            agent,
+            Some(event_tx),
+            AgentEvent::EditApplied {
+                tool_call_id: id.clone(),
+                tool: name.clone(),
+                files: change.files,
+            },
+        )
+        .await;
+    }
+    // ── Bookkeeping for the read-before-edit guard ──
+    // The refusal itself happens before dispatch (`refusals_for_batch`);
+    // what remains is recording the files whose contents the model can be
+    // said to know. A successful *write* counts as much as a read: the model
+    // supplied that content, so writing it again is not a blind overwrite.
+    if !result.is_error {
+        for target in write_targets(&name, &input) {
+            files_read.insert(resolve_path(&tool_ctx.working_dir, &target));
+        }
+    }
+
+    // One rendering for every tool: a header (status, duration, code), then
+    // the output, notes, suggestion. Only the output is reduced for the
+    // active context (errors too: diagnostics are kept first).
+    let report = result.to_report();
+    let output = report.render_output();
+    let (context_text, partial_view, compression) = if verified_skill {
+        (output, false, None)
+    } else {
+        let level = *agent.compression_level.lock();
+        let compressor = Arc::clone(&agent.compressor);
+        let (tool, call_input, call_id) = (name.clone(), input.clone(), id.clone());
+        let (is_error, exit_code) = (report.status.is_error(), report.exit_code);
+        // CPU work and the original's write: off the async threads.
+        let processed = tokio::task::spawn_blocking(move || {
+            compressor.process(
+                &cersei_compression::ToolOutput {
+                    tool: &tool,
+                    input: &call_input,
+                    content: &output,
+                    is_error,
+                    call_id: &call_id,
+                    exit_code,
+                },
+                level,
+            )
+        })
+        .await
+        .expect("output reduction does not panic");
+        if let Some(r) = &processed.raw {
+            agent.raw_refs.lock().insert(id.clone(), r.clone());
+        }
+        (
+            processed.text,
+            processed.partial_view,
+            Some(processed.stats),
+        )
+    };
+    // A file counts as read only when the model saw its exact text: a
+    // skeleton or a summary is not enough to edit it.
+    if (name == "Read" || name == "read")
+        && !result.is_error
+        && !partial_view
+        && let Some(path) = input.get("file_path").and_then(|v| v.as_str())
+    {
+        files_read.insert(resolve_path(&tool_ctx.working_dir, path));
+    }
+    send(
+        agent,
+        Some(event_tx),
+        AgentEvent::ToolEnd {
+            name: name.clone(),
+            id: id.clone(),
+            result: result.content.clone(),
+            is_error: result.is_error,
+            duration,
+            compression,
+        },
+    )
+    .await;
+    PublishedCall {
+        id,
+        name,
+        input,
+        result,
+        duration,
+        own_output,
+        report,
+        context_text,
+    }
+}
+
+/// Store the active and raw histories under the session id, as one pair
+/// (one checkpoint for backends that publish pairs atomically, see
+/// `Memory::histories_are_atomic`). Both are copied together, then the
+/// locks are released before any serialization or I/O. Returns once the
+/// backend has published the pair (or found it already published).
 pub(crate) async fn save_session(agent: &Agent) -> Result<bool> {
     let (Some(memory), Some(session_id)) = (&agent.memory, &agent.session_id) else {
         return Ok(false);
     };
-    let messages = agent.messages.lock().clone();
-    memory.store(session_id, &messages).await?;
-    let raw = agent.raw_history.lock().clone();
+    let (histories, revision) = {
+        let active = agent.messages.lock();
+        let raw = agent.raw_history.lock();
+        (
+            cersei_memory::SessionHistories {
+                active: active.clone(),
+                raw: raw.clone(),
+            },
+            cersei_memory::SaveRevision {
+                owner: agent.save_owner,
+                seq: agent
+                    .save_revision
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                    + 1,
+            },
+        )
+    };
     memory
-        .store(&cersei_memory::session_keys::raw_history(session_id), &raw)
+        .store_histories(session_id, histories, revision)
         .await?;
     Ok(true)
 }
@@ -558,17 +773,18 @@ async fn run_loop(
     if agent.messages.lock().is_empty()
         && let (Some(memory), Some(session_id)) = (&agent.memory, &agent.session_id)
     {
-        let history = memory.load(session_id).await?;
+        // Both histories from one stored pair (one generation).
+        let stored = memory.load_histories(session_id).await?;
+        let history = stored.active;
         if !history.is_empty() {
             let count = history.len();
-            // The raw history is stored next to the session; an older
-            // session without one starts from the active history.
-            let raw = memory
-                .load(&cersei_memory::session_keys::raw_history(session_id))
-                .await
-                .ok()
-                .filter(|r| !r.is_empty())
-                .unwrap_or_else(|| history.clone());
+            // An older session without a raw history starts from the
+            // active one.
+            let raw = if stored.raw.is_empty() {
+                history.clone()
+            } else {
+                stored.raw
+            };
             *agent.raw_history.lock() = raw;
             // Pre-compaction snapshots, numbered from 1 without gaps; later
             // compactions continue the numbering instead of overwriting.
@@ -938,7 +1154,7 @@ async fn run_loop(
             output_modalities: Vec::new(),
         };
 
-        let status = ensure_budget(agent, &mut request, &event_tx).await?;
+        let status = ensure_budget(agent, &mut request, &event_tx, cancel).await?;
         // The context this request describes: its usage measures it only if
         // nothing (a switch, a rewrite) changed it before the response.
         let mut sent_version = agent.context.lock().version();
@@ -994,8 +1210,12 @@ async fn run_loop(
                         CompactReason::ContextOverflow,
                         true,
                         Some(&event_tx),
+                        cancel,
                     )
                     .await;
+                    if outcome == crate::compact::CompactionOutcome::Cancelled {
+                        return Err(CerseiError::Cancelled);
+                    }
                     if !outcome.is_compacted() {
                         return Err(e);
                     }
@@ -1080,9 +1300,17 @@ async fn run_loop(
             if e.is_context_overflow() && overflow_recoveries < allowed {
                 // Refused mid-stream before any tool ran: compact and redo the turn.
                 overflow_recoveries += 1;
-                let outcome =
-                    run_compaction(agent, CompactReason::ContextOverflow, true, Some(&event_tx))
-                        .await;
+                let outcome = run_compaction(
+                    agent,
+                    CompactReason::ContextOverflow,
+                    true,
+                    Some(&event_tx),
+                    cancel,
+                )
+                .await;
+                if outcome == crate::compact::CompactionOutcome::Cancelled {
+                    return Err(CerseiError::Cancelled);
+                }
                 if outcome.is_compacted() {
                     // The same turn again: it produced nothing.
                     turn = turn.saturating_sub(1);
@@ -1296,7 +1524,10 @@ async fn run_loop(
                 });
             }
 
-            // Phase 2: Execute all tools in PARALLEL via join_all
+            // Phase 2: Execute all tools in parallel. Each call is published
+            // (edit applied, tool end) as soon as it finishes, without
+            // waiting for slower siblings; the conversation is assembled
+            // afterwards in the order of the calls.
             let msg_count = agent.messages.lock().len();
             // Built once, outside the per-call closure: this is the same
             // `agent.tools` the lookup below uses (so MCP-injected tools
@@ -1315,9 +1546,10 @@ async fn run_loop(
             // about whether the edit happened.
             let refusals = refusals_for_batch(&tool_use_blocks, &files_read, &tool_ctx.working_dir);
 
-            let exec_futures: Vec<_> = tool_use_blocks
+            let mut pending: futures::stream::FuturesUnordered<_> = tool_use_blocks
                 .iter()
-                .map(|(tool_id, tool_name, tool_input)| {
+                .enumerate()
+                .map(|(index, (tool_id, tool_name, tool_input))| {
                     let tool_name = tool_name.clone();
                     let registered_tool_names = registered_tool_names.clone();
                     let refusal = refusals.get(tool_id).cloned();
@@ -1337,6 +1569,8 @@ async fn run_loop(
                         // The change an approval was given for (written
                         // if the call succeeds).
                         let mut approved_change: Option<cersei_tools::preview::ChangePreview> = None;
+                        // The tool itself ran (it may have changed files).
+                        let mut executed = false;
 
                         let result = if let Some(msg) = refusal {
                             // Refused before dispatch: the tool never runs,
@@ -1433,9 +1667,11 @@ async fn run_loop(
                                                     .await
                                                     .filter(|p| p.refusal.is_none());
                                             }
+                                            executed = true;
                                             execute_admitted(tool, new_input, &tool_ctx).await
                                         }
                                         _ => {
+                                            executed = true;
                                             execute_admitted(tool, tool_input.clone(), &tool_ctx)
                                                 .await
                                         }
@@ -1457,187 +1693,165 @@ async fn run_loop(
                             )
                         };
 
+                        // Measured when the call ends, not when it is published.
                         let duration = start.elapsed();
-                        (tool_id, tool_name, tool_input, result, duration, approved_change)
+                        FinishedCall {
+                            index,
+                            id: tool_id,
+                            name: tool_name,
+                            input: tool_input,
+                            result,
+                            duration,
+                            change: approved_change,
+                            executed,
+                        }
                     }
                 })
                 .collect();
 
-            // Cancelling the turn drops the running tool futures: a shell
-            // command is then interrupted by its own guard instead of
-            // running to its timeout.
-            let results = tokio::select! {
-                r = futures::future::join_all(exec_futures) => r,
-                _ = cancel.cancelled() => {
-                    // Sub-agents stop with the run's token; wait for their
-                    // cleanup (shells, terminal state) rather than drop them.
-                    crate::agents::spawn::settle_children(
-                        &agent.extensions,
-                        std::time::Duration::from_secs(10),
+            // One slot per call, in the order of the calls.
+            let mut slots: Vec<Option<CallSlot>> =
+                (0..tool_use_blocks.len()).map(|_| None).collect();
+            let mut cancelled = false;
+            loop {
+                // Cancelling the turn drops the running tool futures: a
+                // shell command is then interrupted by its own guard instead
+                // of running to its timeout.
+                let next = tokio::select! {
+                    n = futures::StreamExt::next(&mut pending) => n,
+                    _ = cancel.cancelled() => {
+                        cancelled = true;
+                        break;
+                    }
+                };
+                let Some(call) = next else { break };
+                let index = call.index;
+                // A skill activation proposed by this agent's own `Skill`
+                // tool is announced only once committed (it may need a
+                // compaction): that happens below, in the order of the calls.
+                slots[index] = Some(if is_skill_proposal(agent, &call) {
+                    CallSlot::Deferred(call)
+                } else {
+                    CallSlot::Published(
+                        publish_call(agent, &event_tx, &tool_ctx, &mut files_read, call, false)
+                            .await,
                     )
-                    .await;
-                    return Err(CerseiError::Cancelled);
-                }
-            };
+                });
+            }
+            // The calls still running stop here (their guards end shells).
+            drop(pending);
 
-            // Anything but a read may have changed files: cached
-            // code-understanding answers are dropped.
-            if results.iter().any(|(_, name, ..)| {
-                agent.tools.iter().any(|t| {
-                    t.name() == name
-                        && t.permission_level() != cersei_tools::PermissionLevel::ReadOnly
-                })
-            }) {
-                cersei_tools::code_scout::notify_workspace_changed(&tool_ctx);
+            if cancelled {
+                // Results already finished are kept, with the effects they
+                // reported; the calls stopped get the interruption result
+                // `repair_interrupted` would give them. Nothing is invented
+                // for an effect that did not happen.
+                let mut active = Vec::new();
+                let mut raw = Vec::new();
+                for (index, slot) in slots.into_iter().enumerate() {
+                    let id = tool_use_blocks[index].0.clone();
+                    match slot {
+                        Some(CallSlot::Published(p)) => {
+                            let (capped, full) = p.render();
+                            active.push(tool_result_block(&p.id, capped, p.result.is_error));
+                            raw.push(tool_result_block(&p.id, full, p.result.is_error));
+                        }
+                        Some(CallSlot::Deferred(call)) => {
+                            // Finished, never admitted to the context.
+                            let text = format!(
+                                "Skill `{}` was not activated: the run was cancelled by the user.",
+                                call.input
+                                    .get("name")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                            );
+                            let mut failed = call;
+                            failed.result = ToolResult::error(text);
+                            let p = publish_call(
+                                agent,
+                                &event_tx,
+                                &tool_ctx,
+                                &mut files_read,
+                                failed,
+                                false,
+                            )
+                            .await;
+                            let (capped, full) = p.render();
+                            active.push(tool_result_block(&p.id, capped, true));
+                            raw.push(tool_result_block(&p.id, full, true));
+                        }
+                        None => {
+                            let text = interrupted_text("cancelled by the user");
+                            active.push(tool_result_block(&id, text.clone(), true));
+                            raw.push(tool_result_block(&id, text, true));
+                        }
+                    }
+                }
+                agent.raw_history.lock().push(Message::user_blocks(raw));
+                agent.messages.lock().push(Message::user_blocks(active));
+                // Sub-agents stop with the run's token; wait for their
+                // cleanup (shells, terminal state) rather than drop them.
+                crate::agents::spawn::settle_children(
+                    &agent.extensions,
+                    std::time::Duration::from_secs(10),
+                )
+                .await;
+                return Err(CerseiError::Cancelled);
             }
 
-            // Phase 3: Process results sequentially (emit events, build result blocks)
+            // Phase 3: assemble the round in the order of the calls (the
+            // history, the progress check and the failure streaks never
+            // depend on which call finished first).
             let mut result_blocks: Vec<ContentBlock> = Vec::new();
             // (name, input, is_error, output) of each call, for the
             // progress check.
             let mut round: Vec<(String, String, bool, String)> = Vec::new();
             let mut raw_blocks: Vec<ContentBlock> = Vec::new();
 
-            for (tool_id, tool_name, tool_input, mut result, duration, change) in results {
-                // A skill activation proposed by this agent's own `Skill`
-                // tool (its one-time id is in the ledger): committed once it
-                // fits, refused whole otherwise. Its text is never reduced.
-                let verified_skill =
-                    commit_skill_activation(agent, &tool_name, &mut result, &event_tx).await;
-                // The tool's own output, before the engine adds notes to it
-                // (the failure streak changes them every round).
-                let own_output = result.content.clone();
-                if let Some(change) = change.filter(|c| !result.is_error && !c.files.is_empty()) {
-                    send(
-                        agent,
-                        Some(&event_tx),
-                        AgentEvent::EditApplied {
-                            tool_call_id: tool_id.clone(),
-                            tool: tool_name.clone(),
-                            files: change.files,
-                        },
-                    )
-                    .await;
-                }
-                // ── Bookkeeping for the read-before-edit guard ──
-                // The refusal itself now happens before dispatch; see
-                // `refusals_for_batch`. What remains here is recording the
-                // files whose contents the model can be said to know,
-                // which needs the result to confirm the call succeeded.
-                //
-                // A successful *write* counts as much as a read: the model
-                // supplied that content, so it is not overwriting anything
-                // unseen. Recording only reads meant a file the model had
-                // just created with `Write` could never be written again —
-                // it existed on disk, was absent from this set, and every
-                // later `Write`/`Edit` was refused as a blind overwrite of
-                // content the model itself had authored.
-                if !result.is_error {
-                    for target in write_targets(&tool_name, &tool_input) {
-                        files_read.insert(resolve_path(&tool_ctx.working_dir, &target));
+            for slot in slots.into_iter().flatten() {
+                let mut p = match slot {
+                    CallSlot::Published(p) => p,
+                    CallSlot::Deferred(mut call) => {
+                        // Committed once it fits, refused whole otherwise.
+                        // Its text is never reduced.
+                        let verified =
+                            commit_skill_activation(agent, &call.name, &mut call.result, &event_tx)
+                                .await;
+                        publish_call(agent, &event_tx, &tool_ctx, &mut files_read, call, verified)
+                            .await
                     }
-                }
+                };
 
                 // ── Guard: Per-tool error counter with reflection (F-06) ──
-                if result.is_error {
-                    let count = tool_error_counts.entry(tool_name.clone()).or_insert(0);
+                if p.result.is_error {
+                    let count = tool_error_counts.entry(p.name.clone()).or_insert(0);
                     *count += 1;
-                    let note = error_budget_note(&tool_name, *count);
-                    match result.report.as_mut() {
-                        Some(r) => r.notes.push(note),
-                        None => result.content = format!("{}\n\n{}", result.content, note),
-                    }
+                    p.report.notes.push(error_budget_note(&p.name, *count));
                 } else {
-                    tool_error_counts.remove(&tool_name);
+                    tool_error_counts.remove(&p.name);
                 }
 
-                // One rendering for every tool: a header (status,
-                // duration, code), then the output, notes, suggestion.
-                // Only the output is reduced for the active context
-                // (errors too: diagnostics are kept first); the original
-                // stays in the raw history and, when reduced, in the
-                // output store.
-                let report = result.to_report();
-                let output = report.render_output();
-                let level = *agent.compression_level.lock();
-                let (context_text, partial_view, compression) = if verified_skill {
-                    (output.clone(), false, None)
-                } else {
-                    let processed = agent.compressor.process(
-                        &cersei_compression::ToolOutput {
-                            tool: &tool_name,
-                            input: &tool_input,
-                            content: &output,
-                            is_error: report.status.is_error(),
-                            call_id: &tool_id,
-                            exit_code: report.exit_code,
-                        },
-                        level,
-                    );
-                    if let Some(r) = &processed.raw {
-                        agent.raw_refs.lock().insert(tool_id.clone(), r.clone());
-                    }
-                    (
-                        processed.text,
-                        processed.partial_view,
-                        Some(processed.stats),
-                    )
-                };
-                // A file counts as read only when the model saw its exact
-                // text: a skeleton or a summary is not enough to edit it.
-                if (tool_name == "Read" || tool_name == "read")
-                    && !result.is_error
-                    && !partial_view
-                    && let Some(path) = tool_input.get("file_path").and_then(|v| v.as_str())
-                {
-                    files_read.insert(resolve_path(&tool_ctx.working_dir, path));
-                }
-                let capped_content = report.render(&tool_name, duration, Some(&context_text));
-                let full_text = report.render(&tool_name, duration, None);
-                raw_blocks.push(ContentBlock::ToolResult {
-                    tool_use_id: tool_id.clone(),
-                    content: ToolResultContent::Text(full_text.clone()),
-                    is_error: Some(result.is_error),
-                });
-
-                let _ = event_tx
-                    .send(AgentEvent::ToolEnd {
-                        name: tool_name.clone(),
-                        id: tool_id.clone(),
-                        result: result.content.clone(),
-                        is_error: result.is_error,
-                        duration,
-                        compression,
-                    })
-                    .await;
-                agent.emit(AgentEvent::ToolEnd {
-                    name: tool_name.clone(),
-                    id: tool_id.clone(),
-                    result: result.content.clone(),
-                    is_error: result.is_error,
-                    duration,
-                    compression,
-                });
-
+                let (capped_content, full_text) = p.render();
+                raw_blocks.push(tool_result_block(
+                    &p.id,
+                    full_text.clone(),
+                    p.result.is_error,
+                ));
                 round.push((
-                    tool_name.clone(),
-                    tool_input.to_string(),
-                    result.is_error,
-                    own_output,
+                    p.name.clone(),
+                    p.input.to_string(),
+                    p.result.is_error,
+                    p.own_output.clone(),
                 ));
                 tool_calls.push(ToolCallRecord {
-                    name: tool_name,
-                    id: tool_id.clone(),
-                    input: tool_input,
+                    name: p.name,
+                    id: p.id.clone(),
+                    input: p.input,
                     result: full_text,
-                    is_error: result.is_error,
-                    duration,
+                    is_error: p.result.is_error,
+                    duration: p.duration,
                 });
-                result_blocks.push(ContentBlock::ToolResult {
-                    tool_use_id: tool_id,
-                    content: ToolResultContent::Text(capped_content),
-                    is_error: Some(result.is_error),
-                });
+                result_blocks.push(tool_result_block(&p.id, capped_content, p.result.is_error));
             }
 
             // Add tool results as user message: reduced in the active
@@ -1702,14 +1916,18 @@ async fn run_loop(
                 )
                 .await;
             }
-            if agent.context.lock().should_compact(&status) {
-                run_compaction(
+            if agent.context.lock().should_compact(&status)
+                && run_compaction(
                     agent,
                     CompactReason::ThresholdExceeded,
                     false,
                     Some(&event_tx),
+                    cancel,
                 )
-                .await;
+                .await
+                    == crate::compact::CompactionOutcome::Cancelled
+            {
+                return Err(CerseiError::Cancelled);
             }
         }
     }
@@ -1833,8 +2051,11 @@ async fn send(agent: &Agent, tx: Option<&mpsc::Sender<AgentEvent>>, event: Agent
     agent.emit(event);
 }
 
-pub(crate) async fn compact_now(agent: &Agent) -> crate::compact::CompactionOutcome {
-    run_compaction(agent, CompactReason::ManualTrigger, true, None).await
+pub(crate) async fn compact_now(
+    agent: &Agent,
+    cancel: &tokio_util::sync::CancellationToken,
+) -> crate::compact::CompactionOutcome {
+    run_compaction(agent, CompactReason::ManualTrigger, true, None, cancel).await
 }
 
 /// Run one compaction attempt and apply it if it succeeds. `force` skips the
@@ -1844,8 +2065,11 @@ async fn run_compaction(
     reason: CompactReason,
     force: bool,
     tx: Option<&mpsc::Sender<AgentEvent>>,
+    cancel: &tokio_util::sync::CancellationToken,
 ) -> crate::compact::CompactionOutcome {
-    use crate::compact::{CompactionOutcome, CompactionPlan, compact_history};
+    use crate::compact::{
+        COMPACTION_ATTEMPT_TIMEOUT, CompactionOutcome, CompactionPlan, compact_history_with,
+    };
 
     let messages = agent.messages.lock().clone();
     let version = agent.context.lock().version();
@@ -1913,7 +2137,15 @@ async fn run_compaction(
         frame_tokens,
         instructions: None,
     };
-    let run = compact_history(agent.provider().as_ref(), &messages, &est, &plan).await;
+    let run = compact_history_with(
+        agent.provider().as_ref(),
+        &messages,
+        &est,
+        &plan,
+        cancel,
+        tokio::time::Instant::now() + COMPACTION_ATTEMPT_TIMEOUT,
+    )
+    .await;
 
     // The summary call counts once in the session totals, whatever its fate.
     if let Some(u) = &run.usage {
@@ -1982,19 +2214,8 @@ async fn run_compaction(
                 .invalidate(format!("compaction #{number} rewrote the history"));
             // Persist now, so the session, its raw history and the snapshot
             // stay consistent even if the run stops before its end.
-            if let (Some(memory), Some(sid)) = (&agent.memory, &agent.session_id) {
-                let active = agent.messages.lock().clone();
-                let raw = agent.raw_history.lock().clone();
-                let stored = async {
-                    memory.store(sid, &active).await?;
-                    memory
-                        .store(&cersei_memory::session_keys::raw_history(sid), &raw)
-                        .await
-                }
-                .await;
-                if let Err(e) = stored {
-                    tracing::warn!("could not store the compacted session: {e}");
-                }
+            if let Err(e) = save_session(agent).await {
+                tracing::warn!("could not store the compacted session: {e}");
             }
             send(
                 agent,
@@ -2006,6 +2227,9 @@ async fn run_compaction(
             )
             .await;
         }
+        // A cancellation is not an attempt on this history: the next
+        // compaction may try it again, and it never counts as a failure.
+        (CompactionOutcome::Cancelled, _) => {}
         (outcome, _) => {
             let mut st = agent.compaction_state.lock();
             st.last_unsuccessful = Some((version, messages.len()));
@@ -2055,7 +2279,12 @@ async fn admit_skill_text(
     if check(agent).0 {
         return Ok(());
     }
-    let outcome = run_compaction(agent, CompactReason::BudgetExceeded, true, tx).await;
+    // Within the current run: its cancellation stops the compaction.
+    let cancel = agent.run_cancellation();
+    let outcome = run_compaction(agent, CompactReason::BudgetExceeded, true, tx, &cancel).await;
+    if outcome == crate::compact::CompactionOutcome::Cancelled {
+        return Err("the run was cancelled".into());
+    }
     let (ok, est, left) = check(agent);
     if ok {
         return Ok(());
@@ -2243,6 +2472,7 @@ async fn ensure_budget(
     agent: &Agent,
     request: &mut CompletionRequest,
     tx: &mpsc::Sender<AgentEvent>,
+    cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<ContextStatus> {
     for attempt in 0..2 {
         let model = model_view(agent);
@@ -2255,7 +2485,7 @@ async fn ensure_budget(
         let fits = match decision {
             BudgetDecision::Fits => return Ok(status),
             BudgetDecision::Preflight(why) => {
-                match preflight(agent, &model, request, &status, &why, tx).await {
+                match preflight(agent, &model, request, &status, &why, tx, cancel).await? {
                     Some(st) => return Ok(st),
                     None => false,
                 }
@@ -2265,7 +2495,10 @@ async fn ensure_budget(
         debug_assert!(!fits);
         if attempt == 0 && agent.auto_compact {
             let outcome =
-                run_compaction(agent, CompactReason::BudgetExceeded, true, Some(tx)).await;
+                run_compaction(agent, CompactReason::BudgetExceeded, true, Some(tx), cancel).await;
+            if outcome == crate::compact::CompactionOutcome::Cancelled {
+                return Err(CerseiError::Cancelled);
+            }
             if outcome.is_compacted() {
                 request.messages = agent.messages.lock().clone();
                 continue;
@@ -2289,9 +2522,14 @@ async fn ensure_budget(
     unreachable!("the second attempt always returns")
 }
 
+/// Absolute limit of one call to a configured token-counting endpoint.
+/// Past it the local estimate is used, as for any counting failure.
+pub(crate) const TOKEN_COUNT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// A precise check of the complete request: the configured counting endpoint
 /// when there is one, else a full local estimate. `Some(status)` when the
-/// request fits.
+/// request fits. A cancellation during the count stops here, without the
+/// fallback.
 async fn preflight(
     agent: &Agent,
     model: &ModelView,
@@ -2299,11 +2537,24 @@ async fn preflight(
     status: &ContextStatus,
     why: &str,
     tx: &mpsc::Sender<AgentEvent>,
-) -> Option<ContextStatus> {
+    cancel: &tokio_util::sync::CancellationToken,
+) -> Result<Option<ContextStatus>> {
     let limit = status.input_limit.saturating_sub(status.margin);
     let mut note = None;
     if model.token_counting {
-        match agent.provider().count_request_tokens(request).await {
+        let provider = agent.provider();
+        let counted = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return Err(CerseiError::Cancelled),
+            r = tokio::time::timeout(TOKEN_COUNT_TIMEOUT, provider.count_request_tokens(request)) => r,
+        };
+        let counted = counted.unwrap_or_else(|_| {
+            Err(CerseiError::Provider(format!(
+                "no answer within {} s",
+                TOKEN_COUNT_TIMEOUT.as_secs()
+            )))
+        });
+        match counted {
             Ok(Some(n)) => {
                 let st = {
                     let mut ctx = agent.context.lock();
@@ -2318,7 +2569,7 @@ async fn preflight(
                     )),
                 )
                 .await;
-                return (n <= limit).then_some(st);
+                return Ok((n <= limit).then_some(st));
             }
             Ok(None) => {}
             Err(e) => {
@@ -2342,7 +2593,7 @@ async fn preflight(
         )),
     )
     .await;
-    (central <= limit).then(|| status.clone())
+    Ok((central <= limit).then(|| status.clone()))
 }
 
 // ─── Progress check ──────────────────────────────────────────────────────────
@@ -3046,5 +3297,67 @@ mod retry_delay_tests {
             assert!(n.contains(&format!("HTTP {code}")), "{n}");
             assert!(!n.contains("SECRET") && !n.contains("Bearer"), "{n}");
         }
+    }
+}
+
+#[cfg(test)]
+mod compaction_cancel_tests {
+    use super::*;
+
+    struct Unreachable;
+
+    #[async_trait::async_trait]
+    impl cersei_provider::Provider for Unreachable {
+        fn name(&self) -> &str {
+            "unreachable"
+        }
+        fn context_window(&self, _: &str) -> u64 {
+            100_000
+        }
+        async fn complete(
+            &self,
+            _: CompletionRequest,
+        ) -> Result<cersei_provider::CompletionStream> {
+            panic!("a cancelled compaction sends nothing");
+        }
+    }
+
+    /// A cancellation is not an unsuccessful attempt: it never counts
+    /// towards disabling compaction, and the next automatic compaction may
+    /// try the same history.
+    #[tokio::test]
+    async fn a_cancelled_compaction_poisons_nothing() {
+        let mut history = Vec::new();
+        for i in 0..12 {
+            history.push(Message::user(format!(
+                "step {i}: {}",
+                "detail ".repeat(300)
+            )));
+            history.push(Message::assistant(format!("done {i}")));
+        }
+        let agent = Agent::builder()
+            .provider(Unreachable)
+            .with_messages(history)
+            .working_dir(std::env::temp_dir())
+            .build()
+            .unwrap();
+        let cancelled = tokio_util::sync::CancellationToken::new();
+        cancelled.cancel();
+        for _ in 0..5 {
+            let outcome = run_compaction(
+                &agent,
+                CompactReason::ThresholdExceeded,
+                false,
+                None,
+                &cancelled,
+            )
+            .await;
+            assert_eq!(outcome, crate::compact::CompactionOutcome::Cancelled);
+        }
+        let st = agent.compaction_state.lock();
+        assert_eq!(st.failures, 0);
+        assert!(!st.disabled);
+        assert_eq!(st.last_unsuccessful, None);
+        assert_eq!(st.applied, 0);
     }
 }

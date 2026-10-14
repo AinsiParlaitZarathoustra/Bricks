@@ -269,3 +269,110 @@ fn extreme_sizes_and_a_resize_during_a_run_do_not_panic() {
     let t = text(&statusbar::status_line(&a, "⠋", true, 80));
     assert!(t.contains("updating memory"), "{t}");
 }
+
+fn at(a: &App, secs: u64) -> std::time::Instant {
+    a.run.as_ref().expect("running").1 + std::time::Duration::from_secs(secs)
+}
+
+#[test]
+fn working_shows_the_run_elapsed_time_then_the_cancel_hint() {
+    let a = app("Example Model", "/Users/me/Documents/bricks", true);
+    let line =
+        |secs: u64, w: usize| text(&statusbar::status_line_at(&a, "⠦", false, w, at(&a, secs)));
+    assert!(line(12, 200).contains("⠦ working [12 s] (Ctrl+C to cancel)"));
+    assert!(line(65, 200).contains("⠦ working [1 min 05 s] (Ctrl+C to cancel)"));
+    assert!(line(3723, 200).contains("⠦ working [1 h 02 min 03 s] (Ctrl+C to cancel)"));
+    assert!(line(93_784, 200).contains("⠦ working [1 d 02 h 03 min 04 s] (Ctrl+C to cancel)"));
+    assert!(!line(12, 200).contains("—"), "the old form is gone");
+    // Narrow: activity, time and cancellation come before the rest.
+    for w in [28usize, 32, 36, 40, 50] {
+        let t = line(65, w);
+        assert!(statusbar::width(&t) <= w, "{w}: {t:?}");
+        assert!(
+            t.contains("[1 min 05 s]") && t.contains("(Ctrl+C"),
+            "{w}: {t}"
+        );
+    }
+    let t = line(65, 33);
+    assert!(t.contains("⠦ working [1 min 05 s] (Ctrl+C)"), "{t}");
+    // Extreme widths: shortened, never wider than the terminal.
+    for w in 0..28usize {
+        for secs in [0, 65, 93_784, 40 * 86_400] {
+            let t = line(secs, w);
+            assert!(statusbar::width(&t) <= w, "{w}: {t:?}");
+        }
+    }
+    let t = line(65, 14);
+    assert!(
+        t.contains("[1 min 05 s]"),
+        "the time survives a small width: {t}"
+    );
+}
+
+#[test]
+fn the_timer_follows_the_run_and_restarts_with_the_next() {
+    let mut a = app("Example Model", "/Users/me/Documents/bricks", true);
+    let first = a.run.as_ref().unwrap().1;
+    // Tool events, approvals and ticks do not reset it.
+    a.apply(&env(
+        6,
+        Event::ToolStarted {
+            tool_call_id: "t1".into(),
+            name: "Bash".into(),
+            input: serde_json::json!({"command": "sleep 1"}),
+        },
+    ));
+    assert_eq!(a.run.as_ref().unwrap().1, first);
+    // End of the run (succeeded or cancelled): no timer any more.
+    for (seq, outcome) in [(7u64, RunOutcome::Succeeded), (9, RunOutcome::Cancelled)] {
+        a.apply(&env(
+            seq,
+            Event::RunFinished {
+                outcome,
+                failure: None,
+                error: None,
+                termination: None,
+                text: String::new(),
+                turns: 1,
+                approvals_unsatisfied: vec![],
+            },
+        ));
+        assert!(a.run.is_none());
+        let t = text(&statusbar::status_line(&a, "⠦", false, 200));
+        assert!(!t.contains("working") && !t.contains(" s]"), "{t}");
+        // A new run starts from zero.
+        a.apply(&env(
+            seq + 1,
+            Event::RunStarted {
+                prompt: "again".into(),
+                attachments: vec![],
+                model: "local/m".into(),
+                reasoning: None,
+            },
+        ));
+        let started = a.run.as_ref().unwrap().1;
+        assert!(started >= first);
+        let t = text(&statusbar::status_line_at(&a, "⠦", false, 200, started));
+        assert!(t.contains("working [0 s]"), "{t}");
+    }
+    // A session opened (resumed or new) has no run, hence no old start.
+    a.apply(&env(
+        20,
+        Event::SessionOpened {
+            working_dir: "/p".into(),
+            model: "local/m".into(),
+            reasoning: None,
+            effective_reasoning: None,
+            resumed: true,
+            message_count: 4,
+            warnings: vec![],
+        },
+    ));
+    assert!(a.run.is_none());
+    // Maintenance outside a run stays apart from `working`.
+    let t = text(&statusbar::status_line(&a, "⠦", true, 200));
+    assert!(
+        t.contains("updating memory") && !t.contains("working"),
+        "{t}"
+    );
+}

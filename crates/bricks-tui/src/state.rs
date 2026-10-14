@@ -187,6 +187,8 @@ pub struct App {
     pub totals: EditTotals,
     /// The configured models (names, profile labels), from the engine.
     pub models: Vec<cersei_agent::control::ModelChoice>,
+    /// The live cells' rendering kept between frames.
+    pub render_cache: std::sync::Mutex<crate::render_cache::RenderCache>,
 }
 
 fn summary(input: &serde_json::Value) -> String {
@@ -277,6 +279,13 @@ impl App {
                 message_count,
             } => {
                 self.status.effective_reasoning = effective_reasoning.clone();
+                // A session opened is never in a run: no earlier start time
+                // carries over (the next `run_started` sets a new one).
+                self.run = None;
+                self.render_cache
+                    .get_mut()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clear();
                 // Per-response usage belongs to the session it was received
                 // in: a resumed or another session starts an empty list.
                 self.status.turns_usage.clear();

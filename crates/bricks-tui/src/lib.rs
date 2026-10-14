@@ -19,6 +19,7 @@ pub mod links;
 pub mod markdown;
 pub mod mentions;
 pub mod overlay;
+pub mod render_cache;
 pub mod state;
 pub mod statusbar;
 pub mod term;
@@ -291,12 +292,22 @@ pub async fn run(ctl: Controller, mut events: EventStream, opts: TuiOptions) -> 
             },
             env = events.next() => match env {
                 Some(env) => {
-                    ui.on_event(&env);
-                    if let Event::SessionOpened { working_dir, resumed, .. } = &env.event {
-                        ui.set_workspace(std::path::Path::new(working_dir));
-                        if *resumed {
-                            let history = ctl.history().await;
-                            ui.app.load_history(&history);
+                    // Events already queued (a burst of text fragments) are
+                    // applied before the next drawing; none is waited for.
+                    let mut next = Some(env);
+                    let mut applied = 0;
+                    while let Some(env) = next.take() {
+                        ui.on_event(&env);
+                        if let Event::SessionOpened { working_dir, resumed, .. } = &env.event {
+                            ui.set_workspace(std::path::Path::new(working_dir));
+                            if *resumed {
+                                let history = ctl.history().await;
+                                ui.app.load_history(&history);
+                            }
+                        }
+                        applied += 1;
+                        if applied < 512 {
+                            next = events.try_next();
                         }
                     }
                     Vec::new()

@@ -15,7 +15,7 @@ pub trait Hook: Send + Sync {
 
 ## Hook events
 
-Only some events are fired by the engine in 0.6.0. The table says which.
+Only some events are fired by the engine in 0.6.1. The table says which.
 
 | Event | Fired by the engine | What a non-`Continue` action does |
 |-------|---------------------|-----------------------------------|
@@ -36,7 +36,7 @@ Tool-call hooks run after the permission check, so a call the policy denies neve
 | `Continue` | Proceed normally |
 | `Block(reason)` | Stops the operation: on `PreToolUse`, the tool is skipped; on `PostModelTurn`, the run fails. Ignored elsewhere |
 | `ModifyInput(Value)` | Replaces the tool's input JSON. Only meaningful on `PreToolUse` |
-| `InjectMessage(Box<Message>)` | Declared, but the engine does not apply it in 0.6.0. It still counts as the first non-`Continue` action, so later hooks do not run for that event |
+| `InjectMessage(Box<Message>)` | Declared, but the engine does not apply it in 0.6.1. It still counts as the first non-`Continue` action, so later hooks do not run for that event |
 
 ## HookContext
 
@@ -45,8 +45,8 @@ pub struct HookContext {
     pub event: HookEvent,
     pub tool_name: Option<String>,         // set for tool events
     pub tool_input: Option<Value>,         // set for PreToolUse
-    pub tool_result: Option<String>,       // set only when PostToolUse fires (not in 0.6.0)
-    pub tool_is_error: Option<bool>,       // set only when PostToolUse fires (not in 0.6.0)
+    pub tool_result: Option<String>,       // set only when PostToolUse fires (not in 0.6.1)
+    pub tool_is_error: Option<bool>,       // set only when PostToolUse fires (not in 0.6.1)
     pub turn: u32,                         // current turn number
     pub cumulative_cost_usd: f64,          // running cost total (also available as a method)
     pub message_count: usize,              // messages in conversation

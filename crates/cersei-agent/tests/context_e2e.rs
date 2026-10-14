@@ -715,7 +715,15 @@ async fn a_restored_session_brings_back_its_raw_history_and_is_estimated() {
     };
     let a = build();
     a.run("one").await.unwrap();
-    assert!(mem_dir.path().join("s1.raw.jsonl").exists());
+    // The raw history is stored with the session, in its checkpoint.
+    let stored = cersei_memory::Memory::load_histories(
+        &cersei_memory::JsonlMemory::new(mem_dir.path()),
+        "s1",
+    )
+    .await
+    .unwrap();
+    assert_eq!(stored.raw.len(), 2);
+    assert!(!mem_dir.path().join("s1.raw.jsonl").exists());
 
     let b = build();
     // Before any request: restored history, nothing measured yet.

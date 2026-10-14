@@ -32,6 +32,20 @@ export function Tag({ type }) {
   );
 }
 
+<Version version="0.6.1" date="2026-10-14">
+
+<Tag type="added" /> **Run timer next to `working`**: `working [1 min 05 s] (Ctrl+C to cancel)`, the wall time of the run in SI symbols, kept first on narrow status bars. Tool and event durations stay in milliseconds. Ctrl+C also cancels a `/compact` in progress.
+
+<Tag type="changed" /> **Tool calls are published as they finish**: a fast call's `tool_finished` and `edit_applied` no longer wait for a slow sibling; the history keeps the order of the calls. A cancellation keeps the calls already finished.
+
+<Tag type="changed" /> **Compaction and remote token counting can be cancelled and are bounded** (300 s per compaction attempt, 30 s per count, then the local estimate). New outcome `CompactionOutcome::Cancelled`, never counted as a failure.
+
+<Tag type="fixed" /> **CodeSearch** reads the sources once per build, off the async threads, shares concurrent builds, and no longer reuses an index after an edit (inventory of the sources plus notifications from writing tools). **Glob** honours `.gitignore`/`.ignore`, prunes ignored directories and stops past its limit, without claiming a total. **Live Markdown** is no longer re-parsed at every tick; while streaming, only the open block is.
+
+<Tag type="fixed" /> **Session histories are saved as one pair**: with `JsonlMemory`, `<id>.jsonl` becomes one checkpoint (active and raw histories) replaced atomically, so an interrupted save leaves the previous complete pair. Older sessions stay readable. `Memory` gains `store_histories`, `load_histories` and `histories_are_atomic`, with default methods for existing backends.
+
+</Version>
+
 <Version version="0.6.0" date="2026-10-11">
 
 <Tag type="changed" /> **Rust edition 2024.** The workspace (and `examples/benchmark`) moves from edition 2021 to edition 2024. A recent stable Rust is required (1.88 or later for let chains; tested with 1.98.1). The migration was done with `cargo fix --edition` and reviewed by hand; the MCP configuration tests no longer modify the process environment.

@@ -583,3 +583,31 @@ async fn effort_and_the_pickers_default_reset_the_profile() {
     let text = format!("{o:?}");
     assert!(text.contains("No reasoning profiles configured for this model."));
 }
+
+#[test]
+fn ctrl_c_cancels_a_manual_compaction_in_progress() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ui = Ui::new(dir.path());
+    let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+    typed(&mut ui, "/compact");
+    let effects = ui.on_key(key(KeyCode::Enter));
+    assert!(matches!(&effects[..], [Effect::Send(Command::Compact)]));
+    // Outside a run, Ctrl+C reaches the compaction instead of arming quit.
+    let effects = ui.on_key(ctrl_c);
+    assert!(matches!(&effects[..], [Effect::Send(Command::Cancel)]));
+    ui.on_event(&Envelope {
+        schema: SCHEMA_VERSION,
+        session_id: "s".into(),
+        run_id: None,
+        seq: 1,
+        at: 0,
+        event: Event::Compaction {
+            reason: "ManualTrigger".into(),
+            outcome: "cancelled: the history is unchanged".into(),
+            compacted: false,
+        },
+    });
+    // Answered: Ctrl+C is back to its idle meaning.
+    assert!(ui.on_key(ctrl_c).is_empty());
+    assert!(!ui.compacting);
+}

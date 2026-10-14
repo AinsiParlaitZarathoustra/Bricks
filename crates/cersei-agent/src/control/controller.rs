@@ -1307,6 +1307,11 @@ impl Controller {
                     self.agent().cancel();
                     return Ok(());
                 }
+                // A manual compaction has its own operation token.
+                if matches!(&activity, Activity::Busy { what } if what == "a compaction") {
+                    self.agent().cancel();
+                    return Ok(());
+                }
                 if let Some(t) = self.inner.maintenance.lock().as_ref() {
                     t.cancel();
                     return Ok(());

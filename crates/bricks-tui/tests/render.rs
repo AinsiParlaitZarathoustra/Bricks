@@ -368,3 +368,82 @@ fn durations_are_milliseconds_and_a_sub_agent_has_its_own_cell() {
     );
     assert!(!done.contains("so far"), "{done}");
 }
+
+/// Frames drawn at every tick and at a neighbouring tool's events reuse the
+/// answer's rendering; a new fragment re-parses only its open block; the
+/// screen shows the same text as a full rendering.
+#[test]
+fn ticks_and_tool_events_do_not_reparse_a_streaming_answer() {
+    let mut app = App::new();
+    let mut seq = 1;
+    let mut push = |app: &mut App, e: Event| {
+        app.apply(&env(seq, e));
+        seq += 1;
+    };
+    push(
+        &mut app,
+        Event::RunStarted {
+            prompt: "go".into(),
+            attachments: vec![],
+            model: "m".into(),
+            reasoning: None,
+        },
+    );
+    let para =
+        "Un paragraphe *assez* long, avec du `code` et un lien [x](https://example.com).\n\n";
+    for _ in 0..200 {
+        push(&mut app, Event::TextDelta { text: para.into() });
+    }
+    let c = Composer::new();
+    let first = live(&app, &c, 100, 30, None);
+    let stats = |app: &App| app.render_cache.lock().unwrap().stats;
+    let after_first = stats(&app);
+    // 50 ticks: nothing parsed or wrapped again.
+    for _ in 0..50 {
+        assert_eq!(live(&app, &c, 100, 30, None), first);
+    }
+    assert_eq!(stats(&app), after_first);
+    // A tool starts: the answer is closed, hence rendered whole once (the
+    // final rendering)…
+    push(
+        &mut app,
+        Event::ToolStarted {
+            tool_call_id: "t".into(),
+            name: "Read".into(),
+            input: serde_json::json!({"file_path": "a.rs"}),
+        },
+    );
+    live(&app, &c, 100, 30, None);
+    let closed = stats(&app);
+    assert_eq!(closed.parses, after_first.parses + 1);
+    // …and other tool events next to it do not touch it again.
+    push(
+        &mut app,
+        Event::ToolStarted {
+            tool_call_id: "u".into(),
+            name: "Read".into(),
+            input: serde_json::json!({"file_path": "b.rs"}),
+        },
+    );
+    live(&app, &c, 100, 30, None);
+    assert_eq!(stats(&app).parses, closed.parses);
+    // A new fragment opens a new answer: only its text is parsed.
+    push(
+        &mut app,
+        Event::TextDelta {
+            text: "Suite.".into(),
+        },
+    );
+    live(&app, &c, 100, 30, None);
+    let s = stats(&app);
+    assert_eq!(
+        s.parsed_bytes - closed.parsed_bytes,
+        "Suite.".len() as u64,
+        "{s:?}"
+    );
+    // Resize: wrapped again, not parsed.
+    let parses = s.parses;
+    live(&app, &c, 60, 30, None);
+    assert_eq!(stats(&app).parses, parses);
+    assert!(stats(&app).wraps > s.wraps);
+}

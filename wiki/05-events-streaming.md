@@ -113,7 +113,7 @@ impl AgentStream {
 }
 ```
 
-> **Current limitation (repository at 0.6.0).** `run_stream` acts on `cancel()` only. `respond_permission()` and `inject_message()` are accepted but ignored, and the engine never emits `AgentEvent::PermissionRequired`. `InteractivePolicy::via_stream()` returns a policy that allows every call. For approvals, use the approval policy described in [Permissions](08-permissions.md).
+> **Current limitation (repository at 0.6.1).** `run_stream` acts on `cancel()` only. `respond_permission()` and `inject_message()` are accepted but ignored, and the engine never emits `AgentEvent::PermissionRequired`. `InteractivePolicy::via_stream()` returns a policy that allows every call. For approvals, use the approval policy described in [Permissions](08-permissions.md).
 
 The stream receives every event. `event_filter` does not apply to it (see below).
 

@@ -93,6 +93,31 @@ Tools outside the sets:
 
 The `Bash` and `PowerShell` tools keep a persistent interpreter per agent session: `cd`, `export` and shell variables survive from one call to the next while the interpreter lives. A sub-agent has its own session.
 
+### Glob and CodeSearch: what they walk
+
+`Glob` walks with the walker shared by `Grep` and the code engine:
+`.gitignore` and `.ignore` rules apply (with `!` re-inclusions), even outside
+a git checkout, and ignored directories are pruned before the walk enters
+them; hidden entries are skipped unless the pattern names one
+(`.github/**`). `path` is taken literally (brackets, spaces); only `pattern`
+is a glob, and its leading literal directories narrow the walk. The walk is
+sorted and stops at the first match past `limit`, so it says
+`Showing the first N matches; more matches exist. Narrow the pattern.`
+instead of a total it did not count. A rare pattern can still visit the
+whole tree: the walk stops after 200 000 entries (and says so), or when the
+call is cancelled.
+
+`CodeSearch` keeps one index per root and embedding configuration. Each
+search takes an inventory of the sources (same ignore rules, plus
+`node_modules`, `target`, `__pycache__`, `venv`, hidden entries, files over
+500 KB): path, size and modification time of each indexable file. The index
+is reused only for the same inventory and when no writing tool of the agent
+ran since its build began; otherwise it is built again — files read once,
+BM25 and vectors from the same chunks, on the blocking pool, shared by
+concurrent searches, vectors of unchanged chunks reused. An external edit
+that keeps both the size and the modification time of a file is not seen
+until a writing tool runs or the inventory changes.
+
 ### Bash: shell state persistence
 
 `Bash` runs in one persistent `bash` per agent session (`BashSession`, Unix only):

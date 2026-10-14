@@ -317,7 +317,7 @@ dependencies = [
 
 [[package]]
 name = "bricks-cli"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "bricks-tui",
  "cersei-agent",
@@ -341,7 +341,7 @@ dependencies = [
 
 [[package]]
 name = "bricks-semantic"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "cersei-lsp",
  "cersei-types",
@@ -367,7 +367,7 @@ dependencies = [
 
 [[package]]
 name = "bricks-skills"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "parking_lot",
  "serde",
@@ -381,7 +381,7 @@ dependencies = [
 
 [[package]]
 name = "bricks-tui"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "cersei-agent",
  "cersei-memory",
@@ -491,7 +491,7 @@ checksum = "4f4c707c6a209cbe82d10abd08e1ea8995e9ea937d2550646e02798948992be0"
 
 [[package]]
 name = "cersei"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -528,7 +528,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-agent"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -571,7 +571,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-agentlang"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-trait",
  "cersei-tools",
@@ -587,7 +587,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-agentrl"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -618,7 +618,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-compression"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "cersei-types",
@@ -640,7 +640,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-embeddings"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-trait",
  "cersei-types",
@@ -656,7 +656,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-hooks"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-trait",
  "cersei-types",
@@ -667,7 +667,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-lsp"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "cersei-lsp",
  "dashmap",
@@ -683,7 +683,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-mcp"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "bytes",
  "cersei-testkit",
@@ -709,7 +709,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-memory"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-trait",
  "cersei-embeddings",
@@ -734,7 +734,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-provider"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -755,7 +755,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-tbench"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "cersei-agent",
@@ -773,7 +773,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-testkit"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "futures",
  "tokio",
@@ -781,7 +781,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-tools"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -830,7 +830,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-tools-derive"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -839,7 +839,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-types"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -856,7 +856,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-vms"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -883,7 +883,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-web"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "bm25",
  "cersei-testkit",
@@ -908,7 +908,7 @@ dependencies = [
 
 [[package]]
 name = "cersei-workflows"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "async-trait",
  "cersei-agent",
@@ -2816,7 +2816,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "longmem-bench"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "anyhow",
  "async-trait",

@@ -58,6 +58,8 @@ pub struct Ui {
     pub show_thinking: bool,
     pub focus_approval: bool,
     pub maintenance_running: bool,
+    /// A `/compact` sent and not answered yet: Ctrl+C cancels it.
+    pub compacting: bool,
     pub working_dir: PathBuf,
     /// Change previews by tool call, for /diff.
     pub previews: HashMap<String, ChangePreview>,
@@ -79,6 +81,7 @@ impl Ui {
             show_thinking: false,
             focus_approval: false,
             maintenance_running: false,
+            compacting: false,
             working_dir: working_dir.to_path_buf(),
             previews: HashMap::new(),
             hyperlinks: false,
@@ -169,6 +172,12 @@ impl Ui {
             }
             Event::MemoryMaintenanceStarted => self.maintenance_running = true,
             Event::MemoryMaintenanceFinished { .. } => self.maintenance_running = false,
+            Event::Compaction { reason, .. } if reason == "ManualTrigger" => {
+                self.compacting = false
+            }
+            Event::CommandRejected { command, .. } if command == "compact" => {
+                self.compacting = false
+            }
             _ => {}
         }
         if self.app.files_changed {
@@ -246,7 +255,7 @@ impl Ui {
 
         // Ctrl+C: always reachable, whatever has the focus.
         if ctrl && key.code == KeyCode::Char('c') {
-            if self.app.running() || self.maintenance_running {
+            if self.app.running() || self.maintenance_running || self.compacting {
                 self.message = Some("cancelling…".into());
                 return vec![Effect::Send(Command::Cancel)];
             }
@@ -450,7 +459,12 @@ impl Ui {
             self.composer.clear();
             self.popup = None;
             return match commands::parse(&text) {
-                Ok(Action::Engine(cmd)) => vec![Effect::Send(cmd)],
+                Ok(Action::Engine(cmd)) => {
+                    if cmd == Command::Compact {
+                        self.compacting = true;
+                    }
+                    vec![Effect::Send(cmd)]
+                }
                 Ok(Action::Present(Present::Quit)) => vec![Effect::Quit],
                 Ok(Action::Present(Present::Attach(kind, path))) => {
                     self.attach_path(kind, &path);

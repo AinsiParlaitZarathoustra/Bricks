@@ -2,7 +2,7 @@
 
 ## Installation
 
-The workspace version is 0.6.0 (`Cargo.toml`). Depend on a checkout of this repository, the `cersei` crate in `crates/cersei`:
+The workspace version is 0.6.1 (`Cargo.toml`). Depend on a checkout of this repository, the `cersei` crate in `crates/cersei`:
 
 ```toml
 [dependencies]

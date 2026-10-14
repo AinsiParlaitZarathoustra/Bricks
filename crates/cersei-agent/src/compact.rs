@@ -421,6 +421,9 @@ pub enum CompactionOutcome {
     Failed { reason: String },
     /// Nothing to do (history too short, compaction disabled, no progress).
     Skipped { reason: String },
+    /// Stopped by a cancellation before a summary was installed: history
+    /// kept. Not an unsuccessful attempt (it never disables compaction).
+    Cancelled,
 }
 
 impl CompactionOutcome {
@@ -450,6 +453,7 @@ impl std::fmt::Display for CompactionOutcome {
             ),
             CompactionOutcome::Failed { reason } => write!(f, "failed: {reason}"),
             CompactionOutcome::Skipped { reason } => write!(f, "skipped: {reason}"),
+            CompactionOutcome::Cancelled => write!(f, "cancelled: the history is unchanged"),
         }
     }
 }
@@ -740,12 +744,46 @@ fn user_messages_section(old: &[Message], budget: u64, est: &crate::context::Est
 /// history is smaller by `plan.min_gain`, nothing is replaced. The kept tail
 /// is never altered — tool calls stay paired and reasoning blocks, signatures
 /// and opaque protocol items are copied as they are.
+/// Absolute limit of one compaction attempt: the summary request, from
+/// sending it to the end of its stream. It is not pushed back by the
+/// fragments received; a stricter limit of the provider still applies.
+pub const COMPACTION_ATTEMPT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// [`compact_history_with`] without cancellation, bounded by
+/// [`COMPACTION_ATTEMPT_TIMEOUT`].
 pub async fn compact_history(
     provider: &dyn Provider,
     messages: &[Message],
     est: &crate::context::Estimator,
     plan: &CompactionPlan,
 ) -> CompactionRun {
+    compact_history_with(
+        provider,
+        messages,
+        est,
+        plan,
+        &tokio_util::sync::CancellationToken::new(),
+        tokio::time::Instant::now() + COMPACTION_ATTEMPT_TIMEOUT,
+    )
+    .await
+}
+
+/// One compaction attempt. `cancel` is watched while waiting for the
+/// response and while its stream is read: once cancelled, nothing more is
+/// sent or read (the stream is dropped, which closes it) and the outcome is
+/// [`CompactionOutcome::Cancelled`]. Past `deadline` the attempt fails.
+/// Either way no partial summary is installed.
+pub async fn compact_history_with(
+    provider: &dyn Provider,
+    messages: &[Message],
+    est: &crate::context::Estimator,
+    plan: &CompactionPlan,
+    cancel: &tokio_util::sync::CancellationToken,
+    deadline: tokio::time::Instant,
+) -> CompactionRun {
+    if cancel.is_cancelled() {
+        return CompactionRun::without_call(CompactionOutcome::Cancelled);
+    }
     let split = choose_split(
         messages,
         plan.keep_recent_messages,
@@ -797,24 +835,41 @@ pub async fn compact_history(
         output_modalities: Vec::new(),
     };
 
-    let response = match provider.complete(request).await {
-        Ok(stream) => {
-            let mut rx = stream.into_receiver();
-            let mut acc = cersei_provider::StreamAccumulator::new();
-            let mut stream_error = None;
-            while let Some(event) = rx.recv().await {
-                if let StreamEvent::Error { message } = &event {
-                    stream_error = Some(message.clone());
+    let call = async {
+        match provider.complete(request).await {
+            Ok(stream) => {
+                let mut rx = stream.into_receiver();
+                let mut acc = cersei_provider::StreamAccumulator::new();
+                let mut stream_error = None;
+                while let Some(event) = rx.recv().await {
+                    if let StreamEvent::Error { message } = &event {
+                        stream_error = Some(message.clone());
+                    }
+                    acc.process_event(event);
                 }
-                acc.process_event(event);
+                match (stream_error, acc.into_response()) {
+                    (Some(e), _) => Err(e),
+                    (None, Ok(r)) => Ok(r),
+                    (None, Err(e)) => Err(e.to_string()),
+                }
             }
-            match (stream_error, acc.into_response()) {
-                (Some(e), _) => Err(e),
-                (None, Ok(r)) => Ok(r),
-                (None, Err(e)) => Err(e.to_string()),
-            }
+            Err(e) => Err(e.to_string()),
         }
-        Err(e) => Err(e.to_string()),
+    };
+    // Leaving this `select!` drops the request and its stream (the
+    // provider's reader stops when its channel closes).
+    let response = tokio::select! {
+        biased;
+        _ = cancel.cancelled() => {
+            return CompactionRun::without_call(CompactionOutcome::Cancelled);
+        }
+        r = tokio::time::timeout_at(deadline, call) => match r {
+            Ok(r) => r,
+            Err(_) => Err(format!(
+                "no complete answer within the {} s limit of a compaction attempt",
+                COMPACTION_ATTEMPT_TIMEOUT.as_secs()
+            )),
+        },
     };
     let response = match response {
         Ok(r) => r,

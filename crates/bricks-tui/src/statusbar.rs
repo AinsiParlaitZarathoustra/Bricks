@@ -5,7 +5,8 @@
 //! richest arrangement whose width, measured in terminal cells
 //! (`unicode-width`, after removing control characters), fits; text is cut
 //! at grapheme boundaries. While a run is active its activity (spinner,
-//! `working`, `Ctrl+C`) is kept as long as anything is shown.
+//! `working`, the run's elapsed time, `Ctrl+C`) is kept as long as anything
+//! is shown; activity, time and cancellation go before the other segments.
 //!
 //! Figures come from the engine's views through `crate::diag`: the cost
 //! state (a partial estimate is never shown as a total) and the context
@@ -15,6 +16,7 @@ use crate::diag::{ContextFigures, CostState, compact};
 use crate::state::App;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
+use std::time::Instant;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -54,6 +56,27 @@ pub fn fit(s: &str, max: usize) -> String {
     out
 }
 
+/// The wall time of a run, for the activity indicator: `12 s`,
+/// `1 min 05 s`, `1 h 02 min 03 s`, `1 d 02 h 03 min 04 s` (SI symbols, a
+/// space before the unit; sub-fields on two digits). Whole seconds,
+/// rounded down, so a boundary never reads `60 s` or `60 min`.
+///
+/// Only for this indicator: tool, command and event durations stay in
+/// milliseconds (`display_ms`).
+pub fn elapsed(d: std::time::Duration) -> String {
+    let t = d.as_secs();
+    let (days, h, m, s) = (t / 86_400, t / 3600 % 24, t / 60 % 60, t % 60);
+    if days > 0 {
+        format!("{days} d {h:02} h {m:02} min {s:02} s")
+    } else if h > 0 {
+        format!("{h} h {m:02} min {s:02} s")
+    } else if m > 0 {
+        format!("{m} min {s:02} s")
+    } else {
+        format!("{s} s")
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
     Model,
@@ -69,11 +92,11 @@ struct Parts {
     cost: Option<String>,
     path_full: Option<String>,
     path_short: Option<String>,
-    /// (full, medium, short, minimal)
-    activity: Option<[String; 4]>,
+    /// From the richest to the shortest.
+    activity: Option<[String; 5]>,
 }
 
-fn parts(app: &App, spinner: &str, maintenance: bool) -> Parts {
+fn parts(app: &App, spinner: &str, maintenance: bool, now: Instant) -> Parts {
     let s = &app.status;
     let choice = app.models.iter().find(|m| m.selection == s.model);
     let model = clean(
@@ -125,15 +148,18 @@ fn parts(app: &App, spinner: &str, maintenance: bool) -> Parts {
             .unwrap_or_else(|| full.clone());
         (Some(full), Some(last))
     };
-    let activity = if app.running() {
+    let activity = if let Some((_, started)) = &app.run {
+        let t = elapsed(now.saturating_duration_since(*started));
         Some([
-            format!("{spinner} working — Ctrl+C to cancel"),
-            format!("{spinner} working · Ctrl+C"),
-            format!("{spinner} Ctrl+C"),
+            format!("{spinner} working [{t}] (Ctrl+C to cancel)"),
+            format!("{spinner} working [{t}] (Ctrl+C)"),
+            format!("{spinner} [{t}] (Ctrl+C)"),
+            format!("{spinner} [{t}]"),
             spinner.to_string(),
         ])
     } else if maintenance {
         Some([
+            format!("{spinner} updating memory"),
             format!("{spinner} updating memory"),
             format!("{spinner} memory"),
             format!("{spinner} memory"),
@@ -216,12 +242,20 @@ fn layouts(p: &Parts) -> Vec<Segs> {
         mk(vec![
             Some((model_full.clone(), Kind::Model)),
             ctx(2),
-            act(2),
+            act(1),
         ]),
-        mk(vec![Some((p.model.clone(), Kind::Model)), ctx(2), act(2)]),
-        // Very small: the model (cut) and the activity.
-        mk(vec![Some((p.model.clone(), Kind::Model)), act(3)]),
+        mk(vec![Some((p.model.clone(), Kind::Model)), ctx(2), act(1)]),
+        mk(vec![Some((p.model.clone(), Kind::Model)), act(1)]),
+        // Very small: the activity first, the model only if it still fits.
+        mk(vec![Some((p.model.clone(), Kind::Model)), act(2)]),
+        mk(vec![act(1)]),
+        mk(vec![act(2)]),
+        mk(vec![act(3)]),
+        mk(vec![Some((p.model.clone(), Kind::Model)), act(4)]),
     ]
+    .into_iter()
+    .filter(|segs| !segs.is_empty())
+    .collect()
 }
 
 /// The status bar for `width` cells.
@@ -231,7 +265,18 @@ pub fn status_line(
     maintenance: bool,
     width_cells: usize,
 ) -> Line<'static> {
-    let p = parts(app, spinner, maintenance);
+    status_line_at(app, spinner, maintenance, width_cells, Instant::now())
+}
+
+/// [`status_line`] with the elapsed time measured at `now`.
+pub fn status_line_at(
+    app: &App,
+    spinner: &str,
+    maintenance: bool,
+    width_cells: usize,
+    now: Instant,
+) -> Line<'static> {
+    let p = parts(app, spinner, maintenance, now);
     let all = layouts(&p);
     let mut chosen = all
         .iter()
@@ -305,6 +350,26 @@ mod tests {
         );
         assert_eq!(fit("é\u{301}é\u{301}é\u{301}", 2), "é\u{301}…");
         assert_eq!(fit("x", 0), "");
+    }
+
+    #[test]
+    fn elapsed_uses_si_symbols_and_two_digit_fields() {
+        let f = |s: u64| elapsed(std::time::Duration::from_secs(s));
+        assert_eq!(f(0), "0 s");
+        assert_eq!(f(1), "1 s");
+        assert_eq!(f(59), "59 s");
+        assert_eq!(f(60), "1 min 00 s");
+        assert_eq!(f(65), "1 min 05 s");
+        assert_eq!(f(3599), "59 min 59 s");
+        assert_eq!(f(3600), "1 h 00 min 00 s");
+        assert_eq!(f(3723), "1 h 02 min 03 s");
+        assert_eq!(f(86_399), "23 h 59 min 59 s");
+        assert_eq!(f(86_400), "1 d 00 h 00 min 00 s");
+        assert_eq!(f(93_784), "1 d 02 h 03 min 04 s");
+        assert_eq!(f(12 * 86_400 + 5), "12 d 00 h 00 min 05 s");
+        // Rounded down: 59.999 s is still 59 s.
+        assert_eq!(elapsed(std::time::Duration::from_millis(59_999)), "59 s");
+        assert_eq!(elapsed(std::time::Duration::from_millis(999)), "0 s");
     }
 
     #[test]

@@ -95,7 +95,8 @@ only its prompt budget, which the status also notes.
 If the server still refuses a request as too long (HTTP 400/413/422 or a stream
 error with a documented overflow code or message), the history is compacted and
 the request resent, at most `max_overflow_recoveries` times per turn. Nothing
-ran for that turn yet, so no tool effect repeats.
+ran for that turn yet, so no tool effect repeats. A cancellation during that
+compaction stops the run: nothing is resent.
 
 ## 3. Pre-flight counting
 
@@ -113,6 +114,13 @@ server. The request sent is the real one (same messages, system, tools,
 reasoning parameters) restricted to the fields the route accepts. If counting
 fails, the local estimate is used and the event says so. A count is valid for
 the exact request counted; it is not an upper bound on future content.
+
+The counting call has an absolute limit of **30 s** (`TOKEN_COUNT_TIMEOUT`,
+internal): past it the local estimate is used, as for a failure, and the
+status says `no answer within 30 s`. A cancellation of the run during the
+count stops it at once, without the fallback and without sending the
+request. The shared HTTP client has no global timeout; ordinary completions
+keep their own contract.
 
 ## 4. Compaction
 
@@ -144,11 +152,27 @@ refusal; or on demand (`Agent::compact()`).
 
 **Outcomes** (`CompactionOutcome`, also on `AgentEvent::CompactionResult`):
 `Compacted`, `InsufficientGain`, `Failed` (call error, empty or truncated
-summary), `Skipped` (nothing old enough, no budget for the call, automatic
-compaction disabled, or no change since the last unsuccessful attempt). Only
-`Compacted` changes the history. After `max_compaction_failures` unsuccessful
-attempts in a row, automatic compaction stops for the session (manual
-compaction still runs). There is no silent fallback that drops messages.
+summary, time limit), `Skipped` (nothing old enough, no budget for the call,
+automatic compaction disabled, or no change since the last unsuccessful
+attempt), `Cancelled`. Only `Compacted` changes the history. After
+`max_compaction_failures` unsuccessful attempts in a row, automatic
+compaction stops for the session (manual compaction still runs). There is no
+silent fallback that drops messages.
+
+**Cancellation and time limit.** A compaction attempt — automatic, manual,
+or the recovery of an overflow — watches its cancellation while it waits for
+the response headers and while it reads the stream. During a run, the run's
+token; `Agent::compact()` (the `/compact` command) has an operation token of
+its own, new at each call, that `Agent::cancel()` (the `cancel` command,
+Ctrl+C) also cancels. A cancelled attempt drops its request and stream,
+installs nothing, sends nothing more, and is `Cancelled`: it is not an
+unsuccessful attempt (it never counts towards disabling compaction, and the
+next compaction may try the same history). Each attempt has an absolute
+limit of **300 s** (`compact::COMPACTION_ATTEMPT_TIMEOUT`), from sending the
+request to the end of its stream, not pushed back by the fragments
+received; a stricter limit of the provider still applies. Past it the
+attempt `Failed`, the history is unchanged and the usual failure rules
+apply. Usage counts only for a summary received whole, once.
 
 **Nothing is lost:**
 
@@ -157,10 +181,20 @@ compaction still runs). There is no silent fallback that drops messages.
 * `Agent::compaction_snapshots()` — the active history just before each
   compaction.
 * With a session memory (`AgentBuilder::memory` + `session_id`), both are stored
-  with the session's own backend: the raw history under `<session>.raw`, each
-  snapshot under `<session>.compaction-<n>` (with `JsonlMemory`: files
-  `<session>.raw.jsonl`, `<session>.compaction-1.jsonl`, …), written at each
-  compaction and at the end of each run. The saved originals of reduced tool
+  with the session's own backend. The active and raw histories are saved as
+  a pair (`Memory::store_histories`) at each compaction and at the end of
+  each run, and restored from one stored pair (`Memory::load_histories`).
+  With `JsonlMemory` the pair is one checkpoint file, `<session>.jsonl`
+  (header line, active messages, raw messages), replaced atomically: an
+  interrupted save leaves the previous pair, never a mix (see the
+  `JsonlMemory` documentation for the format, the migration of older
+  sessions and the durability limits). Backends that keep the trait's
+  default methods store the two histories one after the other, without
+  that guarantee (`Memory::histories_are_atomic`). Each snapshot is stored
+  under `<session>.compaction-<n>` (`JsonlMemory`:
+  `<session>.compaction-1.jsonl`, …, each written atomically on its own);
+  snapshots and `skills.json` have their own writes, outside the pair's
+  commit. The saved originals of reduced tool
   outputs go to the session's files directory (`JsonlMemory`:
   `<session>.files/`). Restoring a session restores its raw history and its
   snapshots (later compactions continue the numbering), so every reference in

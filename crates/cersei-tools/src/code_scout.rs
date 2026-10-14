@@ -34,8 +34,10 @@ pub fn engine_for(ctx: &ToolContext) -> Arc<SemanticEngine> {
 }
 
 /// Files may have changed (a write, an edit, a shell command): drop the
-/// cached answers of the engines covering this working directory.
+/// cached answers of the engines covering this working directory, and stop
+/// reusing the CodeSearch indexes of its roots.
 pub fn notify_workspace_changed(ctx: &ToolContext) {
+    crate::code_search::invalidate(&ctx.working_dir);
     if let Some(h) = ctx.extensions.get::<SemanticHandle>() {
         h.0.notify_any_change();
     }

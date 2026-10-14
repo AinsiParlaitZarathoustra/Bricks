@@ -40,7 +40,20 @@ pub fn render(text: &str) -> Vec<Line<'static>> {
 /// shows its text, then its destination in brackets; both carry the
 /// destination when it is a web address ([`crate::links::web_target`]).
 pub fn render_rich(text: &str) -> Vec<RichLine> {
+    render_rich_part(text, false, true)
+}
+
+/// [`render_rich`] of a block-level part of a document, as it renders after
+/// the parts before it: `after_text` tells whether the output so far ends
+/// with a non-blank line (a heading then gets its blank line before it, as
+/// it would in the whole document). Trailing blank lines are removed only
+/// for the `last` part, as [`render_rich`] removes them from the whole.
+pub fn render_rich_part(text: &str, after_text: bool, last: bool) -> Vec<RichLine> {
     let mut lines: Vec<RichLine> = Vec::new();
+    // Stands for the previous part's last line; removed below.
+    if after_text {
+        lines.push(RichLine::from(Line::from("·")));
+    }
     let mut cur: Vec<(Span<'static>, Option<Arc<str>>)> = Vec::new();
     let mut styles: Vec<Style> = vec![Style::default()];
     let mut list_stack: Vec<Option<u64>> = Vec::new();
@@ -228,10 +241,104 @@ pub fn render_rich(text: &str) -> Vec<RichLine> {
         }
     }
     flush(&mut cur, &mut lines, quote);
-    while lines.last().is_some_and(|l| l.line.spans.is_empty()) {
+    while last && lines.last().is_some_and(|l| l.line.spans.is_empty()) {
         lines.pop();
     }
+    if after_text && !lines.is_empty() {
+        lines.remove(0);
+    }
     lines
+}
+
+/// Whether some construct of `text` can change how earlier blocks render
+/// (a link reference definition, used before or after it) or spans blank
+/// lines unpredictably (an HTML block). Such a document is only rendered
+/// whole.
+pub fn needs_whole_render(text: &str) -> bool {
+    text.lines().any(|l| {
+        let t = l.trim_start_matches(' ');
+        if l.len() - t.len() > 3 {
+            return false;
+        }
+        t.starts_with('<') || (t.starts_with('[') && t.contains("]:"))
+    })
+}
+
+/// The start of the last block of `text[from..]` that begins a new
+/// top-level block for certain, so that `text[..b]` and `text[b..]` render
+/// as the whole does (`from` must itself be such a boundary, or 0). A
+/// boundary is the start of a line that follows a blank line outside any
+/// fenced code block and that begins at the first column with a character
+/// no previous block could continue with (not a space or tab, not a list,
+/// quote or table marker). `None` when there is none yet.
+pub fn last_stable_boundary(text: &str, from: usize) -> Option<usize> {
+    let mut found = None;
+    // (fence character, length) of the open fenced block.
+    let mut fence: Option<(char, usize)> = None;
+    let mut prev_blank = false;
+    // The block before the blank line may be a table: this renderer does
+    // not end its last line, which the next block then continues.
+    let mut block_has_pipe = false;
+    let mut pos = from;
+    for line in text[from..].split_inclusive('\n') {
+        let start = pos;
+        pos += line.len();
+        let content = line.trim_end_matches(['\n', '\r']);
+        let indent = content.len() - content.trim_start_matches(' ').len();
+        let t = content.trim_start_matches(' ');
+        let marker = |c: char| {
+            let n = t.chars().take_while(|&x| x == c).count();
+            (n >= 3).then_some(n)
+        };
+        if let Some((c, n)) = fence {
+            if indent <= 3
+                && marker(c).is_some_and(|m| m >= n)
+                && t.trim_start_matches(c).trim().is_empty()
+            {
+                fence = None;
+            }
+            prev_blank = false;
+            continue;
+        }
+        if content.trim().is_empty() {
+            prev_blank = true;
+            continue;
+        }
+        let first = content.chars().next().unwrap_or(' ');
+        // An ordered list marker, or digits whose next character has not
+        // arrived yet (it may still become one).
+        let ordered = {
+            let digits = content.chars().take_while(|c| c.is_ascii_digit()).count();
+            let complete = line.ends_with('\n');
+            digits > 0
+                && match content[digits..].chars().next() {
+                    Some('.') | Some(')') => true,
+                    None => !complete,
+                    Some(_) => false,
+                }
+        };
+        if prev_blank
+            && start > from
+            && !block_has_pipe
+            && !matches!(first, ' ' | '\t' | '-' | '*' | '+' | '>' | '|')
+            && !ordered
+        {
+            found = Some(start);
+        }
+        if prev_blank {
+            block_has_pipe = false;
+        }
+        block_has_pipe |= content.contains('|');
+        prev_blank = false;
+        if indent <= 3 {
+            for c in ['`', '~'] {
+                if let Some(n) = marker(c) {
+                    fence = Some((c, n));
+                }
+            }
+        }
+    }
+    found
 }
 
 /// Wrap one line to `width` display columns: at spaces when possible,

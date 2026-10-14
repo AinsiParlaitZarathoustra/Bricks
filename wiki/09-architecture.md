@@ -1,6 +1,6 @@
 # Architecture
 
-## Current layers (Bricks 0.6.0)
+## Current layers (Bricks 0.6.1)
 
 ```
 bricks-cli            the `bricks` binary: arguments, configuration, headless / JSONL
@@ -160,7 +160,7 @@ Agent::run("prompt")
 AgentOutput { message, usage, stop_reason, turns, tool_calls, termination }
 ```
 
-A denied call returns `Permission denied: <reason>` to the model as a tool error. A call stopped by a `PreToolUse` hook returns `Blocked by hook: <reason>`. `PostToolUse` is declared but never fired in 0.6.0 (see [Hooks](07-hooks.md)), so it does not appear in the loop.
+A denied call returns `Permission denied: <reason>` to the model as a tool error. A call stopped by a `PreToolUse` hook returns `Blocked by hook: <reason>`. `PostToolUse` is declared but never fired in 0.6.1 (see [Hooks](07-hooks.md)), so it does not appear in the loop.
 
 ## Event Distribution
 

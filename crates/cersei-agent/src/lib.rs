@@ -237,6 +237,13 @@ pub struct Agent {
     /// Cancels the current run only: a child of `cancel_token`, replaced at
     /// the start of each run, so a cancelled run does not cancel the next.
     run_cancel: parking_lot::Mutex<tokio_util::sync::CancellationToken>,
+    /// Orders this agent's session saves (see `Memory::store_histories`),
+    /// under an owner id of its own.
+    pub(crate) save_revision: std::sync::atomic::AtomicU64,
+    pub(crate) save_owner: u64,
+    /// The token of the manual compaction in progress (or the last one):
+    /// a child of `cancel_token`, new for each [`Agent::compact`].
+    compact_cancel: parking_lot::Mutex<tokio_util::sync::CancellationToken>,
     /// Type-map injected into every `ToolContext` this agent builds. Used by
     /// orchestration layers (e.g. cersei-agentrl) to hand tools a dynamic tool
     /// registry, a sandbox handle, a Mailbox/KvStore, etc. at runtime.
@@ -343,15 +350,21 @@ impl Agent {
         self.snapshots.lock().clone()
     }
 
-    /// Compact the history now (outside of the automatic triggers).
+    /// Compact the history now (outside of the automatic triggers). It has
+    /// its own operation token, new for each call: [`Agent::cancel`] stops
+    /// it, and a compaction after a cancelled one starts normally.
     pub async fn compact(&self) -> CompactionOutcome {
-        runner::compact_now(self).await
+        let token = self.cancel_token.child_token();
+        *self.compact_cancel.lock() = token.clone();
+        runner::compact_now(self, &token).await
     }
 
     /// Cancel the current run (and the memory maintenance that follows
-    /// it). The next run starts normally.
+    /// it), and a manual compaction in progress. The next run or
+    /// compaction starts normally.
     pub fn cancel(&self) {
         self.run_cancel.lock().cancel();
+        self.compact_cancel.lock().cancel();
     }
 
     /// A fresh cancellation token for a new run.
@@ -1086,6 +1099,7 @@ impl AgentBuilder {
 
         let cancel_token = self.cancel_token.unwrap_or_default();
         let run_cancel = cancel_token.child_token();
+        let compact_cancel = cancel_token.child_token();
         Ok(Agent {
             selection: parking_lot::RwLock::new(Selection {
                 provider: Arc::from(provider),
@@ -1138,6 +1152,9 @@ impl AgentBuilder {
             )),
             cancel_token,
             run_cancel: parking_lot::Mutex::new(run_cancel),
+            compact_cancel: parking_lot::Mutex::new(compact_cancel),
+            save_revision: std::sync::atomic::AtomicU64::new(0),
+            save_owner: uuid::Uuid::new_v4().as_u64_pair().0,
             extensions: self.extensions,
             skills,
         })

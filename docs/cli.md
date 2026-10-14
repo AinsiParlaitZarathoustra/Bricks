@@ -159,9 +159,10 @@ the policy says to ask about then stops the run, with `run_finished`
 grants nothing: steps the policy allows still run, the others do not.
 
 **Ctrl+C** cancels the run (or the memory maintenance after it). A second
-Ctrl+C exits at once. The session is stored. Tool calls interrupted by the
-cancellation get a result saying so, so the session can be continued.
-Effects they already had remain: nothing is "undone".
+Ctrl+C exits at once. The session is stored. Tool calls already finished
+keep their result; calls interrupted by the cancellation get a result
+saying so, so the session can be continued. Effects they already had
+remain: nothing is "undone".
 
 **Memory maintenance.** After the answer, the long-term memory (when
 enabled) processes the exchange. `bricks run` waits for it unless
@@ -244,7 +245,7 @@ Events (`type`):
 | `thinking_delta` | `text` | only reasoning the provider exposed; never reconstructed |
 | `tool_started` | `tool_call_id, name, input` | concurrent calls have distinct ids |
 | `tool_progress` | `tool_call_id?, name, message` | long calls (shell) |
-| `tool_finished` | `tool_call_id, name, is_error, duration_ms, output` | |
+| `tool_finished` | `tool_call_id, name, is_error, duration_ms, output` | sent as soon as the call is done, without waiting for the other calls of its round: several calls finish in the order they end. The history sent to the model keeps the order of the calls |
 | `approval_requested` | `approval{approval_id, tool_call_id, tool, level, description, input, preview?, agent_id?}` | `preview.files[{path, kind, before_sha256, diff, added, removed}]` |
 | `approval_resolved` | `approval_id, tool_call_id, decision, by` | `decision`: `allow`, `allow_for_session`, `deny`; `by`: `user`, `session`, `non_interactive`, `cancelled` |
 | `edit_applied` | `tool_call_id, tool, files[{path, kind, added, removed, binary?}], agent_id?, changeset_id?` | a change was applied to the session's workspace: a successful `Write`, `Edit`, `MultiEdit` or `ApplyPatch` of the session agent, or of a sub-agent working in that workspace (`agent_id`), or a ChangeSet applied (`changeset_id`); never for a denial, a refusal or a failure. Counts are those of the complete diff; one event per change |
@@ -420,9 +421,16 @@ When a call must be asked about:
     exact zero), or `Not priced` when no price applies **or** only part of
     the usage is priced — a partial amount is never shown as a total.
     Nothing is shown before the first response.
-  * During a run `⠋ working — Ctrl+C to cancel` stays (shortened to
-    `working · Ctrl+C`, `Ctrl+C`, then the spinner alone); the memory
-    maintenance shows `updating memory`.
+  * During a run `⠋ working [12 s] (Ctrl+C to cancel)` stays: the wall time
+    of the run since `run_started` (tools, approvals, retries and
+    compactions included), in SI symbols with two-digit sub-fields —
+    `59 s`, `1 min 05 s`, `1 h 02 min 03 s`, `1 d 02 h 03 min 04 s` — rounded
+    down, updated at the interface's tick. It starts again with each run and
+    disappears when the run ends or is cancelled. On a narrow bar it is
+    shortened to `working [1 min 05 s] (Ctrl+C)`, `[1 min 05 s] (Ctrl+C)`,
+    `[1 min 05 s]`, then the spinner alone; activity, time and cancellation
+    are kept before the other segments. Tool and event durations stay in
+    milliseconds. The memory maintenance shows `updating memory`.
 * **`/effort`.** The reasoning profiles of the current model, as the
   providers file declares them (ids, labels, parameters); there is no
   built-in list.
@@ -483,7 +491,7 @@ When a call must be asked about:
 | Ctrl+←/→, Alt+←/→ | by word; Shift selects |
 | Ctrl+W, Ctrl+U | delete a word, clear the input |
 | Backspace on an empty input | remove the last attachment |
-| Ctrl+C | cancel the run or the memory maintenance; idle: clear the input, twice in a row: quit |
+| Ctrl+C | cancel the run, a `/compact` in progress or the memory maintenance; idle: clear the input, twice in a row: quit |
 | Ctrl+D | quit (on an empty input) |
 | y / a / n / d | with a pending approval: allow, allow for the session, reject, open the diff. Tab moves between the approval and the input |
 | Ctrl+T, Ctrl+O | live reasoning; details of the last tools and reasoning |

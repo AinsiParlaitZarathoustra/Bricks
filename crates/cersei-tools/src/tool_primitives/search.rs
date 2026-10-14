@@ -6,6 +6,7 @@
 //! binary, so behavior is identical on every machine.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// A single search match with context.
@@ -175,25 +176,180 @@ fn grep_blocking(
     Ok(matches)
 }
 
-/// Find files matching a glob pattern.
-pub async fn glob(pattern: &str, base_dir: &Path) -> Result<Vec<PathBuf>, SearchError> {
-    let full_pattern = base_dir.join(pattern).display().to_string();
+/// Bounds and limits of [`glob_walk`].
+#[derive(Debug, Clone)]
+pub struct GlobOptions {
+    /// Matches to return; the walk stops at the first match past it (which
+    /// only proves that more exist). `0` returns without walking.
+    pub limit: usize,
+    /// Entries (files and directories) the walk may visit before it stops.
+    pub max_visited: usize,
+}
 
-    // glob::glob is synchronous — run on blocking thread
-    let paths = tokio::task::spawn_blocking(move || -> Result<Vec<PathBuf>, SearchError> {
-        let mut results = Vec::new();
-        for path in ::glob::glob(&full_pattern)
-            .map_err(|e| SearchError::InvalidPattern(e.to_string()))?
-            .flatten()
-        {
-            results.push(path);
+/// Entries a glob walk visits at most by default.
+pub const GLOB_MAX_VISITED: usize = 200_000;
+
+impl Default for GlobOptions {
+    fn default() -> Self {
+        Self {
+            limit: usize::MAX,
+            max_visited: GLOB_MAX_VISITED,
         }
-        Ok(results)
-    })
-    .await
-    .map_err(|e| SearchError::CommandFailed(e.to_string()))??;
+    }
+}
 
-    Ok(paths)
+/// What a glob walk found.
+#[derive(Debug, Default, Clone)]
+pub struct GlobOutcome {
+    /// Matches, sorted (at most `limit`).
+    pub paths: Vec<PathBuf>,
+    /// More matches exist than returned (their number is not known).
+    pub more: bool,
+    /// Entries visited.
+    pub visited: usize,
+    /// The walk stopped at `max_visited`: the list may be incomplete.
+    pub visit_cap_hit: bool,
+    /// The walk was abandoned (its caller went away).
+    pub cancelled: bool,
+}
+
+/// Find files and directories matching `pattern` under `base_dir` (all of
+/// them, within [`GLOB_MAX_VISITED`] entries). See [`glob_walk`].
+pub async fn glob(pattern: &str, base_dir: &Path) -> Result<Vec<PathBuf>, SearchError> {
+    Ok(glob_walk(pattern, base_dir, GlobOptions::default())
+        .await?
+        .paths)
+}
+
+/// Find files and directories matching `pattern` under `base_dir`.
+///
+/// `base_dir` is taken literally; only `pattern` is a glob (`*` and `?`
+/// within a path component, `**` across components, `[…]` classes). Its
+/// leading literal components narrow the walk. The walk uses the walker
+/// shared with `Grep` and the code engine: `.gitignore`/`.ignore` rules
+/// (with their `!` re-inclusions) apply even outside a git checkout and
+/// ignored directories are pruned before descent; hidden entries are
+/// skipped unless the pattern names a hidden component (`.github/**`). The
+/// walk is sorted, so which matches are kept is deterministic; it stops at
+/// the first match past `limit`, at `max_visited` entries, or when the
+/// returned future is dropped (checked at every entry, on the blocking
+/// pool). A fully literal pattern names one path, returned if it exists.
+pub async fn glob_walk(
+    pattern: &str,
+    base_dir: &Path,
+    opts: GlobOptions,
+) -> Result<GlobOutcome, SearchError> {
+    struct Stop(Arc<AtomicBool>);
+    impl Drop for Stop {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+    if opts.limit == 0 {
+        ::glob::Pattern::new(pattern).map_err(|e| SearchError::InvalidPattern(e.to_string()))?;
+        return Ok(GlobOutcome::default());
+    }
+    let stop = Stop(Arc::new(AtomicBool::new(false)));
+    let abort = Arc::clone(&stop.0);
+    let (pattern, base) = (pattern.to_string(), base_dir.to_path_buf());
+    let outcome =
+        tokio::task::spawn_blocking(move || glob_walk_blocking(&pattern, &base, &opts, &abort))
+            .await
+            .map_err(|e| SearchError::CommandFailed(e.to_string()))?;
+    drop(stop);
+    outcome
+}
+
+fn has_glob_meta(component: &str) -> bool {
+    component.contains(['*', '?', '['])
+}
+
+/// Synchronous core of [`glob_walk`].
+pub(crate) fn glob_walk_blocking(
+    pattern: &str,
+    base_dir: &Path,
+    opts: &GlobOptions,
+    abort: &AtomicBool,
+) -> Result<GlobOutcome, SearchError> {
+    let mut out = GlobOutcome::default();
+    if opts.limit == 0 {
+        return Ok(out);
+    }
+    // Leading literal components narrow the walk; the rest is matched
+    // against paths relative to it.
+    let pat = Path::new(pattern);
+    let mut root = if pat.is_absolute() {
+        PathBuf::new()
+    } else {
+        base_dir.to_path_buf()
+    };
+    let mut rest = Vec::new();
+    for c in pat.components() {
+        let text = c.as_os_str().to_string_lossy().to_string();
+        if rest.is_empty() && !has_glob_meta(&text) {
+            root.push(c.as_os_str());
+        } else {
+            rest.push(text);
+        }
+    }
+    if rest.is_empty() {
+        // A literal path.
+        if root.exists() {
+            out.paths.push(root);
+        }
+        return Ok(out);
+    }
+    let rest = rest.join("/");
+    let matcher =
+        ::glob::Pattern::new(&rest).map_err(|e| SearchError::InvalidPattern(e.to_string()))?;
+    let options = ::glob::MatchOptions {
+        case_sensitive: true,
+        require_literal_separator: true,
+        require_literal_leading_dot: false,
+    };
+    if !root.is_dir() {
+        return Ok(out);
+    }
+    let hidden = pat.components().any(|c| {
+        let t = c.as_os_str().to_string_lossy();
+        t.starts_with('.') && t != "." && t != ".."
+    });
+    let filters = bricks_semantic::lexical::WalkFilters {
+        hidden,
+        ..Default::default()
+    };
+    let mut builder = bricks_semantic::lexical::walk_builder(&root, &filters)
+        .map_err(SearchError::InvalidPattern)?;
+    builder
+        .follow_links(false)
+        .sort_by_file_name(|a, b| a.cmp(b));
+    for entry in builder.build() {
+        if abort.load(Ordering::SeqCst) {
+            out.cancelled = true;
+            break;
+        }
+        let Ok(entry) = entry else { continue };
+        if entry.depth() == 0 {
+            continue;
+        }
+        out.visited += 1;
+        if out.visited > opts.max_visited {
+            out.visit_cap_hit = true;
+            break;
+        }
+        let Ok(rel) = entry.path().strip_prefix(&root) else {
+            continue;
+        };
+        if matcher.matches_path_with(rel, options) {
+            if out.paths.len() == opts.limit {
+                out.more = true;
+                break;
+            }
+            out.paths.push(entry.path().to_path_buf());
+        }
+    }
+    out.paths.sort();
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -201,11 +357,157 @@ mod tests {
     use super::*;
     use std::fs;
 
-    #[tokio::test]
-    async fn test_glob_basic() {
-        let results = glob("*.toml", Path::new(".")).await.unwrap();
-        // Should find at least Cargo.toml in the workspace
-        assert!(!results.is_empty() || true); // may not find from test cwd
+    // ── glob ──
+
+    fn names(out: &GlobOutcome, root: &Path) -> Vec<String> {
+        out.paths
+            .iter()
+            .map(|p| p.strip_prefix(root).unwrap().display().to_string())
+            .collect()
+    }
+
+    fn walk(pattern: &str, root: &Path, limit: usize) -> GlobOutcome {
+        glob_walk_blocking(
+            pattern,
+            root,
+            &GlobOptions {
+                limit,
+                ..Default::default()
+            },
+            &AtomicBool::new(false),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn ignored_trees_are_pruned_and_unignored_homonyms_kept() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        // No `.git`: the rules apply all the same.
+        fs::write(root.join(".gitignore"), "target/\n*.log\n!keep.log\n").unwrap();
+        fs::create_dir_all(root.join("target/debug")).unwrap();
+        for i in 0..300 {
+            fs::write(root.join(format!("target/debug/f{i}.rs")), "").unwrap();
+        }
+        fs::create_dir_all(root.join("app/node_modules")).unwrap();
+        fs::write(root.join("app/node_modules/kept.rs"), "").unwrap();
+        fs::write(root.join("src.rs"), "").unwrap();
+        fs::write(root.join("drop.log"), "").unwrap();
+        fs::write(root.join("keep.log"), "").unwrap();
+        let out = walk("**/*.rs", root, 1000);
+        assert_eq!(names(&out, root), ["app/node_modules/kept.rs", "src.rs"]);
+        // The 300 ignored files were never visited.
+        assert!(out.visited < 20, "visited {}", out.visited);
+        assert_eq!(names(&walk("*.log", root, 10), root), ["keep.log"]);
+    }
+
+    #[test]
+    fn the_walk_stops_once_the_limit_is_passed() {
+        let tmp = tempfile::tempdir().unwrap();
+        for i in 0..1000 {
+            fs::write(tmp.path().join(format!("f{i:04}.txt")), "").unwrap();
+        }
+        let out = walk("*.txt", tmp.path(), 10);
+        assert_eq!(out.paths.len(), 10);
+        assert!(out.more);
+        assert_eq!(out.visited, 11, "stopped at the first match past the limit");
+        // Deterministic selection and order.
+        assert_eq!(names(&out, tmp.path())[0], "f0000.txt");
+        assert_eq!(
+            names(&walk("*.txt", tmp.path(), 10), tmp.path()),
+            names(&out, tmp.path())
+        );
+        // Exactly the limit: no "more".
+        let all = walk("f000*.txt", tmp.path(), 10);
+        assert_eq!(all.paths.len(), 10);
+        assert!(!all.more);
+        // A rare pattern still walks everything (bounded by max_visited).
+        let rare = glob_walk_blocking(
+            "nothing*",
+            tmp.path(),
+            &GlobOptions {
+                limit: 10,
+                max_visited: 100,
+            },
+            &AtomicBool::new(false),
+        )
+        .unwrap();
+        assert!(rare.paths.is_empty() && rare.visit_cap_hit);
+        assert_eq!(rare.visited, 101);
+    }
+
+    #[test]
+    fn literal_bases_brackets_spaces_hidden_roots_and_recursion() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().join(".work dir [1]");
+        fs::create_dir_all(base.join("sub/deep")).unwrap();
+        for f in [
+            "a.rs",
+            "b.rs",
+            "c.rs",
+            "sub/m.rs",
+            "sub/deep/z.rs",
+            "sub/n.txt",
+        ] {
+            fs::write(base.join(f), "").unwrap();
+        }
+        fs::create_dir_all(base.join(".github")).unwrap();
+        fs::write(base.join(".github/ci.yml"), "").unwrap();
+        // The base is literal even with brackets, spaces and a leading dot.
+        assert_eq!(
+            names(&walk("*.rs", &base, 100), &base),
+            ["a.rs", "b.rs", "c.rs"]
+        );
+        assert_eq!(names(&walk("[ab].rs", &base, 100), &base), ["a.rs", "b.rs"]);
+        assert_eq!(
+            names(&walk("**/*.rs", &base, 100), &base),
+            ["a.rs", "b.rs", "c.rs", "sub/deep/z.rs", "sub/m.rs"]
+        );
+        assert_eq!(names(&walk("sub/*.rs", &base, 100), &base), ["sub/m.rs"]);
+        assert_eq!(
+            names(&walk("sub/**/*.rs", &base, 100), &base),
+            ["sub/deep/z.rs", "sub/m.rs"]
+        );
+        // Hidden entries only when the pattern names one.
+        assert!(names(&walk("**/*.yml", &base, 100), &base).is_empty());
+        assert_eq!(
+            names(&walk(".github/*.yml", &base, 100), &base),
+            [".github/ci.yml"]
+        );
+        // A literal path, and an absolute pattern (whose brackets would be
+        // glob syntax: only the base is literal).
+        assert_eq!(names(&walk("sub/n.txt", &base, 100), &base), ["sub/n.txt"]);
+        let plain = tmp.path().join("plain");
+        fs::create_dir_all(plain.join("sub")).unwrap();
+        fs::write(plain.join("sub/n.txt"), "").unwrap();
+        let abs = format!("{}/sub/*.txt", plain.display());
+        let out = walk(&abs, Path::new("/nonexistent"), 100);
+        assert_eq!(names(&out, &plain), ["sub/n.txt"]);
+    }
+
+    #[test]
+    fn limit_zero_no_match_invalid_pattern_and_cancellation() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("a.rs"), "").unwrap();
+        let zero = walk("*.rs", tmp.path(), 0);
+        assert!(zero.paths.is_empty() && zero.visited == 0 && !zero.more);
+        let none = walk("*.zig", tmp.path(), 10);
+        assert!(none.paths.is_empty() && !none.more);
+        let bad = glob_walk_blocking(
+            "[",
+            tmp.path(),
+            &GlobOptions::default(),
+            &AtomicBool::new(false),
+        );
+        assert!(matches!(bad, Err(SearchError::InvalidPattern(_))));
+        let stopped = glob_walk_blocking(
+            "*.rs",
+            tmp.path(),
+            &GlobOptions::default(),
+            &AtomicBool::new(true),
+        )
+        .unwrap();
+        assert!(stopped.cancelled && stopped.paths.is_empty() && stopped.visited == 0);
     }
 
     #[tokio::test]

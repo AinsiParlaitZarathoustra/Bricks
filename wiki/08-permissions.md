@@ -69,7 +69,7 @@ Agent::builder().permission_policy(DenyAll)
 
 ### RuleBased
 
-Rules are checked in order; the first matching rule decides. A rule matches a tool when its `tool_name` is `None`, is `"all"`, or equals the tool's name. If no rule matches, the call is allowed. `path_pattern` is part of the struct but is not evaluated in 0.6.0.
+Rules are checked in order; the first matching rule decides. A rule matches a tool when its `tool_name` is `None`, is `"all"`, or equals the tool's name. If no rule matches, the call is allowed. `path_pattern` is part of the struct but is not evaluated in 0.6.1.
 
 ```rust
 use cersei::tools::permissions::{PermissionAction, PermissionRule, RuleBased};
@@ -99,7 +99,7 @@ Agent::builder().permission_policy(InteractivePolicy::new(|req| {
 }))
 ```
 
-`InteractivePolicy::via_stream()` returns a `StreamDeferredPolicy`, which allows every call. No event asks the stream consumer, and `AgentEvent::PermissionRequired` is never emitted in 0.6.0. Do not use it for approvals.
+`InteractivePolicy::via_stream()` returns a `StreamDeferredPolicy`, which allows every call. No event asks the stream consumer, and `AgentEvent::PermissionRequired` is never emitted in 0.6.1. Do not use it for approvals.
 
 ## Permission levels
 
@@ -137,7 +137,7 @@ Bash = "ask"
 - **Actions:** `allow` (run without asking), `ask` (a person decides), `deny` (refuse).
 - **Order:** a `Forbidden` tool is always refused. Then the `[permissions.tools]` entry for the tool's name, if any. Then the entry for its level.
 - **Invalid section:** unknown keys make the whole section invalid. The defaults are used and a diagnostic is shown when the session opens.
-- **`default`:** accepted, but every level has its own key, so `default` never decides a call in 0.6.0. `docs/cli.md` says it applies after the levels; the code does not do that.
+- **`default`:** accepted, but every level has its own key, so `default` never decides a call in 0.6.1. `docs/cli.md` says it applies after the levels; the code does not do that.
 
 ### What happens when a call is asked about
 

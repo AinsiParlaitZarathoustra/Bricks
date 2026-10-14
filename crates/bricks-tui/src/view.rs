@@ -524,14 +524,10 @@ pub fn draw_live(f: &mut Frame, app: &App, composer: &Composer, o: &Overlay) {
     let total = area.height as usize;
     let body_h = total.saturating_sub(composer_h + status_h + popup_h);
 
-    // Body: the tail of the live cells (and an approval hint).
-    let mut body: Vec<markdown::RichLine> = Vec::new();
-    for c in &app.cells[app.committed..] {
-        body.extend(markdown::wrap_rich_all(
-            &cell_rich_lines(c, o.show_thinking),
-            width,
-        ));
-    }
+    // Body: the tail of the live cells (and an approval hint). Answers and
+    // reasoning come from the render cache (parsed and wrapped only when
+    // they change); only the lines that fit are copied.
+    let mut extra: Vec<markdown::RichLine> = Vec::new();
     if !app.pending.is_empty() {
         let req = &app.pending[0];
         let hint = Style::default()
@@ -554,14 +550,38 @@ pub fn draw_live(f: &mut Frame, app: &App, composer: &Composer, o: &Overlay) {
             ),
             hint,
         ));
-        body.push(markdown::RichLine::from(Line::from(spans)));
+        extra.push(markdown::RichLine::from(Line::from(spans)));
     }
     if let Some(m) = o.message {
-        body.push(markdown::RichLine::from(Line::from(Span::styled(
+        extra.push(markdown::RichLine::from(Line::from(Span::styled(
             m.to_string(),
             Style::default().fg(Color::Yellow),
         ))));
     }
+    let mut body: Vec<markdown::RichLine> = Vec::new();
+    {
+        let mut cache = app.render_cache.lock().unwrap_or_else(|e| e.into_inner());
+        cache.retain_live(app.committed, app.cells.len());
+        let wanted = body_h.saturating_sub(extra.len());
+        // From the last cell backwards, until the area is full.
+        for (i, c) in app.cells.iter().enumerate().skip(app.committed).rev() {
+            if body.len() >= wanted {
+                break;
+            }
+            let owned;
+            let lines: &[markdown::RichLine] = match cache.lines(i, c, o.show_thinking, width) {
+                Some(l) => l,
+                None => {
+                    owned = markdown::wrap_rich_all(&cell_rich_lines(c, o.show_thinking), width);
+                    &owned
+                }
+            };
+            let take = (wanted - body.len()).min(lines.len());
+            body.extend(lines[lines.len() - take..].iter().rev().cloned());
+        }
+        body.reverse();
+    }
+    body.extend(extra);
     let skip = body.len().saturating_sub(body_h);
     let body: Vec<markdown::RichLine> = body.into_iter().skip(skip).collect();
     let mut y = area.y;
