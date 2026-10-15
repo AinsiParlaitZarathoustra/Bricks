@@ -907,6 +907,15 @@ impl Controller {
         self.inner.activity.lock().clone()
     }
 
+    /// Rename the open session, saved at once. Later saves of the session
+    /// (a run's end, a model change) write the metadata they hold, so the
+    /// title is kept in that same metadata rather than written beside it.
+    pub fn set_title(&self, title: &str) -> Result<(), String> {
+        let mut m = self.inner.meta.lock();
+        m.title = title.trim().to_string();
+        m.save(&files_dir(&self.inner.cfg, &m.id))
+    }
+
     /// Wait until no run or session command is in progress (maintenance
     /// may continue).
     pub async fn wait_idle(&self) {

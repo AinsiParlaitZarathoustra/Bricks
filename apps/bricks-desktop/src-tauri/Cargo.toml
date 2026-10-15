@@ -1,0 +1,37 @@
+[package]
+name = "bricks-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Bricks Desktop: the Tauri application over the Bricks engine."
+
+[lib]
+name = "bricks_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+bricks-config = { workspace = true }
+cersei-agent = { workspace = true }
+cersei-provider = { workspace = true }
+cersei-tools = { workspace = true }
+cersei-types = { workspace = true }
+cersei-memory = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+parking_lot = { workspace = true }
+dirs = { workspace = true }
+chrono = { workspace = true }
+portable-pty = "0.9"
+ts-rs = { version = "11", features = ["serde-json-impl"] }
+uuid = { version = "1", features = ["v4"] }
+base64 = "0.22"
+
+[dev-dependencies]
+tempfile = { workspace = true }

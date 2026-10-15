@@ -1,0 +1,15 @@
+[package]
+name = "bricks-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Engine assembly shared by the Bricks frontends (CLI, terminal interface, desktop): Bricks home, provider registry, project loader and engine configuration."
+
+[dependencies]
+cersei-agent = { workspace = true }
+cersei-provider = { workspace = true }
+cersei-tools = { workspace = true }
+cersei-memory = { workspace = true, features = ["structured"] }
+cersei-embeddings = { workspace = true }
+dirs = { workspace = true }
+parking_lot = { workspace = true }

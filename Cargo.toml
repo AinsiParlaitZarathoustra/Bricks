@@ -26,6 +26,8 @@ members = [
     "bench/long-mem",
     "crates/bricks-cli",
     "crates/bricks-tui",
+    "crates/bricks-config",
+    "apps/bricks-desktop/src-tauri",
 ]
 
 [workspace.package]
@@ -126,6 +128,7 @@ cersei-workflows = { path = "crates/cersei-workflows", version = "0.6.1" }
 cersei-web = { path = "crates/cersei-web", version = "0.6.1" }
 cersei-testkit = { path = "crates/cersei-testkit" }
 bricks-tui = { path = "crates/bricks-tui", version = "0.6.1" }
+bricks-config = { path = "crates/bricks-config", version = "0.6.1" }
 clap = { version = "4.5", features = ["derive"] }
 ratatui = "0.30"
 nucleo-matcher = "0.3"

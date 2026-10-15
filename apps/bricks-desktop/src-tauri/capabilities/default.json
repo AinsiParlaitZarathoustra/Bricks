@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Bricks main window",
+  "windows": ["main"],
+  "permissions": ["core:default", "dialog:default", "opener:default", "core:window:allow-start-dragging"]
+}
