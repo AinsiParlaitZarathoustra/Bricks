@@ -58,6 +58,7 @@ const CONTEXT: ContextStatus = {
 export function snapshot(overrides: Partial<Snapshot> = {}): Snapshot {
 	return {
 		session_id: SESSION_ID,
+		approval_mode: 'standard',
 		title: 'Essai',
 		working_dir: '/work/demo',
 		model: MODEL,

@@ -3,7 +3,7 @@ name = "bricks-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "The `bricks` command: a thin layer that loads the configuration, starts the engine and presents its events (headless JSONL or the terminal interface)."
+description = "The `bricks` command: a thin layer that loads the configuration, starts the engine and presents its events as text or headless JSONL."
 
 [[bin]]
 name = "bricks"
@@ -13,7 +13,6 @@ path = "src/main.rs"
 cersei-agent = { workspace = true }
 bricks-config = { workspace = true }
 cersei-types = { workspace = true }
-bricks-tui = { workspace = true }
 cersei-provider = { workspace = true }
 cersei-tools = { workspace = true }
 cersei-memory = { workspace = true, features = ["structured"] }

@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { File, Folder, Image } from '@lucide/svelte'
+  import File from '@lucide/svelte/icons/file'
+  import Folder from '@lucide/svelte/icons/folder'
+  import Image from '@lucide/svelte/icons/image'
   import type { UserItem } from '$lib/state/conversation.svelte'
   import { basename, formatBytes } from '../format'
 

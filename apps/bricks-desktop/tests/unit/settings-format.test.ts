@@ -23,9 +23,9 @@ describe('settings format helpers', () => {
 		expect(formatCount(1234)).toMatch(/^1\D?234$/);
 	});
 
-	it('lists input modalities in French and defaults to text', () => {
+	it('lists input modalities in French and says when none is declared', () => {
 		expect(formatModalities(['text', 'image'])).toBe('Texte, Image');
-		expect(formatModalities([])).toBe('Texte');
+		expect(formatModalities([])).toBe('Non déclarées');
 		expect(formatModalities(['hologram'])).toBe('hologram');
 	});
 

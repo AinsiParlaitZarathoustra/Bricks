@@ -164,3 +164,61 @@ export const ptyList = (projectId: string | null) => call<PtyInfo[]>('pty_list',
 // ─── Paths ───────────────────────────────────────────────────────────────────
 
 export const pathKind = (path: string) => call<'file' | 'folder' | 'missing'>('path_kind', { path })
+
+// ─── Sprint 14.1: slash commands and inspection ──────────────────────────────
+
+export type * from './bindings/SlashCommandInfo'
+export type * from './bindings/SlashAction'
+export type * from './bindings/SlashPresent'
+export type * from './bindings/SessionToolInfo'
+export type * from './bindings/McpServerInfo'
+export type * from './bindings/SessionConfigInfo'
+export type * from './bindings/ConfigEntry'
+import type { SlashCommandInfo } from './bindings/SlashCommandInfo'
+import type { SlashAction } from './bindings/SlashAction'
+import type { SessionToolInfo } from './bindings/SessionToolInfo'
+import type { McpServerInfo } from './bindings/McpServerInfo'
+import type { SessionConfigInfo } from './bindings/SessionConfigInfo'
+
+export const slashCommands = () => call<SlashCommandInfo[]>('slash_commands')
+/** Throws `IpcError` (`invalid`) with a French message for a bad line. */
+export const slashParse = (line: string) => call<SlashAction>('slash_parse', { line })
+export const sessionTools = (sessionId: string) =>
+  call<SessionToolInfo[]>('session_tools', { sessionId })
+export const sessionMcp = (sessionId: string) => call<McpServerInfo[]>('session_mcp', { sessionId })
+export const sessionConfig = (sessionId: string) =>
+  call<SessionConfigInfo>('session_config', { sessionId })
+export const sessionLocate = (sessionId: string) =>
+  call<SessionItem>('session_locate', { sessionId })
+export const appQuit = () => call<void>('app_quit')
+
+export type * from './bindings/ProjectFileEntry'
+import type { ProjectFileEntry } from './bindings/ProjectFileEntry'
+/** `@` mentions: fuzzy-matched project files (best first). */
+export const projectFiles = (projectId: string, query: string, limit = 50, refresh = false) =>
+  call<ProjectFileEntry[]>('project_files', { projectId, query, limit, refresh })
+
+// ─── Sprint 14.2: provider/model editing ─────────────────────────────────────
+
+export type * from './bindings/ToolApproval'
+export type * from './bindings/ProvidersFile'
+export type * from './bindings/ProviderView'
+export type * from './bindings/ModelView'
+export type * from './bindings/ModelProfileView'
+export type * from './bindings/ProviderPatch'
+export type * from './bindings/ModelPatch'
+import type { ProvidersFile } from './bindings/ProvidersFile'
+import type { ProviderPatch } from './bindings/ProviderPatch'
+import type { ModelPatch } from './bindings/ModelPatch'
+
+/** The providers file as loaded (no secret). */
+export const providersConfig = () => call<ProvidersFile>('providers_config')
+/** Each write needs the `revision` read last; `conflict` if the file changed. */
+export const providerUpdate = (providerId: string, patch: ProviderPatch, revision: string) =>
+  call<ProvidersFile>('provider_update', { providerId, patch, revision })
+export const modelUpdate = (providerId: string, modelId: string, patch: ModelPatch, revision: string) =>
+  call<ProvidersFile>('model_update', { providerId, modelId, patch, revision })
+export const providerDelete = (providerId: string, revision: string) =>
+  call<ProvidersFile>('provider_delete', { providerId, revision })
+export const modelDelete = (providerId: string, modelId: string, revision: string) =>
+  call<ProvidersFile>('model_delete', { providerId, modelId, revision })

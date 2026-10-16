@@ -10,7 +10,7 @@ The Bricks workspace (version 0.6.1). The inherited crates keep their
 
 ```text
 bricks-cli          the `bricks` binary: arguments, configuration, headless / JSONL
-  bricks-tui        terminal interface: renders engine events, turns gestures into commands
+apps/bricks-desktop the desktop application (Tauri): the interactive interface
 cersei-agent        engine: agent loop, controller (commands/events), approvals, compaction
   cersei-provider, cersei-tools, cersei-memory, cersei-compression, cersei-web,
   bricks-semantic, bricks-skills, cersei-lsp, cersei-mcp, cersei-embeddings, …
@@ -21,15 +21,18 @@ cersei-types        shared types and the shared HTTP client
 
 The `bricks` command, a thin layer over the engine: loads `providers.toml`
 and `bricks.toml`, starts the controller of `cersei-agent`, and presents its
-events — through `bricks-tui` when interactive, as text or versioned JSONL
-otherwise (`bricks run`, `bricks serve`). See `docs/cli.md` in the repository.
+events as text or versioned JSONL (`bricks run`, `bricks sessions`). The
+interactive interface is the desktop application. See `docs/cli.md` in the
+repository.
 Install from a checkout: `cargo install --path crates/bricks-cli`.
 
-## bricks-tui
+## apps/bricks-desktop
 
-The interactive terminal interface (ratatui): renders the engine's events
-(streaming text, tool calls, approvals, totals) and turns keys and gestures
-into engine commands. It holds no agent logic.
+The desktop application (Tauri 2, Svelte): the interactive interface. It
+renders the engine's events and turns gestures into engine commands over the
+same contract (`cersei_agent::control`), and it builds its command palette
+from the shared registry (`cersei_agent::control::slash`). It holds no agent
+logic.
 
 ## cersei (facade)
 

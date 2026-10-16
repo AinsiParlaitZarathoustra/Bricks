@@ -19,7 +19,8 @@
 </script>
 
 <div
-  class="flex max-w-full items-center gap-2 rounded-md border bg-background py-1 pr-1 pl-1.5 text-sm"
+  class="flex max-w-full items-center gap-2 rounded-md border bg-muted/60 py-1 pr-1 pl-1.5 text-sm"
+  class:border-transparent={error === null}
   class:border-destructive={error !== null}
   data-kind={attachment.kind}
 >

@@ -5,19 +5,19 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import Palette from '@lucide/svelte/icons/palette';
-	import LayoutPanelLeft from '@lucide/svelte/icons/layout-panel-left';
+	import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal';
 	import Cpu from '@lucide/svelte/icons/cpu';
 	import AppWindow from '@lucide/svelte/icons/app-window';
 	import FlaskConical from '@lucide/svelte/icons/flask-conical';
 	import AppearanceSettings from './AppearanceSettings.svelte';
-	import InterfaceSettings from './InterfaceSettings.svelte';
+	import GeneralSettings from './GeneralSettings.svelte';
 	import ModelSettings from './ModelSettings.svelte';
 	import ApplicationSettings from './ApplicationSettings.svelte';
 	import AdvancedSettings from './AdvancedSettings.svelte';
 
 	let { open = $bindable(false) }: { open?: boolean } = $props();
 
-	type SectionId = 'appearance' | 'interface' | 'models' | 'application' | 'advanced';
+	type SectionId = 'appearance' | 'general' | 'models' | 'application' | 'advanced';
 
 	const SECTIONS: {
 		id: SectionId;
@@ -25,7 +25,7 @@
 		icon: Component<{ class?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>;
 	}[] = [
 		{ id: 'appearance', label: 'Apparence', icon: Palette },
-		{ id: 'interface', label: 'Interface', icon: LayoutPanelLeft },
+		{ id: 'general', label: 'Général', icon: SlidersHorizontal },
 		{ id: 'models', label: 'Modèles', icon: Cpu },
 		{ id: 'application', label: 'Application', icon: AppWindow },
 		{ id: 'advanced', label: 'Avancé', icon: FlaskConical }
@@ -72,8 +72,8 @@
 			<Tabs.Content value="appearance" class="min-h-0 flex-1 overflow-y-auto p-6">
 				<AppearanceSettings />
 			</Tabs.Content>
-			<Tabs.Content value="interface" class="min-h-0 flex-1 overflow-y-auto p-6">
-				<InterfaceSettings />
+			<Tabs.Content value="general" class="min-h-0 flex-1 overflow-y-auto p-6">
+				<GeneralSettings />
 			</Tabs.Content>
 			<Tabs.Content value="models" class="min-h-0 flex-1 overflow-y-auto p-6">
 				<ModelSettings />

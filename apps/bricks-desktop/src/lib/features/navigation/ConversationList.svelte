@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { tick } from 'svelte';
-	import { EllipsisVertical, Pencil, Trash } from '@lucide/svelte';
+	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
+	import Pencil from '@lucide/svelte/icons/pencil';
+	import Trash from '@lucide/svelte/icons/trash';
 	import type { SessionItem } from '$lib/ipc/client';
 	import { app } from '$lib/state/app.svelte';
 	import { Button } from '$lib/components/ui/button';

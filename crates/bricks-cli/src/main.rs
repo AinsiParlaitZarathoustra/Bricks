@@ -7,12 +7,17 @@ mod exit;
 mod headless;
 mod sessions;
 mod setup;
-mod tui;
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 
 fn main() {
-    let cli = args::Cli::parse();
+    let args::Cli { global, command } = args::Cli::parse();
+    let Some(command) = command else {
+        // No command: show the help. There is no interactive interface here.
+        let _ = args::Cli::command().print_help();
+        println!();
+        std::process::exit(exit::OK);
+    };
     // The folder Bricks was started from: the base of relative paths given
     // on the command line (the process never changes it afterwards).
     let launch = match std::env::current_dir() {
@@ -33,15 +38,10 @@ fn main() {
         }
     };
     let code = runtime.block_on(async move {
-        match cli.command {
-            Some(args::Cmd::Run(run)) => headless::run(&cli.global, &launch, run).await,
-            Some(args::Cmd::Sessions { json, all }) => {
-                sessions::run(&cli.global, &launch, json, all).await
-            }
-            None | Some(args::Cmd::Tui) => tui::run(&cli.global, &launch, None, false).await,
-            Some(args::Cmd::Resume { session_id }) => {
-                let pick = session_id.is_none();
-                tui::run(&cli.global, &launch, session_id, pick).await
+        match command {
+            args::Cmd::Run(run) => headless::run(&global, &launch, run).await,
+            args::Cmd::Sessions { json, all } => {
+                sessions::run(&global, &launch, json, all).await
             }
         }
     });

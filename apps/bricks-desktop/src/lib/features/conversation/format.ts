@@ -8,12 +8,6 @@ export const SHELL_TOOLS = new Set(['Bash', 'bash', 'Shell', 'PowerShell'])
 const PATH_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
 const SEARCH_TOOLS = new Set(['Grep', 'Glob'])
 
-export const TOOL_STATUS_LABEL = {
-  running: 'En cours',
-  ok: 'Terminé',
-  error: 'Erreur',
-} as const
-
 export const OUTCOME_LABEL: Record<RunOutcome, string> = {
   succeeded: 'Terminé',
   incomplete: 'Incomplet',

@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { Brain, ChevronDown } from '@lucide/svelte'
+  import Brain from '@lucide/svelte/icons/brain'
+  import ChevronDown from '@lucide/svelte/icons/chevron-down'
   import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '$lib/components/ui/collapsible'
   import type { AssistantItem } from '$lib/state/conversation.svelte'
   import { throttledValue } from '../throttled.svelte'

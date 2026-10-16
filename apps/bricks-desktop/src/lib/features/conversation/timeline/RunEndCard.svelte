@@ -1,5 +1,10 @@
 <script lang="ts">
-  import { Ban, ChevronDown, CircleAlert, CircleCheck, CircleX, TriangleAlert } from '@lucide/svelte'
+  import Ban from '@lucide/svelte/icons/ban'
+  import ChevronDown from '@lucide/svelte/icons/chevron-down'
+  import CircleAlert from '@lucide/svelte/icons/circle-alert'
+  import CircleCheck from '@lucide/svelte/icons/circle-check'
+  import CircleX from '@lucide/svelte/icons/circle-x'
+  import TriangleAlert from '@lucide/svelte/icons/triangle-alert'
   import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '$lib/components/ui/collapsible'
   import DiffStat from '$lib/layout/DiffStat.svelte'
   import type { Conversation, RunEndItem, RunInfo } from '$lib/state/conversation.svelte'

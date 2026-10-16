@@ -250,6 +250,8 @@ pub fn ingest(hub: &Arc<Hub>, entry: &Arc<OpenSession>, env: Envelope) {
                 agent_id,
                 changeset_id,
             } if !files.is_empty() => {
+                // The `@` file index of the project is stale after a write.
+                crate::commands::files::invalidate(&entry.project_id);
                 change = Some(journal_entry(
                     &mut live,
                     entry,

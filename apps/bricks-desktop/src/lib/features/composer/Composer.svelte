@@ -1,12 +1,21 @@
 <script lang="ts">
-  import { onMount, untrack } from 'svelte'
+  import { onMount, tick, untrack } from 'svelte'
   import { getCurrentWebview } from '@tauri-apps/api/webview'
   import type { DragDropEvent } from '@tauri-apps/api/webview'
   import { Button } from '$lib/components/ui/button'
   import { Textarea } from '$lib/components/ui/textarea'
+  import * as Tooltip from '$lib/components/ui/tooltip'
   import { app } from '$lib/state/app.svelte'
+  import { ui } from '$lib/state/ui.svelte'
   import type { Conversation, Draft, DraftAttachment } from '$lib/state/conversation.svelte'
-  import { attachmentSave, errorMessage, pathKind } from '$lib/ipc/client'
+  import {
+    appQuit,
+    attachmentSave,
+    errorMessage,
+    pathKind,
+    slashParse,
+  } from '$lib/ipc/client'
+  import type { SlashCommandInfo } from '$lib/ipc/bindings/SlashCommandInfo'
   import type { PromptBlock } from '$lib/ipc/engine'
   import ArrowUpIcon from '@lucide/svelte/icons/arrow-up'
   import SquareIcon from '@lucide/svelte/icons/square'
@@ -16,6 +25,31 @@
   import AttachmentChip from './AttachmentChip.svelte'
   import ModelSelect from './ModelSelect.svelte'
   import EffortSelect from './EffortSelect.svelte'
+  import CommandPalette from '$lib/features/commands/CommandPalette.svelte'
+  import QuitDialog from '$lib/features/commands/QuitDialog.svelte'
+  import MentionPalette from './MentionPalette.svelte'
+  import { MentionFiles } from './mention-files.svelte'
+  import { mentionAt, mentionKind, projectEntryPath, removeMention, type MentionToken } from './mentions'
+  import type { ProjectFileEntry } from '$lib/ipc/bindings/ProjectFileEntry'
+  import { slashRegistry } from '$lib/features/commands/slash-registry.svelte'
+  import {
+    completeLine,
+    filterCommands,
+    isExactName,
+    moveIndex,
+    paletteQuery,
+  } from '$lib/features/commands/palette'
+  import {
+    HistoryCursor,
+    shouldRecallNewer,
+    shouldRecallOlder,
+  } from '$lib/features/commands/history'
+  import {
+    runSlashLine,
+    type AttachKind,
+    type SlashHost,
+    type SlashOutcome,
+  } from '$lib/features/commands/dispatch'
   import { basename, blobToBase64, extensionFor, isImagePath } from './attachments'
 
   let { conversation }: { conversation: Conversation | null } = $props()
@@ -23,6 +57,8 @@
   const NO_IMAGE_MESSAGE = 'Ce modèle n’accepte pas les images : retirez cette pièce jointe.'
   // Browsers without CSS field-sizing get the manual height fallback below.
   const HAS_FIELD_SIZING = typeof CSS !== 'undefined' && CSS.supports('field-sizing', 'content')
+  const uid = $props.id()
+  const paletteId = `${uid}-palette`
 
   // ─── Draft ────────────────────────────────────────────────────────────────
   // An open conversation keeps its own draft (it survives switches). Without
@@ -44,6 +80,9 @@
   // Without a conversation, these choices are used by the first send.
   let pickedModel = $state<string | null>(null)
   let pickedEffort = $state<string | null>(null)
+  // Set by `/model`, `/effort` (through `ui.picker`) to open the selects.
+  let modelOpen = $state(false)
+  let effortOpen = $state(false)
 
   const hasModels = $derived(app.models.length > 0)
   const selection: string | null = $derived(
@@ -66,7 +105,7 @@
   let dragging = $state(false)
   let refusal = $state<string | null>(null)
   let rootEl = $state<HTMLElement | null>(null)
-  let editorEl = $state<HTMLElement | null>(null)
+  let editorEl = $state<HTMLTextAreaElement | null>(null)
 
   /** Why an attachment cannot be sent, or `null` when it can. */
   function chipError(a: DraftAttachment): string | null {
@@ -78,6 +117,9 @@
   const blocked = $derived(draft.attachments.some((a) => chipError(a) !== null))
   const hasContent = $derived(draft.text.trim() !== '' || draft.attachments.length > 0)
   const canSend = $derived(editable && !running && !sending && saving === 0 && !blocked && hasContent)
+  /** A `/` line is run by the composer, never sent as a prompt (leading spaces do not count). */
+  const isSlashLine = $derived(draft.text.trimStart().startsWith('/'))
+  const slashReady = $derived(isSlashLine && editable && !sending && saving === 0)
 
   const pendingText = $derived.by(() => {
     const p = conversation?.pendingChange
@@ -92,7 +134,7 @@
     if (project.missing) return 'Le dossier du projet est introuvable.'
     if (!hasModels) return 'Aucun modèle configuré.'
     if (running) return 'Préparez le message suivant…'
-    return 'Écrivez un message… (Entrée pour envoyer, Maj+Entrée pour une nouvelle ligne)'
+    return 'Quelque chose à dire ?'
   })
 
   // ─── Attachments ──────────────────────────────────────────────────────────
@@ -144,6 +186,32 @@
       // Checked again after the await: the same path may have been added meanwhile.
       if (!target.attachments.some((a) => a.path === path)) target.attachments.push(attachment)
     }
+  }
+
+  /** Attaches a path named by `/file`, `/folder` or `/image` (the path is checked first). */
+  async function attachByPath(kind: AttachKind, path: string): Promise<string | null> {
+    if (!editable) return 'Ouvrez un projet et configurez un modèle pour joindre un élément.'
+    let found: 'file' | 'folder' | 'missing'
+    try {
+      found = await pathKind(path)
+    } catch (e) {
+      return errorMessage(e)
+    }
+    if (found === 'missing') return `Élément introuvable : ${path}`
+    if (kind === 'folder' && found !== 'folder') return `« ${path} » n’est pas un dossier.`
+    if (kind !== 'folder' && found === 'folder') return `« ${path} » est un dossier : utilisez /folder.`
+    if (kind === 'image' && !isImagePath(path)) {
+      return `« ${path} » n’est pas une image (png, jpeg, gif, webp).`
+    }
+    const target = draft
+    if (target.attachments.some((a) => a.path === path)) return null
+    target.attachments.push({
+      id: crypto.randomUUID(),
+      kind: found === 'folder' ? 'folder' : isImagePath(path) ? 'image' : 'file',
+      path,
+      name: basename(path),
+    })
+    return null
   }
 
   /** Saves a pasted image in the application's storage, then adds its chip. */
@@ -228,23 +296,47 @@
     } catch {
       // Not running inside Tauri: there is no native drop target.
     }
+    void slashRegistry.load()
     return () => {
       disposed = true
       unlisten?.()
+      files.dispose()
     }
   })
 
   // ─── Model and effort choices ─────────────────────────────────────────────
 
+  /** Model choice without an open conversation: kept for the first send. */
+  function applyLocalModel(next: string, reasoning: string | null): string | null {
+    const target = app.model(next)
+    if (!target) return `Modèle inconnu : ${next}.`
+    const known = (profile: string | null) =>
+      profile !== null && target.profiles.some((p) => p.id === profile)
+    if (reasoning !== null && !known(reasoning)) {
+      return `Profil d’effort inconnu pour ${target.name} : ${reasoning}.`
+    }
+    pickedModel = next
+    pickedEffort = reasoning ?? (known(pickedEffort) ? pickedEffort : null)
+    return null
+  }
+
+  /** Effort choice without an open conversation: kept for the first send. */
+  function applyLocalEffort(profile: string | null): string | null {
+    if (profile !== null && !(choice?.profiles.some((p) => p.id === profile) ?? false)) {
+      return `Profil d’effort inconnu : ${profile}.`
+    }
+    pickedEffort = profile
+    return null
+  }
+
   /** Returns the refusal (the selects revert their display), or null when accepted. */
   async function chooseModel(next: string): Promise<string | null> {
     refusal = null
-    const profiles = app.model(next)?.profiles ?? []
     if (!conversation) {
-      pickedModel = next
-      if (pickedEffort && !profiles.some((p) => p.id === pickedEffort)) pickedEffort = null
-      return null
+      refusal = applyLocalModel(next, null)
+      return refusal
     }
+    const profiles = app.model(next)?.profiles ?? []
     const effort = conversation.reasoning
     const keep = effort && profiles.some((p) => p.id === effort) ? effort : undefined
     const error = await app.command(conversation.sessionId, { type: 'set_model', model: next, reasoning: keep })
@@ -255,8 +347,8 @@
   async function chooseEffort(profile: string | null): Promise<string | null> {
     refusal = null
     if (!conversation) {
-      pickedEffort = profile
-      return null
+      refusal = applyLocalEffort(profile)
+      return refusal
     }
     const error = await app.command(conversation.sessionId, { type: 'set_reasoning', profile })
     refusal = error
@@ -269,15 +361,42 @@
    * A submit whose outcome is not known yet: `text` is the draft that was sent.
    * It is cleared when its run starts; an engine refusal (`command_rejected`)
    * keeps it. `runsBefore` and `sentAt` tell the run and the refusal apart.
+   * `restore` is the draft kept aside while browsing history (put back once
+   * the recalled entry is sent); `skill` is the skill of a `/skill` line.
    */
   let awaiting = $state<{
     sessionId: string
     sentAt: number
     runsBefore: number
     text: string
+    restore: string | null
+    skill: string | null
   } | null>(null)
 
+  /** Input history browsing: the draft kept aside while an older prompt is shown. */
+  const cursor = new HistoryCursor<Draft>()
+
+  /** The `/compact` sent from here: its progress and result show near the composer. */
+  let compactWatch = $state<{ sessionId: string; sentAt: number } | null>(null)
+
+  /** Active runs listed by `/quit`; `null` when the confirmation is closed. */
+  let quitRuns = $state<string[] | null>(null)
+
+  /** The open conversation, or a new one that takes over the local draft. */
+  async function ensureConversation(): Promise<{ conversation: Conversation } | { error: string }> {
+    if (conversation) return { conversation }
+    const created = await app.newConversation(selection ?? undefined, pickedEffort ?? undefined)
+    if (!created) return { error: app.lastError?.message ?? 'Impossible de créer la conversation.' }
+    // The local draft moves into the new conversation: a refusal keeps it there.
+    created.draft.text = localDraft.text
+    created.draft.attachments = [...localDraft.attachments]
+    localDraft.text = ''
+    localDraft.attachments = []
+    return { conversation: created }
+  }
+
   async function send() {
+    if (isSlashLine) return runSlashDraft()
     if (!canSend) {
       if (blocked) refusal = 'Retirez les pièces jointes en erreur pour envoyer.'
       return
@@ -291,20 +410,12 @@
     const sentAt = Date.now()
     sending = true
     try {
-      let target = conversation
-      if (!target) {
-        const created = await app.newConversation(selection ?? undefined, pickedEffort ?? undefined)
-        if (!created) {
-          refusal = app.lastError?.message ?? 'Impossible de créer la conversation.'
-          return
-        }
-        // Move the local draft into the new conversation: a refusal keeps it there.
-        created.draft.text = localDraft.text
-        created.draft.attachments = [...localDraft.attachments]
-        localDraft.text = ''
-        localDraft.attachments = []
-        target = created
+      const ensured = await ensureConversation()
+      if ('error' in ensured) {
+        refusal = ensured.error
+        return
       }
+      const target = ensured.conversation
       const runsBefore = target.runs.size
       const sentText = target.draft.text
       const error = await app.command(target.sessionId, { type: 'submit', prompt: { blocks } })
@@ -312,14 +423,23 @@
         refusal = error
         return
       }
-      awaiting = { sessionId: target.sessionId, sentAt, runsBefore, text: sentText }
+      // A recalled entry was sent: the draft kept aside comes back once its run starts.
+      const restore = cursor.end()
+      awaiting = {
+        sessionId: target.sessionId,
+        sentAt,
+        runsBefore,
+        text: sentText,
+        restore: restore?.text ?? null,
+        skill: null,
+      }
     } finally {
       sending = false
     }
   }
 
   // Settles the last submit: its draft goes when its run starts, and stays when
-  // the engine refuses the submit.
+  // the engine refuses the submit or a `/skill` cannot be activated.
   $effect(() => {
     const pending = awaiting
     if (!pending) return
@@ -329,12 +449,26 @@
       return
     }
     const last = conv.lastRejection
-    const refused = last !== null && last.command === 'submit' && last.at >= pending.sentAt
+    const refusedByEngine = last !== null && last.command === 'submit' && last.at >= pending.sentAt
+    const skill = conv.lastSkill
+    const failed =
+      pending.skill !== null && skill !== null && !skill.ok && skill.at >= pending.sentAt ? skill : null
     const started = conv.runs.size > pending.runsBefore
-    if (!refused && !started) return
+    if (!refusedByEngine && !failed && !started) return
     untrack(() => {
       awaiting = null
-      if (started && !refused && conv.draft.text === pending.text) clearDraft(conv.draft)
+      if (failed) {
+        refusal = `Skill « ${failed.name} » non activé : ${failed.reason ?? 'raison inconnue'}. Rien n’a été envoyé.`
+        return
+      }
+      if (refusedByEngine) return
+      if (pending.restore !== null) {
+        for (const a of conv.draft.attachments) revoke(a)
+        conv.draft.text = pending.restore
+        conv.draft.attachments = []
+      } else if (conv.draft.text === pending.text) {
+        clearDraft(conv.draft)
+      }
     })
   })
 
@@ -343,35 +477,436 @@
     submit: 'Envoi refusé',
     set_model: 'Changement de modèle refusé',
     set_reasoning: 'Changement d’effort refusé',
+    compact: 'Compaction refusée',
   }
   let dismissedRejectionAt = $state<number | null>(null)
   const rejection = $derived.by(() => {
     const r = conversation?.lastRejection
-    if (!r || !Object.hasOwn(REJECTION_LABELS, r.command) || r.at === dismissedRejectionAt) return null
+    if (!r || r.at === dismissedRejectionAt) return null
     return r
   })
-  const rejectionLabel = $derived(rejection ? REJECTION_LABELS[rejection.command] : undefined)
+  const rejectionLabel = $derived(
+    rejection ? (REJECTION_LABELS[rejection.command] ?? 'Commande refusée') : null,
+  )
+
+  /** Progress and result of the `/compact` sent from this composer. */
+  const compactStatus = $derived.by(() => {
+    const w = compactWatch
+    if (!w || conversation?.sessionId !== w.sessionId) return null
+    const conv = app.conversations.get(w.sessionId)
+    const done = conv?.lastCompaction
+    if (done && done.at >= w.sentAt) return `Compaction : ${done.outcome}`
+    const refusedNow = conv?.lastRejection
+    if (refusedNow && refusedNow.command === 'compact' && refusedNow.at >= w.sentAt) return null
+    return 'Compaction en cours…'
+  })
 
   async function cancel() {
     if (!conversation) return
     refusal = await app.command(conversation.sessionId, { type: 'cancel' })
   }
 
+  // ─── `/` lines ────────────────────────────────────────────────────────────
+
+  /** Runs the `/` line of the draft. The engine parses it; nothing is sent as a prompt. */
+  async function runSlashDraft() {
+    if (!editable || sending || saving > 0) return
+    refusal = null
+    const origin = draft
+    const sentText = origin.text
+    sending = true
+    try {
+      const outcome = await runSlashLine(sentText.trim(), slashHost)
+      settleSlash(outcome, sentText, origin)
+    } finally {
+      sending = false
+    }
+  }
+
+  /** Clears the typed line, keeps it on a refusal, or starts watching what the engine answers. */
+  function settleSlash(outcome: SlashOutcome, sentText: string, origin: Draft) {
+    switch (outcome.kind) {
+      case 'refused':
+        refusal = outcome.message
+        return
+      case 'done': {
+        // The line is consumed: a draft kept aside while browsing history comes back.
+        origin.text = cursor.end()?.text ?? ''
+        return
+      }
+      case 'sent': {
+        const { sessionId, sentAt, runsBefore, watch } = outcome
+        const restore = cursor.end()?.text ?? null
+        if (watch.kind === 'submit' || watch.kind === 'skill') {
+          awaiting = {
+            sessionId,
+            sentAt,
+            runsBefore,
+            text: sentText,
+            restore,
+            skill: watch.kind === 'skill' ? watch.name : null,
+          }
+          return
+        }
+        if (watch.kind === 'compact') compactWatch = { sessionId, sentAt }
+        const target = app.conversations.get(sessionId)?.draft ?? origin
+        target.text = restore ?? ''
+      }
+    }
+  }
+
+  /** `/quit`: asks first when a run is active, then closes the application. */
+  async function requestQuit(): Promise<string | null> {
+    const active = [...app.conversations.values()]
+      .filter((c) => c.running)
+      .map((c) => c.title || 'Conversation sans titre')
+    if (active.length > 0) {
+      quitRuns = active
+      return null
+    }
+    try {
+      await appQuit()
+      return null
+    } catch (e) {
+      return errorMessage(e)
+    }
+  }
+
+  /** What the `/` dispatcher needs from this composer. */
+  const slashHost: SlashHost = {
+    async parse(line) {
+      try {
+        return await slashParse(line)
+      } catch (e) {
+        throw new Error(errorMessage(e))
+      }
+    },
+    currentSession: () => conversation?.sessionId ?? null,
+    async ensureSession() {
+      if (conversation) return { sessionId: conversation.sessionId }
+      if (!project) return { error: 'Ouvrez un projet pour utiliser cette commande.' }
+      if (project.missing) return { error: 'Le dossier du projet est introuvable.' }
+      if (!hasModels) return { error: 'Aucun modèle configuré.' }
+      const ensured = await ensureConversation()
+      return 'error' in ensured ? ensured : { sessionId: ensured.conversation.sessionId }
+    },
+    mark: (sessionId) => ({
+      sentAt: Date.now(),
+      runsBefore: app.conversations.get(sessionId)?.runs.size ?? 0,
+    }),
+    send: (sessionId, command) => app.command(sessionId, command),
+    async setModel(model, reasoning) {
+      refusal = null
+      return applyLocalModel(model, reasoning)
+    },
+    async setEffort(profile) {
+      refusal = null
+      return applyLocalEffort(profile)
+    },
+    openPicker: (picker) => ui.openPicker(picker),
+    open: (view, args) => ui.open(view, args),
+    attachmentBlocks() {
+      if (saving > 0) return { error: 'Attendez la fin de l’enregistrement de la pièce jointe.' }
+      if (blocked) return { error: 'Retirez les pièces jointes en erreur pour envoyer.' }
+      return { blocks: draft.attachments.map(toBlock) }
+    },
+    resume: (sessionId) => app.resumeSession(sessionId),
+    showChanges() {
+      // The right panel's visibility is owned by the shell: see the report.
+      app.rightView = 'changes'
+    },
+    attach: attachByPath,
+    quit: requestQuit,
+  }
+
+  // ─── Palette `/` ──────────────────────────────────────────────────────────
+
+  /** The palette hides after Esc until the draft changes. */
+  let dismissedFor = $state<string | null>(null)
+  let paletteIndex = $state(0)
+
+  const paletteName = $derived(paletteQuery(draft.text.trimStart()))
+  const paletteItems: SlashCommandInfo[] = $derived(
+    slashRegistry.commands ? filterCommands(slashRegistry.commands, paletteName ?? '') : [],
+  )
+  const paletteOpen = $derived(paletteName !== null && editable && dismissedFor !== draft.text)
+  const activeIndex = $derived(Math.min(paletteIndex, Math.max(paletteItems.length - 1, 0)))
+  const activeCommand: SlashCommandInfo | undefined = $derived(paletteItems[activeIndex])
+  const paletteListShown = $derived(
+    paletteOpen && slashRegistry.state.status === 'ready' && paletteItems.length > 0,
+  )
+
+  // ─── `@` mentions ────────────────────────────────────────────────────────
+
+  const mentionId = `${uid}-mention`
+  const files = new MentionFiles()
+  /** Caret position in the editor, kept in step with the text. */
+  let caret = $state(0)
+  let mentionIndex = $state(0)
+  /** The `@` popover hides after Esc until the draft changes. */
+  let mentionDismissedFor = $state<string | null>(null)
+
+  const mention: MentionToken | null = $derived(editable ? mentionAt(draft.text, caret) : null)
+  const mentionOpen = $derived(mention !== null && !paletteOpen && mentionDismissedFor !== draft.text)
+  const mentionActiveIndex = $derived(Math.min(mentionIndex, Math.max(files.items.length - 1, 0)))
+  const mentionActive: ProjectFileEntry | undefined = $derived(files.items[mentionActiveIndex])
+
+  /** The popup the editor points at: the command palette wins over `@`. */
+  const popupId = $derived(paletteOpen ? paletteId : mentionOpen ? mentionId : null)
+  const popupShown = $derived(paletteOpen ? paletteListShown : mentionOpen && files.items.length > 0)
+  const popupActive = $derived(paletteOpen ? activeIndex : mentionActiveIndex)
+
+  /** Puts the caret at `pos` once the text is rendered. */
+  function moveCaret(pos: number) {
+    caret = pos
+    void tick().then(() => {
+      const el = editorEl
+      if (el) el.setSelectionRange(pos, pos)
+    })
+  }
+
+  /** Puts the caret at the end once the new text is rendered. */
+  function caretToEnd() {
+    moveCaret(draft.text.length)
+  }
+
+  /** Keeps the caret state in step with the editor (typing, arrows, clicks). */
+  function syncCaret() {
+    const el = editorEl
+    if (el) caret = el.selectionStart
+  }
+
+  /** Completes the name of a command (Tab, Enter on an incomplete name, or a click). */
+  function completeWith(cmd: SlashCommandInfo) {
+    draft.text = completeLine(cmd)
+    paletteIndex = 0
+    dismissedFor = null
+    caretToEnd()
+    editorEl?.focus()
+  }
+
+  /** Keys handled while the palette is open. Returns true when the key was used. */
+  function onPaletteKey(e: KeyboardEvent): boolean {
+    const count = paletteItems.length
+    switch (e.key) {
+      case 'ArrowDown':
+      case 'ArrowUp':
+        if (count === 0) return false
+        e.preventDefault()
+        paletteIndex = moveIndex(activeIndex, e.key === 'ArrowDown' ? 1 : -1, count)
+        return true
+      case 'Tab': {
+        const cmd = activeCommand
+        if (!cmd || e.shiftKey) return false
+        e.preventDefault()
+        completeWith(cmd)
+        return true
+      }
+      case 'Enter': {
+        const cmd = activeCommand
+        // A complete name runs the command (the normal Enter path); an incomplete one is completed first.
+        if (!cmd || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return false
+        if (isExactName(paletteName ?? '', cmd)) return false
+        e.preventDefault()
+        completeWith(cmd)
+        return true
+      }
+      case 'Escape':
+        e.preventDefault()
+        e.stopPropagation()
+        dismissedFor = draft.text
+        return true
+      default:
+        return false
+    }
+  }
+
+  /** Rebuilds the project's file index (« Actualiser », Ctrl+R). */
+  function refreshMentions() {
+    const pid = project?.id
+    if (!pid || !mention) return
+    files.refresh(pid, mention.query)
+  }
+
+  /**
+   * Attaches a project entry (folder, image or file) and removes its `@` token
+   * from the text. An entry that has vanished since the listing becomes an error chip.
+   */
+  async function attachEntry(entry: ProjectFileEntry) {
+    const token = mention
+    const root = app.currentProject
+    if (!token || !root || !editable || sending) return
+    const target = draft
+    const next = removeMention(target.text, token)
+    target.text = next.text
+    mentionIndex = 0
+    moveCaret(next.caret)
+    const path = projectEntryPath(root.path, entry.path)
+    if (target.attachments.some((a) => a.path === path)) return
+    const id = crypto.randomUUID()
+    const name = basename(path)
+    let attachment: DraftAttachment
+    try {
+      const found = await pathKind(path)
+      attachment =
+        found === 'missing'
+          ? { id, kind: 'file', path, name, error: 'Élément introuvable.' }
+          : { id, kind: mentionKind(path, found), path, name }
+    } catch (e) {
+      attachment = { id, kind: 'file', path, name, error: errorMessage(e) }
+    }
+    // Checked again after the await: the same path may have been added meanwhile.
+    if (!target.attachments.some((a) => a.path === path)) target.attachments.push(attachment)
+  }
+
+  /** Keys handled while the `@` popover is open. Returns true when the key was used. */
+  function onMentionKey(e: KeyboardEvent): boolean {
+    if (e.ctrlKey && e.key.toLowerCase() === 'r') {
+      e.preventDefault()
+      refreshMentions()
+      return true
+    }
+    const count = files.items.length
+    switch (e.key) {
+      case 'ArrowDown':
+      case 'ArrowUp':
+        if (count === 0) return false
+        e.preventDefault()
+        mentionIndex = moveIndex(mentionActiveIndex, e.key === 'ArrowDown' ? 1 : -1, count)
+        return true
+      case 'Tab': {
+        const entry = mentionActive
+        if (!entry || e.shiftKey) return false
+        e.preventDefault()
+        void attachEntry(entry)
+        return true
+      }
+      case 'Enter': {
+        const entry = mentionActive
+        if (!entry || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) return false
+        e.preventDefault()
+        void attachEntry(entry)
+        return true
+      }
+      case 'Escape':
+        e.preventDefault()
+        e.stopPropagation()
+        mentionDismissedFor = draft.text
+        return true
+      default:
+        return false
+    }
+  }
+
+  // ─── Input history ────────────────────────────────────────────────────────
+
+  /** Earlier prompts of the open conversation, oldest first. */
+  function historyEntries(): string[] {
+    const out: string[] = []
+    for (const item of conversation?.items ?? []) {
+      if (item.kind === 'user' && item.text.trim() !== '') out.push(item.text)
+    }
+    // A send whose run has not started yet is not in the timeline.
+    if (awaiting && conversation && awaiting.sessionId === conversation.sessionId) {
+      if (awaiting.text.trim() !== '') out.push(awaiting.text)
+    }
+    return out
+  }
+
+  /** ↑ / ↓ recall earlier prompts. Returns true when the key was used. */
+  function recall(e: KeyboardEvent): boolean {
+    const el = editorEl
+    if (!el) return false
+    const caret = {
+      text: draft.text,
+      selectionStart: el.selectionStart,
+      selectionEnd: el.selectionEnd,
+      browsing: cursor.browsing,
+    }
+    const next =
+      e.key === 'ArrowUp'
+        ? shouldRecallOlder(caret)
+          ? cursor.older(historyEntries(), draft.text, draft)
+          : null
+        : shouldRecallNewer(caret)
+          ? cursor.newer(historyEntries())
+          : null
+    if (next === null) return false
+    e.preventDefault()
+    draft.text = next
+    caretToEnd()
+    return true
+  }
+
+  // ─── Keyboard and editor ──────────────────────────────────────────────────
+
+  function onInput(e: Event & { currentTarget: HTMLTextAreaElement }) {
+    const value = e.currentTarget.value
+    draft.text = value
+    paletteIndex = 0
+    mentionIndex = 0
+    caret = e.currentTarget.selectionStart
+    // Typing `/` opens the palette: a list that failed to load is asked again then.
+    if (value === '/') void slashRegistry.load()
+  }
+
   /** Enter sends (Cmd/Ctrl+Enter too); Shift+Enter is a newline; IME composition is left alone. */
   function onKeydown(e: KeyboardEvent) {
-    if (e.key !== 'Enter' || e.shiftKey || e.altKey || e.isComposing || e.keyCode === 229) return
+    if (e.isComposing || e.keyCode === 229) return
+    if (paletteOpen && onPaletteKey(e)) return
+    if (mentionOpen && onMentionKey(e)) return
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      if (!e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey) recall(e)
+      return
+    }
+    if (e.key !== 'Enter' || e.shiftKey || e.altKey) return
     e.preventDefault()
-    // While a run is going, nothing is sent: the hint under the editor says so.
-    if (running) return
+    // While a run is going, a prompt waits; a `/` line still runs (its command decides).
+    if (running && !isSlashLine) return
     void send()
   }
 
-  // ─── Editor behaviour ─────────────────────────────────────────────────────
-
-  // Focus the editor when a conversation opens.
+  // Focus the editor when a conversation opens; a recalled entry is kept aside
+  // in the conversation it came from and put back when the conversation changes.
   $effect(() => {
     void conversation?.sessionId
+    untrack(() => {
+      const saved = cursor.end()
+      if (saved) saved.owner.text = saved.text
+      // A new conversation's text: the caret is at its end until the editor reports otherwise.
+      caret = draft.text.length
+    })
     editorEl?.focus()
+  })
+
+  // Searches the project files for the text after `@` while the popover is open.
+  $effect(() => {
+    const token = mentionOpen ? mention : null
+    const pid = project?.id ?? null
+    if (token === null || pid === null) return
+    untrack(() => files.search(pid, token.query))
+  })
+
+  // `/model` and `/effort` open their select (the request is consumed here).
+  $effect(() => {
+    const requested = ui.picker
+    if (requested === null) return
+    untrack(() => {
+      ui.picker = null
+      if (!editable) {
+        refusal = 'Choisissez un projet et un modèle avant de changer ce réglage.'
+        return
+      }
+      if (requested === 'model') {
+        modelOpen = true
+        return
+      }
+      if (!choice || choice.profiles.length === 0) {
+        refusal = 'Ce modèle n’a pas de profil d’effort configuré.'
+        return
+      }
+      effortOpen = true
+    })
   })
 
   // Manual auto-grow where CSS field-sizing is missing (the class handles the rest).
@@ -410,11 +945,42 @@
       <p role="alert" class="text-sm text-destructive">{refusal}</p>
     {/if}
 
+    {#if compactStatus}
+      <p class="px-1 text-xs text-muted-foreground" role="status">{compactStatus}</p>
+    {/if}
+
     <div
-      class="flex flex-col gap-2 rounded-xl border bg-card p-2 shadow-xs transition-colors"
+      class="relative flex flex-col gap-2 rounded-xl border bg-card p-2 shadow-xs transition-colors focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/20"
       class:border-ring={dragging}
       class:bg-accent={dragging}
     >
+      {#if paletteOpen}
+        <CommandPalette
+          id={paletteId}
+          items={paletteItems}
+          activeIndex={activeIndex}
+          status={slashRegistry.state.status}
+          error={slashRegistry.state.status === 'error' ? slashRegistry.state.message : ''}
+          query={paletteName ?? ''}
+          onPick={completeWith}
+          onHover={(index) => (paletteIndex = index)}
+        />
+      {/if}
+
+      {#if mentionOpen}
+        <MentionPalette
+          id={mentionId}
+          items={files.items}
+          activeIndex={mentionActiveIndex}
+          status={files.status}
+          error={files.error}
+          query={mention?.query ?? ''}
+          onPick={(entry) => void attachEntry(entry)}
+          onHover={(index) => (mentionIndex = index)}
+          onRefresh={refreshMentions}
+        />
+      {/if}
+
       {#if dragging}
         <p class="px-1 text-sm text-muted-foreground">Déposez les fichiers pour les joindre.</p>
       {/if}
@@ -441,13 +1007,22 @@
         bind:ref={editorEl}
         rows={1}
         value={draft.text}
-        oninput={(e) => (draft.text = e.currentTarget.value)}
+        oninput={onInput}
         onkeydown={onKeydown}
         onpaste={onPaste}
         disabled={!editable}
         readonly={sending}
         {placeholder}
         aria-label="Message"
+        role="combobox"
+        aria-autocomplete="list"
+        aria-haspopup="listbox"
+        aria-expanded={paletteOpen || mentionOpen}
+        aria-controls={popupShown && popupId ? popupId : undefined}
+        aria-activedescendant={popupShown && popupId ? `${popupId}-opt-${popupActive}` : undefined}
+        onkeyup={syncCaret}
+        onclick={syncCaret}
+        onselect={syncCaret}
         class="max-h-[40vh] min-h-10 resize-none overflow-y-auto border-0 bg-transparent px-1 py-1 shadow-none focus-visible:ring-0 dark:bg-transparent"
       />
 
@@ -457,9 +1032,16 @@
           onPick={(paths, kind) => addPicked(paths, kind === 'folder')}
           onError={(message) => (refusal = message)}
         />
-        <ModelSelect value={selection} models={app.models} disabled={!editable} onChange={chooseModel} />
+        <ModelSelect
+          bind:open={modelOpen}
+          value={selection}
+          models={app.models}
+          disabled={!editable}
+          onChange={chooseModel}
+        />
         {#if choice && choice.profiles.length > 0}
           <EffortSelect
+            bind:open={effortOpen}
             value={effortValue}
             effective={effortEffective}
             profiles={choice.profiles}
@@ -473,21 +1055,30 @@
         {/if}
 
         <div class="ml-auto flex items-center gap-1">
-          {#if running}
+          {#if running && !isSlashLine}
             <Button variant="destructive" size="sm" onclick={cancel}>
               <SquareIcon aria-hidden="true" />
               Arrêter
             </Button>
           {:else}
-            <Button
-              size="icon"
-              aria-label="Envoyer le message"
-              title="Envoyer (Entrée)"
-              disabled={!canSend}
-              onclick={send}
-            >
-              <ArrowUpIcon aria-hidden="true" />
-            </Button>
+            <Tooltip.Root>
+              <Tooltip.Trigger>
+                {#snippet child({ props })}
+                  <Button
+                    {...props}
+                    size="icon"
+                    aria-label="Envoyer le message"
+                    disabled={!canSend && !slashReady}
+                    onclick={send}
+                  >
+                    <ArrowUpIcon aria-hidden="true" />
+                  </Button>
+                {/snippet}
+              </Tooltip.Trigger>
+              <Tooltip.Content side="top">
+                Envoyer (Entrée). Maj+Entrée : nouvelle ligne. Tapez / pour les commandes.
+              </Tooltip.Content>
+            </Tooltip.Root>
           {/if}
         </div>
       </div>
@@ -500,3 +1091,5 @@
     {/if}
   </div>
 </section>
+
+<QuitDialog runs={quitRuns} onClose={() => (quitRuns = null)} />

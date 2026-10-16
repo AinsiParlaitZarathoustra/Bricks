@@ -2,6 +2,7 @@
 
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
@@ -141,4 +142,45 @@ fn opening_in_a_missing_folder_fails_with_folder_missing() {
     let err = manager.open(params, &sh(), sink).unwrap_err();
     assert_eq!(err.code, IpcErrorCode::FolderMissing);
     assert!(manager.list(None).is_empty());
+}
+
+/// A consumer that goes away while the shell is still writing. The sink takes
+/// the first chunk and refuses every later one, so the kill happens with
+/// output still queued in the terminal. The shell must still be reaped.
+/// Repeated over several sessions: the failure is timing-dependent (a shell
+/// stuck exiting with unread output), so one session catches it only rarely.
+#[test]
+fn consumer_refused_mid_flood_still_reaps_the_shell() {
+    let dir = tempfile::tempdir().unwrap();
+    let manager = PtyManager::default();
+    for round in 0..3 {
+        let data_events = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&data_events);
+        let sink: EventSink = Arc::new(move |event: PtyEvent| match event {
+            PtyEvent::Data { .. } => counter.fetch_add(1, Ordering::SeqCst) == 0,
+            PtyEvent::Exit { .. } => false,
+        });
+        let params = OpenParams {
+            project_id: "p1".into(),
+            session_id: None,
+            cwd: dir.path().to_path_buf(),
+            cols: 80,
+            rows: 24,
+        };
+        let info = manager.open(params, &sh(), sink).unwrap();
+        manager
+            .write(&info.id, "while :; do echo flood flood flood flood flood flood flood; done\n")
+            .unwrap();
+
+        let deadline = Instant::now() + WAIT;
+        while !manager.list(None).is_empty() {
+            assert!(
+                Instant::now() < deadline,
+                "round {round}: the shell was never reaped after its consumer went away \
+                 ({} data events)",
+                data_events.load(Ordering::SeqCst)
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
 }

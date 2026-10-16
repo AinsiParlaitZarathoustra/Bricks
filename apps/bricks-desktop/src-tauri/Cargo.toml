@@ -29,9 +29,13 @@ parking_lot = { workspace = true }
 dirs = { workspace = true }
 chrono = { workspace = true }
 portable-pty = "0.9"
+ignore = { workspace = true }
+nucleo-matcher = { workspace = true }
 ts-rs = { version = "11", features = ["serde-json-impl"] }
 uuid = { version = "1", features = ["v4"] }
 base64 = "0.22"
+toml_edit = "0.22"
+sha2 = "0.10"
 
 [dev-dependencies]
 tempfile = { workspace = true }

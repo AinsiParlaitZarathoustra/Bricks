@@ -27,6 +27,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   terminal_height: 240,
   last_project_id: null,
   last_session_id: null,
+  tool_approval: 'standard',
 }
 
 export type RightView = 'context' | 'changes'
@@ -65,6 +66,16 @@ class AppStore {
 
   get sessions(): SessionItem[] {
     return this.currentProjectId ? (this.sessionsByProject.get(this.currentProjectId) ?? []) : []
+  }
+
+  /** Reloads the model catalog (after a provider/model edit). */
+  async reloadModels() {
+    try {
+      this.models = await ipc.modelsList()
+      this.info = await ipc.appInfo()
+    } catch (e) {
+      this.fail(e)
+    }
   }
 
   get hasProviders(): boolean {
@@ -115,8 +126,23 @@ class AppStore {
 
   // ─── Preferences ──────────────────────────────────────────────────────────
 
-  /** Updates preferences and saves them (debounced). */
+  /**
+   * Updates preferences and saves them (debounced). The tool approval
+   * policy changes engine decisions: it is saved at once and rolled back
+   * if the save fails, so the shown choice is always the applied one.
+   */
   setPrefs(patch: Partial<Preferences>) {
+    if (patch.tool_approval !== undefined && patch.tool_approval !== this.prefs.tool_approval) {
+      const previous = this.prefs.tool_approval
+      this.prefs = { ...this.prefs, ...patch }
+      if (this.prefsTimer) clearTimeout(this.prefsTimer)
+      this.prefsTimer = null
+      ipc.prefsSet($state.snapshot(this.prefs)).catch((e) => {
+        this.prefs = { ...this.prefs, tool_approval: previous }
+        this.fail(e)
+      })
+      return
+    }
     this.prefs = { ...this.prefs, ...patch }
     if (this.prefsTimer) clearTimeout(this.prefsTimer)
     this.prefsTimer = setTimeout(() => {
@@ -191,6 +217,23 @@ class AppStore {
     const projectId = this.currentProjectId
     if (!projectId) return null
     return this.open(projectId, null, model, reasoning)
+  }
+
+  /**
+   * Reopens a stored session by id in its own registered project (`/resume
+   * <id>`), through the desktop registry. Returns the refusal message.
+   */
+  async resumeSession(sessionId: string): Promise<string | null> {
+    try {
+      const item = await ipc.sessionLocate(sessionId)
+      if (!item.project_id)
+        return `La session ${sessionId} appartient à un dossier qui n’est pas un projet Bricks (${item.working_dir ?? 'dossier inconnu'}). Ajoutez ce dossier avec « Nouveau projet ».`
+      if (this.currentProjectId !== item.project_id) await this.selectProject(item.project_id)
+      const conv = await this.open(item.project_id, sessionId)
+      return conv ? null : (this.lastError?.message ?? 'Reprise impossible.')
+    } catch (e) {
+      return ipc.errorMessage(e)
+    }
   }
 
   /** Opens (or shows the already open) stored conversation. */

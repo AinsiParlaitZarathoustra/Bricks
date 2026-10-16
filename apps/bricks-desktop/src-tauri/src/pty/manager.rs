@@ -284,16 +284,21 @@ impl Control {
     }
 }
 
-/// PTY → chunks. Ends at end of stream (the shell and its jobs closed the
-/// terminal) or when the pump is gone.
+/// PTY → chunks. Ends only at end of stream (the shell and its jobs closed
+/// the terminal, which is also what lets the shell finish exiting). When the
+/// pump is gone the chunks are discarded, never the reading itself.
 fn read_loop(mut reader: Box<dyn Read + Send>, chunks: SyncSender<Vec<u8>>) {
     let mut buf = vec![0u8; READ_BUF];
+    // Once the pump is gone the output has no consumer, but the reader must
+    // keep draining until end of stream: a shell cannot finish exiting while
+    // its terminal still holds unread output.
+    let mut consumer_gone = false;
     loop {
         match reader.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => {
-                if chunks.send(buf[..n].to_vec()).is_err() {
-                    break;
+                if !consumer_gone && chunks.send(buf[..n].to_vec()).is_err() {
+                    consumer_gone = true;
                 }
             }
             Err(e) if e.kind() == ErrorKind::Interrupted => continue,
@@ -304,8 +309,8 @@ fn read_loop(mut reader: Box<dyn Read + Send>, chunks: SyncSender<Vec<u8>>) {
 }
 
 /// Chunks → `Data` events, batched. If the sink reports the consumer is gone,
-/// the terminal is killed. `drained` is signalled once no more output can
-/// be forwarded.
+/// the terminal is killed (the reader keeps draining, see `read_loop`).
+/// `drained` is signalled once no more output can be forwarded.
 fn pump_output(
     chunks: Receiver<Vec<u8>>,
     gate: Gate,

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { SquarePen } from '@lucide/svelte';
+	import SquarePen from '@lucide/svelte/icons/square-pen';
 	import { Button } from '$lib/components/ui/button';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { app } from '$lib/state/app.svelte';

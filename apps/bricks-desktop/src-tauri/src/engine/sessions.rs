@@ -58,7 +58,11 @@ impl AppState {
             ));
         }
         let registry = self.registry()?;
-        let cfg = bricks_config::engine_config(Path::new(&project.path), registry, true);
+        let mut cfg = bricks_config::engine_config(Path::new(&project.path), registry, true);
+        // The catalog and the approval override are the application's: a
+        // change of either reaches every session, at its next run.
+        cfg.catalog = Arc::clone(&self.catalog) as Arc<dyn cersei_agent::control::ModelCatalog>;
+        cfg.approval_override = Arc::clone(&self.approval);
         let session = match request.session_id.clone() {
             Some(id) => SessionChoice::Resume(id),
             None => SessionChoice::New,

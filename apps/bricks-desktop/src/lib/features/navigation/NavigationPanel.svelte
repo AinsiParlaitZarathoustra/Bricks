@@ -1,11 +1,13 @@
 <script lang="ts">
 	// Left panel: projects, conversations of the current project, and search.
 	// Entry point mounted by App.svelte with no props. All state lives in `app`.
-	import { FolderPlus } from '@lucide/svelte';
+	import FolderPlus from '@lucide/svelte/icons/folder-plus';
+	import Settings from '@lucide/svelte/icons/settings';
 	import { Button } from '$lib/components/ui/button';
 	import { ScrollArea } from '$lib/components/ui/scroll-area';
 	import EmptyState from '$lib/layout/EmptyState.svelte';
 	import { app } from '$lib/state/app.svelte';
+	import { ui } from '$lib/state/ui.svelte';
 	import ConversationList from './ConversationList.svelte';
 	import NewConversationButton from './NewConversationButton.svelte';
 	import ProjectList from './ProjectList.svelte';
@@ -97,4 +99,16 @@
 			{/if}
 		</div>
 	</ScrollArea>
+
+	<div class="border-t border-sidebar-border p-2">
+		<Button
+			variant="ghost"
+			class="w-full justify-start"
+			aria-label="Paramètres de Bricks"
+			onclick={() => (ui.settingsOpen = true)}
+		>
+			<Settings class="size-4" aria-hidden="true" />
+			Paramètres
+		</Button>
+	</div>
 </aside>

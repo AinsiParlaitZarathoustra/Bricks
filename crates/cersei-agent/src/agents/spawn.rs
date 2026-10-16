@@ -2088,4 +2088,93 @@ mod tests {
         // p/plain has no reasoning profiles: the parent's id cannot apply.
         assert_eq!(r.reasoning.applied, "(none)");
     }
+
+    /// A sub-agent's approvals go through its parent's gate, read at each
+    /// decision: the runtime override reaches a running child, and a
+    /// pending request is not answered by a change.
+    #[tokio::test]
+    async fn a_sub_agent_follows_the_runtime_override_of_its_parent() {
+        use crate::control::settings::ApprovalOverride;
+        use crate::control::{ApprovalBroker, ApprovalGate, ApprovalMode, ApprovalRules, Decision};
+        use cersei_tools::PermissionLevel;
+        use cersei_tools::permissions::{PermissionDecision, PermissionPolicy, PermissionRequest};
+        use std::time::Duration;
+
+        let mode = ApprovalOverride::new(ApprovalMode::Standard);
+        let broker = ApprovalBroker::new(true);
+        let (tx, _rx) = tokio::sync::mpsc::channel(64);
+        broker.begin_run(tx, tokio_util::sync::CancellationToken::new());
+        let parent: Arc<dyn PermissionPolicy> = Arc::new(
+            ApprovalGate::new(ApprovalRules::default(), broker.clone())
+                .with_override(Arc::clone(&mode)),
+        );
+        let child: Arc<dyn PermissionPolicy> = Arc::new(ChildPolicy {
+            inner: parent,
+            agent_id: "sa_child".into(),
+        });
+        let request = || PermissionRequest {
+            tool_name: "Write".into(),
+            tool_input: serde_json::json!({}),
+            permission_level: PermissionLevel::Write,
+            description: "write".into(),
+            id: "call".into(),
+            preview: None,
+            agent_id: None,
+        };
+
+        // Standard: the child asks, as the parent's rules say.
+        let mut asking = {
+            let child = Arc::clone(&child);
+            tokio::spawn(async move { child.check(&request()).await })
+        };
+        let id = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(r) = broker.pending().first() {
+                    break r.clone();
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the child asks under standard");
+        assert_eq!(id.agent_id.as_deref(), Some("sa_child"), "the child is named");
+        // A change while the request waits does not answer it.
+        mode.set(ApprovalMode::NoConfirmation);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), &mut asking)
+                .await
+                .is_err(),
+            "the pending request is still waiting"
+        );
+        assert_eq!(broker.pending().len(), 1);
+        broker.respond(&id.approval_id, Decision::Allow, None).unwrap();
+        assert!(matches!(
+            asking.await.unwrap(),
+            PermissionDecision::AllowOnce
+        ));
+
+        // NoConfirmation: the child runs without asking, and nothing is pending.
+        let d = child.check(&request()).await;
+        assert!(matches!(d, PermissionDecision::Allow | PermissionDecision::AllowOnce));
+        assert!(broker.pending().is_empty());
+
+        // AlwaysAsk: asked again, whatever was granted before.
+        mode.set(ApprovalMode::AlwaysAsk);
+        let again = {
+            let child = Arc::clone(&child);
+            tokio::spawn(async move { child.check(&request()).await })
+        };
+        let id = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Some(r) = broker.pending().first() {
+                    break r.approval_id.clone();
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("the child is asked under always-ask");
+        broker.respond(&id, Decision::Deny, Some("no".into())).unwrap();
+        assert!(matches!(again.await.unwrap(), PermissionDecision::Deny(_)));
+    }
 }

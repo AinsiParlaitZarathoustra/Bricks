@@ -1,5 +1,7 @@
 <script lang="ts">
-  import { CircleAlert, Info, TriangleAlert } from '@lucide/svelte'
+  import CircleAlert from '@lucide/svelte/icons/circle-alert'
+  import Info from '@lucide/svelte/icons/info'
+  import TriangleAlert from '@lucide/svelte/icons/triangle-alert'
   import type { NoticeItem } from '$lib/state/conversation.svelte'
 
   let { item }: { item: NoticeItem } = $props()

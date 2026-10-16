@@ -311,3 +311,73 @@ async fn the_bridge_keeps_the_last_run_and_its_sequence_number() {
     assert_eq!(opened.recent_events[1]["message"], "dernier");
     assert_eq!(opened.recent_events[1]["session_id"], session.as_str());
 }
+
+/// A session opened on a model whose catalog then loses it: its next run is
+/// refused with the reason, nothing starts, and nothing is substituted.
+#[tokio::test]
+async fn a_run_after_its_model_was_removed_is_refused_with_the_reason() {
+    use crate::commands::providers::{apply_edit, current_file};
+    use crate::engine::catalog::DesktopCatalog;
+    use crate::services::providers_toml::{Edit, fixtures::PROVIDERS};
+    use cersei_agent::control::{Activity, ModelCatalog, Prompt};
+
+    let dir = tempfile::tempdir().unwrap();
+    let providers = dir.path().join("providers.toml");
+    std::fs::write(&providers, PROVIDERS).unwrap();
+    let wd = dir.path().join("projet");
+    std::fs::create_dir_all(&wd).unwrap();
+    let catalog = DesktopCatalog::new(bricks_config::load_registry(Some(&providers)).map(Arc::new));
+    let mut cfg = EngineConfig::new(
+        &wd,
+        Arc::clone(&catalog) as Arc<dyn ModelCatalog>,
+        BricksConfig::default(),
+        dir.path().join("sessions"),
+    );
+    cfg.interactive = false;
+    let (controller, mut stream) = Controller::open(
+        cfg,
+        OpenOptions {
+            session: SessionChoice::New,
+            model: Some("local/small".into()),
+            reasoning: None,
+        },
+    )
+    .await
+    .expect("the model is configured when the session opens");
+
+    let revision = current_file(&providers).revision;
+    apply_edit(
+        &providers,
+        &parking_lot::Mutex::new(()),
+        &catalog,
+        &revision,
+        &Edit::ModelDelete {
+            provider_id: "local".into(),
+            model_id: "small".into(),
+        },
+    )
+    .expect("the model is removed from the file");
+
+    let refused = controller
+        .send(Command::Submit {
+            prompt: Prompt::text("bonjour"),
+        })
+        .expect_err("the run is refused");
+    assert!(refused.contains("`small`"), "names the model: {refused}");
+    assert!(refused.contains("choose a configured model"), "asks for a model: {refused}");
+    // The same refusal is announced on the event stream.
+    let announced = tokio::time::timeout(Duration::from_secs(5), async {
+        while let Some(env) = stream.next().await {
+            if let Event::CommandRejected { reason, .. } = env.event {
+                return reason;
+            }
+        }
+        panic!("the event stream ended without a refusal");
+    })
+    .await
+    .expect("the refusal arrives");
+    assert_eq!(announced, refused);
+    assert_eq!(controller.activity(), Activity::Idle, "nothing started");
+    controller.close().await;
+}
+

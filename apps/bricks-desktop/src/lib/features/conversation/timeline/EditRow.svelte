@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { FilePen } from '@lucide/svelte'
+  import FilePen from '@lucide/svelte/icons/file-pen'
   import DiffStat from '$lib/layout/DiffStat.svelte'
   import type { Conversation, EditItem } from '$lib/state/conversation.svelte'
   import { CHANGE_KIND_LABEL } from '../format'

@@ -3,7 +3,7 @@
 
 import type { ChangeSetState, InstanceState, Termination } from '$lib/ipc/engine';
 import { TERMINAL_AGENT_STATES } from '$lib/ipc/engine';
-import type { AgentInfo, ToolStatus } from '$lib/state/conversation.svelte';
+import type { AgentInfo } from '$lib/state/conversation.svelte';
 import type { StatusState } from '$lib/layout/StatusDot.svelte';
 import type { BadgeVariant } from '$lib/components/ui/badge';
 
@@ -28,17 +28,6 @@ const STATE_VIEW: Record<InstanceState, AgentStateView> = {
 
 export function agentStateView(state: InstanceState): AgentStateView {
 	return STATE_VIEW[state];
-}
-
-export function toolStatusView(status: ToolStatus): AgentStateView {
-	switch (status) {
-		case 'running':
-			return { dot: 'running', label: 'En cours' };
-		case 'ok':
-			return { dot: 'success', label: 'Terminé' };
-		case 'error':
-			return { dot: 'error', label: 'Erreur' };
-	}
 }
 
 /** Not yet finished: the engine may still change this agent. */
@@ -141,28 +130,6 @@ export function terminationLabel(t: Termination | undefined): string | null {
 		default:
 			return String(t.kind);
 	}
-}
-
-/** One-line summary of a tool call input, for a person to skim. */
-export function inputSummary(input: unknown): string {
-	const limit = 160;
-	if (input && typeof input === 'object') {
-		const o = input as Record<string, unknown>;
-		for (const key of ['command', 'file_path', 'path', 'pattern', 'query', 'url', 'description']) {
-			const v = o[key];
-			if (typeof v === 'string' && v.trim()) return clip(v.trim(), limit);
-		}
-	}
-	try {
-		return clip(JSON.stringify(input) ?? '', limit);
-	} catch {
-		return '';
-	}
-}
-
-function clip(text: string, max: number): string {
-	const oneLine = text.replace(/\s+/g, ' ');
-	return oneLine.length > max ? `${oneLine.slice(0, max - 1)}…` : oneLine;
 }
 
 /** Git porcelain letter of a changed file. */

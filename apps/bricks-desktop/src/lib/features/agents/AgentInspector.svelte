@@ -21,13 +21,13 @@
 		formatDuration,
 		formatTime,
 		formatUsd,
-		inputSummary,
 		isLive,
 		isolationLabel,
 		plural,
-		terminationLabel,
-		toolStatusView
+		terminationLabel
 	} from './agentView';
+	import ToolLine from '$lib/features/conversation/timeline/ToolLine.svelte';
+	import { toolLineState } from '$lib/features/conversation/timeline/toolLine';
 
 	interface Props {
 		agent: AgentInfo;
@@ -44,6 +44,8 @@
 	const cancellable = $derived(canCancel(agent.state));
 	const durationMs = $derived(agentDurationMs(agent, now));
 	const spawn = $derived(agent.spawn);
+	/** The agent ended by cancellation or interruption: its unfinished tool calls are interruptions. */
+	const agentInterrupted = $derived(agent.state === 'cancelled' || agent.state === 'interrupted');
 	const result = $derived(agent.result);
 	const termination = $derived(terminationLabel(result?.termination));
 	const changesets = $derived(
@@ -105,7 +107,15 @@
 		if (target) void control(target.action, { changeset_id: target.changesetId });
 	}
 
-	function choiceNote(choice: Choice): string | null {
+	// Stopping an agent is final: confirm first, then send the cancel.
+		let cancelOpen = $state(false);
+
+		function confirmCancel() {
+			cancelOpen = false;
+			void control('cancel', { agent_id: agent.id });
+		}
+
+		function choiceNote(choice: Choice): string | null {
 		if (!choice.requested || choice.requested === choice.applied) return null;
 		return `demandé : ${choice.requested}${choice.reason ? ` (${choice.reason})` : ''}`;
 	}
@@ -163,7 +173,7 @@
 						variant="outline"
 						size="sm"
 						disabled={waiting}
-						onclick={() => control('cancel', { agent_id: agent.id })}
+						onclick={() => (cancelOpen = true)}
 					>
 						{waiting && busy === 'cancel' ? 'Arrêt…' : 'Arrêter l’agent'}
 					</Button>
@@ -257,20 +267,14 @@
 				{#if agent.tools.length === 0}
 					<p class="text-xs text-muted-foreground">Aucun appel d’outil pour l’instant.</p>
 				{:else}
-					<ul class="flex flex-col gap-1.5">
+					<ul class="flex flex-col gap-0.5">
 						{#each agent.tools as tool, i (tool.toolCallId || i)}
-							{@const toolState = toolStatusView(tool.status)}
-							<li class="flex min-w-0 flex-col gap-0.5 rounded-md border border-border px-2.5 py-1.5 text-xs">
-								<span class="flex min-w-0 items-center gap-2">
-									<span class="min-w-0 flex-1 truncate font-mono font-medium">{tool.name}</span>
-									<StatusDot status={toolState.dot} label={toolState.label} class="shrink-0" />
-									{#if tool.durationMs !== undefined}
-										<span class="shrink-0 tabular-nums text-muted-foreground"
-											>{formatDuration(tool.durationMs)}</span
-										>
-									{/if}
-								</span>
-								<span class="truncate font-mono text-muted-foreground">{inputSummary(tool.input)}</span>
+							<li>
+								<ToolLine
+									name={tool.name}
+									state={toolLineState(tool, agentInterrupted)}
+									durationMs={tool.durationMs}
+								/>
 							</li>
 						{/each}
 					</ul>
@@ -449,6 +453,19 @@
 			{:else}
 				<AlertDialog.Action onclick={confirmChangesetAction}>Appliquer</AlertDialog.Action>
 			{/if}
+		</AlertDialog.Footer>
+	</AlertDialog.Content>
+</AlertDialog.Root>
+
+<AlertDialog.Root bind:open={cancelOpen}>
+	<AlertDialog.Content class="sm:max-w-md">
+		<AlertDialog.Header>
+			<AlertDialog.Title>Arrêter ce sous-agent ?</AlertDialog.Title>
+			<AlertDialog.Description>« {spawn.profile} » sera arrêté.</AlertDialog.Description>
+		</AlertDialog.Header>
+		<AlertDialog.Footer>
+			<AlertDialog.Cancel>Annuler</AlertDialog.Cancel>
+			<AlertDialog.Action variant="destructive" onclick={confirmCancel}>Arrêter l’agent</AlertDialog.Action>
 		</AlertDialog.Footer>
 	</AlertDialog.Content>
 </AlertDialog.Root>

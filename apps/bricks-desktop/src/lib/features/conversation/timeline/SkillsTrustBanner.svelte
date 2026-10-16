@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ShieldAlert } from '@lucide/svelte'
+  import ShieldAlert from '@lucide/svelte/icons/shield-alert'
   import { Button } from '$lib/components/ui/button'
   import { app } from '$lib/state/app.svelte'
   import type { Conversation } from '$lib/state/conversation.svelte'

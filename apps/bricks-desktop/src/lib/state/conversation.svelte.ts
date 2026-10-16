@@ -5,6 +5,10 @@
 import { SvelteMap } from 'svelte/reactivity'
 import type { HistoryMessage, OpenedSession, SessionItem } from '$lib/ipc/client'
 import type {
+  AgentProfilesEvent,
+  SearchHit,
+  SkillsListing,
+  Usage,
   AgentResult,
   ApprovalRequest,
   AttachmentInfo,
@@ -181,6 +185,46 @@ export interface Draft {
   attachments: DraftAttachment[]
 }
 
+export interface TurnUsage {
+  at: number
+  runId?: string
+  usage: Usage
+}
+
+export interface JobInfo {
+  jobId: string
+  agentId: string
+  rootRunId: string
+  command: string
+  cwd: string
+  pid: number
+  startedAt: number
+  stdoutBytes: number
+  stderrBytes: number
+  /** `running` until `job_finished`: then `completed` | `failed` | `stopped`. */
+  state: string
+  code?: number
+  signal?: number
+  durationMs?: number
+  logs: string[]
+}
+
+export interface SearchResult {
+  at: number
+  query: string
+  status: string
+  hits: SearchHit[]
+  omitted: number
+  notes: string[]
+  elapsedMs: number
+}
+
+export interface MemoryState {
+  lastRecall?: { at: number; items: number; tokens: number; omitted: number; budget: number }
+  maintenanceRunning: boolean
+  lastMaintenance?: { at: number; outcome: string; report?: unknown; error?: string }
+}
+
 const SHELL_TOOLS = new Set(['Bash', 'bash', 'Shell', 'PowerShell'])
 
 export class Conversation {
@@ -218,6 +262,24 @@ export class Conversation {
   /** Last answer to an `agent_control` command (apply/discard/cancel). */
   lastAgentControl = $state<{ action: string; ok: boolean; text: string; at: number } | null>(null)
 
+  // Sprint 14.1: answers of the migrated commands, kept per session.
+  /** Per-response usage, in order (`usage.turn`); session total is `usageTotalFull`. */
+  turnUsages = $state<TurnUsage[]>([])
+  usageTotalFull = $state<Usage | null>(null)
+  /** Last `run_usage` of a root run (own + descendants, each response once). */
+  runUsages = new SvelteMap<string, Extract<Envelope, { type: 'run_usage' }>>()
+  jobs = new SvelteMap<string, JobInfo>()
+  searchResult = $state<SearchResult | null>(null)
+  agentProfiles = $state<AgentProfilesEvent | null>(null)
+  skillsListing = $state<{ at: number; listing: SkillsListing } | null>(null)
+  memory = $state<MemoryState>({ maintenanceRunning: false })
+  /** Last compaction answer (`compaction` event). */
+  /** Last `context_cleared` answer (`/clear`). */
+  lastClear = $state<{ at: number; messagesRemoved: number } | null>(null)
+  lastCompaction = $state<{ at: number; reason: string; outcome: string; compacted: boolean } | null>(null)
+  /** Last skill activation outcome (`/skill`). */
+  lastSkill = $state<{ at: number; name: string; ok: boolean; reason?: string } | null>(null)
+
   lastSeq = -1
 
   constructor(opened: OpenedSession, projectId: string | null) {
@@ -244,6 +306,7 @@ export class Conversation {
   }
 
   applySnapshot(s: Snapshot) {
+    this.usageTotalFull = s.usage
     this.title = s.title || this.title
     this.workingDir = s.working_dir
     this.model = s.model
@@ -379,6 +442,8 @@ export class Conversation {
 
   /** Applies one envelope; duplicates (seq already seen) are ignored. */
   apply(env: Envelope) {
+    // Another session's envelope never touches this one (nor its seq).
+    if (env.session_id !== this.sessionId) return
     if (env.seq <= this.lastSeq) return
     this.lastSeq = env.seq
     const runId = env.run_id
@@ -476,6 +541,9 @@ export class Conversation {
         this.contextStale = false
         break
       case 'usage':
+        this.turnUsages.push({ at: env.at, runId, usage: env.turn })
+        if (this.turnUsages.length > 2000) this.turnUsages.splice(0, this.turnUsages.length - 2000)
+        this.usageTotalFull = env.total
         this.usageTotal = {
           input: env.total.input_tokens,
           output: env.total.output_tokens,
@@ -483,6 +551,7 @@ export class Conversation {
         }
         break
       case 'compaction':
+        this.lastCompaction = { at: env.at, reason: env.reason, outcome: env.outcome, compacted: env.compacted }
         this.contextStale = env.compacted || this.contextStale
         this.notice(
           'info',
@@ -491,6 +560,7 @@ export class Conversation {
         )
         break
       case 'context_cleared':
+        this.lastClear = { at: env.at, messagesRemoved: env.messages_removed }
         this.contextStale = true
         this.notice('info', `Contexte vidé (${env.messages_removed} messages retirés).`, runId)
         break
@@ -593,6 +663,91 @@ export class Conversation {
       case 'skills_trust_resolved':
         this.skillsTrust = null
         break
+      case 'run_usage':
+        this.runUsages.set(env.root_run_id, env)
+        break
+      case 'memory_recalled':
+        this.memory.lastRecall = {
+          at: env.at,
+          items: env.items,
+          tokens: env.tokens,
+          omitted: env.omitted,
+          budget: env.budget,
+        }
+        break
+      case 'memory_maintenance_started':
+        this.memory.maintenanceRunning = true
+        break
+      case 'memory_maintenance_finished':
+        this.memory.maintenanceRunning = false
+        this.memory.lastMaintenance = {
+          at: env.at,
+          outcome: env.outcome,
+          report: env.report,
+          error: env.error,
+        }
+        break
+      case 'search_results':
+        this.searchResult = {
+          at: env.at,
+          query: env.query,
+          status: env.status,
+          hits: env.hits,
+          omitted: env.omitted,
+          notes: env.notes ?? [],
+          elapsedMs: env.elapsed_ms,
+        }
+        break
+      case 'agent_profiles':
+        this.agentProfiles = env
+        break
+      case 'skills':
+        this.skillsListing = { at: env.at, listing: env.listing as SkillsListing }
+        break
+      case 'skill_activated':
+        if (!env.agent_id) this.lastSkill = { at: env.at, name: env.name, ok: true }
+        break
+      case 'skill_activation_failed':
+        if (!env.agent_id) this.lastSkill = { at: env.at, name: env.name, ok: false, reason: env.reason }
+        this.notice('error', `Skill « ${env.name} » non activé : ${env.reason}`, runId)
+        break
+      case 'job_started':
+        this.jobs.set(
+          env.job_id,
+          reactive<JobInfo>({
+            jobId: env.job_id,
+            agentId: env.agent_id,
+            rootRunId: env.root_run_id,
+            command: env.command,
+            cwd: env.cwd,
+            pid: env.pid,
+            startedAt: env.at,
+            stdoutBytes: 0,
+            stderrBytes: 0,
+            state: 'running',
+            logs: [],
+          }),
+        )
+        break
+      case 'job_output': {
+        const j = this.jobs.get(env.job_id)
+        if (j) {
+          j.stdoutBytes = env.stdout_bytes
+          j.stderrBytes = env.stderr_bytes
+        }
+        break
+      }
+      case 'job_finished': {
+        const j = this.jobs.get(env.job_id)
+        if (j) {
+          j.state = env.state
+          j.code = env.code
+          j.signal = env.signal
+          j.durationMs = env.duration_ms
+          j.logs = env.logs ?? []
+        }
+        break
+      }
       case 'agent_control_result':
         this.lastAgentControl = { action: env.action, ok: env.ok, text: env.text, at: env.at }
         break

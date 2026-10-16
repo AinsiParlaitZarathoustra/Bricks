@@ -19,10 +19,9 @@
   import ChangesPanel from '$lib/features/changes/ChangesPanel.svelte'
   import TerminalPanel from '$lib/features/terminal/TerminalPanel.svelte'
   import SettingsDialog from '$lib/features/settings/SettingsDialog.svelte'
-  import { Settings } from '@lucide/svelte'
-  import { Button } from '$lib/components/ui/button'
+  import InspectorHost from '$lib/features/commands/InspectorHost.svelte'
+  import { ui } from '$lib/state/ui.svelte'
 
-  let settingsOpen = $state(false)
 
   let leftOpen = $state(true)
   let rightOpen = $state(true)
@@ -65,6 +64,11 @@
     })
   }
 
+  // `/diff` (or any caller) sets app.rightView = 'changes': show the panel.
+  $effect(() => {
+    if (app.rightView === 'changes') rightOpen = true
+  })
+
   function toggleChanges() {
     if (app.rightView === 'changes' && rightOpen) {
       app.rightView = 'context'
@@ -96,11 +100,6 @@
         <TopBar {...controls} changesPressed={app.rightView === 'changes' && rightOpen} onToggleChanges={toggleChanges}>
           {#snippet title()}
             <ConversationTitle conversation={app.current} />
-          {/snippet}
-          {#snippet actions()}
-            <Button variant="ghost" size="icon" aria-label="Paramètres de Bricks" onclick={() => (settingsOpen = true)}>
-              <Settings class="size-4" />
-            </Button>
           {/snippet}
         </TopBar>
       {/snippet}
@@ -144,6 +143,7 @@
       {/snippet}
     </AppShell>
   {/if}
-  <SettingsDialog bind:open={settingsOpen} />
+  <SettingsDialog bind:open={ui.settingsOpen} />
+  <InspectorHost />
   <Toaster richColors />
 </Tooltip.Provider>

@@ -25,10 +25,47 @@ pub async fn prefs_get(state: State<'_, AppState>) -> IpcResult<Preferences> {
 
 #[tauri::command]
 pub async fn prefs_set(state: State<'_, AppState>, prefs: Preferences) -> IpcResult<()> {
+    save_preferences(&state, prefs).await
+}
+
+/// Saves the preferences; the tool-approval preference is then in force for
+/// every session and sub-agent, at their next decision. Nothing changes when
+/// the file cannot be written.
+pub(crate) async fn save_preferences(state: &AppState, prefs: Preferences) -> IpcResult<()> {
+    let mode = crate::engine::approval_mode(prefs.tool_approval);
     let store = Arc::clone(&state.prefs);
     tokio::task::spawn_blocking(move || store.set(prefs))
         .await
-        .map_err(join_error)?
+        .map_err(join_error)??;
+    state.approval.set(mode);
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cersei_agent::control::ApprovalMode;
+
+    #[tokio::test]
+    async fn saving_the_approval_preference_applies_it_at_once_and_at_startup() {
+        let home = tempfile::tempdir().unwrap();
+        let state = AppState::assemble(home.path().to_path_buf(), Err("pas de registre".into()));
+        assert_eq!(state.approval.get(), ApprovalMode::Standard, "standard by default");
+
+        let prefs = Preferences {
+            tool_approval: crate::contract::ToolApproval::NoConfirmation,
+            ..Preferences::default()
+        };
+        save_preferences(&state, prefs).await.unwrap();
+        assert_eq!(state.approval.get(), ApprovalMode::NoConfirmation);
+
+        let next_start = AppState::assemble(home.path().to_path_buf(), Err("pas de registre".into()));
+        assert_eq!(
+            next_start.approval.get(),
+            ApprovalMode::NoConfirmation,
+            "the saved preference is applied at startup"
+        );
+    }
 }
 
 /// Subscribes the window to every session's events; returns the

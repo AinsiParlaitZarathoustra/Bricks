@@ -8,6 +8,8 @@ pub mod conversations;
 pub mod paths;
 pub mod prefs;
 pub mod projects;
+pub mod providers;
+pub mod providers_toml;
 
 use crate::contract::{IpcError, IpcErrorCode};
 use std::fmt::Display;

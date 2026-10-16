@@ -317,7 +317,8 @@ fn a_repeated_workspace_is_refused_explicitly() {
         "{help}"
     );
     assert!(help.contains("Default: the current folder"), "{help}");
-    assert!(help.contains("--hyperlinks"), "{help}");
+    assert!(!help.contains("--hyperlinks"), "{help}");
+    assert!(!help.contains("interactive interface"), "{help}");
 }
 
 #[test]
@@ -326,10 +327,7 @@ fn headless_output_never_carries_terminal_links() {
     let m = model(vec![text(link), text(link)]);
     let h = Home::new(&m.url);
     let a = h.project("A", "");
-    for args in [
-        &["--hyperlinks", "always", "run", "--json", "x"][..],
-        &["--hyperlinks", "always", "run", "x"][..],
-    ] {
+    for args in [&["run", "--json", "x"][..], &["run", "x"][..]] {
         let o = h.run(&a, args);
         assert_eq!(o.status.code(), Some(0), "{}", err(&o));
         let out = String::from_utf8_lossy(&o.stdout);

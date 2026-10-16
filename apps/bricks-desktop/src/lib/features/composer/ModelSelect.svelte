@@ -3,11 +3,14 @@
   import type { ModelChoice } from '$lib/ipc/engine'
 
   let {
+    open = $bindable(false),
     value,
     models,
     disabled = false,
     onChange,
   }: {
+    /** Opened from outside (`/model`); the select reports its own state. */
+    open?: boolean
     /** Selected `provider/model`, or `null` when none is chosen yet. */
     value: string | null
     models: ModelChoice[]
@@ -44,12 +47,17 @@
 </script>
 
 <Select.Root
+  bind:open
   type="single"
   value={shown}
   onValueChange={handleChange}
   disabled={disabled || models.length === 0}
 >
-  <Select.Trigger size="sm" class="max-w-56 min-w-0" aria-label={`Modèle : ${label}`}>
+  <Select.Trigger
+    size="sm"
+    class="max-w-56 min-w-0 border-transparent bg-transparent text-muted-foreground shadow-none hover:bg-muted hover:text-foreground data-[state=open]:bg-muted dark:bg-transparent dark:hover:bg-muted"
+    aria-label={`Modèle : ${label}`}
+  >
     <span class="truncate">{label}</span>
   </Select.Trigger>
   <Select.Content>

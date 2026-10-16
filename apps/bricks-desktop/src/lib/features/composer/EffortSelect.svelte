@@ -6,6 +6,7 @@
   const DEFAULT_VALUE = '__default__'
 
   let {
+    open = $bindable(false),
     value,
     effective,
     profiles,
@@ -13,6 +14,8 @@
     disabled = false,
     onChange,
   }: {
+    /** Opened from outside (`/effort`); the select reports its own state. */
+    open?: boolean
     /** Requested profile id, `null` for the model's default. */
     value: string | null
     /** Profile id the engine actually applies. */
@@ -50,8 +53,12 @@
   }
 </script>
 
-<Select.Root type="single" value={shown} onValueChange={handleChange} {disabled}>
-  <Select.Trigger size="sm" class="max-w-56 min-w-0" aria-label={`Effort de raisonnement : ${triggerLabel}`}>
+<Select.Root bind:open type="single" value={shown} onValueChange={handleChange} {disabled}>
+  <Select.Trigger
+    size="sm"
+    class="max-w-56 min-w-0 border-transparent bg-transparent text-muted-foreground shadow-none hover:bg-muted hover:text-foreground data-[state=open]:bg-muted dark:bg-transparent dark:hover:bg-muted"
+    aria-label={`Effort de raisonnement : ${triggerLabel}`}
+  >
     <span class="truncate">{triggerLabel}</span>
   </Select.Trigger>
   <Select.Content>

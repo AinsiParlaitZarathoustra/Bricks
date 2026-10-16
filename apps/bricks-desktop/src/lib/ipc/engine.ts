@@ -40,6 +40,14 @@ export type Termination =
   | { kind: 'no_progress'; repeats: number }
   | { kind: string; [k: string]: unknown }
 
+export interface CostEstimate {
+  amount_usd: number
+  tariff: string
+  /** Some responses had no price: `amount_usd` is a lower bound. */
+  partial: boolean
+  unpriced: string[]
+}
+
 export interface Usage {
   input_tokens: number
   output_tokens: number
@@ -49,7 +57,7 @@ export interface Usage {
   reasoning_tokens: number
   /** Absent: no price configured (unknown, not zero). */
   cost_usd?: number
-  cost_estimate?: unknown
+  cost_estimate?: CostEstimate
 }
 
 export interface ContextUsed {
@@ -216,6 +224,39 @@ export interface ChangeSet {
   note?: string
 }
 
+export interface SkillListing {
+  name: string
+  source: string
+  state: string
+  description?: string
+  path?: string
+  revision?: string
+  details?: string[]
+}
+
+export interface SkillsListing {
+  generation: number
+  project_decision: string
+  entries: SkillListing[]
+  total: number
+  page: number
+  diagnostics?: string[]
+  catalog_omitted: number
+}
+
+export interface ProfileListing {
+  name: string
+  description: string
+  /** `project` | `user` | `built_in` (engine `ProfileScope`). */
+  scope: string
+  source: string
+  valid: boolean
+  error?: string
+  shadows?: string[]
+}
+
+export type AgentProfilesEvent = Extract<Event, { type: 'agent_profiles' }>
+
 export interface SkillSourceInfo {
   source: string
   path: string
@@ -381,7 +422,13 @@ export type Event =
       logs?: string[]
     }
   | { type: 'agent_control_result'; action: string; ok: boolean; text: string }
-  | { type: 'agent_profiles'; profiles: unknown[]; total: number; page: number; diagnostics?: unknown[] }
+  | {
+      type: 'agent_profiles'
+      profiles: ProfileListing[]
+      total: number
+      page: number
+      diagnostics?: { source: string; message: string }[]
+    }
   | {
       type: 'skill_activated'
       agent_id?: string
@@ -391,7 +438,7 @@ export type Event =
       origin: string
     }
   | { type: 'skill_activation_failed'; agent_id?: string; name: string; reason: string }
-  | { type: 'skills'; listing: unknown }
+  | { type: 'skills'; listing: SkillsListing }
   | { type: 'skills_trust_requested'; project: string; sources: SkillSourceInfo[] }
   | { type: 'skills_trust_resolved'; project: string; allowed: boolean; by: string }
   | { type: 'command_rejected'; command: string; reason: string }
@@ -463,6 +510,8 @@ export interface Snapshot {
   allowed_for_session: string[]
   memory_space: string | null
   approval_rules: unknown
+  /** Application-wide approval override (`standard` without one). */
+  approval_mode: 'standard' | 'always_ask' | 'no_confirmation'
 }
 
 export interface ProfileChoice {

@@ -16,7 +16,7 @@
 {:else if item.kind === 'assistant'}
   <AssistantMessage {item} />
 {:else if item.kind === 'tool'}
-  <ToolRow {item} />
+  <ToolRow {item} {conversation} />
 {:else if item.kind === 'approval'}
   <ApprovalCard approval={item.approval} resolved={item.resolved} {conversation} />
 {:else if item.kind === 'edit'}
