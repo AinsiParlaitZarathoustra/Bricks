@@ -106,7 +106,8 @@ fn session_of(event: &DesktopEvent) -> Option<String> {
             .map(String::from),
         DesktopEvent::SessionState { session_id, .. }
         | DesktopEvent::SessionDeleted { session_id }
-        | DesktopEvent::Lagged { session_id } => Some(session_id.clone()),
+        | DesktopEvent::Lagged { session_id }
+        | DesktopEvent::RunLabeled { session_id, .. } => Some(session_id.clone()),
         DesktopEvent::SessionUpdated { session } => Some(session.id.clone()),
         DesktopEvent::ChangeRecorded { record } => Some(record.session_id.clone()),
     }

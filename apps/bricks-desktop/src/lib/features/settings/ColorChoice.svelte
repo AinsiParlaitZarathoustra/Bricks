@@ -36,7 +36,7 @@
 
 <div class="flex items-center justify-between gap-3 p-3">
 	<div class="flex min-w-0 flex-col gap-0.5">
-		<span class="text-sm font-medium text-foreground">{label}</span>
+		<span class="text-[13px] font-medium text-foreground">{label}</span>
 		<span class="font-mono text-xs text-muted-foreground tabular-nums">
 			{custom ? value : `${value}, couleur du thème`}
 		</span>

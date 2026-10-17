@@ -3,7 +3,8 @@
 // allows them. Pure: unit-tested (tests/unit/runend-summary.test.ts).
 import type { RunInfo } from '$lib/state/conversation.svelte'
 import type { RunOutcome } from '$lib/ipc/engine'
-import { OUTCOME_LABEL, formatDuration, terminationLabel } from './format'
+import { OUTCOME_LABEL, terminationLabel } from './format'
+import { formatToolDuration } from './timeline/toolLine'
 
 export interface RunEndSummary {
   /** `null` while the engine has not reported the outcome. */
@@ -38,7 +39,7 @@ export function runEndSummary(run: RunInfo | undefined): RunEndSummary {
     outcome,
     label: outcome ? OUTCOME_LABEL[outcome] : 'Fin de l’exécution',
     durationMs,
-    duration: durationMs === null ? null : formatDuration(durationMs),
+    duration: durationMs === null ? null : formatToolDuration(durationMs),
     additions: countable ? files.reduce((sum, file) => sum + file.added, 0) : null,
     deletions: countable ? files.reduce((sum, file) => sum + file.removed, 0) : null,
     reason: outcome === 'incomplete' && run ? terminationLabel(run.termination) : null,

@@ -17,6 +17,7 @@ use crate::contract::{
 use crate::services::conversations::{
     contains_folded, item_from_summary, message_text, path_text, snippet,
 };
+use crate::services::run_labels::normalize_label;
 use crate::services::{invalid, io_error, not_found, now_ms};
 use cersei_agent::control::{
     Activity, Command, Controller, OpenOptions, SessionChoice, SessionMeta, SessionScope,
@@ -63,6 +64,9 @@ impl AppState {
         // change of either reaches every session, at its next run.
         cfg.catalog = Arc::clone(&self.catalog) as Arc<dyn cersei_agent::control::ModelCatalog>;
         cfg.approval_override = Arc::clone(&self.approval);
+        // Sessions are stored under this application state's home (tests use
+        // a temporary one), never the global default.
+        cfg.sessions_dir = self.sessions_dir().to_path_buf();
         let session = match request.session_id.clone() {
             Some(id) => SessionChoice::Resume(id),
             None => SessionChoice::New,
@@ -87,6 +91,7 @@ impl AppState {
             self.sessions_dir().to_path_buf(),
             created_at,
             message_count,
+            Arc::clone(&self.run_labels),
         );
         // What opening queued (the session's own first event) is taken now,
         // before any consumer runs, so the first view receives it.
@@ -130,13 +135,19 @@ impl AppState {
         }
         let transcript = self.sessions_dir().join(format!("{session_id}.jsonl"));
         let files = files_dir(self.sessions_dir(), session_id);
-        if !transcript.exists() && !files.exists() {
+        let labels = Arc::clone(&self.run_labels);
+        let labelled = labels.exists(session_id);
+        if !transcript.exists() && !files.exists() && !labelled {
             return Err(not_found("conversation inconnue"));
         }
         JsonlMemory::new(self.sessions_dir())
             .delete(session_id)
             .await
             .map_err(|e| io_error("suppression de la conversation", e))?;
+        let id = session_id.to_string();
+        tauri::async_runtime::spawn_blocking(move || labels.delete(&id))
+            .await
+            .map_err(|e| error(IpcErrorCode::Internal, e.to_string()))??;
         self.hub.publish(DesktopEvent::SessionDeleted {
             session_id: session_id.to_string(),
         });
@@ -319,7 +330,15 @@ impl AppState {
     }
 
     /// Sends an engine command (JSON as in `docs/cli.md`) to an open session.
-    pub fn send_command(&self, session_id: &str, command: serde_json::Value) -> IpcResult<()> {
+    /// `display` is the command as typed (e.g. `/skill debug`) of a submit: it
+    /// labels the run that submit starts, and never reaches the engine. Other
+    /// commands ignore it.
+    pub async fn send_command(
+        &self,
+        session_id: &str,
+        command: serde_json::Value,
+        display: Option<String>,
+    ) -> IpcResult<()> {
         check_session_id(session_id)?;
         let entry = self.require_open(session_id)?;
         let command: Command = serde_json::from_value(command)
@@ -330,9 +349,10 @@ impl AppState {
                 "pour changer de conversation, ouvrez-la : une session reste liée à son contrôleur",
             ));
         }
+        let label = display.as_deref().and_then(normalize_label);
         entry
-            .controller
-            .send(command)
+            .send(command, label)
+            .await
             .map_err(|reason| error(IpcErrorCode::Rejected, reason))
     }
 

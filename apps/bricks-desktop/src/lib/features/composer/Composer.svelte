@@ -63,11 +63,16 @@
   const uid = $props.id()
   const paletteId = `${uid}-palette`
 
+  const project = $derived(app.currentProject)
+
   // ─── Draft ────────────────────────────────────────────────────────────────
   // An open conversation keeps its own draft (it survives switches). Without
-  // one, a local draft is used until the first send creates the conversation.
+  // one, the project's draft (kept by the app state, one per project) is used
+  // until the first valid send creates the conversation.
   let localDraft = $state<Draft>({ text: '', attachments: [], skills: [] })
-  const draft: Draft = $derived(conversation ? conversation.draft : localDraft)
+  const draft: Draft = $derived(
+    conversation ? conversation.draft : project ? app.draftFor(project.id) : localDraft,
+  )
 
   function revoke(a: DraftAttachment) {
     if (a.previewUrl) URL.revokeObjectURL(a.previewUrl)
@@ -91,17 +96,21 @@
 
   const hasModels = $derived(app.models.length > 0)
   const selection: string | null = $derived(
-    conversation ? conversation.model : (pickedModel ?? app.models[0]?.selection ?? null),
+    conversation
+      ? conversation.model
+      : project
+        ? app.draftModel(project.id)
+        : (pickedModel ?? app.models[0]?.selection ?? null),
   )
   const choice = $derived(app.model(selection))
-  const effortValue: string | null = $derived(conversation ? conversation.reasoning : pickedEffort)
+  const draftEffort: string | null = $derived(project ? app.draftReasoning(project.id) : pickedEffort)
+  const effortValue: string | null = $derived(conversation ? conversation.reasoning : draftEffort)
   const effortEffective: string | null = $derived(
-    conversation ? conversation.effectiveReasoning : (pickedEffort ?? choice?.default_profile ?? null),
+    conversation ? conversation.effectiveReasoning : (draftEffort ?? choice?.default_profile ?? null),
   )
   const supportsImage = $derived(choice?.input.includes('image') ?? false)
 
   // ─── State flags ──────────────────────────────────────────────────────────
-  const project = $derived(app.currentProject)
   const editable = $derived(project !== null && !project.missing && hasModels)
   const running = $derived(conversation?.running ?? false)
 
@@ -321,7 +330,8 @@
       return `Profil d’effort inconnu pour ${target.name} : ${reasoning}.`
     }
     pickedModel = next
-    pickedEffort = reasoning ?? (known(pickedEffort) ? pickedEffort : null)
+    pickedEffort = reasoning ?? (known(draftEffort) ? draftEffort : null)
+    if (project) app.setDraftModel(project.id, next, pickedEffort)
     return null
   }
 
@@ -331,6 +341,7 @@
       return `Profil d’effort inconnu : ${profile}.`
     }
     pickedEffort = profile
+    if (project && selection) app.setDraftModel(project.id, selection, profile)
     return null
   }
 
@@ -389,19 +400,26 @@
   /** Active runs listed by `/quit`; `null` when the confirmation is closed. */
   let quitRuns = $state<string[] | null>(null)
 
-  /** The open conversation, or a new one that takes over the local draft. */
+  /**
+   * The open conversation, or the single new one created for the project's
+   * draft (shared by concurrent callers; the app state copies the draft into
+   * it). `createdFor` names the project whose draft is cleared once the first
+   * submit is accepted.
+   */
+  let createdFor: string | null = null
   async function ensureConversation(): Promise<{ conversation: Conversation } | { error: string }> {
     if (conversation) return { conversation }
-    const created = await app.newConversation(selection ?? undefined, pickedEffort ?? undefined)
+    const projectId = project?.id ?? null
+    const created = await app.startConversation(selection ?? undefined, effortValue ?? undefined)
     if (!created) return { error: app.lastError?.message ?? 'Impossible de créer la conversation.' }
-    // The local draft moves into the new conversation: a refusal keeps it there.
-    created.draft.text = localDraft.text
-    created.draft.attachments = [...localDraft.attachments]
-    created.draft.skills = [...localDraft.skills]
-    localDraft.text = ''
-    localDraft.attachments = []
-    localDraft.skills = []
+    createdFor = projectId
     return { conversation: created }
+  }
+
+  /** After the first accepted submit of a new conversation, the project draft is spent. */
+  function spendProjectDraft() {
+    if (createdFor) app.clearProjectDraft(createdFor)
+    createdFor = null
   }
 
   async function send() {
@@ -434,6 +452,7 @@
         refusal = error
         return
       }
+      spendProjectDraft()
       // A recalled entry was sent: the draft kept aside comes back once its run starts.
       const restore = cursor.end()
       awaiting = {
@@ -554,6 +573,7 @@
         const { sessionId, sentAt, runsBefore, watch } = outcome
         const restore = cursor.end()?.text ?? null
         if (watch.kind === 'submit' || watch.kind === 'skill') {
+          spendProjectDraft()
           awaiting = {
             sessionId,
             sentAt,
@@ -611,7 +631,7 @@
       sentAt: Date.now(),
       runsBefore: app.conversations.get(sessionId)?.runs.size ?? 0,
     }),
-    send: (sessionId, command) => app.command(sessionId, command),
+    send: (sessionId, command, display) => app.command(sessionId, command, display ?? null),
     async setModel(model, reasoning) {
       refusal = null
       return applyLocalModel(model, reasoning)
@@ -914,6 +934,12 @@
       // A new conversation's text: the caret is at its end until the editor reports otherwise.
       caret = draft.text.length
     })
+    editorEl?.focus()
+  })
+
+  // « Nouvelle conversation » (any entry point) asks the composer for focus.
+  $effect(() => {
+    if (app.composerFocus === 0) return
     editorEl?.focus()
   })
 

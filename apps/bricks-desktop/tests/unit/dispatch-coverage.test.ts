@@ -54,8 +54,8 @@ function fakeHost(action: SlashAction, options: Options = {}) {
 			rec('mark', sessionId);
 			return { sentAt: 1000, runsBefore: 2 };
 		},
-		async send(sessionId, command) {
-			rec('send', sessionId, command);
+		async send(sessionId, command, display) {
+			rec('send', sessionId, command, display);
 			return options.sendError ?? null;
 		},
 		async setModel(model, reasoning) {
@@ -305,13 +305,24 @@ describe('engine Command: desktop effect of each type', () => {
 		const fake = fakeHost(engine({ type: 'search', text: 'x', regex: true }));
 		const outcome = await runSlashLine('/search re:x', fake.host);
 		expect(outcome.kind).toBe('sent');
-		expect(effects(fake.calls).map((c) => c.name)).toEqual([
-			'ensureSession',
-			'open',
-			'mark',
-			'send'
-		]);
-		expect(fake.calls[2]).toEqual({ name: 'open', args: ['search', { query: 'x', regex: true }] });
+		expect(effects(fake.calls).map((c) => c.name)).toEqual(['open', 'mark', 'send']);
+		expect(fake.calls[1]).toEqual({ name: 'open', args: ['search', { query: 'x', regex: true }] });
+	});
+
+	it('commands that need a conversation are refused without one, and create none', async () => {
+		const closed = fakeHost(engine({ type: 'search', text: 'x', regex: false }), { session: null });
+		expect(await runSlashLine('/search x', closed.host)).toEqual({
+			kind: 'refused',
+			message: 'Aucune conversation ouverte.'
+		});
+		expect(effects(closed.calls)).toEqual([]);
+
+		const skills = fakeHost(engine({ type: 'list_skills', query: '', page: 0 }), { session: null });
+		expect(await runSlashLine('/skills', skills.host)).toEqual({
+			kind: 'refused',
+			message: 'Aucune conversation ouverte.'
+		});
+		expect(sendsOfType(skills.calls, 'list_skills')).toBe(0);
 	});
 
 	it('list_agent_profiles and reload_agent_profiles open the catalogue, then send', async () => {
@@ -435,6 +446,8 @@ describe('engine Command: desktop effect of each type', () => {
 				skills: ['pdf']
 			}
 		});
+		// The message shows the command as typed, not the request.
+		expect(fake.calls.find((c) => c.name === 'send')?.args[2]).toBe('/skill pdf');
 	});
 
 	it('a blocked attachment stops a submit before any session is created', async () => {

@@ -30,7 +30,9 @@
     <div
       dir="auto"
       class="max-w-[85%] rounded-2xl bg-secondary px-3.5 py-2 text-start text-sm break-words whitespace-pre-wrap text-secondary-foreground"
-    >{#each parts as part, i (i)}{#if part.kind === 'link'}<a
+    >{#if item.commandLabel}<span
+          class="mr-1.5 inline-block rounded bg-background/70 px-1.5 align-baseline font-mono text-xs text-muted-foreground"
+          dir="ltr">{item.commandLabel}</span>{/if}{#each parts as part, i (i)}{#if part.kind === 'link'}<a
             href={part.href}
             rel="noopener noreferrer nofollow"
             title={part.href}

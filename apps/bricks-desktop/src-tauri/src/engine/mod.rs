@@ -18,6 +18,7 @@ use crate::services::conversations::path_text;
 use crate::services::paths::check_folder;
 use crate::services::prefs::PrefsStore;
 use crate::services::projects::ProjectStore;
+use crate::services::run_labels::RunLabelStore;
 use crate::services::skills::SkillsCatalogStore;
 use cersei_agent::control::{ApprovalMode, ApprovalOverride, ModelCatalog};
 use cersei_provider::ProviderRegistry;
@@ -54,6 +55,8 @@ pub struct AppState {
     pub(crate) prefs: Arc<PrefsStore>,
     /// The skills catalogue of the settings page (Sprint 14.3), outside any session.
     pub(crate) skills: Arc<SkillsCatalogStore>,
+    /// Presentation labels of runs started from typed commands (Sprint 14.4).
+    pub(crate) run_labels: Arc<RunLabelStore>,
     pub(crate) hub: Arc<Hub>,
     /// The open sessions, by session id.
     sessions: Mutex<HashMap<String, Arc<OpenSession>>>,
@@ -101,6 +104,7 @@ impl AppState {
             attachments_dir: desktop.join("attachments"),
             prefs: Arc::new(prefs),
             skills: Arc::new(SkillsCatalogStore::new(dirs::home_dir())),
+            run_labels: Arc::new(RunLabelStore::at(desktop.join("run-labels"))),
             projects: Arc::new(projects),
             hub: Arc::new(Hub::new(journal)),
             sessions: Mutex::new(HashMap::new()),

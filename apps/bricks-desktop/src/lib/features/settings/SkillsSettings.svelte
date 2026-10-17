@@ -111,7 +111,7 @@
 
 <div class="flex flex-col gap-6">
 	<section class="flex flex-col gap-3" aria-labelledby={`${uid}-title`}>
-		<h3 id={`${uid}-title`} class="text-sm font-semibold text-foreground">Skills</h3>
+		<h3 id={`${uid}-title`} class="text-[13px] font-semibold text-foreground">Skills</h3>
 
 		<div class="flex flex-col gap-3 sm:flex-row sm:items-end">
 			<div class="flex min-w-0 flex-col gap-1.5 sm:w-64 sm:shrink-0">
@@ -150,7 +150,7 @@
 	</section>
 
 	{#if error}
-		<div role="alert" class="flex flex-col items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm">
+		<div role="alert" class="flex flex-col items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-[13px]">
 			<p class="flex items-start gap-2 text-pretty">
 				<TriangleAlert class="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
 				Impossible de lire les skills : {error}
@@ -161,9 +161,9 @@
 			</Button>
 		</div>
 	{:else if !catalog}
-		<p role="status" class="text-sm text-muted-foreground">Lecture des skills…</p>
+		<p role="status" class="text-[13px] text-muted-foreground">Lecture des skills…</p>
 	{:else}
-		<div class="flex flex-wrap items-center justify-between gap-3 text-sm">
+		<div class="flex flex-wrap items-center justify-between gap-3 text-[13px]">
 			<span class="tabular-nums text-muted-foreground" aria-live="polite">
 				{skillCountLabel(total)}{applied ? ` pour « ${applied} »` : ''}
 			</span>
@@ -183,7 +183,7 @@
 		</div>
 
 		{#if entries.length === 0}
-			<p class="text-sm text-muted-foreground">
+			<p class="text-[13px] text-muted-foreground">
 				{applied ? `Aucun skill ne correspond à « ${applied} ».` : 'Aucun skill dans ces sources.'}
 			</p>
 		{:else}
@@ -197,14 +197,14 @@
 					{@const details = entry.details ?? []}
 					<li class="flex flex-col gap-1.5 p-3">
 						<div class="flex flex-wrap items-center gap-2">
-							<span class="min-w-0 font-mono text-sm break-all text-foreground">{entry.name}</span>
+							<span class="min-w-0 font-mono text-[13px] break-all text-foreground">{entry.name}</span>
 							<Badge variant={tone === 'ok' ? 'secondary' : 'outline'} class={badgeClass(tone)}>
 								{skillStateLabel(entry.state)}
 							</Badge>
 						</div>
 						<p class="text-xs text-muted-foreground">{skillSourceLabel(entry.source)}</p>
 						{#if entry.description}
-							<p class="text-sm text-pretty text-muted-foreground">{entry.description}</p>
+							<p class="text-xs text-pretty text-muted-foreground">{entry.description}</p>
 						{/if}
 						{#if details.length > 0}
 							<details class="text-xs text-muted-foreground">
@@ -225,7 +225,7 @@
 			<SettingsGroup title="Sources lues">
 				<ul class="flex flex-col">
 					{#each catalog.sources as source, index (`${index}:${source.source}:${source.path}`)}
-						<li class="flex items-start justify-between gap-3 p-3 text-sm">
+						<li class="flex items-start justify-between gap-3 p-3 text-[13px]">
 							<div class="flex min-w-0 flex-col gap-0.5">
 								<span class="text-foreground">{skillSourceLabel(source.source)}</span>
 								<span class="truncate font-mono text-xs text-muted-foreground" title={source.path}>{source.path}</span>
@@ -238,7 +238,7 @@
 		{/if}
 
 		{#if diagnostics.length > 0 || omitted > 0}
-			<details class="text-sm">
+			<details class="text-[13px]">
 				<summary class="cursor-pointer text-muted-foreground hover:text-foreground">
 					Diagnostics ({diagnostics.length + (omitted > 0 ? 1 : 0)})
 				</summary>

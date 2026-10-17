@@ -138,6 +138,10 @@ pub struct OpenedSession {
     pub recent_events: Vec<serde_json::Value>,
     #[ts(type = "number")]
     pub last_seq: u64,
+    /// Presentation labels of runs started from typed commands, oldest
+    /// first (desktop-only metadata; absent for older sessions).
+    #[serde(default)]
+    pub run_labels: Vec<RunLabel>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -186,6 +190,9 @@ pub enum DesktopEvent {
     /// Deltas were dropped for this subscriber (slow consumer): reload
     /// the session with `session_open`.
     Lagged { session_id: String },
+    /// A run was started from a typed command (e.g. `/skill debug …`):
+    /// presentation label for its user message (Sprint 14.4).
+    RunLabeled { session_id: String, label: RunLabel },
 }
 
 // ─── Attachments ─────────────────────────────────────────────────────────────
@@ -651,4 +658,26 @@ pub struct SkillSourceView {
     pub source: String,
     pub path: String,
     pub skills: u32,
+}
+
+// ─── Sprint 14.4: typed-command labels ──────────────────────────────────────
+
+/// How a run's user message was typed, when it came from a command:
+/// `label` is the command as typed without its request (e.g. `/skill debug`),
+/// `prompt` the request text sent to the engine (to place the label on the
+/// right message when reloading a history that has no run ids).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct RunLabel {
+    pub run_id: String,
+    pub label: String,
+    pub prompt: String,
+    #[ts(type = "number")]
+    pub at: i64,
+    /// 0-based index, among ALL user-role messages of the session history
+    /// (engine-injected ones included), of the user message this run added.
+    /// `None` for labels stored before it existed: the frontend then falls
+    /// back to the prompt text.
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub user_index: Option<u32>,
 }

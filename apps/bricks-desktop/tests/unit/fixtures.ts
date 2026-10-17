@@ -97,6 +97,7 @@ export function openedSession(overrides: Partial<OpenedSession> = {}): OpenedSes
 		history: [],
 		recent_events: [],
 		last_seq: 0,
+		run_labels: [],
 		...overrides
 	};
 }

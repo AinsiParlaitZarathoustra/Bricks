@@ -21,6 +21,7 @@
   import SettingsDialog from '$lib/features/settings/SettingsDialog.svelte'
   import InspectorHost from '$lib/features/commands/InspectorHost.svelte'
   import { ui } from '$lib/state/ui.svelte'
+  import { Button } from '$lib/components/ui/button'
 
 
   let leftOpen = $state(true)
@@ -121,14 +122,11 @@
             {:else}
               <div class="grid h-full place-items-center p-6">
                 {#if !app.hasProviders}
-                  <EmptyState
-                    title="Aucun fournisseur configuré"
-                    description="Bricks lit ses fournisseurs dans ~/.bricks/providers.toml. Ajoutez-en un, puis relancez l’application."
-                  />
-                {:else if !app.currentProject}
-                  <EmptyState title="Bienvenue dans Bricks" description="Choisissez un dossier avec « Nouveau projet » pour commencer." />
-                {:else}
-                  <EmptyState title={app.currentProject.name} description="Écrivez un message ci-dessous pour démarrer une conversation dans ce projet." />
+                  <EmptyState title="Aucun fournisseur configuré">
+                    {#snippet action()}
+                      <Button variant="ghost" size="sm" onclick={() => (ui.settingsOpen = true)}>Ouvrir les paramètres</Button>
+                    {/snippet}
+                  </EmptyState>
                 {/if}
               </div>
             {/if}

@@ -9,17 +9,15 @@
 	import Cpu from '@lucide/svelte/icons/cpu';
 	import Sparkles from '@lucide/svelte/icons/sparkles';
 	import AppWindow from '@lucide/svelte/icons/app-window';
-	import FlaskConical from '@lucide/svelte/icons/flask-conical';
 	import AppearanceSettings from './AppearanceSettings.svelte';
 	import GeneralSettings from './GeneralSettings.svelte';
 	import ModelSettings from './ModelSettings.svelte';
 	import SkillsSettings from './SkillsSettings.svelte';
 	import ApplicationSettings from './ApplicationSettings.svelte';
-	import AdvancedSettings from './AdvancedSettings.svelte';
 
 	let { open = $bindable(false) }: { open?: boolean } = $props();
 
-	type SectionId = 'appearance' | 'general' | 'models' | 'skills' | 'application' | 'advanced';
+	type SectionId = 'appearance' | 'general' | 'models' | 'skills' | 'application';
 
 	const SECTIONS: {
 		id: SectionId;
@@ -30,8 +28,7 @@
 		{ id: 'general', label: 'Général', icon: SlidersHorizontal },
 		{ id: 'models', label: 'Modèles', icon: Cpu },
 		{ id: 'skills', label: 'Skills', icon: Sparkles },
-		{ id: 'application', label: 'Application', icon: AppWindow },
-		{ id: 'advanced', label: 'Avancé', icon: FlaskConical }
+		{ id: 'application', label: 'Application', icon: AppWindow }
 	];
 
 	let section = $state<SectionId>('appearance');
@@ -45,7 +42,7 @@
 	>
 		<div class="flex flex-col gap-1 border-b border-border px-6 py-4 pr-14">
 			<Dialog.Title class="text-base font-semibold text-foreground">Paramètres de Bricks</Dialog.Title>
-			<Dialog.Description class="text-sm text-muted-foreground">
+			<Dialog.Description class="sr-only">
 				Préférences de l’application. Les modifications sont enregistrées automatiquement.
 			</Dialog.Description>
 		</div>
@@ -64,7 +61,7 @@
 					{@const Icon = item.icon}
 					<Tabs.Trigger
 						value={item.id}
-						class="h-9 flex-none justify-start gap-2 rounded-md px-3 text-sm text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs"
+						class="h-9 flex-none justify-start gap-2 rounded-md px-3 text-[13px] text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs"
 					>
 						<Icon class="size-4" aria-hidden="true" />
 						{item.label}
@@ -86,9 +83,6 @@
 			</Tabs.Content>
 			<Tabs.Content value="application" class="min-h-0 flex-1 overflow-y-auto p-6">
 				<ApplicationSettings />
-			</Tabs.Content>
-			<Tabs.Content value="advanced" class="min-h-0 flex-1 overflow-y-auto p-6">
-				<AdvancedSettings />
 			</Tabs.Content>
 		</Tabs.Root>
 	</Dialog.Content>

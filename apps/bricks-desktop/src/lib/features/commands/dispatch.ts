@@ -40,12 +40,15 @@ export interface SlashHost {
   parse(line: string): Promise<SlashAction>
   /** Session of the open conversation, or `null`. */
   currentSession(): string | null
-  /** A session for the commands that need one: the open conversation, or a new one. */
+  /** A session for a submit only: the open conversation, or a new one (single creation). */
   ensureSession(): Promise<{ sessionId: string } | { error: string }>
   /** Engine counters taken right before a command is sent. */
   mark(sessionId: string): { sentAt: number; runsBefore: number }
-  /** Sends an engine command: `null` when accepted, else the refusal. */
-  send(sessionId: string, command: Command): Promise<string | null>
+  /**
+   * Sends an engine command: `null` when accepted, else the refusal. `display`
+   * is the typed command of a `/skill` submit (`/skill debug`), else `null`.
+   */
+  send(sessionId: string, command: Command, display?: string | null): Promise<string | null>
   /** Model choice when no conversation is open (kept for the first send). */
   setModel(selection: string, reasoning: string | null): Promise<string | null>
   /** Effort choice when no conversation is open. */
@@ -62,6 +65,7 @@ export interface SlashHost {
 
 const DONE: SlashOutcome = { kind: 'done' }
 const NO_WATCH: SlashWatch = { kind: 'none' }
+const NO_CONVERSATION = 'Aucune conversation ouverte.'
 
 function refused(message: string): SlashOutcome {
   return { kind: 'refused', message }
@@ -69,6 +73,12 @@ function refused(message: string): SlashOutcome {
 
 function fromError(error: string | null): SlashOutcome {
   return error === null ? DONE : refused(error)
+}
+
+/** The `/skill <name>` part of a typed line, as typed: the label of its message. */
+function skillLabel(line: string): string | null {
+  const match = /^(\S+)\s+(\S+)/.exec(line)
+  return match ? `${match[1]} ${match[2]}` : null
 }
 
 /** Parses and runs one `/` line. */
@@ -81,7 +91,7 @@ export async function runSlashLine(line: string, host: SlashHost): Promise<Slash
   }
   return action.kind === 'present'
     ? runPresent(action.present, host)
-    : runEngine(action.command, host)
+    : runEngine(action.command, host, line.trim())
 }
 
 async function runPresent(p: SlashPresent, host: SlashHost): Promise<SlashOutcome> {
@@ -150,24 +160,28 @@ async function sendTo(
   sessionId: string,
   command: Command,
   watch: SlashWatch,
+  display: string | null = null,
 ): Promise<SlashOutcome> {
   const { sentAt, runsBefore } = host.mark(sessionId)
-  const error = await host.send(sessionId, command)
+  const error = await host.send(sessionId, command, display)
   if (error !== null) return refused(error)
   return { kind: 'sent', sessionId, sentAt, runsBefore, watch }
 }
 
-/** Opens a view, then sends the command that fills it (the answer comes as events). */
+/**
+ * Opens a view, then sends the command that fills it (the answer comes as
+ * events). Needs the open conversation: without one, nothing is created.
+ */
 async function openAndSend(
   host: SlashHost,
   view: InspectorView,
   args: InspectorState['args'],
   command: Command,
 ): Promise<SlashOutcome> {
-  const session = await host.ensureSession()
-  if ('error' in session) return refused(session.error)
+  const sid = host.currentSession()
+  if (sid === null) return refused(NO_CONVERSATION)
   host.open(view, args)
-  return sendTo(host, session.sessionId, command, NO_WATCH)
+  return sendTo(host, sid, command, NO_WATCH)
 }
 
 const CHANGESET_ACTIONS: Record<string, 'inspect' | 'apply' | 'discard'> = {
@@ -176,7 +190,7 @@ const CHANGESET_ACTIONS: Record<string, 'inspect' | 'apply' | 'discard'> = {
   discard_changes: 'discard',
 }
 
-async function runEngine(command: Command, host: SlashHost): Promise<SlashOutcome> {
+async function runEngine(command: Command, host: SlashHost, line: string): Promise<SlashOutcome> {
   switch (command.type) {
     case 'set_model': {
       if (!command.model) {
@@ -207,6 +221,7 @@ async function runEngine(command: Command, host: SlashHost): Promise<SlashOutcom
         session.sessionId,
         { type: 'submit', prompt },
         skill ? { kind: 'skill', name: skill } : { kind: 'submit' },
+        skill ? skillLabel(line) : null,
       )
     }
     case 'cancel': {

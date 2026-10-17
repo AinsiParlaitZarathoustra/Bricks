@@ -2,7 +2,6 @@
 	// « Modèles » of the settings: the providers of the providers file, each with its models.
 	// Reads and writes the file through the IPC; every write carries the revision last read.
 	import { onMount } from 'svelte';
-	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import { app } from '$lib/state/app.svelte';
 	import {
@@ -20,7 +19,6 @@
 	import type { ProvidersFile } from '$lib/ipc/bindings/ProvidersFile';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
-	import SettingsGroup from './SettingsGroup.svelte';
 	import ProviderGroup from './ProviderGroup.svelte';
 	import ProviderFormDialog from './ProviderFormDialog.svelte';
 	import ModelFormDialog from './ModelFormDialog.svelte';
@@ -151,25 +149,16 @@
 <div class="flex flex-col gap-6">
 	<section class="flex flex-col gap-3" aria-labelledby="models-providers-title">
 		<div class="flex flex-col gap-1">
-			<h3 id="models-providers-title" class="text-sm font-semibold text-foreground">Fournisseurs et modèles</h3>
-			<p class="text-sm text-pretty text-muted-foreground">
-				Cliquez sur le nom d’un modèle pour voir ses détails. Les modifications sont enregistrées dans le fichier
-				des fournisseurs.
-			</p>
-			{#if file}
-				<p class="truncate text-xs text-muted-foreground" title={file.path}>
-					Fichier : <span class="font-mono">{file.path}</span>
-				</p>
-			{/if}
+			<h3 id="models-providers-title" class="text-[13px] font-semibold text-foreground">Fournisseurs et modèles</h3>
 		</div>
 
 		{#if pageNotice}
-			<p role="alert" class="text-sm text-pretty text-destructive">{pageNotice}</p>
+			<p role="alert" class="text-[13px] text-pretty text-destructive">{pageNotice}</p>
 		{/if}
 
 		{#if !file}
 			{#if loadError}
-				<div role="alert" class="flex flex-col items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm">
+				<div role="alert" class="flex flex-col items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-[13px]">
 					<p class="flex items-start gap-2 text-pretty">
 						<TriangleAlert class="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
 						Impossible de lire les fournisseurs : {loadError}
@@ -180,15 +169,15 @@
 					</Button>
 				</div>
 			{:else}
-				<p role="status" class="text-sm text-muted-foreground">Lecture des fournisseurs…</p>
+				<p role="status" class="text-[13px] text-muted-foreground">Lecture des fournisseurs…</p>
 			{/if}
 		{:else}
 			{#if loadError}
-				<p role="alert" class="text-sm text-pretty text-destructive">Relecture impossible : {loadError}</p>
+				<p role="alert" class="text-[13px] text-pretty text-destructive">Relecture impossible : {loadError}</p>
 			{/if}
 
 			{#if file.error}
-				<div role="alert" class="flex flex-col items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm">
+				<div role="alert" class="flex flex-col items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-[13px]">
 					<p class="flex items-start gap-2 text-pretty">
 						<TriangleAlert class="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
 						Le fichier des fournisseurs est invalide : {file.error}
@@ -202,7 +191,7 @@
 
 			{#if providers.length === 0}
 				{#if !file.error}
-					<p class="text-sm text-muted-foreground">Aucun fournisseur configuré.</p>
+					<p class="text-[13px] text-muted-foreground">Aucun fournisseur configuré.</p>
 				{/if}
 			{:else}
 				<ul class="flex flex-col gap-3" aria-label="Fournisseurs">
@@ -262,15 +251,4 @@
 			/>
 		{/if}
 	{/key}
-
-	<SettingsGroup title="Choix par défaut" description="Modèle et effort de raisonnement appliqués aux nouvelles conversations.">
-		<div class="flex items-center justify-between gap-4 p-3">
-			<span class="text-sm text-muted-foreground">Modèle par défaut</span>
-			<Badge variant="outline">À venir</Badge>
-		</div>
-		<div class="flex items-center justify-between gap-4 p-3">
-			<span class="text-sm text-muted-foreground">Effort de raisonnement par défaut</span>
-			<Badge variant="outline">À venir</Badge>
-		</div>
-	</SettingsGroup>
 </div>

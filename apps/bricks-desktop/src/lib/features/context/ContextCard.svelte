@@ -16,7 +16,7 @@
 </script>
 
 <SectionCard title="Contexte">
-	<p class="text-sm font-medium tabular-nums">{line}</p>
+	<p class="text-[13px] font-medium tabular-nums">{line}</p>
 
 	<div class="mt-3 border-t border-border pt-2">
 		<p class="text-xs font-medium">Consommation cumulée (facturée)</p>

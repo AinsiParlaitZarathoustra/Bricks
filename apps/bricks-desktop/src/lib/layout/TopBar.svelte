@@ -50,7 +50,7 @@
 <header
 	data-tauri-drag-region
 	class={cn(
-		'grid h-11 shrink-0 grid-cols-[minmax(0,1fr)_minmax(0,min(28rem,50%))_minmax(0,1fr)] items-center gap-2 border-b border-border bg-background px-3',
+		'grid h-11 shrink-0 grid-cols-[minmax(0,1fr)_minmax(0,min(28rem,50%))_minmax(0,1fr)] items-center gap-2 border-b border-transparent bg-background px-3',
 		className
 	)}
 >

@@ -133,7 +133,7 @@
 							aria-label="Nouveau titre de la conversation"
 							maxlength={200}
 							autocomplete="off"
-							class="h-8 text-sm"
+							class="h-8 text-[13px]"
 							onkeydown={onRenameKey}
 							onblur={() => void endRename(true, false)}
 						/>
@@ -153,7 +153,7 @@
 						onkeydown={(event) => onItemKeydown(event, session)}
 					>
 						<span class="flex w-full min-w-0 items-center gap-2">
-							<span class="min-w-0 flex-1 truncate text-sm font-medium">{displayTitle(session.title)}</span>
+							<span class="min-w-0 flex-1 truncate text-[13px] font-medium">{displayTitle(session.title)}</span>
 							{#if session.running}
 								<StatusDot status="running" label="Conversation en cours" />
 							{/if}

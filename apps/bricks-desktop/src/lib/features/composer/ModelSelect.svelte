@@ -55,7 +55,7 @@
 >
   <Select.Trigger
     size="sm"
-    class="max-w-56 min-w-0 border-transparent bg-transparent text-muted-foreground shadow-none hover:bg-muted hover:text-foreground data-[state=open]:bg-muted dark:bg-transparent dark:hover:bg-muted"
+    class="max-w-56 min-w-0 text-[13px] border-transparent bg-transparent text-muted-foreground shadow-none hover:bg-muted hover:text-foreground data-[state=open]:bg-muted dark:bg-transparent dark:hover:bg-muted"
     aria-label={`Modèle : ${label}`}
   >
     <span class="truncate">{label}</span>

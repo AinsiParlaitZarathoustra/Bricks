@@ -4,13 +4,14 @@
 
 use super::hub::Hub;
 use crate::contract::{
-    ChangeFile, ChangeRecord, DesktopEvent, HistoryMessage, OpenedSession, SessionItem,
+    ChangeFile, ChangeRecord, DesktopEvent, HistoryMessage, OpenedSession, RunLabel, SessionItem,
 };
 use crate::services::changes::{NewChange, StoredPatch, cap_patch, new_record_id};
 use crate::services::conversations::{history_message, path_text};
 use crate::services::now_ms;
+use crate::services::run_labels::{self, RunLabelStore, user_index_of};
 use cersei_agent::control::{
-    Activity, Controller, Envelope, Event, EventStream, SessionMeta, WrittenFile,
+    Activity, Command, Controller, Envelope, Event, EventStream, SessionMeta, WrittenFile,
 };
 use cersei_memory::{JsonlMemory, Memory};
 use cersei_tools::preview::ChangeKind;
@@ -34,6 +35,14 @@ pub struct OpenSession {
     created_at: i64,
     stop: watch::Sender<bool>,
     live: parking_lot::Mutex<Live>,
+    /// The presentation labels of the session's runs (Sprint 14.4).
+    labels: Arc<RunLabelStore>,
+    /// Held while a submit is recorded and sent, so two submits never
+    /// interleave their records (and the history is counted once per submit).
+    submit_gate: tokio::sync::Mutex<()>,
+    /// Completion of the last journal append of this session: the next one
+    /// waits for it, so the appends keep the order of the edits.
+    journal_tail: parking_lot::Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
 }
 
 struct Live {
@@ -43,6 +52,34 @@ struct Live {
     /// Messages in the stored session, refreshed when a run ends.
     message_count: usize,
     previews: VecDeque<Preview>,
+    /// The accepted submits whose `run_started` has not come yet, oldest
+    /// first (Sprint 14.4).
+    expected: VecDeque<Expected>,
+    /// The label of the run in progress, kept until its end: its message
+    /// index is only known once the run has added its messages.
+    running_label: Option<PendingLabel>,
+}
+
+/// A submit accepted by the controller, waiting for the run it starts. The
+/// engine starts the runs in the order of their submits, one at a time, so
+/// the next `run_started` belongs to the oldest record. The consumer can lag
+/// behind the engine (its queue is bounded), so the match is by order of
+/// submits, not by timing.
+struct Expected {
+    /// The label as typed (`None` for a submit typed as plain text).
+    label: Option<String>,
+    /// The user-role messages before the run, counted while it could not
+    /// yet run (only for a labelled submit).
+    base: Option<u32>,
+}
+
+/// A labelled run, from its start to its end.
+struct PendingLabel {
+    run_id: String,
+    label: String,
+    prompt: String,
+    at: i64,
+    base: u32,
 }
 
 /// The diffs an approval showed for one tool call, kept until it is applied.
@@ -61,6 +98,7 @@ impl OpenSession {
         sessions_dir: PathBuf,
         created_at: i64,
         message_count: usize,
+        labels: Arc<RunLabelStore>,
     ) -> (Arc<Self>, watch::Receiver<bool>) {
         let (stop, stop_rx) = watch::channel(false);
         let entry = Self {
@@ -76,9 +114,41 @@ impl OpenSession {
                 running: false,
                 message_count,
                 previews: VecDeque::new(),
+                expected: VecDeque::new(),
+                running_label: None,
             }),
+            labels,
+            submit_gate: tokio::sync::Mutex::new(()),
+            journal_tail: parking_lot::Mutex::new(None),
         };
         (Arc::new(entry), stop_rx)
+    }
+
+    /// Sends a command to the controller. A submit is recorded first, with
+    /// its label (the one typed for it, if any), so the `run_started` it
+    /// starts takes that label; a refused submit leaves nothing behind. Other
+    /// commands ignore the label.
+    pub async fn send(&self, command: Command, label: Option<String>) -> Result<(), String> {
+        if !matches!(command, Command::Submit { .. }) {
+            return self.controller.send(command);
+        }
+        let _gate = self.submit_gate.lock().await;
+        // A submit is accepted only while idle, and the run appends its
+        // messages after the ones there are now: count them while nothing
+        // changes them.
+        let base = match label {
+            Some(_) if !self.is_busy() => {
+                Some(run_labels::user_count(&self.controller.history().await))
+            }
+            _ => None,
+        };
+        self.live.lock().expected.push_back(Expected { label, base });
+        let sent = self.controller.send(command);
+        if sent.is_err() {
+            // Refused: nothing started. The record just pushed is the newest.
+            self.live.lock().expected.pop_back();
+        }
+        sent
     }
 
     /// A run or a sub-agent is active (the controller's own view).
@@ -112,12 +182,32 @@ impl OpenSession {
             (live.ring.iter().cloned().collect(), live.last_seq)
         };
         let snapshot = serde_json::to_value(self.controller.snapshot()).unwrap_or(serde_json::Value::Null);
+        let run_labels = self.load_run_labels().await;
         OpenedSession {
             session: session_item(self).await,
             snapshot,
             history,
             recent_events,
             last_seq,
+            run_labels,
+        }
+    }
+
+    /// The labels of the session's runs, oldest first. A file that cannot be
+    /// read is reported and gives none: the conversation still opens.
+    async fn load_run_labels(&self) -> Vec<RunLabel> {
+        let labels = Arc::clone(&self.labels);
+        let session_id = self.session_id.clone();
+        match tauri::async_runtime::spawn_blocking(move || labels.list(&session_id)).await {
+            Ok(Ok(list)) => list,
+            Ok(Err(e)) => {
+                eprintln!("bricks-desktop: run labels of {} : {}", self.session_id, e.message);
+                Vec::new()
+            }
+            Err(e) => {
+                eprintln!("bricks-desktop: run labels of {} : {e}", self.session_id);
+                Vec::new()
+            }
         }
     }
 
@@ -211,21 +301,40 @@ pub fn ingest(hub: &Arc<Hub>, entry: &Arc<OpenSession>, env: Envelope) {
     let mut refresh = false;
     let mut count_messages = false;
     let mut change = None;
+    let mut run_label = None;
     {
         let mut live = entry.live.lock();
         live.last_seq = env.seq;
         match &env.event {
-            Event::RunStarted { .. } => {
+            Event::RunStarted { prompt, .. } => {
                 live.ring.clear();
                 live.running = true;
                 running_changed = Some(true);
                 refresh = true;
+                // The run of the oldest accepted submit still unstarted; a
+                // typed command labels only the run its own submit started.
+                live.running_label = None;
+                if let Some(expected) = live.expected.pop_front()
+                    && let (Some(label), Some(base), Some(run_id)) =
+                        (expected.label, expected.base, env.run_id.clone())
+                {
+                    live.running_label = Some(PendingLabel {
+                        run_id,
+                        label,
+                        prompt: prompt.clone(),
+                        at: env.at,
+                        base,
+                    });
+                }
             }
             Event::RunFinished { .. } => {
                 live.running = false;
                 running_changed = Some(false);
                 refresh = true;
                 count_messages = true;
+                // The run's messages are all in the history now: its label
+                // is placed there, off this task.
+                run_label = live.running_label.take();
             }
             Event::ModelChanged { .. } | Event::ReasoningChanged { .. } => refresh = true,
             Event::ApprovalRequested { approval } => {
@@ -285,8 +394,48 @@ pub fn ingest(hub: &Arc<Hub>, entry: &Arc<OpenSession>, env: Envelope) {
         spawn_refresh(hub.clone(), entry.clone(), count_messages);
     }
     if let Some(new_change) = change {
-        spawn_journal(hub.clone(), new_change);
+        spawn_journal(hub.clone(), entry, new_change);
     }
+    if let Some(pending) = run_label {
+        spawn_label(hub.clone(), entry.clone(), pending);
+    }
+}
+
+/// Places the label of a run that has ended, then stores it off the event
+/// task and announces it when it is new. The message is the first one from
+/// the run's base whose text is the prompt; a label whose message is not
+/// there is not kept, rather than placed on a message it does not belong to.
+fn spawn_label(hub: Arc<Hub>, entry: Arc<OpenSession>, pending: PendingLabel) {
+    tauri::async_runtime::spawn(async move {
+        let history = entry.controller.history().await;
+        let Some(user_index) = user_index_of(&history, pending.base, &pending.prompt) else {
+            eprintln!(
+                "bricks-desktop: run labels : the message of run {} is not in the history; its label is not kept",
+                pending.run_id
+            );
+            return;
+        };
+        let session_id = entry.session_id.clone();
+        let label = RunLabel {
+            run_id: pending.run_id,
+            label: pending.label,
+            prompt: pending.prompt,
+            at: pending.at,
+            user_index: Some(user_index),
+        };
+        let announced = DesktopEvent::RunLabeled {
+            session_id: session_id.clone(),
+            label: label.clone(),
+        };
+        let labels = Arc::clone(&entry.labels);
+        let result = tauri::async_runtime::spawn_blocking(move || labels.append(&session_id, &label)).await;
+        match result {
+            Ok(Ok(true)) => hub.publish(announced),
+            Ok(Ok(false)) => {}
+            Ok(Err(e)) => eprintln!("bricks-desktop: run labels : {}", e.message),
+            Err(e) => eprintln!("bricks-desktop: run labels : {e}"),
+        }
+    });
 }
 
 /// Builds the journal entry of an applied edit, with the patches an earlier
@@ -365,12 +514,21 @@ impl Live {
     }
 }
 
-/// Appends the entry off the event task; announces it when it is new.
-fn spawn_journal(hub: Arc<Hub>, change: NewChange) {
+/// Appends the entry off the event task; announces it when it is new. The
+/// appends of one session run in the order of their edits: a replayed edit
+/// is appended after the one it repeats, so the first one keeps its patch.
+fn spawn_journal(hub: Arc<Hub>, entry: &OpenSession, change: NewChange) {
     let record = change.record.clone();
     let journal = Arc::clone(&hub.journal);
+    let (done_tx, done_rx) = tokio::sync::oneshot::channel::<()>();
+    let before = entry.journal_tail.lock().replace(done_rx);
     tauri::async_runtime::spawn(async move {
+        if let Some(before) = before {
+            // A dropped sender (a failed append) also ends the wait.
+            let _ = before.await;
+        }
         let result = tauri::async_runtime::spawn_blocking(move || journal.append(change)).await;
+        let _ = done_tx.send(());
         match result {
             Ok(Ok(true)) => hub.record_added(record),
             Ok(Ok(false)) => {}

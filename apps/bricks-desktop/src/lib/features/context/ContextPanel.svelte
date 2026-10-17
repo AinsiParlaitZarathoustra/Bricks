@@ -44,7 +44,7 @@
 				<div class="flex justify-end">
 					<DropdownMenu.Root>
 						<DropdownMenu.Trigger
-							class={buttonVariants({ variant: 'ghost', size: 'sm' })}
+							class={[buttonVariants({ variant: 'ghost', size: 'sm' }), 'text-[13px]']}
 							disabled={!menuEnabled}
 						>
 							<EllipsisIcon aria-hidden="true" />

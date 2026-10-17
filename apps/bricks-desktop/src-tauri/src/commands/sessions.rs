@@ -42,9 +42,16 @@ pub async fn session_delete(state: State<'_, AppState>, session_id: String) -> I
 }
 
 /// Sends an engine `Command` (JSON as in `docs/cli.md`) to the session.
+/// `display` is the typed command of a submit (e.g. `/skill debug`), kept as
+/// the label of the run it starts; it is never sent to the engine.
 #[tauri::command]
-pub async fn session_command(state: State<'_, AppState>, session_id: String, command: serde_json::Value) -> IpcResult<()> {
-    state.send_command(&session_id, command)
+pub async fn session_command(
+    state: State<'_, AppState>,
+    session_id: String,
+    command: serde_json::Value,
+    display: Option<String>,
+) -> IpcResult<()> {
+    state.send_command(&session_id, command, display).await
 }
 
 /// `cersei_agent::control::Snapshot`.

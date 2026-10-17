@@ -2,7 +2,6 @@
   import { tick, untrack } from 'svelte'
   import { ArrowDown, LoaderCircle } from '@lucide/svelte'
   import { Button } from '$lib/components/ui/button'
-  import EmptyState from '$lib/layout/EmptyState.svelte'
   import type { Conversation, TimelineItem } from '$lib/state/conversation.svelte'
   import { OUTCOME_LABEL, plural, truncate } from './format'
   import ApprovalCard from './timeline/ApprovalCard.svelte'
@@ -190,10 +189,6 @@
             Charger les messages précédents ({hiddenCount})
           </Button>
         </div>
-      {/if}
-
-      {#if conversation.items.length === 0 && !conversation.skillsTrust}
-        <EmptyState title="Nouvelle conversation" description="Écrivez un message ci-dessous pour démarrer." />
       {/if}
 
       {#each visible as item (item.id)}

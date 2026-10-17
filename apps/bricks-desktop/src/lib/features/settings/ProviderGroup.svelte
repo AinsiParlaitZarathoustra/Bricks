@@ -31,7 +31,7 @@
 <section class="flex flex-col rounded-lg border border-border" aria-labelledby={`${uid}-name`}>
 	<header class="flex items-center gap-2 px-3.5 py-2.5">
 		<div class="flex min-w-0 flex-1 flex-col">
-			<h4 id={`${uid}-name`} class="truncate text-sm font-medium text-foreground">{title}</h4>
+			<h4 id={`${uid}-name`} class="truncate text-[13px] font-medium text-foreground">{title}</h4>
 			<p class="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
 				<span class="truncate font-mono">{provider.endpoint}</span>
 				{#if !provider.has_credentials}
@@ -81,7 +81,7 @@
 	</header>
 
 	{#if provider.models.length === 0}
-		<p class="border-t border-border px-3.5 py-2.5 text-sm text-muted-foreground">Aucun modèle pour ce fournisseur.</p>
+		<p class="border-t border-border px-3.5 py-2.5 text-[13px] text-muted-foreground">Aucun modèle pour ce fournisseur.</p>
 	{:else}
 		<ul class="flex flex-col gap-0.5 border-t border-border py-1" aria-label={`Modèles de ${title}`}>
 			{#each provider.models as model (model.id)}

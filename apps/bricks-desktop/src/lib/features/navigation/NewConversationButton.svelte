@@ -17,7 +17,7 @@
 	/** Why a new conversation cannot start, or null when it can. */
 	const blockedReason = $derived.by((): string | null => {
 		if (!app.hasProviders) {
-			return 'Aucun fournisseur configuré. Bricks lit ses fournisseurs dans ~/.bricks/providers.toml.';
+			return 'Aucun fournisseur configuré.';
 		}
 		const project = app.currentProject;
 		if (!project) return 'Choisissez un projet pour démarrer une conversation.';

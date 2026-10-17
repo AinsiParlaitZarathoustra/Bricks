@@ -5,7 +5,6 @@
 	import Settings from '@lucide/svelte/icons/settings';
 	import { Button } from '$lib/components/ui/button';
 	import { ScrollArea } from '$lib/components/ui/scroll-area';
-	import EmptyState from '$lib/layout/EmptyState.svelte';
 	import { app } from '$lib/state/app.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import ConversationList from './ConversationList.svelte';
@@ -40,8 +39,8 @@
 	class="flex h-full min-h-0 flex-col bg-sidebar text-sidebar-foreground"
 >
 	<div class="flex flex-col gap-1.5 p-3 pb-2">
-		<NewConversationButton class="w-full justify-start" />
-		<Button variant="ghost" class="w-full justify-start" onclick={addProject} disabled={adding}>
+		<NewConversationButton class="w-full justify-start text-[13px]" />
+		<Button variant="ghost" class="w-full justify-start text-[13px]" onclick={addProject} disabled={adding}>
 			<FolderPlus class="size-4" aria-hidden="true" />
 			Nouveau projet
 		</Button>
@@ -58,19 +57,7 @@
 			{:else}
 				<section class="flex flex-col gap-1 px-2">
 					<h2 class="px-2 text-xs font-medium text-muted-foreground">Projets</h2>
-					{#if app.projects.length === 0}
-						<EmptyState
-							title="Aucun projet"
-							description="Un projet est un dossier de votre ordinateur. Ajoutez-en un pour démarrer une conversation."
-						>
-							{#snippet action()}
-								<Button size="sm" onclick={addProject} disabled={adding}>
-									<FolderPlus class="size-4" aria-hidden="true" />
-									Nouveau projet
-								</Button>
-							{/snippet}
-						</EmptyState>
-					{:else}
+					{#if app.projects.length > 0}
 						<ProjectList />
 					{/if}
 				</section>
@@ -78,20 +65,7 @@
 				{#if app.projects.length > 0}
 					<section class="flex flex-col gap-1 px-2">
 						<h2 class="px-2 text-xs font-medium text-muted-foreground">Conversations</h2>
-						{#if !project}
-							<p class="px-2 py-1 text-sm text-muted-foreground">
-								Sélectionnez un projet pour voir ses conversations.
-							</p>
-						{:else if app.sessions.length === 0}
-							<EmptyState
-								title="Aucune conversation"
-								description={`Démarrez une conversation dans « ${project.name} ».`}
-							>
-								{#snippet action()}
-									<NewConversationButton size="sm" />
-								{/snippet}
-							</EmptyState>
-						{:else}
+						{#if project && app.sessions.length > 0}
 							<ConversationList />
 						{/if}
 					</section>
@@ -100,10 +74,10 @@
 		</div>
 	</ScrollArea>
 
-	<div class="border-t border-sidebar-border p-2">
+	<div class="border-t border-sidebar-border/50 p-2">
 		<Button
 			variant="ghost"
-			class="w-full justify-start"
+			class="w-full justify-start text-[13px]"
 			aria-label="Paramètres de Bricks"
 			onclick={() => (ui.settingsOpen = true)}
 		>

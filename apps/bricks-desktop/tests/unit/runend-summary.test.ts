@@ -50,9 +50,9 @@ describe('runEndSummary: the state and the duration', () => {
 		expect(runEndSummary(run({ outcome: 'succeeded', finishedAt: T0 - 1 })).durationMs).toBeNull();
 	});
 
-	it('formats seconds and minutes from the same milliseconds', () => {
-		expect(runEndSummary(run({ outcome: 'succeeded', finishedAt: T0 + 12_400 })).duration).toBe('12,4 s');
-		expect(runEndSummary(run({ outcome: 'succeeded', finishedAt: T0 + 125_000 })).duration).toBe('2 min 5 s');
+	it('keeps long durations in milliseconds', () => {
+		const long = runEndSummary(run({ outcome: 'succeeded', finishedAt: T0 + 12_400 })).duration;
+		expect(long?.replace(/\s/g, ' ')).toBe('12 400 ms');
 	});
 });
 

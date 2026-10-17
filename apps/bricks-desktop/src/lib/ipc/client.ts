@@ -119,8 +119,9 @@ export const sessionClose = (sessionId: string, cancel = false) =>
 export const sessionRename = (sessionId: string, title: string) =>
   call<SessionItem>('session_rename', { sessionId, title })
 export const sessionDelete = (sessionId: string) => call<void>('session_delete', { sessionId })
-export const sessionCommand = (sessionId: string, command: Command) =>
-  call<void>('session_command', { sessionId, command })
+/** `display`: the typed command of a submit (e.g. `/skill debug`), shown on its user message. */
+export const sessionCommand = (sessionId: string, command: Command, display: string | null = null) =>
+  call<void>('session_command', { sessionId, command, display })
 export const sessionSnapshot = (sessionId: string) =>
   call<Snapshot>('session_snapshot', { sessionId })
 export const attachmentSave = (name: string, mediaType: string, dataBase64: string) =>
@@ -242,3 +243,5 @@ export const sessionAgents = (sessionId: string) =>
 /** Isolated ChangeSets of an open session (engine `ChangeSet[]`). */
 export const sessionChangesets = (sessionId: string) =>
   call<import('./engine').ChangeSet[]>('session_changesets', { sessionId })
+
+export type * from './bindings/RunLabel'

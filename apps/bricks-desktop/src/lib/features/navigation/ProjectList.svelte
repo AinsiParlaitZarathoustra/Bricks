@@ -106,7 +106,7 @@
 				>
 					<Folder class="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 					<span class="flex min-w-0 flex-col">
-						<span class="truncate text-sm font-medium">{project.name}</span>
+						<span class="truncate text-[13px] font-medium">{project.name}</span>
 						<span class="truncate text-xs text-muted-foreground">{shortPath(project.path)}</span>
 					</span>
 				</button>

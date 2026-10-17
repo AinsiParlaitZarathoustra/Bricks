@@ -262,6 +262,87 @@ Last run (2026-10-17, Haiku V, Sprint 14.3 validation):
   178 passed; `--test agents_runtime` 21 passed.
 - Not run: the macOS application, the full `cersei-agent` test set, negative controls.
 
+### Sprint 14.4 tests (validation)
+
+Owner: Haiku 3 (Sprint 14.4, tests and regression review). Files:
+
+- `tests/unit/session-flow-14-4.test.ts` (15 tests): « Nouvelle conversation », the single conversation
+  start, the per-project drafts, and the `/` dispatch wired to the app store.
+- `tests/unit/run-labels-14-4.test.ts` (9 tests): command labels on user messages, live and after a reopen.
+- `src-tauri/tests/run_labels_14_4.rs` (8 tests): the label store across a restart, and the wire shapes.
+
+`tests/unit/drafts-labels-14-4.test.ts` belongs to another agent and is not changed here.
+
+How they run. The unit tests replace `invoke` of `@tauri-apps/api/core` with a recording fake, so the real
+IPC client (`src/lib/ipc/client.ts`) runs and each `session_open` and `session_command` is counted at the
+boundary. Each test loads a fresh app store and uses fake timers, so the debounced preference save never
+runs between tests. The Rust test uses only the label store on a temporary home: it opens no conversation.
+
+What is pinned:
+
+- « Nouvelle conversation » called 20 times: no IPC call, one draft object, composer focus +20.
+- A composer send and a dispatch submit started together share one `session_open`; the conversation takes
+  the project draft (text, attachments, skills) and its model and effort.
+- Drafts stay per project through a switch, an opened conversation and a new one; a conversation created in
+  B takes the draft of B only.
+- `/skill debug fix it` with no conversation: one creation, then one `session_command` with
+  `display: '/skill debug'` and `prompt.skills: ['debug']`; with a conversation open, no second session.
+  `/search`, `/clear`, `/compact` and `/cancel` with no conversation are refused with no session. Views,
+  pickers and `/model` open no session.
+- Labels: a `run_labeled` before or after its `run_started` gives one labelled message; a run without a label
+  has no `commandLabel` key; a reopened session takes its labels from `run_labels`; a session stored before
+  labels opens with none; a running run is labelled once by its run id, and a repeated label changes nothing.
+- Rust: labels, deletions and a write cut short by a crash survive a restart of the store on the same home;
+  a label already stored is not stored again after a restart; the `run_labeled` JSON and an `OpenedSession`
+  without `run_labels` read as the frontend expects.
+
+Expected failures. These three are product defects. They stay red (plain `it`, not `it.fails`) until the
+owner fixes them, so `npm run test:unit` reports 3 failed:
+
+- **S14.4-1, labels move to the wrong message on reopen.** `src/lib/state/conversation.svelte.ts:400`
+  (`free.findIndex((i) => i.text === label.prompt)`) gives the label to the first unlabelled message with the
+  same text, so `/skill debug Analyse` labels an earlier plain « Analyse ». Test: `run-labels-14-4.test.ts`,
+  « an earlier message with the same text … ». Fix: store the position of the user message in `RunLabel`
+  (the number of user messages before it, set in `engine/live.rs` at `RunStarted`) and match on it; keep the
+  text match only for labels without a position.
+- **S14.4-2, a « lagged » event drops the unsent draft of the open conversation.** `app.svelte.ts:471-472`
+  deletes the conversation and reopens it with an empty draft. Test: `session-flow-14-4.test.ts`, « survives
+  a « lagged » reopen ». Fix: pass the draft to the reopen, `this.open(conv.projectId, e.session_id, undefined,
+  undefined, conv.draft)`.
+- **S14.4-3, a conversation created for A is shown after the user moved to B.** `app.svelte.ts:374` calls
+  `show()`, which sets `currentProjectId` (`app.svelte.ts:383`) when the creation completes. Test:
+  `session-flow-14-4.test.ts`, « not shown when the user has moved to project B ». Fix: show a created
+  conversation only while its project is still the current one.
+
+Test-environment defect, blocking `cargo test -p bricks-desktop`:
+
+- **S14.4-4, the lib tests write sessions into the real `~/.bricks/sessions`.** `src-tauri/src/engine/sessions.rs:62`
+  builds the engine config with `bricks_config::engine_config`, which points the session folder at the global
+  `bricks_home()/sessions`, not at the `AppState` home. Two tests in `src-tauri/src/commands/inspect.rs` open a
+  session with a temporary home and so write there on every run: `the_configuration_never_carries_a_provider_key`
+  (line 600) and `an_open_session_is_located_by_its_controller` (line 717). Fix: add
+  `cfg.sessions_dir = self.sessions_dir().to_path_buf();` after line 62. Production is unchanged, since
+  `AppState::new` already uses `bricks_home()`. Until it is fixed, run the Rust tests of this sprint with
+  `cargo test -p bricks-desktop --test run_labels_14_4`, not the whole package. Each run leaves two folders
+  of the form `<date>-<time>-<id>.files` holding only `session.json`; they are not deleted here.
+
+Not covered:
+
+- The Composer send path, the slash host and the draft settlement in `Composer.svelte`: there is no component
+  test harness. `session-flow-14-4.test.ts` runs the composer's `ensureSession` logic against the app store.
+- The engine's label queue in `engine/live.rs` (the `Expected` queue and `ingest`) needs a running controller:
+  it is covered only by reading the code.
+- The restart test does not go through a real engine session.
+
+Last run (2026-10-17, Haiku 3):
+
+- `npm run test:unit`: 38 files, 555 passed, 3 failed (S14.4-1 to S14.4-3, as above).
+- `npm run test:types`: no error.
+- `cargo test -p bricks-desktop --test run_labels_14_4`: 8 passed.
+- Not run: the full `cargo test -p bricks-desktop` after the leak was found (S14.4-4). Its first run, before
+  the leak was reported, passed: lib 157, `preferences_approval` 5, `profiles_14_3` 10, `providers_edit` 9,
+  `skills_prompt_14_3` 4, `slash_mapping` 12.
+
 ### WebDriver tests (`tests/e2e`)
 
 - `wdio.conf.ts` seeds a throwaway `BRICKS_HOME` (`seed.ts`: `desktop/projects.json` with one

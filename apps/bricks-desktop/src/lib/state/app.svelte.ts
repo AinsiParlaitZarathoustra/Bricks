@@ -15,7 +15,7 @@ import type {
   SessionSearchHit,
 } from '$lib/ipc/client'
 import type { Command, Envelope, ModelChoice } from '$lib/ipc/engine'
-import { Conversation } from './conversation.svelte'
+import { Conversation, type Draft } from './conversation.svelte'
 
 export const DEFAULT_PREFERENCES: Preferences = {
   theme: 'system',
@@ -33,6 +33,19 @@ export const DEFAULT_PREFERENCES: Preferences = {
 }
 
 export type RightView = 'context' | 'changes'
+
+/**
+ * How a conversation that has just opened takes the view: `always` (the user
+ * asked for it), `draft` (a new conversation: only while the user is still on
+ * the draft of its project), `never` (kept in the background).
+ */
+type Reveal = 'always' | 'draft' | 'never'
+
+interface OpenOptions {
+  /** The project draft a new conversation takes over (copied before it is shown). */
+  draftFrom?: Draft
+  reveal?: Reveal
+}
 
 class AppStore {
   ready = $state(false)
@@ -54,6 +67,15 @@ class AppStore {
 
   /** Last user-facing error of an action (shown as a toast by the UI). */
   lastError = $state<{ message: string; at: number } | null>(null)
+
+  /** Bumped by `newConversation()`: the composer focuses its editor when it changes. */
+  composerFocus = $state(0)
+  /** Local composer drafts per project, kept until a conversation takes one over. */
+  private drafts = new SvelteMap<string, Draft>()
+  /** Model and effort chosen for the next conversation of each project. */
+  private draftChoices = new SvelteMap<string, { model: string; reasoning: string | null }>()
+  /** Conversations being created, per project: concurrent callers share the promise. */
+  private starting = new Map<string, Promise<Conversation | null>>()
 
   private unsubscribe: (() => Promise<void>) | null = null
   private prefsTimer: ReturnType<typeof setTimeout> | null = null
@@ -100,6 +122,8 @@ class AppStore {
       this.info = info
       this.prefs = prefs
       this.projects = projects
+      // Drafts are created here, not while rendering (a state write in a derived is refused).
+      for (const p of projects) this.draftFor(p.id)
       this.models = await ipc.modelsList().catch((e) => {
         this.fail(e)
         return []
@@ -174,6 +198,8 @@ class AppStore {
       await ipc.projectRemove(projectId)
       this.projects = this.projects.filter((p) => p.id !== projectId)
       this.sessionsByProject.delete(projectId)
+      this.drafts.delete(projectId)
+      this.draftChoices.delete(projectId)
       if (this.currentProjectId === projectId) {
         this.currentProjectId = null
         this.currentSessionId = null
@@ -198,6 +224,7 @@ class AppStore {
 
   async selectProject(projectId: string) {
     this.currentProjectId = projectId
+    this.draftFor(projectId)
     if (this.current && this.current.projectId !== projectId) this.currentSessionId = null
     this.setPrefs({ last_project_id: projectId })
     await this.refreshSessions(projectId)
@@ -214,18 +241,88 @@ class AppStore {
 
   // ─── Conversations ────────────────────────────────────────────────────────
 
-  /** Starts a new conversation in the current project. */
-  async newConversation(model?: string, reasoning?: string): Promise<Conversation | null> {
+  /**
+   * « Nouvelle conversation »: shows the composer of the current project with
+   * its draft. No session is opened here (no IPC): the first valid send does
+   * it through `startConversation`. Repeated calls keep the same draft.
+   */
+  newConversation(): void {
     const projectId = this.currentProjectId
-    if (!projectId) return null
-    // The engine needs a model: without an explicit choice, keep the current
-    // conversation's (if still configured), else the first configured one.
-    if (!model) {
-      const current = this.current?.model
-      model = (current && this.model(current) ? current : this.models[0]?.selection) ?? undefined
-      if (reasoning === undefined && model === current) reasoning = this.current?.reasoning ?? undefined
+    if (!projectId) return
+    const leaving = this.current
+    // The next conversation's model defaults to the one being left (if configured).
+    if (leaving && leaving.projectId === projectId) {
+      this.draftChoices.set(projectId, { model: leaving.model, reasoning: leaving.reasoning })
     }
-    return this.open(projectId, null, model, reasoning)
+    this.draftFor(projectId)
+    this.currentSessionId = null
+    this.setPrefs({ last_session_id: null })
+    this.composerFocus += 1
+  }
+
+  /** The local composer draft of a project (created on first use, then kept). */
+  draftFor(projectId: string): Draft {
+    const existing = this.drafts.get(projectId)
+    if (existing) return existing
+    const fresh = $state<Draft>({ text: '', attachments: [], skills: [] })
+    this.drafts.set(projectId, fresh)
+    return fresh
+  }
+
+  /** Empties the draft of a project: called by the composer once its first submit succeeded. */
+  clearProjectDraft(projectId: string) {
+    const draft = this.draftFor(projectId)
+    draft.text = ''
+    draft.attachments = []
+    draft.skills = []
+  }
+
+  /** Model of the next conversation of a project: its own choice if still configured, else the first configured. */
+  draftModel(projectId: string): string | null {
+    const chosen = this.draftChoices.get(projectId)?.model
+    if (chosen && this.model(chosen)) return chosen
+    return this.models[0]?.selection ?? null
+  }
+
+  /** Effort of the next conversation of a project; kept only while its model is the draft model. */
+  draftReasoning(projectId: string): string | null {
+    const choice = this.draftChoices.get(projectId)
+    return choice && choice.model === this.draftModel(projectId) ? choice.reasoning : null
+  }
+
+  setDraftModel(projectId: string, model: string, reasoning: string | null = null) {
+    this.draftChoices.set(projectId, { model, reasoning })
+  }
+
+  /**
+   * Opens the session of a new conversation in the current project, which
+   * takes over the project draft. This is the only path that creates a session
+   * from the composer. Concurrent callers for one project share the same
+   * creation; a conversation already shown for the project is returned as is.
+   * The project draft is kept until `clearProjectDraft`. On failure the draft
+   * is kept and the error is reported in `lastError`.
+   */
+  startConversation(model?: string, reasoning?: string): Promise<Conversation | null> {
+    const projectId = this.currentProjectId
+    if (!projectId) {
+      this.fail('Choisissez un projet pour démarrer une conversation.')
+      return Promise.resolve(null)
+    }
+    const pending = this.starting.get(projectId)
+    if (pending) return pending
+    const shown = this.current
+    if (shown && shown.projectId === projectId) return Promise.resolve(shown)
+    const creation = this.createConversation(projectId, model, reasoning).finally(() => {
+      this.starting.delete(projectId)
+    })
+    this.starting.set(projectId, creation)
+    return creation
+  }
+
+  private createConversation(projectId: string, model?: string, reasoning?: string): Promise<Conversation | null> {
+    const selection = model ?? this.draftModel(projectId) ?? undefined
+    const effort = model === undefined ? (reasoning ?? this.draftReasoning(projectId) ?? undefined) : reasoning
+    return this.open(projectId, null, selection, effort, { draftFrom: this.draftFor(projectId), reveal: 'draft' })
   }
 
   /**
@@ -262,6 +359,7 @@ class AppStore {
     sessionId: string | null,
     model?: string,
     reasoning?: string,
+    options: OpenOptions = {},
   ): Promise<Conversation | null> {
     try {
       const opened = await ipc.sessionOpen({
@@ -273,6 +371,12 @@ class AppStore {
       let conv = this.conversations.get(opened.session.id)
       if (!conv) {
         conv = new Conversation(opened, projectId)
+        const draftFrom = options.draftFrom
+        if (draftFrom) {
+          conv.draft.text = draftFrom.text
+          conv.draft.attachments = $state.snapshot(draftFrom.attachments)
+          conv.draft.skills = $state.snapshot(draftFrom.skills)
+        }
         this.conversations.set(conv.sessionId, conv)
         const c = conv
         Promise.all([ipc.sessionAgents(c.sessionId), ipc.sessionChangesets(c.sessionId)])
@@ -280,12 +384,20 @@ class AppStore {
           .catch(() => {})
       }
       this.upsertSession(projectId, opened.session)
-      this.show(conv)
+      if (this.revealed(projectId, options.reveal ?? 'always')) this.show(conv)
       return conv
     } catch (e) {
       this.fail(e)
       return null
     }
+  }
+
+  /** Whether a conversation of `projectId` that has just opened takes the view now. */
+  private revealed(projectId: string, reveal: Reveal): boolean {
+    if (reveal === 'always') return true
+    if (reveal === 'never') return false
+    // Still on the draft of this project: the user did not navigate away meanwhile.
+    return this.currentProjectId === projectId && this.currentSessionId === null
   }
 
   private show(conv: Conversation) {
@@ -329,12 +441,21 @@ class AppStore {
     return ipc.sessionsSearch(allProjects ? null : this.currentProjectId, query)
   }
 
-  /** Sends an engine command to a session. Errors are returned, not thrown. */
-  async command(sessionId: string, command: Command): Promise<string | null> {
+  /**
+   * Sends an engine command to a session. `display` is the command as typed
+   * (e.g. `/skill debug`) for the user message of a submit; it never reaches
+   * the engine. Errors are returned, not thrown.
+   */
+  async command(sessionId: string, command: Command, display?: string | null): Promise<string | null> {
+    // The label of a submit is pending from the call on: the run it starts can
+    // announce itself before the call returns. A refusal takes it back.
+    const submitted = command.type === 'submit' ? this.conversations.get(sessionId) : undefined
+    submitted?.setPendingSubmitLabel(display || null)
     try {
-      await ipc.sessionCommand(sessionId, command)
+      await ipc.sessionCommand(sessionId, command, display ?? null)
       return null
     } catch (e) {
+      submitted?.setPendingSubmitLabel(null)
       return ipc.errorMessage(e)
     }
   }
@@ -373,11 +494,19 @@ class AppStore {
       case 'lagged': {
         const conv = this.conversations.get(e.session_id)
         if (conv?.projectId) {
+          // The reopened conversation keeps its unsent draft, and takes the view only if it had it.
+          const wasShown = this.currentSessionId === e.session_id
           this.conversations.delete(e.session_id)
-          this.open(conv.projectId, e.session_id)
+          this.open(conv.projectId, e.session_id, undefined, undefined, {
+            draftFrom: conv.draft,
+            reveal: wasShown ? 'always' : 'never',
+          })
         }
         break
       }
+      case 'run_labeled':
+        this.conversations.get(e.session_id)?.applyRunLabel(e.label)
+        break
       case 'change_recorded':
         changeListeners.forEach((l) => l(e.record))
         break

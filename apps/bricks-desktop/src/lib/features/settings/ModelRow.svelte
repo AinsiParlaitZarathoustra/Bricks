@@ -28,7 +28,7 @@
 	<div class="flex items-center gap-1 px-1.5">
 		<button
 			type="button"
-			class="min-w-0 flex-1 truncate rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+			class="min-w-0 flex-1 truncate rounded-md px-2 py-1.5 text-left text-[13px] text-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
 			aria-expanded={expanded}
 			aria-controls={expanded ? detailId : undefined}
 			onclick={() => (expanded = !expanded)}

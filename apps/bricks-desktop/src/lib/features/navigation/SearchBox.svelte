@@ -35,7 +35,7 @@
 			aria-label="Rechercher dans les conversations (titres et messages)"
 			autocomplete="off"
 			spellcheck={false}
-			class="h-8 pl-8 text-sm"
+			class="h-8 pl-8 text-[13px]"
 			onkeydown={onKeydown}
 		/>
 	</div>

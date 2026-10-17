@@ -27,9 +27,9 @@
 </script>
 
 <div class="flex flex-col gap-3">
-	<Label for={`${uid}-approval`} class="text-sm font-semibold text-foreground">Approbation des outils</Label>
+	<Label for={`${uid}-approval`} class="text-[13px] font-semibold text-foreground">Approbation des outils</Label>
 	<Select.Root type="single" value={app.prefs.tool_approval} onValueChange={choose}>
-		<Select.Trigger id={`${uid}-approval`} class="w-full max-w-72" aria-describedby={`${uid}-effect`}>
+		<Select.Trigger id={`${uid}-approval`} class="w-full max-w-72">
 			<span class="truncate">{selected?.label ?? app.prefs.tool_approval}</span>
 		</Select.Trigger>
 		<Select.Content>
@@ -38,11 +38,8 @@
 			{/each}
 		</Select.Content>
 	</Select.Root>
-	{#if selected}
-		<p id={`${uid}-effect`} class="text-sm text-pretty text-muted-foreground">{selected.effect}</p>
-	{/if}
 	{#if failure}
-		<p role="alert" class="text-sm text-pretty text-destructive">
+		<p role="alert" class="text-[13px] text-pretty text-destructive">
 			Le réglage n’a pas été enregistré : {failure}
 		</p>
 	{/if}

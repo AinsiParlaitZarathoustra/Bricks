@@ -11,7 +11,7 @@
 </script>
 
 <div class="flex h-full min-h-0 flex-col">
-	<h2 class="px-3 pt-3 pb-2 text-sm font-medium">Modifications</h2>
+	<h2 class="px-3 pt-3 pb-2 text-[13px] font-medium">Modifications</h2>
 	<Tabs.Root bind:value={tab} class="flex min-h-0 flex-1 flex-col gap-0">
 		<Tabs.List class="mx-3 grid grid-cols-3">
 			<Tabs.Trigger value="conversation" class="min-w-0 truncate text-xs">Conversation</Tabs.Trigger>

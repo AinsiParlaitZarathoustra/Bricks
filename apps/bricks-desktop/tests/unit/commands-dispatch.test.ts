@@ -48,8 +48,8 @@ function fakeHost(options: Options = {}) {
 			rec('mark', sessionId);
 			return { sentAt: 1000, runsBefore: 2 };
 		},
-		async send(sessionId, command) {
-			rec('send', sessionId, command);
+		async send(sessionId, command, display) {
+			rec('send', sessionId, command, display);
 			return options.sendError ?? null;
 		},
 		async setModel(model, reasoning) {
@@ -167,6 +167,11 @@ describe('submit from /skill', () => {
 		});
 	});
 
+	it('labels the message with the command as typed, without the request', async () => {
+		const r = await run({ action: engine(submit), session: 'sess-1' }, '/skill review relis ce fichier');
+		expect(r.calls.find((c) => c.name === 'send')?.args[2]).toBe('/skill review');
+	});
+
 	it('appends the draft attachments to the prompt blocks', async () => {
 		const attached: PromptBlock[] = [{ kind: 'file', path: '/p/a b.txt' }];
 		const r = await run({ action: engine(submit), session: 'sess-1', attachment: { blocks: attached } });
@@ -194,27 +199,33 @@ describe('submit from /skill', () => {
 
 describe('commands that open a view, then send', () => {
 	it('/search opens the search view with the query, then sends it', async () => {
-		const r = await run({ action: engine({ type: 'search', text: 'todo', regex: false }) });
-		expect(r.names()).toEqual(['parse', 'ensureSession', 'open', 'mark', 'send']);
+		const r = await run({ action: engine({ type: 'search', text: 'todo', regex: false }), session: 'sess-1' });
+		expect(r.names()).toEqual(['parse', 'open', 'mark', 'send']);
 		expect(r.calls.find((c) => c.name === 'open')?.args).toEqual(['search', { query: 'todo', regex: false }]);
 		expect(r.outcome.kind).toBe('sent');
 	});
 
+	it('/search without an open conversation is refused and creates no session', async () => {
+		const r = await run({ action: engine({ type: 'search', text: 'todo', regex: false }) });
+		expect(r.outcome).toEqual({ kind: 'refused', message: 'Aucune conversation ouverte.' });
+		expect(r.names()).toEqual(['parse']);
+	});
+
 	it('/search re:<regex> keeps the regex flag', async () => {
-		const r = await run({ action: engine({ type: 'search', text: 'fo+', regex: true }) });
+		const r = await run({ action: engine({ type: 'search', text: 'fo+', regex: true }), session: 'sess-1' });
 		expect(r.calls.find((c) => c.name === 'open')?.args).toEqual(['search', { query: 'fo+', regex: true }]);
 	});
 
 	it('/skills opens the skills view and sends the listing', async () => {
-		const r = await run({ action: engine({ type: 'list_skills', query: 'rev', page: 0 }) });
+		const r = await run({ action: engine({ type: 'list_skills', query: 'rev', page: 0 }), session: 'sess-1' });
 		expect(r.calls.find((c) => c.name === 'open')?.args).toEqual(['skills', { query: 'rev' }]);
 		expect(r.names().at(-1)).toBe('send');
 	});
 
-	it('does not open the view when no session can be opened', async () => {
-		const r = await run({ action: engine({ type: 'reload_skills' }), ensureError: 'Aucun modèle configuré.' });
-		expect(r.outcome).toEqual({ kind: 'refused', message: 'Aucun modèle configuré.' });
-		expect(r.names()).toEqual(['parse', 'ensureSession']);
+	it('does not open the view and creates no session when none is open', async () => {
+		const r = await run({ action: engine({ type: 'reload_skills' }) });
+		expect(r.outcome).toEqual({ kind: 'refused', message: 'Aucune conversation ouverte.' });
+		expect(r.names()).toEqual(['parse']);
 	});
 });
 

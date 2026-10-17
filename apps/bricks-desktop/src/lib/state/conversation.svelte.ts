@@ -3,7 +3,7 @@
 // at other conversations so no event is lost. Owner: orchestrator.
 
 import { SvelteMap } from 'svelte/reactivity'
-import type { HistoryMessage, OpenedSession, SessionItem } from '$lib/ipc/client'
+import type { HistoryMessage, OpenedSession, RunLabel, SessionItem } from '$lib/ipc/client'
 import type {
   InstanceRecord,
   AgentProfilesEvent,
@@ -44,6 +44,8 @@ export interface UserItem {
   text: string
   attachments: AttachmentInfo[]
   at?: number
+  /** The command as typed, for a message sent by a typed command (e.g. `/skill debug`). */
+  commandLabel?: string
 }
 
 export interface AssistantItem {
@@ -230,6 +232,17 @@ export interface MemoryState {
 
 const SHELL_TOOLS = new Set(['Bash', 'bash', 'Shell', 'PowerShell'])
 
+/**
+ * Whether a user text is an engine skill activation: the instructions of a
+ * skill chosen for a request, stored as a user message (`render_activation`,
+ * crates/bricks-skills). The person did not type it, and the skill shows as the
+ * command label of the request instead.
+ */
+function isEngineSkillActivation(text: string): boolean {
+  const t = text.trim()
+  return t.startsWith('<skill_activation id="') && t.endsWith('</skill_activation>')
+}
+
 export class Conversation {
   readonly sessionId: string
   projectId: string | null
@@ -284,6 +297,10 @@ export class Conversation {
   lastSkill = $state<{ at: number; name: string; ok: boolean; reason?: string } | null>(null)
 
   lastSeq = -1
+  /** Command labels by run id, kept whether or not the run's message exists yet. */
+  private runLabels = new SvelteMap<string, string>()
+  /** Label of the submit sent last, until the next live run starts (see `setPendingSubmitLabel`). */
+  private pendingSubmitLabel: string | null = null
 
   constructor(opened: OpenedSession, projectId: string | null) {
     this.sessionId = opened.session.id
@@ -291,8 +308,10 @@ export class Conversation {
     this.session = opened.session
     this.title = opened.session.title
     this.applySnapshot(opened.snapshot)
-    this.loadHistory(opened.history)
+    const userItemIds = this.loadHistory(opened.history)
     this.replay(opened.recent_events)
+    // Absent for sessions stored before labels existed.
+    this.applyStoredLabels(opened.run_labels ?? [], userItemIds)
   }
 
   get running(): boolean {
@@ -352,17 +371,92 @@ export class Conversation {
     this.title = item.title
   }
 
-  private loadHistory(history: HistoryMessage[]) {
+  /**
+   * The label of the submit being sent (`null`: a plain submit, or none). It
+   * goes on the user message of the next live run, keyed by that run's id, so
+   * the label shows as the run starts; the engine's `run_labeled` comes at the
+   * end of the run and changes nothing then.
+   */
+  setPendingSubmitLabel(label: string | null) {
+    this.pendingSubmitLabel = label
+  }
+
+  /**
+   * Places the command label of a run on its user message. A label already
+   * set for the run is ignored; a label that arrives before the message is
+   * applied when the message is created (see `startRun`).
+   */
+  applyRunLabel(label: RunLabel) {
+    if (this.runLabels.get(label.run_id) === label.label) return
+    this.runLabels.set(label.run_id, label.label)
+    const item = this.items.find((i) => i.kind === 'user' && i.runId === label.run_id)
+    if (item?.kind === 'user') item.commandLabel = label.label
+  }
+
+  /**
+   * Labels of a reopened session, oldest first. A run still in the timeline is
+   * labelled by its run id. A label with `user_index` goes to the user message at
+   * that index among all user-role messages of the history (`loadHistory`). A
+   * label without an index (stored before it existed) goes to the first
+   * unlabelled stored message with the same text, at most once. A label that
+   * matches no message is dropped: nothing is invented.
+   */
+  private applyStoredLabels(labels: RunLabel[], userItemIds: Map<number, string>) {
+    const byText: RunLabel[] = []
+    for (const label of labels) {
+      if (this.items.some((i) => i.kind === 'user' && i.runId === label.run_id)) {
+        this.applyRunLabel(label)
+        continue
+      }
+      if (label.user_index == null) {
+        byText.push(label)
+        continue
+      }
+      this.runLabels.set(label.run_id, label.label)
+      const id = userItemIds.get(label.user_index)
+      const item = this.items.find((i) => i.kind === 'user' && i.id === id)
+      if (item?.kind === 'user' && !item.commandLabel) item.commandLabel = label.label
+    }
+    // Old labels: unlabelled stored messages, oldest first, each takes at most one.
+    const free = this.items.filter((i): i is UserItem => i.kind === 'user' && !i.runId && !i.commandLabel)
+    for (const label of byText) {
+      this.runLabels.set(label.run_id, label.label)
+      const at = free.findIndex((i) => i.text === label.prompt)
+      if (at < 0) continue
+      const [item] = free.splice(at, 1)
+      item.commandLabel = label.label
+    }
+  }
+
+  /**
+   * Builds the timeline of the stored history. Returns the id of the user item
+   * of each user-role message, keyed by the message's index among ALL user-role
+   * messages (`RunLabel.user_index`). A message that makes no user item has none.
+   */
+  private loadHistory(history: HistoryMessage[]): Map<number, string> {
     const items: TimelineItem[] = []
     const tools = new Map<string, ToolItem>()
+    const userItemIds = new SvelteMap<number, string>()
+    let userIndex = -1
     for (const msg of history) {
       if (msg.role === 'system') continue
+      // Every user-role message counts, the engine's skill activations included.
+      if (msg.role === 'user') userIndex += 1
+      // The user item of this message: the first one its text or its images make.
+      let own: UserItem | undefined
       for (const block of msg.blocks) {
         switch (block.type) {
           case 'text':
             if (!block.text.trim()) break
+            // Only user text: an assistant text is never hidden, whatever it contains.
+            if (msg.role === 'user' && isEngineSkillActivation(block.text)) break
             if (msg.role === 'user') {
-              items.push({ kind: 'user', id: localId('u'), text: block.text, attachments: [] })
+              const item: UserItem = { kind: 'user', id: localId('u'), text: block.text, attachments: [] }
+              items.push(item)
+              if (!own) {
+                own = item
+                userItemIds.set(userIndex, item.id)
+              }
             } else {
               const last = items.at(-1)
               if (last?.kind === 'assistant') last.text += block.text
@@ -411,12 +505,15 @@ export class Conversation {
             break
           }
           case 'image': {
-            const last = items.at(-1)
             if (msg.role === 'user' && block.path) {
               const info: AttachmentInfo = { kind: 'image', path: block.path, bytes: 0 }
-              if (last?.kind === 'user') last.attachments.push(info)
-              else
-                items.push({ kind: 'user', id: localId('u'), text: '', attachments: [info] })
+              // The images of a message join its own user item, never a neighbouring one.
+              if (own) own.attachments.push(info)
+              else {
+                own = { kind: 'user', id: localId('u'), text: '', attachments: [info] }
+                items.push(own)
+                userItemIds.set(userIndex, own.id)
+              }
             }
             break
           }
@@ -424,6 +521,7 @@ export class Conversation {
       }
     }
     this.items = items
+    return userItemIds
   }
 
   /**
@@ -780,6 +878,8 @@ export class Conversation {
         break
       case 'command_rejected':
         this.lastRejection = { command: env.command, reason: env.reason, at: env.at }
+        // A refused submit starts no run: its label is not waiting for one.
+        if (env.command === 'submit') this.pendingSubmitLabel = null
         break
       default:
         break
@@ -802,6 +902,12 @@ export class Conversation {
     if (!live) return
     this.runningRunId = runId
     this.lastRejection = null
+    // The submit sent last is the one that starts this run: its label is kept by run id.
+    if (this.pendingSubmitLabel !== null) {
+      this.runLabels.set(runId, this.pendingSubmitLabel)
+      this.pendingSubmitLabel = null
+    }
+    const commandLabel = this.runLabels.get(runId)
     this.items.push({
       kind: 'user',
       id: localId('u'),
@@ -809,6 +915,7 @@ export class Conversation {
       text: env.prompt,
       attachments: env.attachments,
       at: env.at,
+      ...(commandLabel === undefined ? {} : { commandLabel }),
     })
   }
 

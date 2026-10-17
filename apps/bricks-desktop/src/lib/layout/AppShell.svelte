@@ -309,11 +309,11 @@
 		<PaneGroup direction="horizontal" bind:this={hGroup} onLayoutChange={onHorizontalLayout} class="flex h-full w-full">
 			{#if leftInline && left}
 				<Pane id="bricks-left" order={1} defaultSize={leftPct} minSize={sideMinPct} maxSize={leftMaxPct}>
-					<div class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
+					<div class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-sidebar text-sidebar-foreground">
 						{@render left()}
 					</div>
 				</Pane>
-				<Resizable.Handle aria-label="Redimensionner le panneau de gauche" onDraggingChange={onHandleDragging} />
+				<Resizable.Handle class="bg-border/50" aria-label="Redimensionner le panneau de gauche" onDraggingChange={onHandleDragging} />
 			{/if}
 
 			<Pane id="bricks-center" order={2} defaultSize={centerPct} minSize={centerMinPct}>
@@ -325,9 +325,9 @@
 							</main>
 						</Pane>
 						{#if terminalInline && terminal}
-							<Resizable.Handle aria-label="Redimensionner le terminal" onDraggingChange={onHandleDragging} />
+							<Resizable.Handle class="bg-border/50" aria-label="Redimensionner le terminal" onDraggingChange={onHandleDragging} />
 							<Pane id="bricks-terminal" order={2} defaultSize={termPct} minSize={termMinPct} maxSize={termMaxPct}>
-								<section aria-label="Terminal" class="flex h-full min-h-0 flex-col border-t border-border bg-background">
+								<section aria-label="Terminal" class="flex h-full min-h-0 flex-col bg-background">
 									{@render terminal()}
 								</section>
 							</Pane>
@@ -337,9 +337,9 @@
 			</Pane>
 
 			{#if rightInline && right}
-				<Resizable.Handle aria-label="Redimensionner le panneau de droite" onDraggingChange={onHandleDragging} />
+				<Resizable.Handle class="bg-border/50" aria-label="Redimensionner le panneau de droite" onDraggingChange={onHandleDragging} />
 				<Pane id="bricks-right" order={3} defaultSize={rightPct} minSize={sideMinPct} maxSize={rightMaxPct}>
-					<aside aria-label="Contexte" class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-l border-sidebar-border bg-sidebar text-sidebar-foreground">
+					<aside aria-label="Contexte" class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-sidebar text-sidebar-foreground">
 						{@render right()}
 					</aside>
 				</Pane>
