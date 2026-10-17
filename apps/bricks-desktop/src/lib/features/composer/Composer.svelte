@@ -1086,7 +1086,7 @@
         onclick={syncCaret}
         onselect={syncCaret}
         dir="auto"
-        class="max-h-[40vh] min-h-10 resize-none overflow-y-auto border-0 bg-transparent px-1 py-1 text-start shadow-none focus-visible:ring-0 dark:bg-transparent"
+        class="max-h-[40vh] min-h-0 resize-none overflow-y-auto border-0 bg-transparent px-2 py-2 leading-5 text-start shadow-none focus-visible:ring-0 dark:bg-transparent"
       />
 
       <div class="flex flex-wrap items-center gap-1">

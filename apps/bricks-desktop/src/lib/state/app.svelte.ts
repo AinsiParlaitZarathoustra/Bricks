@@ -218,6 +218,13 @@ class AppStore {
   async newConversation(model?: string, reasoning?: string): Promise<Conversation | null> {
     const projectId = this.currentProjectId
     if (!projectId) return null
+    // The engine needs a model: without an explicit choice, keep the current
+    // conversation's (if still configured), else the first configured one.
+    if (!model) {
+      const current = this.current?.model
+      model = (current && this.model(current) ? current : this.models[0]?.selection) ?? undefined
+      if (reasoning === undefined && model === current) reasoning = this.current?.reasoning ?? undefined
+    }
     return this.open(projectId, null, model, reasoning)
   }
 
