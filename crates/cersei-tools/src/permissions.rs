@@ -9,6 +9,11 @@ use serde::{Deserialize, Serialize};
 #[async_trait]
 pub trait PermissionPolicy: Send + Sync {
     async fn check(&self, request: &PermissionRequest) -> PermissionDecision;
+
+    /// Whether the agent must bind this policy to an interactive stream.
+    fn requires_stream(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -143,14 +148,17 @@ impl PermissionPolicy for InteractivePolicy {
     }
 }
 
-/// Placeholder policy that emits PermissionRequired events via the agent stream.
+/// Policy bound to permission events by `Agent::run_stream`.
+/// Without a stream it denies calls rather than silently allowing them.
 pub struct StreamDeferredPolicy;
 
 #[async_trait]
 impl PermissionPolicy for StreamDeferredPolicy {
     async fn check(&self, _request: &PermissionRequest) -> PermissionDecision {
-        // In practice, the agent loop intercepts this and emits
-        // AgentEvent::PermissionRequired, then waits for a response.
-        PermissionDecision::Allow
+        PermissionDecision::Deny("Interactive permissions require Agent::run_stream".into())
+    }
+
+    fn requires_stream(&self) -> bool {
+        true
     }
 }

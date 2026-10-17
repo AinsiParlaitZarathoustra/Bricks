@@ -99,7 +99,7 @@ Agent::builder().permission_policy(InteractivePolicy::new(|req| {
 }))
 ```
 
-`InteractivePolicy::via_stream()` returns a `StreamDeferredPolicy`, which allows every call. No event asks the stream consumer, and `AgentEvent::PermissionRequired` is never emitted in 0.6.1. Do not use it for approvals.
+`InteractivePolicy::via_stream()` returns a `StreamDeferredPolicy`. With `Agent::run_stream()`, each call emits `AgentEvent::PermissionRequired` and waits for `stream.respond_permission(request.id, decision)`. Cancellation or dropping the stream stops the wait. Without a stream, the policy denies calls. See [stream controls](05-events-streaming.md) for message injection and request-id semantics.
 
 ## Permission levels
 

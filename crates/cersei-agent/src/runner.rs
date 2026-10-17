@@ -371,6 +371,19 @@ fn push_message(agent: &Agent, msg: Message) {
     agent.messages.lock().push(msg);
 }
 
+/// Preserve injected input in both histories at a valid conversation boundary.
+fn inject_pending(agent: &Agent, controls: Option<&crate::events::StreamControls>) {
+    if let Some(controls) = controls {
+        for message in controls.drain_messages() {
+            push_message(agent, Message::user(message));
+            agent
+                .context
+                .lock()
+                .invalidate("a user message was injected");
+        }
+    }
+}
+
 /// Run the agent without streaming (blocking until complete), then the
 /// long-term memory's maintenance.
 pub async fn run_agent(agent: &Agent, input: &UserInput) -> Result<AgentOutput> {
@@ -416,7 +429,34 @@ pub async fn run_prepared(
     event_tx: mpsc::Sender<AgentEvent>,
     cancel: tokio_util::sync::CancellationToken,
 ) -> Result<AgentOutput> {
-    let result = run_loop(agent, input, &event_tx, &cancel).await;
+    run_prepared_controlled(
+        agent,
+        input,
+        event_tx,
+        cancel,
+        None,
+        Arc::clone(&agent.permission_policy),
+    )
+    .await
+}
+
+pub(crate) async fn run_prepared_controlled(
+    agent: &Agent,
+    input: &UserInput,
+    event_tx: mpsc::Sender<AgentEvent>,
+    cancel: tokio_util::sync::CancellationToken,
+    controls: Option<Arc<crate::events::StreamControls>>,
+    permissions: Arc<dyn cersei_tools::permissions::PermissionPolicy>,
+) -> Result<AgentOutput> {
+    let result = run_loop(
+        agent,
+        input,
+        &event_tx,
+        &cancel,
+        controls.as_deref(),
+        permissions,
+    )
+    .await;
     if let Some(s) = agent.skill_session() {
         s.ledger.lock().clear_pending();
     }
@@ -426,7 +466,11 @@ pub async fn run_prepared(
         } else {
             "interrupted by an error"
         };
+        if let Some(controls) = controls.as_deref() {
+            controls.finish();
+        }
         repair_interrupted(agent, why);
+        inject_pending(agent, controls.as_deref());
         match save_session(agent).await {
             Ok(true) => {
                 if let Some(session_id) = &agent.session_id {
@@ -760,6 +804,8 @@ async fn run_loop(
     input: &UserInput,
     event_tx: &mpsc::Sender<AgentEvent>,
     cancel: &tokio_util::sync::CancellationToken,
+    controls: Option<&crate::events::StreamControls>,
+    permissions: Arc<dyn cersei_tools::permissions::PermissionPolicy>,
 ) -> Result<AgentOutput> {
     let prompt = input.text.as_str();
     // Nothing to do: refused before the session is loaded or a request sent.
@@ -1005,7 +1051,7 @@ async fn run_loop(
         // One shell session per agent (not per run): state persists across
         // turns and `reply` calls; sub-agents have their own.
         session_id: agent.shell_session_id.clone(),
-        permissions: Arc::clone(&agent.permission_policy),
+        permissions: Arc::clone(&permissions),
         cost_tracker: Arc::clone(&agent.cost_tracker),
         mcp_manager: agent.mcp_manager(),
         extensions: agent.extensions.clone(),
@@ -1068,6 +1114,9 @@ async fn run_loop(
                 .lock()
                 .invalidate("old tool results were removed from the active context");
         }
+
+        // Inject only between complete rounds, never between tool uses and results.
+        inject_pending(agent, controls);
 
         // Build completion request
         let messages = agent.messages.lock().clone();
@@ -1504,6 +1553,11 @@ async fn run_loop(
                 send(agent, Some(&event_tx), AgentEvent::Status(status)).await;
                 continue;
             }
+            // A message received during generation still deserves a response.
+            // Closing admission and checking the queue are atomic.
+            if controls.is_some_and(|c| !c.finish_if_empty()) {
+                continue;
+            }
             termination = crate::Termination::Completed;
             break;
         } else {
@@ -1557,7 +1611,7 @@ async fn run_loop(
                     let tool_input = tool_input.clone();
                     // Its own view: the call id never leaks to a sibling.
                     let tool_ctx = tool_ctx.for_call(&tool_id);
-                    let permission_policy = Arc::clone(&agent.permission_policy);
+                    let permission_policy = Arc::clone(&permissions);
                     let hooks = agent.hooks.clone();
                     let cumulative_cost = cumulative.cost_usd.unwrap_or(0.0);
 
@@ -1933,6 +1987,10 @@ async fn run_loop(
     }
 
     // Persist session: the active history, and next to it the raw history.
+    if let Some(controls) = controls {
+        controls.finish();
+    }
+    inject_pending(agent, controls);
     if save_session(agent).await? {
         let session_id = agent.session_id.clone().unwrap_or_default();
         let _ = event_tx
