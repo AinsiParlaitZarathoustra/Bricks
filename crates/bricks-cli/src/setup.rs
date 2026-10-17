@@ -1,38 +1,21 @@
-//! Configuration loading: the existing loaders, with the project folder
-//! explicit. Errors are complete messages for the user (exit code 2).
+//! Configuration loading for the command line: the workspace and the
+//! providers file come from the arguments; everything else is assembled by
+//! `bricks-config`, shared with the other frontends. Errors are complete
+//! messages for the user (exit code 2).
 //!
 //! The workspace given on the command line (`--workspace`, alias `--cd`)
 //! is where a new session starts. A project's settings (`bricks.toml`,
-//! system prompt, long-term memory) are read by [`CliProjects`] for the
-//! folder of the session actually opened — a resumed session's own folder,
-//! not the one Bricks was started in.
+//! system prompt, long-term memory) are read by `bricks_config::Projects`
+//! for the folder of the session actually opened — a resumed session's own
+//! folder, not the one Bricks was started in.
 
 use crate::args::Global;
-use cersei_agent::BricksConfig;
-use cersei_agent::control::{
-    EngineConfig, OpenOptions, ProjectContext, ProjectLoader, SessionChoice, SkillsSetup,
-};
-use cersei_agent::system_prompt::{SystemPromptOptions, build_system_prompt};
-use cersei_embeddings::{EmbeddingProvider, GeminiEmbeddings, HashingEmbeddings, OpenAiEmbeddings};
-use cersei_memory::structured::extract::LlmExtractor;
-use cersei_memory::structured::{MemoryConfig, StructuredMemory};
+use cersei_agent::control::{EngineConfig, OpenOptions, SessionChoice};
 use cersei_provider::ProviderRegistry;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-/// `~/.bricks`, or `$BRICKS_HOME`.
-pub fn bricks_home() -> PathBuf {
-    if let Some(h) = std::env::var_os("BRICKS_HOME") {
-        return PathBuf::from(h);
-    }
-    dirs::home_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".bricks")
-}
-
-pub fn sessions_dir() -> PathBuf {
-    bricks_home().join("sessions")
-}
+pub use bricks_config::sessions_dir;
 
 /// The workspace to open: `arg` (or `launch` without one), with a leading
 /// `~` or `~/` expanded from `home` (no shell is involved, so a quoted `~`
@@ -112,191 +95,21 @@ fn providers_path(global: &Global, launch: &Path) -> Option<PathBuf> {
         .providers
         .as_ref()
         .map(|p| launch.join(p))
-        .or_else(|| {
-            std::env::var_os("BRICKS_HOME").map(|h| PathBuf::from(h).join("providers.toml"))
-        })
+        .or_else(bricks_config::providers_file_from_env)
 }
 
 pub fn registry(global: &Global, launch: &Path) -> Result<ProviderRegistry, String> {
-    ProviderRegistry::load(providers_path(global, launch).as_deref()).map_err(|e| {
-        format!(
-            "{e}\nModels are configured in providers.toml (see docs/providers.md); \
-             nothing is built in."
-        )
-    })
-}
-
-fn embedder(spec: &str) -> Result<Arc<dyn EmbeddingProvider>, String> {
-    let (kind, arg) = match spec.split_once(':') {
-        Some((k, a)) => (k, Some(a)),
-        None => (spec, None),
-    };
-    Ok(match kind {
-        "hashing" => {
-            let dims = arg
-                .map(|a| {
-                    a.parse::<usize>()
-                        .map_err(|_| format!("memory.embeddings: `{a}` is not a dimension"))
-                })
-                .transpose()?
-                .unwrap_or(384);
-            Arc::new(HashingEmbeddings::new(dims))
-        }
-        "openai" => {
-            let e = OpenAiEmbeddings::from_env()
-                .map_err(|e| format!("memory.embeddings openai: {e}"))?;
-            Arc::new(match arg {
-                Some(m) => e.with_model(m),
-                None => e,
-            })
-        }
-        "gemini" => {
-            let e = GeminiEmbeddings::from_env()
-                .map_err(|e| format!("memory.embeddings gemini: {e}"))?;
-            Arc::new(match arg {
-                Some(m) => e.with_model(m),
-                None => e,
-            })
-        }
-        other => return Err(format!("memory.embeddings: unknown `{other}`")),
-    })
-}
-
-/// Long-term memories opened by this process, by file and configuration:
-/// one store is never opened twice (sessions of several projects may share
-/// the default one).
-type OpenMemories = parking_lot::Mutex<std::collections::HashMap<String, Arc<StructuredMemory>>>;
-
-/// The long-term memory, when `[memory] enabled = true`.
-fn long_term_memory(
-    wd: &Path,
-    registry: &ProviderRegistry,
-    open: &OpenMemories,
-) -> Result<Option<(Arc<StructuredMemory>, String)>, String> {
-    let text = match std::fs::read_to_string(wd.join("bricks.toml")) {
-        Ok(t) => t,
-        Err(_) => return Ok(None),
-    };
-    let cfg = MemoryConfig::from_bricks_toml(&text).map_err(|e| format!("bricks.toml: {e}"))?;
-    if !cfg.enabled {
-        return Ok(None);
-    }
-    let path = cfg
-        .path
-        .clone()
-        .unwrap_or_else(|| bricks_home().join("memory").join("memory.grafeo"));
-    let key = format!("{}\n{cfg:?}", path.display());
-    if let Some(m) = open.lock().get(&key) {
-        return Ok(Some((Arc::clone(m), cfg.space.clone())));
-    }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
-    }
-    let mut builder = StructuredMemory::builder(embedder(&cfg.embeddings)?)
-        .path(&path)
-        .config(cfg.clone());
-    if let Some(sel) = &cfg.extractor_model {
-        let resolved = registry
-            .resolve(sel)
-            .map_err(|e| format!("memory.extractor_model: {e}"))?;
-        let provider = resolved
-            .build_provider()
-            .map_err(|e| format!("memory.extractor_model: {e}"))?;
-        builder = builder.extractor(Arc::new(LlmExtractor::new(
-            Arc::new(provider),
-            resolved.api_model.clone(),
-            cfg.extraction.clone(),
-        )));
-    }
-    let memory = Arc::new(
-        builder
-            .open()
-            .map_err(|e| format!("long-term memory {}: {e}", path.display()))?,
-    );
-    open.lock().insert(key, Arc::clone(&memory));
-    Ok(Some((memory, cfg.space.clone())))
-}
-
-/// Reads a project with the existing loaders: `BricksConfig::load`, the
-/// long-term memory of its `bricks.toml`, the system prompt for its folder.
-pub struct CliProjects {
-    registry: Arc<ProviderRegistry>,
-    interactive: bool,
-    memories: OpenMemories,
-}
-
-/// The names of the tools the session agent announces to the model, as the
-/// controller builds it from the engine's tools (`cersei_tools::coding`):
-/// those, and the native sub-agent tools when `[agents] enabled`. The
-/// system prompt's conditional guidance is decided from this list. (`Skill`
-/// is left out: the skills catalog, added to the prompt by the agent, says
-/// how to use it.)
-fn announced_tools(bricks: &BricksConfig) -> Vec<String> {
-    let mut names: Vec<String> = cersei_tools::coding()
-        .iter()
-        .map(|t| t.name().to_string())
-        .collect();
-    if bricks.agents.enabled && !names.iter().any(|n| n == "Agent") {
-        names.extend(["Agent", "Agents", "AgentControl", "AgentProfiles"].map(String::from));
-    }
-    names
-}
-
-impl ProjectLoader for CliProjects {
-    fn load(&self, wd: &Path) -> Result<ProjectContext, String> {
-        let bricks = BricksConfig::load(wd);
-        let memory = long_term_memory(wd, &self.registry, &self.memories)?;
-        let tools_available = announced_tools(&bricks);
-        let system = build_system_prompt(&SystemPromptOptions {
-            is_non_interactive: !self.interactive,
-            working_directory: Some(wd.display().to_string()),
-            tools_available,
-            has_memory: memory.is_some(),
-            has_auto_compact: true,
-            ..Default::default()
-        });
-        let (long_term_memory, memory_space) = match memory {
-            Some((m, space)) => (
-                Some(m as Arc<dyn cersei_memory::LongTermMemory>),
-                Some(space),
-            ),
-            None => (None, None),
-        };
-        Ok(ProjectContext {
-            working_dir: wd.to_path_buf(),
-            bricks,
-            system_prompt: Some(system),
-            long_term_memory,
-            memory_space,
-            mcp_servers: Vec::new(),
-            agent_profile_sources: None,
-        })
-    }
+    bricks_config::load_registry(providers_path(global, launch).as_deref())
 }
 
 /// Everything the engine needs. Nothing of a project is read here: the
-/// controller asks [`CliProjects`] for the project of the session it opens
-/// (so a broken `bricks.toml` here does not prevent resuming a session of
-/// another project).
+/// controller asks the project loader for the project of the session it
+/// opens (so a broken `bricks.toml` here does not prevent resuming a
+/// session of another project).
 pub fn engine(global: &Global, launch: &Path, interactive: bool) -> Result<EngineConfig, String> {
     let wd = workspace(global, launch)?;
     let registry = Arc::new(registry(global, launch)?);
-    let mut cfg = EngineConfig::new(
-        &wd,
-        Arc::clone(&registry) as Arc<dyn cersei_agent::control::ModelCatalog>,
-        BricksConfig::default(),
-        sessions_dir(),
-    );
-    cfg.interactive = interactive;
-    // Skills: the session's project sources and the user's home folder
-    // (`~/.agents/skills`, `~/.claude/skills`), plus the built-in ones.
-    cfg.skills = Some(SkillsSetup::with_home(dirs::home_dir()));
-    cfg.project_loader = Some(Arc::new(CliProjects {
-        registry,
-        interactive,
-        memories: Default::default(),
-    }));
-    Ok(cfg)
+    Ok(bricks_config::engine_config(&wd, registry, interactive))
 }
 
 pub fn open_options(global: &Global, session: Option<String>) -> OpenOptions {
@@ -376,6 +189,8 @@ mod tests {
 #[cfg(test)]
 mod prompt_tests {
     use super::*;
+    use bricks_config::Projects;
+    use cersei_agent::BricksConfig;
     use cersei_agent::control::scripted::{Reply, Script, ScriptedCatalog};
     use cersei_agent::control::{Command, Controller, Event, OpenOptions, Prompt, SessionChoice};
 
@@ -392,7 +207,7 @@ mod prompt_tests {
     }
 
     /// The system prompt of the first request of a session opened through
-    /// the real controller with the CLI's own project loader.
+    /// the real controller with the shared project loader.
     async fn sent(interactive: bool, extra: &str) -> (String, Vec<String>) {
         let dir = tempfile::tempdir().unwrap();
         let wd = std::fs::canonicalize(dir.path()).unwrap();
@@ -409,11 +224,7 @@ mod prompt_tests {
             wd.join(".sessions"),
         );
         cfg.interactive = interactive;
-        cfg.project_loader = Some(Arc::new(CliProjects {
-            registry: registry(),
-            interactive,
-            memories: Default::default(),
-        }));
+        cfg.project_loader = Some(Arc::new(Projects::new(registry(), interactive)));
         let (ctl, mut events) = Controller::open(
             cfg,
             OpenOptions {
@@ -464,25 +275,5 @@ mod prompt_tests {
             assert!(!tools.iter().any(|t| t == "Agent" || t == "Agents"));
             assert!(s.starts_with(&without("- Délègue aux sous-agents")), "{s}");
         }
-    }
-
-    /// The names the loader announces are the tools the controller gives
-    /// the session agent (for the two conditional bullets).
-    #[test]
-    fn announced_tools_follow_the_session_agent() {
-        let mut b = BricksConfig::default();
-        let names = announced_tools(&b);
-        for t in [
-            "CodeScout",
-            "Agent",
-            "Agents",
-            "AgentControl",
-            "AgentProfiles",
-        ] {
-            assert!(names.iter().any(|n| n == t), "{t}");
-        }
-        b.agents.enabled = false;
-        let names = announced_tools(&b);
-        assert!(!names.iter().any(|n| n.starts_with("Agent")));
     }
 }

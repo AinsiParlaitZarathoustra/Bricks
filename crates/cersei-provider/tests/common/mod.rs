@@ -5,8 +5,6 @@
 //! served one scripted [`Reply`] and closed (`Connection: close`), and every
 //! request is recorded so tests can assert on path, headers and JSON body.
 
-#![allow(dead_code)]
-
 use cersei_provider::{ProviderRegistry, ResolvedModel};
 use serde_json::Value;
 use std::collections::HashMap;

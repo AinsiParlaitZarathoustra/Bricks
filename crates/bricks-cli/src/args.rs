@@ -1,6 +1,6 @@
 //! Command line.
 
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
@@ -9,15 +9,16 @@ use std::path::PathBuf;
     version,
     about = "Bricks — a coding agent in the terminal.",
     long_about = "Bricks — a coding agent in the terminal.\n\n\
-        Without a command, opens the interactive interface. `bricks run` runs one prompt \
-        without it (scripts, CI). Models come from ~/.bricks/providers.toml (or --providers); \
-        settings from the project's bricks.toml. See docs/cli.md.\n\n\
+        Without a command, prints this help. `bricks run` runs one prompt (scripts, CI); \
+        `bricks run --session <id>` continues a stored session. The desktop application \
+        resumes sessions from its sidebar and the `/resume` command. Models come from \
+        ~/.bricks/providers.toml (or --providers); settings from the project's bricks.toml. \
+        See docs/cli.md.\n\n\
         Examples:\n  \
-        bricks --workspace ~/Documents/atlas\n  \
-        bricks --workspace \"~/Documents/My project\"\n  \
         bricks --workspace ./atlas sessions\n  \
         bricks sessions --all\n  \
-        bricks --workspace ./atlas run \"Describe this project.\""
+        bricks --workspace ./atlas run \"Describe this project.\"\n  \
+        bricks --workspace ./atlas run --session <id> \"Continue where we stopped.\""
 )]
 pub struct Cli {
     #[command(flatten)]
@@ -48,31 +49,11 @@ pub struct Global {
     /// Reasoning profile of that model (as configured).
     #[arg(long, global = true, value_name = "PROFILE")]
     pub reasoning: Option<String>,
-    /// Clickable web links in the interface (OSC 8): `auto` when the
-    /// terminal is known to support them, `always`, or `never` (the link's
-    /// address stays written next to it in every mode).
-    #[arg(
-        long,
-        global = true,
-        value_enum,
-        default_value_t = Hyperlinks::Auto,
-        value_name = "WHEN"
-    )]
-    pub hyperlinks: Hyperlinks,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
-pub enum Hyperlinks {
-    Auto,
-    Always,
-    Never,
 }
 
 #[derive(Debug, Subcommand)]
 pub enum Cmd {
-    /// Open the interactive interface (the default).
-    Tui,
-    /// Run one prompt without the interface.
+    /// Run one prompt (`--session <id>` continues a stored session).
     Run(RunArgs),
     /// List the stored sessions of the project (`--all`: every project).
     Sessions {
@@ -83,10 +64,6 @@ pub enum Cmd {
         #[arg(long)]
         all: bool,
     },
-    /// Resume a session in the interface (without an id: choose it among
-    /// the project's sessions, or all of them). A session resumes in its
-    /// own folder, with that project's settings.
-    Resume { session_id: Option<String> },
 }
 
 #[derive(Debug, Args)]

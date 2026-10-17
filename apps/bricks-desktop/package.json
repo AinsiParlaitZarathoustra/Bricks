@@ -1,0 +1,50 @@
+{
+  "name": "bricks-desktop",
+  "private": true,
+  "version": "0.6.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json",
+    "tauri": "tauri",
+    "test:unit": "vitest run --config tests/vitest.config.ts",
+    "test:e2e": "wdio run tests/e2e/wdio.conf.ts",
+    "test:types": "tsc -p tests/tsconfig.json"
+  },
+  "devDependencies": {
+    "@internationalized/date": "^3.12.4",
+    "@sveltejs/vite-plugin-svelte": "^7.3.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@tauri-apps/cli": "^2.12.3",
+    "@tsconfig/svelte": "^5.0.8",
+    "@types/dompurify": "^3.0.5",
+    "@types/node": "^24.13.3",
+    "bits-ui": "^2.19.5",
+    "cn": "^0.4.0",
+    "mode-watcher": "^1.1.0",
+    "paneforge": "^1.0.2",
+    "shadcn-svelte": "^1.7.0",
+    "svelte": "^5.57.0",
+    "svelte-check": "^4.7.6",
+    "svelte-sonner": "^1.2.1",
+    "tailwind-variants": "^3.3.1",
+    "tailwindcss": "^4.3.3",
+    "tw-animate-css": "^1.4.0",
+    "typescript": "~6.0.2",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.5"
+  },
+  "dependencies": {
+    "@lucide/svelte": "^1.57.0",
+    "@tauri-apps/api": "^2.12.4",
+    "@tauri-apps/plugin-dialog": "^2.8.3",
+    "@tauri-apps/plugin-opener": "^2.7.2",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
+    "dompurify": "^3.4.17",
+    "highlight.js": "^11.12.0",
+    "marked": "^18.1.1"
+  }
+}

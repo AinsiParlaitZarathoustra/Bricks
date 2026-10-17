@@ -16,8 +16,8 @@ Bricks is a new tool for coding with AI. Built on the technology behind
 a redesigned, more robust architecture to the terminal, with one goal:
 give AI agents the means to do their best work.
 
-It combines an interactive terminal interface, a headless command for scripts
-and CI, and an embeddable Rust engine for building your own applications.
+It combines a desktop application, a headless command for scripts and CI, and
+an embeddable Rust engine for building your own applications.
 
 ### Two ideas behind Bricks
 
@@ -56,11 +56,14 @@ Configure a provider and model using the [configuration example](#configuration)
 then choose how to work:
 
 ```bash
-bricks                                                        # interactive terminal interface
 bricks run "Explain the failing test in src/parser.rs"          # one prompt, answer on stdout
 bricks run --json --non-interactive "Analyse the build errors"  # scripts and CI: JSONL events
-bricks resume                                                 # pick a stored session
+bricks sessions                                                 # the project's stored sessions
+bricks run --session <id> "Continue where we stopped"           # continue one, headless
 ```
+
+The interactive interface is the desktop application in `apps/bricks-desktop`:
+open a project, then pick a conversation in the sidebar or use `/resume`.
 
 ## What it does
 
@@ -120,11 +123,13 @@ bricks resume                                                 # pick a stored se
   * A change approved for a file that changed meanwhile is recomputed and
     asked again.
 * **The `bricks` command.** A thin layer over the engine's command/event
-  contract. JSONL events are versioned, with documented exit codes.
-  * The interface is inline, so the transcript stays in your terminal
-    scrollback.
-  * It has `@` file mentions, `/` commands, approvals with diff,
-    inspectors and session resume. See [docs/cli.md](docs/cli.md).
+  contract, for scripts and CI. JSONL events are versioned, with documented
+  exit codes. Sessions can be listed and continued (`bricks sessions`,
+  `bricks run --session <id>`). See [docs/cli.md](docs/cli.md).
+* **The desktop application** (`apps/bricks-desktop`). The interactive
+  interface: projects and conversations in a sidebar, `@` file mentions,
+  `/` commands, approvals with the diff, inspectors and session resume. See
+  [the desktop section of docs/cli.md](docs/cli.md#the-desktop-application).
 
 ## Configuration
 
@@ -188,7 +193,7 @@ bounded and never silently drops an event. See [docs/cli.md](docs/cli.md).
 
 ```text
 bricks-cli            the `bricks` binary: arguments, configuration, headless / JSONL
-  bricks-tui          terminal interface (ratatui): renders events, turns gestures into commands
+apps/bricks-desktop   the desktop application (Tauri): the interactive interface
 cersei                facade crate — use cersei::prelude::*
   cersei-agent        agent builder, agentic loop, context manager, compaction,
                       command/event contract (control), approvals
@@ -391,7 +396,7 @@ have not yet been validated in those runs.
 
 | Guide | Contents |
 |---|---|
-| [docs/cli.md](docs/cli.md) | the `bricks` command, JSONL schema, keys, approvals, sessions |
+| [docs/cli.md](docs/cli.md) | the `bricks` command, JSONL schema, approvals, sessions, the desktop application |
 | [docs/providers.md](docs/providers.md) | providers configuration |
 | [docs/context.md](docs/context.md) | context management and compaction |
 | [docs/compression.md](docs/compression.md) | tool-output compression and rules |

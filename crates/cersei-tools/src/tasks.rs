@@ -15,6 +15,9 @@ static TASK_REGISTRY: once_cell::sync::Lazy<dashmap::DashMap<String, TaskEntry>>
 pub struct TaskEntry {
     pub id: String,
     pub description: String,
+    /// Optional instructions retained for the person or agent doing the work.
+    #[serde(default)]
+    pub prompt: Option<String>,
     pub status: TaskStatus,
     pub output: Option<String>,
     pub created_at: String,
@@ -73,7 +76,7 @@ impl Tool for TaskCreateTool {
             "type": "object",
             "properties": {
                 "description": { "type": "string", "description": "What this task does" },
-                "prompt": { "type": "string", "description": "The prompt for the sub-agent (optional)" }
+                "prompt": { "type": "string", "description": "Instructions to retain with this task (optional); does not launch a sub-agent" }
             },
             "required": ["description"]
         })
@@ -82,7 +85,6 @@ impl Tool for TaskCreateTool {
     async fn execute(&self, input: Value, ctx: &ToolContext) -> ToolResult {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
-        #[allow(dead_code)]
         struct Input {
             description: String,
             prompt: Option<String>,
@@ -98,6 +100,7 @@ impl Tool for TaskCreateTool {
         let task = TaskEntry {
             id: id.clone(),
             description: input.description.clone(),
+            prompt: input.prompt,
             status: TaskStatus::Pending,
             output: None,
             created_at: now.clone(),
@@ -154,8 +157,12 @@ impl Tool for TaskGetTool {
             Some(task) => {
                 let output = task.output.as_deref().unwrap_or("(no output yet)");
                 ToolResult::success(format!(
-                    "Task [{}] {:?}\n  {}\n  Output: {}",
-                    task.id, task.status, task.description, output
+                    "Task [{}] {:?}\n  {}\n  Prompt: {}\n  Output: {}",
+                    task.id,
+                    task.status,
+                    task.description,
+                    task.prompt.as_deref().unwrap_or("(none)"),
+                    output
                 ))
             }
             // F-A15: enumerate the ids that do exist — a weak model that
@@ -465,6 +472,23 @@ mod tests {
         let get = TaskGetTool;
         let r = get.execute(serde_json::json!({"id": &id}), &ctx).await;
         assert!(r.content.contains("Completed"));
+    }
+
+    #[tokio::test]
+    async fn task_prompt_is_retained_and_retrievable() {
+        let result = TaskCreateTool.execute(
+            serde_json::json!({"description": "Investigate", "prompt": "Inspect the failing build"}),
+            &test_ctx(),
+        ).await;
+        assert!(!result.is_error);
+        let id = result.content.split('\'').nth(1).unwrap();
+        let entry = get_task(id).unwrap();
+        assert_eq!(entry.prompt.as_deref(), Some("Inspect the failing build"));
+        assert_eq!(entry.status, TaskStatus::Pending);
+        let result = TaskGetTool
+            .execute(serde_json::json!({"id": id}), &test_ctx())
+            .await;
+        assert!(result.content.contains("Inspect the failing build"));
     }
 
     #[tokio::test]

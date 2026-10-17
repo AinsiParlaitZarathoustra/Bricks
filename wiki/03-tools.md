@@ -323,3 +323,7 @@ let agent = Agent::builder()
 Each MCP tool's permission level comes from the server's annotations: `readOnlyHint` gives ReadOnly, `destructiveHint` gives Dangerous, and anything else gives Execute. These are hints from the server, not guarantees.
 
 To use the tools of a `McpManager` you created yourself, call `cersei_tools::mcp_tool::tools_of(&Arc<McpManager>).await`, an async function that returns the `Vec<Box<dyn Tool>>` to pass to `.tools(...)`.
+
+`TaskCreate` records tracking metadata; it does not launch a sub-agent. Its optional
+`prompt` is retained with the task and returned by `TaskGet`. Use `Agent` or
+`Agents` to execute delegated work.

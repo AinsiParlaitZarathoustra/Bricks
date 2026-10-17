@@ -26,7 +26,9 @@ impl FileHistory {
         Self::default()
     }
 
-    pub fn record_read(&mut self, path: &Path) {
+    /// Count one access to `path` with `bump` and stamp its last access time.
+    fn record(&mut self, path: &Path, bump: impl FnOnce(&mut FileAccess)) {
+        let now = now_secs();
         let entry = self
             .entries
             .entry(path.to_path_buf())
@@ -37,38 +39,20 @@ impl FileHistory {
                 edit_count: 0,
                 last_accessed: 0,
             });
-        entry.read_count += 1;
-        entry.last_accessed = now_secs();
+        entry.last_accessed = now;
+        bump(entry);
+    }
+
+    pub fn record_read(&mut self, path: &Path) {
+        self.record(path, |f| f.read_count += 1);
     }
 
     pub fn record_write(&mut self, path: &Path) {
-        let entry = self
-            .entries
-            .entry(path.to_path_buf())
-            .or_insert_with(|| FileAccess {
-                path: path.to_path_buf(),
-                read_count: 0,
-                write_count: 0,
-                edit_count: 0,
-                last_accessed: 0,
-            });
-        entry.write_count += 1;
-        entry.last_accessed = now_secs();
+        self.record(path, |f| f.write_count += 1);
     }
 
     pub fn record_edit(&mut self, path: &Path) {
-        let entry = self
-            .entries
-            .entry(path.to_path_buf())
-            .or_insert_with(|| FileAccess {
-                path: path.to_path_buf(),
-                read_count: 0,
-                write_count: 0,
-                edit_count: 0,
-                last_accessed: 0,
-            });
-        entry.edit_count += 1;
-        entry.last_accessed = now_secs();
+        self.record(path, |f| f.edit_count += 1);
     }
 
     /// Get all accessed files, sorted by last access (most recent first).

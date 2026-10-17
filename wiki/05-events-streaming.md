@@ -108,12 +108,14 @@ impl AgentStream {
     pub async fn collect(self) -> Result<AgentOutput>;
     pub async fn collect_text(self) -> Result<String>;
     pub fn cancel(&self);                                    // takes effect
-    pub fn respond_permission(&self, request_id: String, decision: PermissionDecision); // see limitation
-    pub fn inject_message(&self, message: String);           // see limitation
+    pub fn respond_permission(&self, request_id: String, decision: PermissionDecision);
+    pub fn inject_message(&self, message: String);
 }
 ```
 
-> **Current limitation (repository at 0.6.1).** `run_stream` acts on `cancel()` only. `respond_permission()` and `inject_message()` are accepted but ignored, and the engine never emits `AgentEvent::PermissionRequired`. `InteractivePolicy::via_stream()` returns a policy that allows every call. For approvals, use the approval policy described in [Permissions](08-permissions.md).
+With `InteractivePolicy::via_stream()`, each tool call emits `PermissionRequired` and waits for `respond_permission(request.id, decision)`. Request ids are unique, including renewed approvals after a preview changes; unknown or already answered ids are ignored. As with other engine policies, the three allow variants authorize this call only; use the session engine's [approval policy](08-permissions.md) for remembered session approvals. Without `run_stream`, this policy denies calls.
+
+`inject_message()` queues nonblank user messages, in order, for the next model request. They enter both histories after pending tool results. A message queued during the final answer causes another model turn. Messages submitted after completion are ignored. Cancellation stops permission waits as well as running work; queued input is retained in the histories even if the run is interrupted. Dropping an active stream cancels its run.
 
 The stream receives every event. `event_filter` does not apply to it (see below).
 

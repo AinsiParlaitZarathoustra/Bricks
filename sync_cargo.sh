@@ -4,7 +4,7 @@
 #
 # It publishes the crates listed in CRATES below — an explicit selection, not
 # every workspace member (`cersei-testkit` and `longmem-bench` are private;
-# `bricks-cli` and `bricks-tui` are not published by this script) — at the
+# `bricks-cli` is not published by this script) — at the
 # version declared in the workspace `Cargo.toml`, in dependency order (leaves
 # first), so crates.io always has a crate's dependencies before its dependents.
 # Before anything is done, the list is checked against `cargo metadata`

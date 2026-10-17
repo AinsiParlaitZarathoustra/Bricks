@@ -12,6 +12,7 @@ pub mod queue;
 pub mod scripted;
 pub mod session;
 pub mod settings;
+pub mod slash;
 
 pub use approval::{ApprovalBroker, ApprovalGate, ApprovalRequest, DecidedBy, Decision};
 pub use controller::{
@@ -25,4 +26,6 @@ pub use protocol::{
     WrittenFile,
 };
 pub use session::{SessionMeta, SessionScope, SessionSummary, same_workspace};
-pub use settings::{Action, AgentSettings, ApprovalRules};
+pub use settings::{
+    Action, AgentSettings, ApprovalMode, ApprovalOverride, ApprovalRules, Effective,
+};

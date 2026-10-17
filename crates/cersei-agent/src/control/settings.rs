@@ -24,6 +24,8 @@
 use cersei_tools::PermissionLevel;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
 
 /// What happens to a tool call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,6 +95,105 @@ impl ApprovalRules {
             PermissionLevel::Execute => self.execute,
             PermissionLevel::Dangerous => self.dangerous,
             PermissionLevel::Forbidden => Action::Deny,
+        }
+    }
+}
+
+/// A runtime override of the project's approval policy, set by a frontend
+/// (the desktop's preference). It is read at each decision, so a change
+/// applies to the next call of every open session and of their running
+/// sub-agents, without restarting anything. [`ApprovalMode::Standard`] (the
+/// default, and the CLI's) leaves the project's rules and session grants
+/// exactly as they are.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalMode {
+    #[default]
+    Standard,
+    /// Every call the rules do not refuse is asked. Session grants ignored.
+    AlwaysAsk,
+    /// Every call the rules do not refuse runs without asking.
+    NoConfirmation,
+}
+
+impl ApprovalMode {
+    fn code(self) -> u8 {
+        match self {
+            ApprovalMode::Standard => 0,
+            ApprovalMode::AlwaysAsk => 1,
+            ApprovalMode::NoConfirmation => 2,
+        }
+    }
+
+    fn from_code(code: u8) -> Self {
+        match code {
+            1 => ApprovalMode::AlwaysAsk,
+            2 => ApprovalMode::NoConfirmation,
+            _ => ApprovalMode::Standard,
+        }
+    }
+}
+
+/// The shared, atomic cell holding the [`ApprovalMode`] of one engine
+/// configuration. Cloned as an `Arc` into every session it builds.
+#[derive(Debug)]
+pub struct ApprovalOverride {
+    mode: AtomicU8,
+}
+
+impl ApprovalOverride {
+    pub fn new(mode: ApprovalMode) -> Arc<Self> {
+        Arc::new(Self {
+            mode: AtomicU8::new(mode.code()),
+        })
+    }
+
+    pub fn get(&self) -> ApprovalMode {
+        ApprovalMode::from_code(self.mode.load(Ordering::SeqCst))
+    }
+
+    pub fn set(&self, mode: ApprovalMode) {
+        self.mode.store(mode.code(), Ordering::SeqCst);
+    }
+}
+
+/// What a call gets once the runtime override is applied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Effective {
+    pub action: Action,
+    /// Whether an earlier "allow for this session" still applies.
+    pub honour_session_grants: bool,
+}
+
+impl ApprovalRules {
+    /// The one decision point of the approval gate, for the session agent
+    /// and its sub-agents alike. Priority:
+    /// 1. `Forbidden` tools, and explicit `deny` rules (by tool or level):
+    ///    refused, whatever the mode;
+    /// 2. `AlwaysAsk`: asked, session grants ignored;
+    /// 3. `NoConfirmation`: allowed;
+    /// 4. `Standard`: the rules and session grants, unchanged.
+    pub fn effective(&self, mode: ApprovalMode, tool: &str, level: PermissionLevel) -> Effective {
+        let rule = self.action_for(tool, level);
+        if rule == Action::Deny {
+            return Effective {
+                action: Action::Deny,
+                honour_session_grants: true,
+            };
+        }
+        match mode {
+            ApprovalMode::Standard => Effective {
+                action: rule,
+                honour_session_grants: true,
+            },
+            ApprovalMode::AlwaysAsk => Effective {
+                action: Action::Ask,
+                honour_session_grants: false,
+            },
+            ApprovalMode::NoConfirmation => Effective {
+                action: Action::Allow,
+                honour_session_grants: true,
+            },
         }
     }
 }
@@ -249,5 +350,59 @@ mod tests {
             let e = from_bricks_toml(text).unwrap_err();
             assert!(e.contains(needle), "{text}: {e}");
         }
+    }
+
+    #[test]
+    fn the_override_follows_the_priority_table() {
+        use ApprovalMode::*;
+        // Project rules: Read allowed, Write asked, Bash denied by tool rule,
+        // and a level rule that denies `dangerous` tools.
+        let (_, rules) = from_bricks_toml(
+            "[permissions]\ndangerous = \"deny\"\n\n[permissions.tools]\nBash = \"deny\"\n",
+        )
+        .unwrap();
+        let eff = |mode, tool: &str, level| rules.effective(mode, tool, level);
+        let deny = Effective { action: Action::Deny, honour_session_grants: true };
+        let ask_no_grants = Effective { action: Action::Ask, honour_session_grants: false };
+        let allow = Effective { action: Action::Allow, honour_session_grants: true };
+
+        // Standard: exactly the rules, session grants honoured.
+        assert_eq!(eff(Standard, "Read", PermissionLevel::ReadOnly), allow);
+        assert_eq!(
+            eff(Standard, "Write", PermissionLevel::Write),
+            Effective { action: Action::Ask, honour_session_grants: true }
+        );
+        assert_eq!(eff(Standard, "Bash", PermissionLevel::Execute), deny);
+        assert_eq!(eff(Standard, "Dangerous", PermissionLevel::Dangerous), deny);
+
+        // Forbidden and explicit denials win over every mode.
+        for mode in [Standard, AlwaysAsk, NoConfirmation] {
+            assert_eq!(eff(mode, "X", PermissionLevel::Forbidden), deny, "{mode:?}");
+            assert_eq!(eff(mode, "Bash", PermissionLevel::Execute), deny, "{mode:?}");
+            assert_eq!(eff(mode, "Dangerous", PermissionLevel::Dangerous), deny, "{mode:?}");
+        }
+
+        // AlwaysAsk: every other call is asked, even when the rules allow it,
+        // and session grants are ignored.
+        assert_eq!(eff(AlwaysAsk, "Read", PermissionLevel::ReadOnly), ask_no_grants);
+        assert_eq!(eff(AlwaysAsk, "Write", PermissionLevel::Write), ask_no_grants);
+        assert_eq!(eff(AlwaysAsk, "Edit", PermissionLevel::None), ask_no_grants);
+
+        // NoConfirmation: every other call runs without asking.
+        assert_eq!(eff(NoConfirmation, "Read", PermissionLevel::ReadOnly), allow);
+        assert_eq!(eff(NoConfirmation, "Write", PermissionLevel::Write), allow);
+    }
+
+    #[test]
+    fn the_shared_override_is_read_at_each_decision() {
+        let cell = ApprovalOverride::new(ApprovalMode::Standard);
+        let other_view = Arc::clone(&cell);
+        assert_eq!(other_view.get(), ApprovalMode::Standard, "default is standard");
+        cell.set(ApprovalMode::AlwaysAsk);
+        assert_eq!(other_view.get(), ApprovalMode::AlwaysAsk, "every holder sees the change");
+        cell.set(ApprovalMode::NoConfirmation);
+        assert_eq!(other_view.get(), ApprovalMode::NoConfirmation);
+        cell.set(ApprovalMode::Standard);
+        assert_eq!(other_view.get(), ApprovalMode::Standard);
     }
 }

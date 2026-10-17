@@ -13,6 +13,7 @@
 //!   `command_rejected` event: a second prompt is never started silently.
 
 use super::approval::{ApprovalBroker, ApprovalGate, ApprovalRequest};
+use super::settings::{ApprovalMode, ApprovalOverride};
 use super::attach::{self, AttachLimits};
 use super::protocol::*;
 use super::queue::EventQueue;
@@ -26,6 +27,7 @@ use cersei_types::{CerseiError, Message, Usage};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
@@ -62,6 +64,13 @@ pub trait ModelCatalog: Send + Sync {
     /// The provider of `selection`, with `reasoning` checked against the
     /// model's profiles.
     fn build(&self, selection: &str, reasoning: Option<&str>) -> Result<Box<dyn Provider>, String>;
+    /// Changes whenever the models or their parameters change. A session
+    /// rebuilds its provider at its next run when this differs from the
+    /// revision its provider was built with. Constant catalogs keep the
+    /// default.
+    fn revision(&self) -> u64 {
+        0
+    }
 }
 
 impl ModelCatalog for cersei_provider::ProviderRegistry {
@@ -147,6 +156,10 @@ pub struct EngineConfig {
     /// Skills (`None`: no skills, no `Skill` tool). Each session reads its
     /// own project's sources; its trust decision is its own.
     pub skills: Option<SkillsSetup>,
+    /// Runtime approval override shared by every session built from this
+    /// configuration, read at each decision (default: standard, which is
+    /// the project's rules unchanged).
+    pub approval_override: Arc<ApprovalOverride>,
 }
 
 /// Where a session's skills come from, besides its project.
@@ -253,6 +266,7 @@ impl EngineConfig {
             agent_profile_sources: None,
             project_loader: None,
             skills: None,
+            approval_override: ApprovalOverride::new(ApprovalMode::Standard),
         }
     }
 }
@@ -309,6 +323,8 @@ pub struct Snapshot {
     pub allowed_for_session: Vec<String>,
     pub memory_space: Option<String>,
     pub approval_rules: super::settings::ApprovalRules,
+    /// The runtime override in force (the project's rules apply under it).
+    pub approval_mode: ApprovalMode,
 }
 
 /// A tool as inspectors show it.
@@ -338,6 +354,8 @@ struct Inner {
     spawner: parking_lot::RwLock<Option<Arc<crate::agents::AgentSpawner>>>,
     /// The session's skills (service and trust), when configured.
     skills: parking_lot::RwLock<Option<bricks_skills::SkillAccess>>,
+    /// The catalog revision the current provider was built with.
+    provider_revision: AtomicU64,
 }
 
 /// One session, driven by commands. Cheap to clone.
@@ -523,10 +541,10 @@ fn build_agent(
         .extensions(ext)
         .working_dir(&meta.working_dir)
         .model(meta.model.clone())
-        .permission_policy(ApprovalGate::new(
-            project.bricks.permissions.clone(),
-            broker.clone(),
-        ))
+        .permission_policy(
+            ApprovalGate::new(project.bricks.permissions.clone(), broker.clone())
+                .with_override(Arc::clone(&cfg.approval_override)),
+        )
         .memory(session_store(cfg))
         .session_id(meta.id.clone())
         .bricks_config(project.bricks.clone());
@@ -708,6 +726,9 @@ impl Controller {
         cfg: EngineConfig,
         opts: OpenOptions,
     ) -> Result<(Controller, EventStream), String> {
+        // Read before the provider is built: a change in between causes one
+        // more rebuild at the next run, never a missed one.
+        let revision = cfg.catalog.revision();
         let Prepared {
             meta,
             provider,
@@ -780,6 +801,7 @@ impl Controller {
             profiles: parking_lot::RwLock::new(profiles),
             spawner: parking_lot::RwLock::new(spawner.clone()),
             skills: parking_lot::RwLock::new(skills),
+            provider_revision: AtomicU64::new(revision),
         });
         if let Some(sp) = &spawner {
             install_session_sink(&queue, sp.runtime());
@@ -900,11 +922,21 @@ impl Controller {
             allowed_for_session: self.inner.broker.session_allowed(),
             memory_space: meta.memory_space.clone(),
             approval_rules: self.project().bricks.permissions.clone(),
+            approval_mode: self.inner.cfg.approval_override.get(),
         }
     }
 
     pub fn activity(&self) -> Activity {
         self.inner.activity.lock().clone()
+    }
+
+    /// Rename the open session, saved at once. Later saves of the session
+    /// (a run's end, a model change) write the metadata they hold, so the
+    /// title is kept in that same metadata rather than written beside it.
+    pub fn set_title(&self, title: &str) -> Result<(), String> {
+        let mut m = self.inner.meta.lock();
+        m.title = title.trim().to_string();
+        m.save(&files_dir(&self.inner.cfg, &m.id))
     }
 
     /// Wait until no run or session command is in progress (maintenance
@@ -934,6 +966,32 @@ impl Controller {
             }
             notified.await;
         }
+    }
+
+    /// Rebuilds the session's provider when the catalog changed since it was
+    /// built, so the next run uses the models and parameters configured now.
+    /// A model that is no longer configured is refused with the reason and
+    /// nothing is substituted: the provider stays as it was, and the next
+    /// attempt tries again.
+    fn refresh_provider(&self) -> Result<(), String> {
+        let catalog = &self.inner.cfg.catalog;
+        let revision = catalog.revision();
+        if revision == self.inner.provider_revision.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        let (model, reasoning) = {
+            let m = self.inner.meta.lock();
+            (m.model.clone(), m.reasoning.clone())
+        };
+        let provider = catalog.build(&model, reasoning.as_deref()).map_err(|e| {
+            format!(
+                "{e}; choose a configured model before sending ({})",
+                model_list(&self.inner.cfg)
+            )
+        })?;
+        self.agent().set_model(provider, Some(model), reasoning);
+        self.inner.provider_revision.store(revision, Ordering::SeqCst);
+        Ok(())
     }
 
     fn reject(&self, cmd: &Command, reason: String) -> Result<(), String> {
@@ -1430,6 +1488,7 @@ impl Controller {
                     (Some(m), None) if *m != cur_model => None,
                     _ => cur_reasoning,
                 };
+                let revision = self.inner.cfg.catalog.revision();
                 let provider = match self
                     .inner
                     .cfg
@@ -1439,6 +1498,7 @@ impl Controller {
                     Ok(p) => p,
                     Err(e) => return self.reject(&cmd, e),
                 };
+                self.inner.provider_revision.store(revision, Ordering::SeqCst);
                 let running = matches!(*self.inner.activity.lock(), Activity::Running { .. });
                 self.agent()
                     .set_model(provider, Some(new_model.clone()), new_reasoning.clone());
@@ -1551,6 +1611,13 @@ impl Controller {
                     *a = Activity::Running {
                         run_id: run_id.clone(),
                     };
+                }
+                // The models and their parameters as configured now: a changed
+                // catalog is applied here, or the run is refused, before
+                // anything is sent.
+                if let Err(e) = self.refresh_provider() {
+                    self.set_activity(Activity::Idle);
+                    return self.reject(&cmd, e);
                 }
                 // Skills chosen with the prompt: all usable now, or nothing
                 // is sent.
@@ -1673,6 +1740,7 @@ impl Controller {
     async fn resume(&self, session_id: &str) -> Result<(), String> {
         let cfg = &self.inner.cfg;
         let base = self.project().working_dir.clone();
+        let revision = cfg.catalog.revision();
         let Prepared {
             meta,
             provider,
@@ -1756,6 +1824,7 @@ impl Controller {
             warnings: all_warnings,
         };
         *self.inner.meta.lock() = meta;
+        self.inner.provider_revision.store(revision, Ordering::SeqCst);
         *self.inner.skills.write() = skills;
         self.inner.queue.push(None, ev, None).await;
         self.announce_project_skills().await;

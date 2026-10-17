@@ -166,12 +166,11 @@ When `with_messages()` is used (e.g., during provider switching), the runner ski
 ```bash
 bricks sessions                     # this project's sessions, most recent first
 bricks sessions --all               # every stored session
-bricks resume                       # open the interface on the session picker
-bricks resume abc12345              # open the interface on that session
 bricks run --session abc12345 "…"   # continue a session headless
 ```
 
-See `docs/cli.md` in the repository. (The `abstract sessions show/rm` commands
+In the desktop application, pick a conversation in the sidebar or use
+`/resume abc12345`. See `docs/cli.md` in the repository. (The `abstract sessions show/rm` commands
 of the Cersei era do not exist in Bricks.)
 
 ### Soft Delete (Tombstones)
@@ -394,7 +393,7 @@ grep '"type":"user"' session.jsonl | python3 -c "import sys,json; [print(json.lo
 grep '"type":"tombstone"' session.jsonl
 ```
 
-Or open it in the Bricks interface with `bricks resume abc12345`.
+Or open it in the desktop application with `/resume abc12345`.
 
 ### Concurrent Access
 

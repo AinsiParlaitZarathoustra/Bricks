@@ -213,35 +213,36 @@ pub enum CompactReason {
 /// and bidirectional control (permissions, cancellation, message injection).
 pub struct AgentStream {
     rx: mpsc::Receiver<AgentEvent>,
-    control_tx: mpsc::Sender<AgentControl>,
+    controls: std::sync::Arc<StreamControls>,
 }
 
 impl AgentStream {
     pub(crate) fn new(
         rx: mpsc::Receiver<AgentEvent>,
-        control_tx: mpsc::Sender<AgentControl>,
+        controls: std::sync::Arc<StreamControls>,
     ) -> Self {
-        Self { rx, control_tx }
+        Self { rx, controls }
     }
 
     /// Respond to a PermissionRequired event.
     pub fn respond_permission(&self, request_id: String, decision: PermissionDecision) {
-        let _ = self.control_tx.try_send(AgentControl::PermissionResponse {
-            request_id,
-            decision,
-        });
+        if let Some(reply) = self.controls.inner.lock().pending.remove(&request_id) {
+            let _ = reply.send(decision);
+        }
     }
 
     /// Send a cancellation signal.
     pub fn cancel(&self) {
-        let _ = self.control_tx.try_send(AgentControl::Cancel);
+        self.controls.cancel.cancel();
     }
 
-    /// Inject a user message mid-stream.
+    /// Queue a user message for the next model request, after pending tool results.
+    /// Messages submitted after the run has finished are ignored.
     pub fn inject_message(&self, message: String) {
-        let _ = self
-            .control_tx
-            .try_send(AgentControl::InjectMessage(message));
+        let mut inner = self.controls.inner.lock();
+        if !inner.finished && !message.trim().is_empty() {
+            inner.messages.push(message);
+        }
     }
 
     /// Receive the next event.
@@ -276,16 +277,113 @@ impl AgentStream {
     }
 }
 
-// ─── Control messages ────────────────────────────────────────────────────────
+// Dropping the consumer must not leave tools awaiting permission forever.
+impl Drop for AgentStream {
+    fn drop(&mut self) {
+        // A consumed final answer must not cancel subsequent memory maintenance.
+        let mut inner = self.controls.inner.lock();
+        if !inner.finished {
+            self.controls.cancel.cancel();
+        }
+        inner.finished = true;
+        inner.pending.clear();
+    }
+}
 
-#[derive(Debug)]
-pub(crate) enum AgentControl {
-    #[allow(dead_code)]
-    PermissionResponse {
-        request_id: String,
-        decision: PermissionDecision,
-    },
-    Cancel,
-    #[allow(dead_code)]
-    InjectMessage(String),
+#[derive(Default)]
+struct ControlState {
+    messages: Vec<String>,
+    pending: std::collections::HashMap<String, tokio::sync::oneshot::Sender<PermissionDecision>>,
+    finished: bool,
+}
+
+pub(crate) struct StreamControls {
+    inner: parking_lot::Mutex<ControlState>,
+    cancel: tokio_util::sync::CancellationToken,
+}
+
+impl StreamControls {
+    pub(crate) fn new(cancel: tokio_util::sync::CancellationToken) -> Self {
+        Self {
+            inner: Default::default(),
+            cancel,
+        }
+    }
+
+    pub(crate) fn drain_messages(&self) -> Vec<String> {
+        std::mem::take(&mut self.inner.lock().messages)
+    }
+
+    pub(crate) fn finish_if_empty(&self) -> bool {
+        let mut inner = self.inner.lock();
+        if !inner.messages.is_empty() {
+            return false;
+        }
+        inner.finished = true;
+        true
+    }
+
+    pub(crate) fn finish(&self) {
+        let mut inner = self.inner.lock();
+        inner.finished = true;
+        inner.pending.clear();
+    }
+}
+
+/// A run-local binding, also inherited by sub-agents through ToolContext.
+pub(crate) struct StreamPermissions {
+    controls: std::sync::Arc<StreamControls>,
+    tx: mpsc::Sender<AgentEvent>,
+    emit: std::sync::Arc<dyn Fn(AgentEvent) + Send + Sync>,
+}
+
+impl StreamPermissions {
+    pub(crate) fn new(
+        controls: std::sync::Arc<StreamControls>,
+        tx: mpsc::Sender<AgentEvent>,
+        emit: std::sync::Arc<dyn Fn(AgentEvent) + Send + Sync>,
+    ) -> Self {
+        Self { controls, tx, emit }
+    }
+}
+
+// Remove abandoned requests on cancellation or when a tool future is dropped.
+struct PendingPermission<'a>(&'a StreamControls, String);
+impl Drop for PendingPermission<'_> {
+    fn drop(&mut self) {
+        self.0.inner.lock().pending.remove(&self.1);
+    }
+}
+
+#[async_trait::async_trait]
+impl cersei_tools::permissions::PermissionPolicy for StreamPermissions {
+    async fn check(&self, request: &PermissionRequest) -> PermissionDecision {
+        let denied = || PermissionDecision::Deny("Permission stream closed or cancelled".into());
+        let mut request = request.clone();
+        // Tool call ids may be reused by children or during a stale-preview retry.
+        request.id = uuid::Uuid::new_v4().to_string();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        {
+            let mut inner = self.controls.inner.lock();
+            if inner.finished || self.controls.cancel.is_cancelled() {
+                return denied();
+            }
+            inner.pending.insert(request.id.clone(), tx);
+        }
+        let _pending = PendingPermission(&self.controls, request.id.clone());
+        let event = AgentEvent::PermissionRequired(request);
+        tokio::select! {
+            biased;
+            _ = self.controls.cancel.cancelled() => return denied(),
+            result = self.tx.send(event.clone()) => {
+                if result.is_err() { return denied(); }
+            }
+        }
+        (self.emit)(event);
+        tokio::select! {
+            biased;
+            _ = self.controls.cancel.cancelled() => denied(),
+            result = rx => result.unwrap_or_else(|_| denied()),
+        }
+    }
 }

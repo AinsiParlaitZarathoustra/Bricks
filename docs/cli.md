@@ -1,22 +1,24 @@
 # The `bricks` command
 
 `bricks` is a thin layer over the engine (`cersei-agent`): it parses
-arguments, loads the configuration, opens a session and presents its
-events. The engine runs everything else — the agentic loop, providers,
-tools, approvals, compaction, long-term memory recall and maintenance.
+arguments, loads the configuration, runs one prompt or lists the stored
+sessions, and presents the engine's events. The engine runs everything
+else — the agentic loop, providers, tools, approvals, compaction,
+long-term memory recall and maintenance.
 
 ```text
 bricks-cli (binary `bricks`)
   ├── arguments, configuration (existing loaders)
-  ├── headless mode: human output or versioned JSONL
-  └── bricks-tui: the interactive interface
+  └── headless mode: human output or versioned JSONL (run, sessions)
             │  commands ↓   ↑ events      (cersei_agent::control)
        engine: Controller → Agent
             │
   providers · context · tools · approvals · memory · sessions
+
+apps/bricks-desktop: the interactive interface, on the same contract
 ```
 
-The engine never depends on `bricks-cli`, ratatui or crossterm. Both
+The engine never depends on `bricks-cli` or on any interface. The two
 frontends use the same contract (`cersei_agent::control`): typed
 `Command`s in, versioned `Envelope`s out.
 
@@ -65,7 +67,7 @@ No model is ever chosen silently: without `--model` or `[agent] model`,
 ## Projects (`--workspace`)
 
 ```bash
-bricks                                          # the current folder
+bricks sessions                                 # the sessions of the current folder
 bricks --workspace /Users/me/Documents/atlas
 bricks --workspace ~/Documents/atlas
 bricks --workspace "~/Documents/My project"     # quoted: Bricks expands `~` itself
@@ -93,10 +95,8 @@ bricks --workspace ./my-project run "Describe this project."
 * **Other paths** on the command line (`--providers`, `--file`,
   `--image`): `--providers` starts from the folder Bricks was started in;
   attachments are resolved against the session's folder, as before.
-* **Shown.** The status bar ends with the project (`~/Documents/atlas`,
-  shortened with `…/` and a short mark of the full path when long, or only
-  its last folder on a narrow terminal);
-  `/session` and the session picker show the full path.
+* **Shown.** The desktop application shows the project's folder;
+  `/session` shows the full path.
 * **Not a sandbox.** A workspace chooses settings and CodeScout's scope;
   the other tools follow the approval policy, as everywhere. A workspace
   is a folder; a worktree (`docs/agents.md`) is another folder, hence
@@ -106,20 +106,18 @@ bricks --workspace ./my-project run "Describe this project."
 
 | command | what it does |
 |---|---|
-| `bricks`, `bricks tui` | open the interactive interface (new session) |
-| `bricks run "…"` | run one prompt without the interface |
+| `bricks` | prints the help. The command line has no interactive interface: see [The desktop application](#the-desktop-application) |
+| `bricks run "…"` | run one prompt and print the answer |
 | `bricks run --model <p/m> --reasoning <profile> "…"` | with another model / profile |
 | `bricks run --json --non-interactive "…"` | JSONL on stdout, no human interaction |
-| `bricks run --session <id> "…"` | continue a stored session headless |
+| `bricks run --session <id> "…"` | continue a stored session, in its own folder and project |
 | `bricks run --skill <name> [--skill …] "…"` | activate skills before the prompt (see `docs/skills.md`) |
 | `bricks run --trust-project-skills …` | allow this project's skills for this session only |
 | `bricks sessions [--json]` | the project's stored sessions, most recent first |
 | `bricks sessions --all [--json]` | every stored session, whatever the project |
-| `bricks resume` | open the interface on the session picker (this project; Tab: all) |
-| `bricks resume <id>` | open the interface on that session (any project) |
 
 Global options: `--workspace <dir>` (alias `--cd`), `--providers <file>`,
-`--model <p/m>`, `--reasoning <profile>`, `--hyperlinks auto|always|never`.
+`--model <p/m>`, `--reasoning <profile>`.
 
 ## Headless mode (`bricks run`)
 
@@ -358,17 +356,17 @@ Events reach each consumer through a bounded queue:
   pace. Nothing is dropped.
 * a cancellation is never held back by a slow consumer. Once the run is
   cancelled, its last events are queued beyond the bound.
-* when the consumer goes away (closed stdout, closed interface), the run
-  is cancelled (headless) or the session closes.
+* when the consumer goes away (closed stdout, or a frontend that stopped),
+  the run is cancelled (headless) or the session closes.
 
 The durable session store is the authority on the conversation. The
-interface keeps no conversation store of its own. On resume it reads the
+frontends keep no conversation store of their own. On resume they read the
 stored history.
 
 ## Approvals
 
-The policy belongs to the engine and is the same for the interface and
-the headless mode. It is configured in `[permissions]`:
+The policy belongs to the engine and is the same for the desktop
+application and the headless mode. It is configured in `[permissions]`:
 
 * by tool name first (`[permissions.tools]`), then by permission level
   (`read_only`, `write`, `execute`, `dangerous`, `none`), then `default`;
@@ -393,108 +391,22 @@ When a call must be asked about:
 * **Allow for the session** applies to later calls of the same tool in the
   session.
 
-## The interactive interface
+## The desktop application
 
-* **Layout.** The interface is conversational: the transcript, a composer
-  at the bottom and a one-line status bar. It uses an inline viewport. The
-  live part (the run in progress, the composer, the status) stays at the
-  bottom; finished parts are written once into the terminal's own
-  scrollback, so the transcript stays in your terminal after you quit.
-* **Windows.** Inspectors, pickers and the diff open on the alternate
-  screen, and closing them restores the transcript untouched.
-* **Long outputs** are never redrawn on every frame. In the transcript, a
-  tool call shows one line (or its first error line). Runs of more than six
-  calls are grouped. The details of the last calls (outputs up to 256 KB
-  each; originals are stored with the session) open with Ctrl+O.
-* **Reasoning** appears as a collapsed block only when the provider exposed
-  some. Ctrl+T shows it live; Ctrl+O shows it after the fact.
-* **Status bar.** Composed for the terminal's width, measured in cells (wide
-  characters and emoji count double, text is cut between graphemes):
-  `Example Model · High │ Context ≈18.8k / 984k (≈1.9%) │ Not priced │ ~/Documents/bricks`
-  on a wide terminal, then `Ctx ≈1.9%`, the project's last folder, the model
-  without its profile, and at the narrowest the model and the activity.
-  * The model is its configured name; the profile is the effective one (the
-    requested profile, else the model's declared default), by its label.
-  * `≈` marks an estimate (provenance `estimated` or `mixed`); a measured or
-    counted occupation has no mark.
-  * The cost is the estimate (`$0.0123`, `<$0.0001`, `$0.00` only for an
-    exact zero), or `Not priced` when no price applies **or** only part of
-    the usage is priced — a partial amount is never shown as a total.
-    Nothing is shown before the first response.
-  * During a run `⠋ working [12 s] (Ctrl+C to cancel)` stays: the wall time
-    of the run since `run_started` (tools, approvals, retries and
-    compactions included), in SI symbols with two-digit sub-fields —
-    `59 s`, `1 min 05 s`, `1 h 02 min 03 s`, `1 d 02 h 03 min 04 s` — rounded
-    down, updated at the interface's tick. It starts again with each run and
-    disappears when the run ends or is cancelled. On a narrow bar it is
-    shortened to `working [1 min 05 s] (Ctrl+C)`, `[1 min 05 s] (Ctrl+C)`,
-    `[1 min 05 s]`, then the spinner alone; activity, time and cancellation
-    are kept before the other segments. Tool and event durations stay in
-    milliseconds. The memory maintenance shows `updating memory`.
-* **`/effort`.** The reasoning profiles of the current model, as the
-  providers file declares them (ids, labels, parameters); there is no
-  built-in list.
-  * `/effort` opens them, `●` on the requested one and the effective one in
-    the title; `/effort <id>` selects one.
-  * `/effort default` goes back to the **model's declared default**: not
-    "reasoning off", and not an earlier choice of the session. A profile
-    whose id is `default` stays selectable in the picker.
-  * The change applies to the next request — during a run, its next turn;
-    the request being streamed and its retries keep their selection. It is
-    stored with the session, as the model is.
-  * An unknown id is refused with the choices, and nothing changes. A model
-    without profiles says `No reasoning profiles configured for this model.`
-* **`/cost`.** The session's usage from the engine: requests (compactions
-  and requests without usage said apart), input, cache read, cache write,
-  output and reasoning (a part of output, never added to it), and the
-  pricing state: an estimate, `$0.00` for a known zero, `Not priced`, or
-  `Not priced (partial)` with the known subtotal labelled as such and the
-  unpriced categories. `/cost details`: per response received by the
-  interface since the session was opened or resumed (a resumed session's
-  earlier requests are only in the total).
-* **`/context`.** The active context apart from the session's consumption:
-  window (`Not configured` when the configuration states none), prompt
-  budget, current usage, occupation (`used / prompt budget`; may exceed
-  100%), safe availability (`prompt budget − margin − upper bound`: what
-  admission allows, prudent and not a server guarantee) and the source.
-  `/context details`: measured and estimated parts, method, upper bound,
-  output reserve, margin, raw availability (`prompt budget − used`),
-  session totals and notes.
-* **Totals.** The line just above the status bar shows `+N −N`: the lines
-  added and removed by the changes applied to the session's workspace
-  since the session was opened — a sum of operations (two edits of one
-  file both count; an edit undone by another counts twice), not a
-  `git diff`. They come from `edit_applied` only: `Write`, `Edit`,
-  `MultiEdit`, `ApplyPatch` that succeeded, a sub-agent's in the same
-  workspace, a ChangeSet applied (once). Not counted: denied, refused or
-  failed calls, previews, files changed by `Bash`, MCP tools,
-  `NotebookEdit` (no preview) or by hand, a worktree's writes before their
-  ChangeSet is applied, binary files' lines. A new or resumed session
-  starts from `+0 −0`; the totals stay after the run, at rest.
-* **Colours.** Added lines and `+N` are pale green, removed lines and
-  `−N` pale red — in diffs, edit results, approval previews and the
-  totals; the signs carry the meaning without colours.
-  The full context and cost inspectors separate the current context from
-  the cumulative consumption.
+The interactive interface is the desktop application, `apps/bricks-desktop`.
+It drives the same engine contract as `bricks run`. The `/` commands below
+have the same names in its command palette, which is built from the shared
+registry (`cersei_agent::control::slash`).
 
-### Keys
-
-| key | |
-|---|---|
-| Enter | send |
-| Shift+Enter, Alt+Enter, Ctrl+J | newline (Shift+Enter needs a terminal that reports it, e.g. kitty, WezTerm, foot, recent iTerm2) |
-| `\` then Enter | newline, on any terminal |
-| paste | inserted as text (bracketed paste): never sent |
-| `@` | file and folder list (fuzzy, `.gitignore` respected); Tab/Enter attach, Ctrl+R refresh, Esc close; `@"name with spaces` |
-| `/` | command list |
-| ↑ / ↓ | prompt history (on the first / last line); otherwise move the cursor |
-| Ctrl+←/→, Alt+←/→ | by word; Shift selects |
-| Ctrl+W, Ctrl+U | delete a word, clear the input |
-| Backspace on an empty input | remove the last attachment |
-| Ctrl+C | cancel the run, a `/compact` in progress or the memory maintenance; idle: clear the input, twice in a row: quit |
-| Ctrl+D | quit (on an empty input) |
-| y / a / n / d | with a pending approval: allow, allow for the session, reject, open the diff. Tab moves between the approval and the input |
-| Ctrl+T, Ctrl+O | live reasoning; details of the last tools and reasoning |
+* **Projects and conversations.** A project is a folder. The sidebar lists
+  its conversations: choosing one opens it, and a new one starts in the
+  project.
+* **Resume.** `/resume` opens the session picker; `/resume <id>` resumes
+  that session. Resuming takes the same path as `bricks run --session <id>`:
+  the session's own folder and project, its model and reasoning profile and
+  its compaction snapshots. See [Sessions and resume](#sessions-and-resume).
+* **Approvals.** A pending approval shows the change before anything is
+  written. The policy is the one of [Approvals](#approvals).
 
 ### Commands
 
@@ -509,42 +421,52 @@ When a call must be asked about:
 
 * **Registry.** The registry is declarative (name, aliases, arguments,
   description, action). Engine actions are contract commands; the others
-  only open windows.
+  open a view of the application.
 * **`/diff`** shows three different things apart: the change waiting for a
   decision, the changes applied by the agent in this session, and the
-  working tree's own `git diff`, which includes your changes.
+  working tree's own Git state, which includes your changes.
 * **`/config`** never shows keys or authentication headers.
-
-### Web links
-
-Links in answers keep their text and their address, written next to it
-(`la doc <https://example.com/doc>`): what a click opens is always
-visible. `--hyperlinks` decides whether they are clickable (OSC 8):
-
-| mode | |
-|---|---|
-| `auto` (default) | clickable when the terminal is recognised: iTerm2, WezTerm, Ghostty, VS Code (`TERM_PROGRAM`), kitty, Windows Terminal, VTE ≥ 0.50, Konsole. Off inside tmux or screen, and in any other terminal (`TERM=xterm-256color` alone proves nothing; Apple's Terminal is not recognised) |
-| `always` | clickable in any terminal (an emulator without OSC 8 support shows the text only) |
-| `never` | never |
-
-* The terminal opens a link with its own gesture (⌘-click in iTerm2);
-  Bricks never opens a browser and never fetches an address to check it.
-* Only `http`/`https` addresses with a host are activated, in their
-  percent-encoded, printable form: nothing in an address can end the
-  sequence or start another one. Local paths, `file:`, `javascript:` and
-  invalid addresses stay plain text; control characters in an address are
-  shown as `�`.
-* A wrapped link opens the same address from every piece; links survive
-  resizing, scrolling into the scrollback and resuming (a restored answer
-  is rendered like a new one); text drawn over a former link is plain.
-* Nothing of this is stored: the conversation and the JSONL events keep
-  the Markdown. `bricks run` (text or `--json`) never writes OSC 8; its
-  text output prints the answer as written, without a Markdown renderer.
+* **`/effort`.** The reasoning profiles of the current model, as the
+  providers file declares them (ids, labels, parameters); there is no
+  built-in list. `/effort` lists them and `/effort <id>` selects one.
+  `/effort default` goes back to the **model's declared default**: not
+  "reasoning off", and not an earlier choice of the session. A profile
+  whose id is `default` stays selectable. The change applies to the next
+  request (during a run, its next turn); the request being streamed and its
+  retries keep their selection. It is stored with the session, as the model
+  is. An unknown id is refused with the choices, and nothing changes. A model
+  without profiles says `No reasoning profiles configured for this model.`
+* **`/cost`.** The session's usage from the engine: requests (compactions
+  and requests without usage said apart), input, cache read, cache write,
+  output and reasoning (a part of output, never added to it), and the
+  pricing state: an estimate, `$0.00` for a known zero, `Not priced`, or
+  `Not priced (partial)` with the known subtotal labelled as such and the
+  unpriced categories. `/cost details`: per response received by the
+  application since the session was opened or resumed (a resumed session's
+  earlier requests are only in the total).
+* **`/context`.** The active context apart from the session's consumption:
+  window (`Not configured` when the configuration states none), prompt
+  budget, current usage, occupation (`used / prompt budget`; may exceed
+  100%), safe availability (`prompt budget − margin − upper bound`: what
+  admission allows, prudent and not a server guarantee) and the source.
+  `/context details`: measured and estimated parts, method, upper bound,
+  output reserve, margin, raw availability (`prompt budget − used`),
+  session totals and notes.
+* **Edit counts.** The lines added and removed by the changes applied to the
+  session's workspace since the session was opened: a sum of operations (two
+  edits of one file both count; an edit undone by another counts twice), not
+  a `git diff`. They come from `edit_applied` only: `Write`, `Edit`,
+  `MultiEdit`, `ApplyPatch` that succeeded, a sub-agent's in the same
+  workspace, a ChangeSet applied (once). Not counted: denied, refused or
+  failed calls, previews, files changed by `Bash`, MCP tools,
+  `NotebookEdit` (no preview) or by hand, a worktree's writes before their
+  ChangeSet is applied, binary files' lines. A new or resumed session starts
+  from `+0 −0`.
 
 ### Attachments
 
-* **What.** Files, folders and images come from `@` or `/file`,
-  `/folder`, `/image`.
+* **What.** Files, folders and images come from the composer: `@`, or
+  `/file`, `/folder`, `/image`.
 * **Capture.** A file's content is captured when the prompt is sent: its
   path, size and SHA-256 go into the message, and the session keeps
   exactly what was sent. A later edit of the file does not change the
@@ -572,14 +494,13 @@ only: no provider, model or key is needed, and nothing is created, moved
 or changed. The session store is unchanged (one store, no copy per
 project).
 
-**Picker.** `bricks resume`, `/sessions` and `/resume` without an id open
-one picker: the sessions of the open session's project (after a resume,
-that session's project). **Tab** switches between *this project* and *all
-projects* (shown at the bottom); typing filters either list. An empty
-project list says so and points to Tab.
+**Picker.** In the desktop application, `/resume` (alias `/sessions`)
+without an id opens the session picker: the sessions of the open session's
+project (after a resume, that session's project). The sidebar lists the
+project's conversations. An empty list says so.
 
-**Resuming another project's session** is allowed: `resume <id>`,
-`run --session <id>` and the picker take any id. It opens session B in
+**Resuming another project's session** is allowed: `/resume <id>` and
+`run --session <id>` take any id. It opens session B in
 B's recorded folder with B's project — its `bricks.toml`, rules, system
 prompt, long-term memory, profiles, CodeScout settings. It does not turn
 the session you were in into a session of B, and `--workspace` does not
@@ -590,8 +511,8 @@ anything is switched: when that fails, the open session stays as it was
 and the reason is shown. Approvals "for the session" stay with the
 session they were given in; the previous session's background jobs stop.
 
-`bricks resume` (picker) or `bricks resume <id>`, `/resume`, and
-`bricks run --session <id>` restore:
+`/resume` (with or without an id) and `bricks run --session <id>`
+restore:
 
 * the conversation (the active history and the raw history) and the
   compaction snapshots;
@@ -637,25 +558,17 @@ printf '[agent]\nmodel = "demo/scripted"\n' > bricks.toml   # in a scratch direc
 bricks --providers scripts/demo_providers.toml run --json --non-interactive "Find the README"
 bricks --providers scripts/demo_providers.toml run --non-interactive "please write a file"; echo "exit $?"   # 3: approval needed
 bricks --providers scripts/demo_providers.toml sessions
-bricks --providers scripts/demo_providers.toml            # the interface
 ```
 
 ## Tested platforms
 
-* **macOS (arm64).** This is the only platform these tests and the PTY
-  checks ran on: a Ctrl+C in headless mode, and the interface's modes,
-  paste, resize, Ctrl+C and quit. The `/dev/tty` approvals and the PTY
-  tests are Unix-only.
-* **Web links (Sprint 11).** Checked on the bytes the interface writes in
-  a pseudo-terminal (modes `auto`/`always`/`never`, a recognised terminal,
-  an unknown one, tmux) and replayed cell by cell by a test emulator. Not
-  yet checked by clicking in a real emulator: the only terminal on the
-  test machine is Apple's Terminal, which `auto` does not recognise (text
-  and address shown); clickability in iTerm2 and the others listed above is
-  expected from their documented OSC 8 support, not verified here.
+* **macOS (arm64).** This is the only platform these tests ran on: the
+  headless and JSONL modes, and a Ctrl+C in a pseudo-terminal
+  (`pty_headless`, Unix-only).
 * **Linux.** Not run.
 * **Windows.** Not run: the headless mode builds without `/dev/tty`
-  approvals (no prompt is offered), and the interface was not exercised.
+  approvals (no prompt is offered). The desktop application is covered by
+  its own checklist, not here.
 
 ## Known limits
 
@@ -668,10 +581,7 @@ bricks --providers scripts/demo_providers.toml            # the interface
 * A sub-agent's events carry its `agent_id`, parent, root run and the
   parent's `tool_call_id` (and `batch_index` within `Agents`).
 * No MCP server is configured from `bricks.toml` yet: `/mcp` says so.
-* No syntax highlighting, clipboard access or in-terminal image preview.
-  Images are attached by path.
-* A panic restores the terminal through a panic hook. This is not covered
-  by an automated test.
+* Images are attached by path.
 * Two Bricks processes may open the same project or resume the same
   session at once; nothing locks between processes.
 * A session's project cannot be changed while it is open (no

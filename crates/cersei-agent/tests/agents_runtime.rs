@@ -11,7 +11,7 @@ use cersei_agent::agents::{InstanceState, ProfileSources};
 use cersei_agent::control::scripted::{Reply, Script, ScriptedProvider};
 use cersei_agent::control::*;
 use cersei_provider::{CompletionRequest, CompletionStream, Provider};
-use cersei_types::{Message, MessageContent, Role, Usage};
+use cersei_types::{MessageContent, Role, Usage};
 use serde_json::json;
 use std::path::Path;
 use std::sync::Arc;
@@ -1404,12 +1404,6 @@ async fn background_jobs_are_owned_scoped_and_stopped_as_a_tree() {
     for k in kids {
         assert!(!cersei_tools::shell::procs::is_running(k), "{k} survived");
     }
-}
-
-// Used by the harness for messages.
-#[allow(dead_code)]
-fn _msg(m: &Message) -> Option<&str> {
-    m.get_text()
 }
 
 // ─── Applied changes (`edit_applied`) ────────────────────────────────────────

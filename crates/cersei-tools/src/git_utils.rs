@@ -3,83 +3,56 @@
 //! Used by the system prompt builder to inject git context.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output};
+
+/// Run `git <args>` in `path`. `None` when git cannot be started.
+fn run_git(path: &Path, args: &[&str]) -> Option<Output> {
+    Command::new("git")
+        .args(args)
+        .current_dir(path)
+        .output()
+        .ok()
+}
+
+/// Trimmed stdout of `git <args>`, when git succeeds.
+fn git_stdout(path: &Path, args: &[&str]) -> Option<String> {
+    run_git(path, args)
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+}
+
+/// Trimmed stdout of `git <args>` whatever its status; empty when git cannot
+/// be started.
+fn git_stdout_or_empty(path: &Path, args: &[&str]) -> String {
+    run_git(path, args)
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default()
+}
 
 /// Check if a path is inside a git repository.
 pub fn is_git_repo(path: &Path) -> bool {
-    Command::new("git")
-        .args(["rev-parse", "--is-inside-work-tree"])
-        .current_dir(path)
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    run_git(path, &["rev-parse", "--is-inside-work-tree"]).is_some_and(|o| o.status.success())
 }
 
 /// Get the root of the git repository.
 pub fn get_repo_root(path: &Path) -> Option<PathBuf> {
-    Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .current_dir(path)
-        .output()
-        .ok()
-        .and_then(|o| {
-            if o.status.success() {
-                Some(PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()))
-            } else {
-                None
-            }
-        })
+    git_stdout(path, &["rev-parse", "--show-toplevel"]).map(PathBuf::from)
 }
 
 /// Get current branch name.
 pub fn current_branch(path: &Path) -> Option<String> {
-    Command::new("git")
-        .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(path)
-        .output()
-        .ok()
-        .and_then(|o| {
-            if o.status.success() {
-                Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
-            } else {
-                None
-            }
-        })
+    git_stdout(path, &["rev-parse", "--abbrev-ref", "HEAD"])
 }
 
 /// Get git status (short format).
 pub fn git_status(path: &Path) -> Option<String> {
-    Command::new("git")
-        .args(["status", "--short"])
-        .current_dir(path)
-        .output()
-        .ok()
-        .and_then(|o| {
-            if o.status.success() {
-                Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
-            } else {
-                None
-            }
-        })
+    git_stdout(path, &["status", "--short"])
 }
 
 /// Get git diff (staged + unstaged).
 pub fn git_diff(path: &Path) -> Option<String> {
-    let staged = Command::new("git")
-        .args(["diff", "--cached", "--stat"])
-        .current_dir(path)
-        .output()
-        .ok()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_default();
-
-    let unstaged = Command::new("git")
-        .args(["diff", "--stat"])
-        .current_dir(path)
-        .output()
-        .ok()
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_default();
+    let staged = git_stdout_or_empty(path, &["diff", "--cached", "--stat"]);
+    let unstaged = git_stdout_or_empty(path, &["diff", "--stat"]);
 
     let combined = format!("{}\n{}", staged, unstaged).trim().to_string();
     if combined.is_empty() {
@@ -91,27 +64,13 @@ pub fn git_diff(path: &Path) -> Option<String> {
 
 /// Get recent commit history (one-line format).
 pub fn recent_commits(path: &Path, count: usize) -> Option<String> {
-    Command::new("git")
-        .args(["log", "--oneline", &format!("-{}", count)])
-        .current_dir(path)
-        .output()
-        .ok()
-        .and_then(|o| {
-            if o.status.success() {
-                Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
-            } else {
-                None
-            }
-        })
+    let count = format!("-{}", count);
+    git_stdout(path, &["log", "--oneline", &count])
 }
 
 /// List modified files (both staged and unstaged).
 pub fn list_modified_files(path: &Path) -> Vec<String> {
-    Command::new("git")
-        .args(["diff", "--name-only", "HEAD"])
-        .current_dir(path)
-        .output()
-        .ok()
+    run_git(path, &["diff", "--name-only", "HEAD"])
         .map(|o| {
             String::from_utf8_lossy(&o.stdout)
                 .lines()
@@ -191,5 +150,48 @@ mod tests {
             let ctx = ctx.unwrap();
             assert!(ctx.contains("branch") || ctx.contains("Status"));
         }
+    }
+
+    #[test]
+    fn queries_read_branch_status_log_and_changes_of_a_repo() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        let git = |args: &[&str]| {
+            let out = Command::new("git")
+                .args([
+                    "-c",
+                    "user.name=test",
+                    "-c",
+                    "user.email=test@example.com",
+                    "-c",
+                    "commit.gpgsign=false",
+                ])
+                .args(args)
+                .current_dir(dir)
+                .output()
+                .unwrap();
+            assert!(out.status.success(), "git {args:?} failed");
+        };
+        git(&["init", "-q", "-b", "main"]);
+        std::fs::write(dir.join("a.txt"), "one\n").unwrap();
+        git(&["add", "a.txt"]);
+        git(&["commit", "-q", "-m", "first"]);
+
+        assert!(is_git_repo(dir));
+        assert!(get_repo_root(dir).is_some());
+        assert_eq!(current_branch(dir).as_deref(), Some("main"));
+        assert_eq!(git_status(dir).as_deref(), Some(""));
+        assert!(recent_commits(dir, 5).unwrap().contains("first"));
+        assert!(list_modified_files(dir).is_empty());
+        assert_eq!(git_diff(dir), None);
+
+        std::fs::write(dir.join("a.txt"), "two\n").unwrap();
+        assert_eq!(git_status(dir).as_deref(), Some("M a.txt"));
+        assert_eq!(list_modified_files(dir), vec!["a.txt".to_string()]);
+        assert!(git_diff(dir).unwrap().contains("a.txt"));
+
+        let ctx = build_git_context(dir).unwrap();
+        assert!(ctx.contains("Current branch: main"));
+        assert!(ctx.contains("M a.txt"));
     }
 }

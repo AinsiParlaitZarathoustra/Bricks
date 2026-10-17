@@ -4,7 +4,8 @@
 
 ```
 bricks-cli            the `bricks` binary: arguments, configuration, headless / JSONL
-  bricks-tui          terminal interface: renders engine events, turns gestures into commands
+bricks-config         engine assembly shared by the CLI and the desktop
+apps/bricks-desktop   desktop application (Tauri 2 + Svelte 5) over the controller
 cersei-agent          engine: agent loop, controller (commands/events), approvals, compaction
   cersei-provider, cersei-tools, cersei-memory, cersei-compression, cersei-web,
   bricks-semantic, bricks-skills, cersei-lsp, cersei-mcp, cersei-embeddings, …

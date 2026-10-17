@@ -5,7 +5,7 @@ description: How Cersei is structured — design principles, crate organization,
 
 # Architecture
 
-Bricks is a workspace of crates inherited from Cersei (`cersei-*`) plus its own (`bricks-*`): the `bricks` CLI and its terminal interface sit on top of the engine. Every component is modular and replaceable via traits. The full list is in the [crate map](/docs/crate-map).
+Bricks is a workspace of crates inherited from Cersei (`cersei-*`) plus its own (`bricks-*`): the `bricks` CLI and the desktop application (`apps/bricks-desktop`) sit on top of the engine. Every component is modular and replaceable via traits. The full list is in the [crate map](/docs/crate-map).
 
 ## Design Principles
 
@@ -19,7 +19,7 @@ Bricks is a workspace of crates inherited from Cersei (`cersei-*`) plus its own 
 
 ```
 bricks-cli                The `bricks` binary: arguments, configuration, headless / JSONL
-  bricks-tui              Terminal interface: renders events, turns gestures into commands
+apps/bricks-desktop       Desktop application (Tauri): the interactive interface
 cersei                    Facade — re-exports all sub-crates via prelude
   cersei-types            Messages, errors, stream events (no dependencies)
   cersei-provider         Provider trait, registry from providers.toml, 3 protocols
@@ -46,9 +46,7 @@ cersei-agent (depends on types, provider, tools, memory, hooks, mcp)
     ^
 cersei (facade — depends on everything)
 
-bricks-tui (depends on cersei-agent: renders its events)
-    ^
-bricks-cli (depends on cersei-agent, cersei-provider, bricks-tui)
+bricks-cli (depends on cersei-agent, cersei-provider)
 ```
 
 `cersei-memory`, `cersei-hooks`, and `cersei-mcp` are siblings — they depend on `cersei-types` but not on each other.

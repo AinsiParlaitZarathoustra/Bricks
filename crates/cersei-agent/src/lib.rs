@@ -172,7 +172,6 @@ type EventFilter = Arc<dyn Fn(&AgentEvent) -> bool + Send + Sync>;
 
 // ─── Agent ───────────────────────────────────────────────────────────────────
 
-#[allow(dead_code)]
 pub struct Agent {
     /// Provider, model label and reasoning profile, changed together by
     /// [`Agent::set_model`] / [`Agent::set_reasoning`]. A run takes one
@@ -280,41 +279,49 @@ impl Agent {
     /// `Complete` or `Error`, then the memory maintenance events, if any.
     pub fn run_stream_input(self: &Arc<Self>, input: UserInput) -> AgentStream {
         let (event_tx, event_rx) = mpsc::channel(512);
-        let (control_tx, mut control_rx) = mpsc::channel(64);
         let agent = Arc::clone(self);
-
-        // Controls: cancellation reaches the run immediately, whatever the
-        // event consumer is doing.
-        let controlled = Arc::clone(self);
-        let controls = tokio::spawn(async move {
-            while let Some(c) = control_rx.recv().await {
-                match c {
-                    events::AgentControl::Cancel => controlled.cancel(),
-                    events::AgentControl::PermissionResponse { .. }
-                    | events::AgentControl::InjectMessage(_) => {}
-                }
-            }
-        });
+        // Make cancellation available before the worker is first polled.
+        let cancel = self.begin_run();
+        let controls = Arc::new(events::StreamControls::new(cancel.clone()));
+        let permissions: Arc<dyn PermissionPolicy> = if self.permission_policy.requires_stream() {
+            Arc::new(events::StreamPermissions::new(
+                Arc::clone(&controls),
+                event_tx.clone(),
+                Arc::new(self.emit_handle()),
+            ))
+        } else {
+            Arc::clone(&self.permission_policy)
+        };
+        let run_controls = Arc::clone(&controls);
 
         tokio::spawn(async move {
-            let result = runner::run_agent_streaming(&agent, &input, event_tx.clone()).await;
+            let result = runner::run_prepared_controlled(
+                &agent,
+                &input,
+                event_tx.clone(),
+                cancel.clone(),
+                Some(run_controls.clone()),
+                permissions,
+            )
+            .await;
+            run_controls.finish();
             let ok = result.is_ok();
             match result {
                 Ok(output) => {
+                    agent.emit(AgentEvent::Complete(output.clone()));
                     let _ = event_tx.send(AgentEvent::Complete(output)).await;
                 }
                 Err(e) => {
+                    agent.emit(AgentEvent::Error(e.to_string()));
                     let _ = event_tx.send(AgentEvent::Error(e.to_string())).await;
                 }
             }
             if ok {
-                let cancel = agent.run_cancel.lock().clone();
                 runner::maintain_memory(&agent, &cancel, Some(&event_tx)).await;
             }
-            controls.abort();
         });
 
-        AgentStream::new(event_rx, control_tx)
+        AgentStream::new(event_rx, controls)
     }
 
     /// Multi-turn: send a follow-up message in the same conversation.
@@ -592,12 +599,13 @@ impl Agent {
 
     /// The system prompt of the requests of the current run: the configured
     /// prompt, the catalog of skills (names and descriptions only), then the
-    /// recalled long-term memory block (if any).
+    /// recalled long-term memory block (if any), then the appended instructions.
     pub(crate) fn effective_system(&self) -> Option<String> {
         let parts: Vec<String> = [
             self.system_prompt.clone(),
             self.skills_catalog(),
             self.recalled.lock().clone(),
+            self.append_system_prompt.clone(),
         ]
         .into_iter()
         .flatten()

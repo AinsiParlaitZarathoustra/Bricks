@@ -52,8 +52,8 @@ A dry run of a crate whose internal dependencies are not on crates.io yet at
 that version fails at `cargo publish --dry-run` (the registry cannot resolve
 them). This is expected before the first real publication of a version.
 
-`bricks-cli`, `bricks-tui`, `cersei-testkit` and `longmem-bench` are not
-published by the script. `bricks-skills` (formerly `cersei-skills`, renamed
+`bricks-cli`, `cersei-testkit` and `longmem-bench` are not published by the
+script. `bricks-skills` (formerly `cersei-skills`, renamed
 in Sprint 12) is published before `cersei-tools`, which depends on it; the
 former name stays on crates.io at its last version and is not updated.
 
