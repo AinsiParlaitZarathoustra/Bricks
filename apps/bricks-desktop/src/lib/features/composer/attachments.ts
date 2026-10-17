@@ -1,5 +1,4 @@
 // Pure helpers shared by the composer components. No Svelte runes here.
-// Owner: Haiku 5 (Sprint 14, composer).
 
 /** Extensions sent as `image` blocks; the engine decides what the model accepts. */
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp'])

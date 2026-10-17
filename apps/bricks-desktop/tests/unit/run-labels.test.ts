@@ -1,4 +1,4 @@
-// Sprint 14.4, command labels on user messages, live and after a reopen. Events enter
+//.4, command labels on user messages, live and after a reopen. Events enter
 // through the real subscription (`app.init()` registers the handler on the fake
 // Channel), so the routing of `run_labeled` and `engine` events is the one the bridge
 // uses. `invoke` of `@tauri-apps/api/core` is the only fake.

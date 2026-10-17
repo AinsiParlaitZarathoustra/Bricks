@@ -1,7 +1,7 @@
 <script lang="ts">
 	// Context occupation (`/context`, `/ctx`): the same compact line as the context
-	// card, and explicit compaction and clearing. Owner: Haiku 1 (Sprint 14.2),
-	// after Haiku 4 (Sprint 14.1).
+	// card, and explicit compaction and clearing.
+	// after Haiku 4.
 	import type { InspectorState } from '$lib/state/ui.svelte';
 	import { app } from '$lib/state/app.svelte';
 	import { ui } from '$lib/state/ui.svelte';

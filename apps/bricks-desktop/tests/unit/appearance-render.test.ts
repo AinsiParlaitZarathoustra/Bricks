@@ -1,7 +1,7 @@
-// Appearance (Sprint 14.3, validation): the palette's CSS variables exist as theme tokens in both
+// Appearance: the palette's CSS variables exist as theme tokens in both
 // modes of src/app.css, and the accent presets keep their text readable. The rules themselves are
 // unit-tested in theme-palette.test.ts and appearance-colors.test.ts; this file checks the wiring
-// between the palette and the stylesheet. Validation, Haiku V (Sprint 14.3).
+// between the palette and the stylesheet. Validation, Haiku V.
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { COLOR_ROLES, PALETTE_VARIABLES, PRESETS, colorChecks, type ResolvedMode } from '../../src/lib/theme/palette';

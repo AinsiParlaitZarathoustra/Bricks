@@ -1,4 +1,4 @@
-// Unit tests for the Sprint 14.1 fields of the conversation reducer (Conversation.apply):
+// Unit tests for the.1 fields of the conversation reducer (Conversation.apply):
 // usage, search, agent profiles, skills, memory, jobs, /clear, /compact, /skill, command
 // refusals, and session isolation. Envelopes are hand-built with EnvelopeFeed (fixtures.ts).
 import { describe, expect, it } from 'vitest';
@@ -46,7 +46,7 @@ function usage(input: number, output: number, extra: Partial<Usage> = {}): Usage
 	};
 }
 
-/** Fields of a conversation that Sprint 14.1 events can change, as plain values. */
+/** Fields of a conversation that.1 events can change, as plain values. */
 function observable(conv: Conversation) {
 	return {
 		items: conv.items.length,

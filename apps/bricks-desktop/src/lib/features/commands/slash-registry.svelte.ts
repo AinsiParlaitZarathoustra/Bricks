@@ -1,6 +1,5 @@
 // The shared `/` command list, loaded once from the engine registry
 // (`slash_commands`) and cached. A failed load is shown and can be retried.
-// Owner: Haiku 3 (Sprint 14.1).
 
 import { errorMessage, slashCommands } from '$lib/ipc/client'
 import type { SlashCommandInfo } from '$lib/ipc/bindings/SlashCommandInfo'

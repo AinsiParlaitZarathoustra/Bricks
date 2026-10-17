@@ -1,6 +1,5 @@
 // One light line per tool call, and the one-line trace of a resolved approval.
 // Shared by the timeline and the sub-agent inspector. Pure functions only.
-// Owner: Haiku 1 (Sprint 14.2).
 
 import { DECIDED_BY_LABEL, DECISION_LABEL } from '../format';
 import type { DecidedBy, Decision } from '$lib/ipc/engine';

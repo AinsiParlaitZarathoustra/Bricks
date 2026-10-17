@@ -1,5 +1,4 @@
 // Labels and pure helpers of the session inspectors (French, no state, no IPC).
-// Owner: Haiku 6 (Sprint 14.1).
 
 import type { BadgeVariant } from '$lib/components/ui/badge';
 import type { Activity } from '$lib/ipc/engine';

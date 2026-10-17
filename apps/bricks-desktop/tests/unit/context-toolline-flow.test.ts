@@ -1,4 +1,4 @@
-// Sprint 14.2 validation, reducer side: what a tool line and a resolved approval are built from,
+//.2 validation, reducer side: what a tool line and a resolved approval are built from,
 // and the context line across a compaction that changed nothing and a clear that is followed
 // by a new measure. Hand-built envelopes (fixtures.ts); complements the files it does not repeat.
 import { describe, expect, it } from 'vitest';

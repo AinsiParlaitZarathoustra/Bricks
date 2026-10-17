@@ -1,7 +1,7 @@
-// Server render of two Sprint 14.3 views: the user message (links in plain text, `dir="auto"`,
+// Server render of two.3 views: the user message (links in plain text, `dir="auto"`,
 // HTML-like text shown as text) and the run-end card (the « bilan » line built from the
 // reducer's envelopes, as the engine sends them). Node environment, rendered with svelte/server,
-// like toolline-render.test.ts. Validation, Haiku V (Sprint 14.3).
+// like toolline-render.test.ts. Validation, Haiku V.
 import { describe, expect, it } from 'vitest';
 import { render } from 'svelte/server';
 import UserMessage from '../../src/lib/features/conversation/timeline/UserMessage.svelte';

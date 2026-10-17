@@ -1,4 +1,4 @@
-//! The skills catalogue of the settings page (Sprint 14.3): the sources a
+//! The skills catalogue of the settings page: the sources a
 //! session would read, with the state each candidate has there. Built on
 //! `bricks_skills::SkillsService`, as the engine builds it for a session.
 //!

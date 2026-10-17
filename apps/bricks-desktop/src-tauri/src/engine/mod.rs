@@ -53,9 +53,9 @@ pub struct AppState {
     attachments_dir: PathBuf,
     pub(crate) projects: Arc<ProjectStore>,
     pub(crate) prefs: Arc<PrefsStore>,
-    /// The skills catalogue of the settings page (Sprint 14.3), outside any session.
+    /// The skills catalogue of the settings page, outside any session.
     pub(crate) skills: Arc<SkillsCatalogStore>,
-    /// Presentation labels of runs started from typed commands (Sprint 14.4).
+    /// Presentation labels of runs started from typed commands.
     pub(crate) run_labels: Arc<RunLabelStore>,
     pub(crate) hub: Arc<Hub>,
     /// The open sessions, by session id.

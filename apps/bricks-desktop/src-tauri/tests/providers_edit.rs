@@ -1,4 +1,4 @@
-//! Provider and model editing (Sprint 14.2), end to end on a temporary
+//! Provider and model editing, end to end on a temporary
 //! `providers.toml`: the write, the revision check, the file as the next
 //! start reads it, and the secrets that must never leave the engine.
 //!

@@ -1,8 +1,8 @@
-// Static checks of the Sprint 14.3 interface (validation, Haiku V): the texts that spec §6 removes
+// Static checks of the.3 interface (validation, Haiku V): the texts that spec §6 removes
 // are gone from the views that render them, the wording and structure the spec keeps are there,
 // and no raw HTML is rendered outside the sanitised Markdown path. These read the source files;
 // they do not render components. A `it.fails` documents a known open defect: it passes while the
-// defect is present and must be turned into `it` once the product is fixed (see tests/REVIEW_14_3.md).
+// defect is present and must be turned into `it` once the product is fixed.
 import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 

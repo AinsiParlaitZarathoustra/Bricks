@@ -1,5 +1,5 @@
 // Context occupation as the desktop shows it: one line, « ≈ 12 374 / 1 000 000 tokens ».
-// Pure functions only. Owner: Haiku 1 (Sprint 14.2).
+// Pure functions only.
 //
 // Rules, in one place:
 // - The numerator is the active occupation (`context_used.tokens`) whatever its

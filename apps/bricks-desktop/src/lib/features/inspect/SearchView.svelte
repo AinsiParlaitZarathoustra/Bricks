@@ -1,6 +1,6 @@
 <script lang="ts">
 	// Workspace text search (`/search`, `/s`): a real search of the project's
-	// files by the engine. Not the conversation search. Owner: Haiku 4 (Sprint 14.1).
+	// files by the engine. Not the conversation search.
 	import { onMount, untrack } from 'svelte';
 	import type { InspectorState } from '$lib/state/ui.svelte';
 	import { app } from '$lib/state/app.svelte';

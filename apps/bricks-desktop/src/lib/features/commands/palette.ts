@@ -1,6 +1,5 @@
 // Pure logic of the `/` palette: which commands match a draft, how a name is
 // completed, how the highlight moves. No runes and no IPC, so it is unit-tested.
-// Owner: Haiku 3 (Sprint 14.1).
 
 import type { SlashCommandInfo } from '$lib/ipc/bindings/SlashCommandInfo'
 

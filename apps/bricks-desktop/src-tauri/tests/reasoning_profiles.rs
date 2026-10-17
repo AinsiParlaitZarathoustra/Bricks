@@ -1,4 +1,4 @@
-//! Sprint 14.3, validation: reasoning profiles and the model form, end to end
+//!.3, validation: reasoning profiles and the model form, end to end
 //! on a temporary `providers.toml`. The patches are read from the JSON the
 //! desktop form sends (`src/lib/features/settings/models.ts` `buildModelPatch`),
 //! so the wire shape is checked as well as the write.

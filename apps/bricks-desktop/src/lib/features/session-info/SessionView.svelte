@@ -1,6 +1,6 @@
 <script lang="ts">
 	// Session inspector (`/session`): identifier, title, folder, model and effort
-	// (requested and applied), activity, memory space, approvals. Owner: Haiku 6 (Sprint 14.1).
+	// (requested and applied), activity, memory space, approvals.
 	import { onDestroy, untrack } from 'svelte';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import CopyIcon from '@lucide/svelte/icons/copy';

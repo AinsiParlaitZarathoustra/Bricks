@@ -1,7 +1,7 @@
 <script lang="ts">
 	// Right panel: project environment, context occupation, pending approvals,
 	// the sub-agents of the shown conversation, and the « Plus » menu that opens
-	// the existing ADK inspectors. Owner: Haiku 6 (Sprint 14), menu: Haiku F4 (Sprint 14.3).
+	// the existing ADK inspectors.3).
 	import { app } from '$lib/state/app.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import { ScrollArea } from '$lib/components/ui/scroll-area';

@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 const WIDTH: std::ops::RangeInclusive<u32> = 160..=640;
 const TERMINAL_HEIGHT: std::ops::RangeInclusive<u32> = 120..=900;
-/// Share of the centre column the terminal pane may take (Sprint 14.3).
+/// Share of the centre column the terminal pane may take.
 const TERMINAL_RATIO: std::ops::RangeInclusive<f32> = 0.1..=0.8;
 
 pub struct PrefsStore {

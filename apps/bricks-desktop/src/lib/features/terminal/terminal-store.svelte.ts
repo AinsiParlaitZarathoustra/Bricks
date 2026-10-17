@@ -2,7 +2,7 @@
 // project. The sessions live here, not in the component: the pane unmounts when it
 // is closed, but the shells, their scrollback and their xterm instances survive,
 // and the component attaches the active one again on mount. Each terminal belongs
-// to the project it was opened for. Owner: Haiku F3 (Sprint 14.3, terminals).
+// to the project it was opened for.
 
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import { TerminalSession, type TerminalDeps } from './terminal-session.svelte';

@@ -186,7 +186,7 @@ export interface DraftAttachment {
 export interface Draft {
   text: string
   attachments: DraftAttachment[]
-  /** Skills to activate with the next message (`Prompt.skills`), Sprint 14.3. */
+  /** Skills to activate with the next message (`Prompt.skills`). */
   skills: string[]
 }
 
@@ -278,7 +278,7 @@ export class Conversation {
   /** Last answer to an `agent_control` command (apply/discard/cancel). */
   lastAgentControl = $state<{ action: string; ok: boolean; text: string; at: number } | null>(null)
 
-  // Sprint 14.1: answers of the migrated commands, kept per session.
+  //.1: answers of the migrated commands, kept per session.
   /** Per-response usage, in order (`usage.turn`); session total is `usageTotalFull`. */
   turnUsages = $state<TurnUsage[]>([])
   usageTotalFull = $state<Usage | null>(null)

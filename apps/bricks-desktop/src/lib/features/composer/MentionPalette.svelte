@@ -2,7 +2,6 @@
   // The `@` popover above the composer: project files and folders matching the
   // text after `@`. Same listbox pattern as the command palette: the editor keeps
   // the keyboard (aria-activedescendant); this component renders and reports.
-  // Owner: Haiku 3 (Sprint 14.1, @ mentions).
   import type { ProjectFileEntry } from '$lib/ipc/bindings/ProjectFileEntry'
   import { Kbd } from '$lib/components/ui/kbd'
   import FileIcon from '@lucide/svelte/icons/file'

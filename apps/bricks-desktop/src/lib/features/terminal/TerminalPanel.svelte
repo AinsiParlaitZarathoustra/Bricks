@@ -2,7 +2,7 @@
 	// Bottom pane: interactive shells on a real PTY, one set per project.
 	// The sessions live in terminals.svelte.ts (store and session rules in
 	// terminal-store / terminal-session); this component only shows the active
-	// one. Owner: Haiku F3 (Sprint 14.3, terminals).
+	// one.
 	import '@xterm/xterm/css/xterm.css';
 	import { untrack } from 'svelte';
 	import Plus from '@lucide/svelte/icons/plus';

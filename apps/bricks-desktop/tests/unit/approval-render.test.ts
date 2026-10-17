@@ -1,6 +1,6 @@
 // Server render of the tool approval card (ApprovalCard.svelte): a pending request shows its
 // three decisions; a resolved one is a single trace line with no decision left to take.
-// Sprint 14.2, Haiku 4 (validation). Node environment, rendered to a string.
+//.2, Haiku 4 (validation). Node environment, rendered to a string.
 import { describe, expect, it } from 'vitest';
 import { render } from 'svelte/server';
 import ApprovalCard from '../../src/lib/features/conversation/timeline/ApprovalCard.svelte';

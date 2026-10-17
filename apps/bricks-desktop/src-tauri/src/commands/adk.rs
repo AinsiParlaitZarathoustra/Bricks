@@ -1,5 +1,5 @@
 //! Read adapters over engine state that the desktop could only reach as text
-//! or as events of the current run (owner: Rust agent, Sprint 14.3). They
+//! or as events of the current run. They
 //! return the engine's own serialized records, read now; nothing is run,
 //! changed or granted. The frontend keeps them in its reducer as before.
 use crate::commands::inspect::open_or_not_found;

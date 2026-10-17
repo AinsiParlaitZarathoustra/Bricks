@@ -14,7 +14,7 @@ clear_context_window: boolean, input_modalities: Array<string> | null,
  */
 reasoning_default: string | null, clear_reasoning_default: boolean, 
 /**
- * Sprint 14.3: replaces the whole profile list (ids unique; the
+ *.3: replaces the whole profile list (ids unique; the
  * default must stay one of them or be cleared in the same patch).
  */
 profiles: Array<ReasoningProfileEdit> | null, };

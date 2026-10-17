@@ -191,7 +191,7 @@ pub enum DesktopEvent {
     /// the session with `session_open`.
     Lagged { session_id: String },
     /// A run was started from a typed command (e.g. `/skill debug …`):
-    /// presentation label for its user message (Sprint 14.4).
+    /// presentation label for its user message.
     RunLabeled { session_id: String, label: RunLabel },
 }
 
@@ -339,12 +339,12 @@ pub struct Preferences {
     pub terminal_height: u32,
     pub last_project_id: Option<String>,
     pub last_session_id: Option<String>,
-    /// Desktop-wide tool approval policy (Sprint 14.2), applied by the engine
+    /// Desktop-wide tool approval policy, applied by the engine
     /// to every session of this application and its sub-agents.
     pub tool_approval: ToolApproval,
-    /// Custom colours per resolved mode (Sprint 14.3). Empty = theme tokens.
+    /// Custom colours per resolved mode. Empty = theme tokens.
     pub colors: ThemeColors,
-    /// Terminal pane share of the centre column, 0.1–0.8 (Sprint 14.3).
+    /// Terminal pane share of the centre column, 0.1–0.8.
     /// `None`: not set yet — derived once from the legacy `terminal_height`.
     pub terminal_ratio: Option<f32>,
 }
@@ -376,7 +376,7 @@ pub enum Theme {
     System,
 }
 
-// ─── Sprint 14.1: slash commands and session inspection ────────────────────
+// ─── slash commands and session inspection ────────────────────
 
 /// One entry of the shared `/` command registry
 /// (`cersei_agent::control::slash`).
@@ -483,7 +483,7 @@ pub struct ProjectFileEntry {
     pub is_dir: bool,
 }
 
-// ─── Sprint 14.2: tool approval policy and provider/model editing ───────────
+// ─── tool approval policy and provider/model editing ───────────
 
 /// Global approval policy of the desktop. Priority (one place, in the engine
 /// gate): `forbidden` tools → refused; an explicit `deny` rule → refused;
@@ -561,7 +561,7 @@ pub struct ModelView {
 pub struct ModelProfileView {
     pub id: String,
     pub label: Option<String>,
-    /// Sprint 14.3: the profile's request changes (no secret values).
+    ///.3: the profile's request changes (no secret values).
     #[ts(type = "Record<string, unknown>")]
     pub parameters: serde_json::Value,
     pub remove: Vec<String>,
@@ -600,12 +600,12 @@ pub struct ModelPatch {
     /// Default reasoning profile id (must be one of the model's profiles).
     pub reasoning_default: Option<String>,
     pub clear_reasoning_default: bool,
-    /// Sprint 14.3: replaces the whole profile list (ids unique; the
+    ///.3: replaces the whole profile list (ids unique; the
     /// default must stay one of them or be cleared in the same patch).
     pub profiles: Option<Vec<ReasoningProfileEdit>>,
 }
 
-// ─── Sprint 14.3: colours, reasoning profiles, skills catalogue ─────────────
+// ─── colours, reasoning profiles, skills catalogue ─────────────
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS)]
 #[serde(default)]
@@ -660,7 +660,7 @@ pub struct SkillSourceView {
     pub skills: u32,
 }
 
-// ─── Sprint 14.4: typed-command labels ──────────────────────────────────────
+// ─── typed-command labels ──────────────────────────────────────
 
 /// How a run's user message was typed, when it came from a command:
 /// `label` is the command as typed without its request (e.g. `/skill debug`),

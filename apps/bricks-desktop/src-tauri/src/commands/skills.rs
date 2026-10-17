@@ -1,5 +1,5 @@
 //! Skills catalogue for the settings page, outside any session
-//! (owner: Rust agent, Sprint 14.3). Reads the sources through
+//!. Reads the sources through
 //! `services::skills`; grants no trust.
 use crate::contract::*;
 use crate::engine::AppState;

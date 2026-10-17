@@ -1,4 +1,4 @@
-// Sprint 14.4, behaviour of « Nouvelle conversation », the single conversation start,
+//.4, behaviour of « Nouvelle conversation », the single conversation start,
 // the per-project drafts and the `/` dispatch wired to the app store. The IPC boundary
 // is `invoke` of `@tauri-apps/api/core`: the real client (src/lib/ipc/client.ts) runs
 // over it, so every `session_open` / `session_command` the app sends is recorded here.

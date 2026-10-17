@@ -3,7 +3,6 @@
   // context, filtered by the engine (list_skills in a conversation, the catalogue
   // without one). Choosing a skill only adds it to the draft: no trust is granted
   // here, and the project skills that await the trust decision are not offered.
-  // Owner: Haiku F2 (Sprint 14.3, composer).
   import { onMount } from 'svelte'
   import * as Command from '$lib/components/ui/command'
   import { Button } from '$lib/components/ui/button'

@@ -1,4 +1,4 @@
-// Colour palette of Bricks (Sprint 14.3): pure helpers, no runes and no DOM, so the appearance
+// Colour palette of Bricks: pure helpers, no runes and no DOM, so the appearance
 // settings, the theme and the tests share one set of rules.
 //
 // Three choices are customised per resolved mode (light or dark):

@@ -1,7 +1,7 @@
 // Runs one `/` line: the engine parses it (`slash_parse`), then each action
 // is handled here. A `/` line is never sent to the model as a prompt. The
 // desktop side effects go through a `SlashHost`, so the mapping is unit-tested
-// with a fake host. Owner: Haiku 3 (Sprint 14.1).
+// with a fake host.
 
 import type { SlashAction } from '$lib/ipc/bindings/SlashAction'
 import type { SlashPresent } from '$lib/ipc/bindings/SlashPresent'

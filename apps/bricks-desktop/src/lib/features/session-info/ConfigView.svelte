@@ -1,7 +1,7 @@
 <script lang="ts">
 	// Effective configuration of the session (`/config`): model, permissions,
 	// memory, sub-agents, configuration files read, other settings. Shows no key
-	// and no authentication header: the engine never sends them. Owner: Haiku 6 (Sprint 14.1).
+	// and no authentication header: the engine never sends them.
 	import { untrack } from 'svelte';
 	import { Badge } from '$lib/components/ui/badge';
 	import { errorMessage, sessionConfig, type SessionConfigInfo } from '$lib/ipc/client';

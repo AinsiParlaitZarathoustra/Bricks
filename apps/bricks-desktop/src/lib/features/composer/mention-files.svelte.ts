@@ -1,7 +1,7 @@
 // The project file index behind `@` mentions: a short pause after typing, then
 // one search for the text after `@`; « Actualiser » (Ctrl+R) rebuilds the index.
 // Answers that arrive after a newer request are dropped. Owner: Haiku 3
-// (Sprint 14.1, @ mentions).
+//.
 
 import { errorMessage, projectFiles, type ProjectFileEntry } from '$lib/ipc/client'
 

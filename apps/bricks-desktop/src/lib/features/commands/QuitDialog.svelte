@@ -1,7 +1,7 @@
 <script lang="ts">
   // Confirmation of `/quit` while a run is active: it lists the conversations
   // with a run in progress, then closes the application through the native
-  // command. Owner: Haiku 3 (Sprint 14.1).
+  // command.
   import * as AlertDialog from '$lib/components/ui/alert-dialog'
   import { appQuit } from '$lib/ipc/client'
   import { app } from '$lib/state/app.svelte'

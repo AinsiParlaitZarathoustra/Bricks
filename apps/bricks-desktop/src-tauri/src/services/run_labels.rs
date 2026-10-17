@@ -1,4 +1,4 @@
-//! Presentation labels of runs started from typed commands (Sprint 14.4).
+//! Presentation labels of runs started from typed commands.
 //!
 //! The engine receives a plain `submit` for `/skill debug …`; the desktop
 //! remembers how the user typed it. Labels live in

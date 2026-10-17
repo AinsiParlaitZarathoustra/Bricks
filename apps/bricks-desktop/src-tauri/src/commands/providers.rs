@@ -1,4 +1,4 @@
-//! Provider and model editing (owner: Haiku 3, Sprint 14.2). Every write:
+//! Provider and model editing. Every write:
 //! checks the revision the desktop read, edits only the target table, validates
 //! the whole file with the provider crate, writes atomically, then reloads the
 //! catalog. Each command returns the file as it now is, reloaded.

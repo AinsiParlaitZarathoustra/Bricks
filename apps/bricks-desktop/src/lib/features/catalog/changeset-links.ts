@@ -1,6 +1,6 @@
 // Links from the changes panel to a sub-agent ChangeSet inspector (`ChangesetView`).
 // Pure helpers: which distinct changesets a file's edits belong to, and the label
-// of the link. Owner: Haiku F4 (Sprint 14.3).
+// of the link.
 
 import { shortId } from '$lib/features/changes/format';
 

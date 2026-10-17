@@ -1,7 +1,6 @@
 <script lang="ts">
 	// Long-term memory of the session (`/memory`): the space, the last recall and the
 	// last maintenance pass. Read-only: no editor and no new memory engine here.
-	// Owner: Haiku 4 (Sprint 14.1).
 	import { onMount } from 'svelte';
 	import type { InspectorState } from '$lib/state/ui.svelte';
 	import * as ipc from '$lib/ipc/client';

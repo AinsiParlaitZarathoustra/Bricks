@@ -1,6 +1,6 @@
 // Workspace text search (`/search`): reading of the input, grouping of the
 // hits by file, highlighting of the query in a hit line, and the labels of
-// the engine's status. Pure functions only. Owner: Haiku 4 (Sprint 14.1).
+// the engine's status. Pure functions only.
 //
 // The engine matches case-sensitively. A literal query is a plain string; a
 // regular expression is compiled here as a JavaScript RegExp for the

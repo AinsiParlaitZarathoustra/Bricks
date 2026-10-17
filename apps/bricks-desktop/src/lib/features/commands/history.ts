@@ -1,7 +1,7 @@
 // Input history of the composer: ↑ recalls earlier prompts of the conversation,
 // ↓ goes forward again and finally gives back the draft that was there before.
 // The draft is never lost: the text it had when browsing started is kept aside.
-// Pure (no runes): unit-tested. Owner: Haiku 3 (Sprint 14.1).
+// Pure (no runes): unit-tested.
 
 export interface CaretState {
   text: string

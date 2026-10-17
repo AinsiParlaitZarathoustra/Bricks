@@ -3,7 +3,7 @@
 // detaching takes it out again; neither touches the shell, the xterm state or
 // the scrollback. Only `dispose()` (an explicit close) kills the PTY and frees
 // xterm. xterm and the PTY commands are injected through `TerminalDeps`, so the
-// rules here are testable without a window. Owner: Haiku F3 (Sprint 14.3, terminals).
+// rules here are testable without a window.
 
 import type { IDisposable, ITerminalOptions, ITheme } from '@xterm/xterm';
 import type { PtyEvent } from '../../ipc/bindings/PtyEvent';

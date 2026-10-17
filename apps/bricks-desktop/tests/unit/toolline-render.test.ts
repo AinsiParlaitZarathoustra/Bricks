@@ -1,5 +1,5 @@
 // Server render of the one-line tool call (ToolLine.svelte): what the line shows, and what it
-// must not show (arguments, command text, output). Sprint 14.2, Haiku 4 (validation).
+// must not show (arguments, command text, output)..2, Haiku 4 (validation).
 // Node environment: the component is compiled for the server and rendered to a string.
 import { describe, expect, it } from 'vitest';
 import { render } from 'svelte/server';

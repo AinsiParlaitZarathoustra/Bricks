@@ -35,7 +35,7 @@ pub struct OpenSession {
     created_at: i64,
     stop: watch::Sender<bool>,
     live: parking_lot::Mutex<Live>,
-    /// The presentation labels of the session's runs (Sprint 14.4).
+    /// The presentation labels of the session's runs.
     labels: Arc<RunLabelStore>,
     /// Held while a submit is recorded and sent, so two submits never
     /// interleave their records (and the history is counted once per submit).
@@ -53,7 +53,7 @@ struct Live {
     message_count: usize,
     previews: VecDeque<Preview>,
     /// The accepted submits whose `run_started` has not come yet, oldest
-    /// first (Sprint 14.4).
+    /// first.
     expected: VecDeque<Expected>,
     /// The label of the run in progress, kept until its end: its message
     /// index is only known once the run has added its messages.

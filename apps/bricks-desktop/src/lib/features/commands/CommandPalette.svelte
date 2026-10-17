@@ -2,7 +2,6 @@
   // The `/` palette above the composer: an ARIA listbox. The keyboard stays in
   // the composer's editor (combobox pattern: aria-activedescendant), so this
   // component only renders the options and reports clicks and hovers.
-  // Owner: Haiku 3 (Sprint 14.1).
   import type { SlashCommandInfo } from '$lib/ipc/bindings/SlashCommandInfo'
   import type { SlashRegistryState } from './slash-registry.svelte'
   import { usageLine } from './palette'

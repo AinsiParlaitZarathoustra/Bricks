@@ -20,7 +20,7 @@ export const LAYOUT_DEFAULTS = {
 } as const;
 
 /**
- * Terminal pane share of the centre column (Sprint 14.3). The saved ratio is kept
+ * Terminal pane share of the centre column. The saved ratio is kept
  * within min..max; `fallback` is used until a ratio is known (no preference loaded yet).
  */
 export const TERMINAL_RATIO = {

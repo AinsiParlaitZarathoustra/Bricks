@@ -1,6 +1,6 @@
 <script lang="ts">
   // One light line for a tool call: no card, no arguments, no output. Used by the
-  // timeline and by the sub-agent inspector. Owner: Haiku 1 (Sprint 14.2).
+  // timeline and by the sub-agent inspector.
   import CircleCheck from '@lucide/svelte/icons/circle-check'
   import CircleStop from '@lucide/svelte/icons/circle-stop'
   import CircleX from '@lucide/svelte/icons/circle-x'

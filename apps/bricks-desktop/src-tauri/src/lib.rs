@@ -60,26 +60,26 @@ pub fn run() {
             pty::commands::pty_list,
             // Paths (orchestrator)
             paths::path_kind,
-            // Slash commands (Haiku 1, Sprint 14.1)
+            // Slash commands
             commands::slash::slash_commands,
             commands::slash::slash_parse,
-            // Session inspection (Haiku 6, Sprint 14.1)
+            // Session inspection
             commands::inspect::session_tools,
             commands::inspect::session_mcp,
             commands::inspect::session_config,
             commands::inspect::session_locate,
             commands::inspect::app_quit,
-            // File index for @ mentions (Haiku 1, Sprint 14.1)
+            // File index for @ mentions
             commands::files::project_files,
-            // Provider/model editing (Haiku 3, Sprint 14.2)
+            // Provider/model editing
             commands::providers::providers_config,
             commands::providers::provider_update,
             commands::providers::model_update,
             commands::providers::provider_delete,
             commands::providers::model_delete,
-            // Skills catalogue for settings (Sprint 14.3)
+            // Skills catalogue for settings
             commands::skills::skills_catalog,
-            // Read adapters over engine agent state (Sprint 14.3)
+            // Read adapters over engine agent state
             commands::adk::session_agents,
             commands::adk::session_changesets,
         ])

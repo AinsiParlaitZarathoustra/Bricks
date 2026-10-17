@@ -1,4 +1,4 @@
-//! Correspondence matrix for the `/` commands (Sprint 14.1, owner: Haiku 8).
+//! Correspondence matrix for the `/` commands.
 //!
 //! The registry is `cersei_agent::control::slash::COMMANDS`; the desktop reaches it
 //! only through the public `slash_parse` / `slash_commands` commands. Each row

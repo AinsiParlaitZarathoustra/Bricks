@@ -1,6 +1,6 @@
 <script lang="ts">
 	// Clearing the active context (`/clear`). Says what it does and does not do,
-	// asks for the confirmation, then shows the engine's answer. Owner: Haiku 4 (Sprint 14.1).
+	// asks for the confirmation, then shows the engine's answer.
 	import type { InspectorState } from '$lib/state/ui.svelte';
 	import { app } from '$lib/state/app.svelte';
 	import { ui } from '$lib/state/ui.svelte';

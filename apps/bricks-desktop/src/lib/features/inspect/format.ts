@@ -1,7 +1,6 @@
-// Display helpers of the inspector views (Sprint 14.1): French numbers,
+// Display helpers of the inspector views: French numbers,
 // money and times, the cost reading rules, and readers for engine values
 // that the typed IPC keeps loose (`unknown`). Pure functions only.
-// Owner: Haiku 4 (Sprint 14.1).
 
 import type { Usage } from '$lib/ipc/engine';
 

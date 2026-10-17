@@ -1,7 +1,7 @@
 <script lang="ts">
 	// Tools of the session (`/tools`): name, description, permission level, the
 	// decision the approval rules give it, and whether it was allowed for the
-	// session. Owner: Haiku 6 (Sprint 14.1).
+	// session.
 	import { untrack } from 'svelte';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';

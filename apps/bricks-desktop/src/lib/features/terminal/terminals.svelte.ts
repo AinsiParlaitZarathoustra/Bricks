@@ -1,7 +1,6 @@
 // Live wiring of the terminal feature: xterm, the PTY commands and the app state
 // plug into the store and the session rules (terminal-store / terminal-session,
 // tested with fakes). The bottom pane uses the `terminals` instance below.
-// Owner: Haiku F3 (Sprint 14.3, terminals).
 
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';

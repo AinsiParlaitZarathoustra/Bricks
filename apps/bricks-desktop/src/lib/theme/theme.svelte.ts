@@ -9,7 +9,7 @@
  * to `initTheme()` once at startup, and call `setTheme()` when the user picks
  * a mode, then save it. This module never touches storage.
  *
- * Custom colours (Sprint 14.3) come from `app.prefs.colors` for the resolved
+ * Custom colours come from `app.prefs.colors` for the resolved
  * mode. A module-level effect applies them as soon as preferences load, when
  * the mode changes and when the user edits a colour, so no caller has to
  * remember to apply them at start-up.

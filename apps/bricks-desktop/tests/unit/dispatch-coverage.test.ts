@@ -1,4 +1,4 @@
-// Coverage of the `/` dispatcher (Sprint 14.1, owner: Haiku 8).
+// Coverage of the `/` dispatcher.
 //
 // Every view of the generated `SlashPresent` binding and every engine `Command` type is listed
 // below with the desktop effect it must produce. The two lists are also read from the generated

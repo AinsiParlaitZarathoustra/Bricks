@@ -1,4 +1,4 @@
-//! Sprint 14.4, validation: the command labels of runs survive a restart of the
+//!.4, validation: the command labels of runs survive a restart of the
 //! desktop. The store is the one the engine opens under its home folder
 //! (`<home>/desktop/run-labels`, see `engine/mod.rs`). A restart is simulated by
 //! dropping the store and opening it again on the same temporary home.

@@ -1,7 +1,6 @@
 <script lang="ts">
 	// Session consumption and cost (`/cost`, `/usage`, `details`). Figures come from
 	// the engine's usage events; nothing is priced or counted again here.
-	// Owner: Haiku 4 (Sprint 14.1).
 	import { onMount, untrack } from 'svelte';
 	import type { InspectorState } from '$lib/state/ui.svelte';
 	import type { Usage } from '$lib/ipc/engine';

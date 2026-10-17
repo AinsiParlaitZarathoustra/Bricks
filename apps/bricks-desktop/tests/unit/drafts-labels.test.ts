@@ -1,4 +1,4 @@
-// Unit tests for the Sprint 14.4 application logic: « Nouvelle conversation » without a
+// Unit tests for the.4 application logic: « Nouvelle conversation » without a
 // session, per-project drafts, the single conversation start, the command display label
 // and its placement on user messages. The IPC client is replaced by a recording fake.
 import { beforeEach, describe, expect, it, vi } from 'vitest';

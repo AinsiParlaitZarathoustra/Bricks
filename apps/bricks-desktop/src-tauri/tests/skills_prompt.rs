@@ -1,4 +1,4 @@
-//! Sprint 14.3, validation: a message sent from the composer with skills chosen
+//!.3, validation: a message sent from the composer with skills chosen
 //! in the `+` menu. The JSON is the one the frontend sends (`session_command`
 //! forwards it unchanged, see `src/lib/features/composer/Composer.svelte` `send`
 //! and `src/lib/ipc/engine.ts` `Command`/`Prompt`): it must read back as the

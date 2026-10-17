@@ -1,4 +1,4 @@
-//! The shared `/` command registry over IPC (owner: Haiku 1, Sprint 14.1).
+//! The shared `/` command registry over IPC.
 //! The registry is `cersei_agent::control::slash`, the same one the terminal
 //! uses; this file only maps its actions to the contract types. Messages
 //! are French.

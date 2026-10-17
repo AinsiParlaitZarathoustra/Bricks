@@ -1,6 +1,6 @@
-//! The project file index behind `@` mentions (owner: Haiku 1, Sprint 14.1).
+//! The project file index behind `@` mentions.
 //!
-//! Ported from the former terminal interface's `@` mention index (removed in Sprint 14.1).
+//! Ported from the former terminal interface's `@` mention index.
 //! One index per project, built with `ignore` (`.gitignore`, `.ignore`,
 //! `.git/info/exclude`; hidden files excluded), bounded in entries, matched
 //! with nucleo's fuzzy matcher. An index is rebuilt when it is older than

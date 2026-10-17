@@ -1,6 +1,6 @@
 <script lang="ts">
 	// MCP servers of the session (`/mcp`): name and state as the engine reports
-	// them. Read-only: no installation or management here. Owner: Haiku 6 (Sprint 14.1).
+	// them. Read-only: no installation or management here.
 	import { untrack } from 'svelte';
 	import { Badge } from '$lib/components/ui/badge';
 	import { errorMessage, sessionMcp, type McpServerInfo } from '$lib/ipc/client';

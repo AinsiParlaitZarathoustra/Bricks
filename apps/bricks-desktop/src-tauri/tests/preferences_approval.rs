@@ -1,4 +1,4 @@
-//! The tool-approval preference (Sprint 14.2) in `preferences.json`: it is
+//! The tool-approval preference in `preferences.json`: it is
 //! saved, it is read back after a restart, an old file without it means
 //! `standard`, and a value the file does not know never loosens the policy.
 //! Every file is in a temporary folder; nothing touches `~/.bricks`.

@@ -1,7 +1,6 @@
 <script lang="ts">
   // `/help`: the commands come from the engine registry (the same list as the
   // palette, nothing is written here); the keys are the desktop interactions.
-  // Owner: Haiku 3 (Sprint 14.1).
   import { onMount } from 'svelte'
   import { Button } from '$lib/components/ui/button'
   import { Kbd } from '$lib/components/ui/kbd'

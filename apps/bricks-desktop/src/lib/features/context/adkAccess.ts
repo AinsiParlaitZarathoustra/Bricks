@@ -1,7 +1,6 @@
 // Discoverable access to the ADK inspectors that already exist, from the right
 // panel's « Plus » menu. Pure data: the menu itself lives in ContextPanel.svelte.
 // Each entry opens a view owned by its feature folder through `ui.open(view)`.
-// Owner: Haiku F4 (Sprint 14.3).
 //
 // Rules, in one place:
 // - A view appears once. Actions are not duplicated across panels: the context

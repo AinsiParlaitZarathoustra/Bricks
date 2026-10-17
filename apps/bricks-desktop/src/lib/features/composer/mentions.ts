@@ -1,6 +1,6 @@
 // `@` mentions in the composer: detection of the token being typed, its removal
 // once the entry is attached, and the path and kind of a project entry. Pure
-// (no runes, no IPC): unit-tested. Owner: Haiku 3 (Sprint 14.1, @ mentions).
+// (no runes, no IPC): unit-tested.
 
 import { isImagePath } from './attachments'
 

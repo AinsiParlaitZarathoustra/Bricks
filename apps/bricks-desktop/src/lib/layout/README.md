@@ -1,6 +1,6 @@
 # Layout and design system
 
-Owner: Sprint 14 design agent. Other feature agents plug into these components; keep the props stable.
+Feature components plug into these components; keep the props stable.
 
 ## Tokens (`src/app.css`)
 

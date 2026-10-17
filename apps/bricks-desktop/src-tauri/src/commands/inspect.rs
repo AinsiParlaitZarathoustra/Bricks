@@ -1,5 +1,5 @@
 //! Session inspection adapters: tools, MCP, configuration, locating a
-//! stored session, safe quit (owner: Haiku 6, Sprint 14.1).
+//! stored session, safe quit.
 //!
 //! Every adapter reads the engine's own views (`Controller::tools`,
 //! `mcp_statuses`, `snapshot`, the project's `BricksConfig`) and returns only

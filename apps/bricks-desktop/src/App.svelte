@@ -29,7 +29,7 @@
   let terminalOpen = $state(false)
   let leftWidth = $state(260)
   let rightWidth = $state(280)
-  // Terminal share of the centre column (Sprint 14.3). `legacyTerminalHeight` is the
+  // Terminal share of the centre column. `legacyTerminalHeight` is the
   // saved pixel height, read by AppShell once to derive the ratio when none is saved.
   let terminalRatio = $state<number | null>(null)
   let legacyTerminalHeight = $state<number | undefined>(undefined)

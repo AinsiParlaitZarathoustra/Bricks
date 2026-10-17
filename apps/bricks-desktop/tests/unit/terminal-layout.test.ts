@@ -1,4 +1,4 @@
-// Terminal pane height as a share of the centre column (Sprint 14.3): bounds, pixel
+// Terminal pane height as a share of the centre column: bounds, pixel
 // limits of both panes, proportional restore, and the one-time migration of the legacy
 // `terminal_height` preference. Pure functions of src/lib/layout/geometry.ts.
 import { describe, expect, it } from 'vitest';

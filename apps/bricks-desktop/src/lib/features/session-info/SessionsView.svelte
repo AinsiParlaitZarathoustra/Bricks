@@ -1,7 +1,7 @@
 <script lang="ts">
 	// Resume picker (`/resume`, `/sessions`): the conversations of the current
 	// project, and a search across every project. Choosing one reopens it in its
-	// own project, through the desktop registry. Owner: Haiku 6 (Sprint 14.1).
+	// own project, through the desktop registry.
 	import { onMount } from 'svelte';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import { Badge } from '$lib/components/ui/badge';

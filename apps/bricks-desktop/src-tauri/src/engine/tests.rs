@@ -409,7 +409,7 @@ async fn a_run_after_its_model_was_removed_is_refused_with_the_reason() {
     controller.close().await;
 }
 
-// ─── Sprint 14.4: labels of runs started from typed commands ───────────────
+// ─── labels of runs started from typed commands ───────────────
 
 /// The command JSON of a submit of `text`, as the frontend sends it.
 fn submit_json(text: &str) -> serde_json::Value {

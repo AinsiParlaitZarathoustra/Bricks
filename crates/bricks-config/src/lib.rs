@@ -1,7 +1,7 @@
 //! Engine assembly shared by the Bricks frontends (CLI, terminal interface,
 //! desktop): the Bricks home, the provider registry, the project loader and
 //! the engine configuration. Extracted from `bricks-cli/src/setup.rs`
-//! (Sprint 14). Nothing here depends on command-line arguments: a frontend
+//!. Nothing here depends on command-line arguments: a frontend
 //! resolves its own options into plain paths and flags first.
 
 mod engine;

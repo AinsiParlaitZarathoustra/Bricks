@@ -2,6 +2,6 @@
 
 export type ModelProfileView = { id: string, label: string | null, 
 /**
- * Sprint 14.3: the profile's request changes (no secret values).
+ *.3: the profile's request changes (no secret values).
  */
 parameters: Record<string, unknown>, remove: Array<string>, };

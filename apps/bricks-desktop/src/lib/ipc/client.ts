@@ -166,7 +166,7 @@ export const ptyList = (projectId: string | null) => call<PtyInfo[]>('pty_list',
 
 export const pathKind = (path: string) => call<'file' | 'folder' | 'missing'>('path_kind', { path })
 
-// ─── Sprint 14.1: slash commands and inspection ──────────────────────────────
+// ─── slash commands and inspection ──────────────────────────────
 
 export type * from './bindings/SlashCommandInfo'
 export type * from './bindings/SlashAction'
@@ -199,7 +199,7 @@ import type { ProjectFileEntry } from './bindings/ProjectFileEntry'
 export const projectFiles = (projectId: string, query: string, limit = 50, refresh = false) =>
   call<ProjectFileEntry[]>('project_files', { projectId, query, limit, refresh })
 
-// ─── Sprint 14.2: provider/model editing ─────────────────────────────────────
+// ─── provider/model editing ─────────────────────────────────────
 
 export type * from './bindings/ToolApproval'
 export type * from './bindings/ProvidersFile'
@@ -224,7 +224,7 @@ export const providerDelete = (providerId: string, revision: string) =>
 export const modelDelete = (providerId: string, modelId: string, revision: string) =>
   call<ProvidersFile>('model_delete', { providerId, modelId, revision })
 
-// ─── Sprint 14.3: skills catalogue, colours, reasoning profiles ──────────────
+// ─── skills catalogue, colours, reasoning profiles ──────────────
 
 export type * from './bindings/ThemeColors'
 export type * from './bindings/ColorSet'

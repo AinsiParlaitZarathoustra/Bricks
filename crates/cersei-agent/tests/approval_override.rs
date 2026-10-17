@@ -1,6 +1,6 @@
 //! The runtime approval override (`ApprovalMode`), end to end: the priority
 //! table at the gate, and through the real controller and a scripted model
-//! (an open session, its running sub-agent, a pending request). Sprint 14.2.
+//! (an open session, its running sub-agent, a pending request)..
 //!
 //! Every test uses a temporary project and sessions folder, and a
 //! `ProfileSources` that points at the temporary folder: nothing is read
