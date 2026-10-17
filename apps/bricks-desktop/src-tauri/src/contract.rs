@@ -335,6 +335,11 @@ pub struct Preferences {
     /// Desktop-wide tool approval policy (Sprint 14.2), applied by the engine
     /// to every session of this application and its sub-agents.
     pub tool_approval: ToolApproval,
+    /// Custom colours per resolved mode (Sprint 14.3). Empty = theme tokens.
+    pub colors: ThemeColors,
+    /// Terminal pane share of the centre column, 0.1–0.8 (Sprint 14.3).
+    /// `None`: not set yet — derived once from the legacy `terminal_height`.
+    pub terminal_ratio: Option<f32>,
 }
 
 impl Default for Preferences {
@@ -350,6 +355,8 @@ impl Default for Preferences {
             last_project_id: None,
             last_session_id: None,
             tool_approval: ToolApproval::Standard,
+            colors: ThemeColors::default(),
+            terminal_ratio: None,
         }
     }
 }
@@ -547,6 +554,10 @@ pub struct ModelView {
 pub struct ModelProfileView {
     pub id: String,
     pub label: Option<String>,
+    /// Sprint 14.3: the profile's request changes (no secret values).
+    #[ts(type = "Record<string, unknown>")]
+    pub parameters: serde_json::Value,
+    pub remove: Vec<String>,
 }
 
 /// Fields of a provider the desktop form edits. `None` = unchanged.
@@ -582,4 +593,62 @@ pub struct ModelPatch {
     /// Default reasoning profile id (must be one of the model's profiles).
     pub reasoning_default: Option<String>,
     pub clear_reasoning_default: bool,
+    /// Sprint 14.3: replaces the whole profile list (ids unique; the
+    /// default must stay one of them or be cleared in the same patch).
+    pub profiles: Option<Vec<ReasoningProfileEdit>>,
+}
+
+// ─── Sprint 14.3: colours, reasoning profiles, skills catalogue ─────────────
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct ThemeColors {
+    pub light: ColorSet,
+    pub dark: ColorSet,
+}
+
+/// `#rrggbb` values; `None` keeps the theme's token.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct ColorSet {
+    /// Actions, selections, focus ring.
+    pub accent: Option<String>,
+    /// Central surface.
+    pub background: Option<String>,
+    /// Navigation and side panels.
+    pub panel: Option<String>,
+}
+
+/// A reasoning profile as edited by the desktop (engine `ReasoningProfile`).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct ReasoningProfileEdit {
+    pub id: String,
+    pub label: Option<String>,
+    /// JSON object merged into the request (validated by the engine:
+    /// protected fields refused).
+    #[ts(type = "Record<string, unknown>")]
+    pub parameters: serde_json::Value,
+    /// JSON Pointers removed from the request.
+    pub remove: Vec<String>,
+}
+
+/// Skills catalogue outside any session (settings), for a project or the
+/// user/built-in sources only. Consulting grants no trust.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct SkillsCatalog {
+    /// Project whose sources were included (`None`: user and built-in only).
+    pub project_id: Option<String>,
+    /// `cersei_agent::control::SkillsListing`.
+    #[ts(type = "import('../engine').SkillsListing")]
+    pub listing: serde_json::Value,
+    /// Sources scanned, in order.
+    pub sources: Vec<SkillSourceView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct SkillSourceView {
+    /// `project` | `user` | `builtin` (engine wording).
+    pub source: String,
+    pub path: String,
+    pub skills: u32,
 }

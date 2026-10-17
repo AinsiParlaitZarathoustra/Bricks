@@ -44,11 +44,6 @@
 </script>
 
 <div class="flex flex-col gap-4 text-sm">
-	<p class="text-xs text-pretty text-muted-foreground">
-		Profils d’agents du projet, de l’utilisateur et intégrés à Bricks. Un profil masque les
-		définitions de priorité inférieure qui portent le même nom.
-	</p>
-
 	{#if !conv}
 		<p class="text-muted-foreground">Aucune conversation ouverte.</p>
 	{:else}

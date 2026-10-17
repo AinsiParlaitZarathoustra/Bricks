@@ -53,7 +53,7 @@
 				</dd>
 			</dl>
 		{:else}
-			<p class="mt-1 text-xs text-muted-foreground">Aucune requête pour l’instant.</p>
+			<p class="mt-1 text-xs text-muted-foreground">Aucune requête.</p>
 		{/if}
 	</div>
 </SectionCard>

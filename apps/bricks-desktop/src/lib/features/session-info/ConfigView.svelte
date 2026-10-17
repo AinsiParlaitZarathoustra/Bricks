@@ -63,7 +63,6 @@
 {#if !conv || !sessionId}
 	<EmptyState
 		title="Aucune conversation ouverte"
-		description="Ouvrez une conversation pour voir sa configuration."
 	/>
 {:else if loadError}
 	<p role="alert" class="text-sm text-destructive">Lecture de la configuration impossible : {loadError}</p>
@@ -168,9 +167,7 @@
 						Aucun fichier de configuration lu : valeurs par défaut.
 					</p>
 				{/if}
-				<p class="text-xs text-muted-foreground">
-					Les clés d’accès et les en-têtes d’authentification ne sont jamais affichés.
-				</p>
+				
 			</div>
 		</SectionCard>
 

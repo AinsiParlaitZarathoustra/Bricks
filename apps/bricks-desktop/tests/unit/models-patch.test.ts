@@ -45,8 +45,8 @@ const model: ModelView = {
 	context_window_tokens: 200000,
 	reasoning_default: 'low',
 	profiles: [
-		{ id: 'low', label: 'Léger' },
-		{ id: 'high', label: 'Approfondi' }
+		{ id: 'low', label: 'Léger', parameters: {}, remove: [] },
+		{ id: 'high', label: 'Approfondi', parameters: {}, remove: [] }
 	],
 	priced: true
 };
@@ -75,21 +75,14 @@ describe('validateModelForm', () => {
 		expect(hasFormErrors(errors)).toBe(true);
 	});
 
-	it('accepts an empty context window (unknown) but refuses a bad one', () => {
-		expect(validateModelForm({ ...modelForm(model), contextWindow: '' })).toEqual({});
-		expect(validateModelForm({ ...modelForm(model), contextWindow: '  ' })).toEqual({});
-		expect(validateModelForm({ ...modelForm(model), contextWindow: '-1' }).contextWindow).toBeDefined();
+	it('has no context window field to validate', () => {
+		const form = modelForm(model);
+		expect(form).not.toHaveProperty('contextWindow');
+		expect(hasFormErrors(validateModelForm(form))).toBe(false);
 	});
 
 	it('leaves a valid form without errors', () => {
 		expect(hasFormErrors(validateModelForm(modelForm(model)))).toBe(false);
-	});
-});
-
-describe('modelForm', () => {
-	it('shows an unknown context window as an empty field', () => {
-		expect(modelForm({ ...model, context_window_tokens: null }).contextWindow).toBe('');
-		expect(modelForm(model).contextWindow).toBe('200000');
 	});
 });
 
@@ -147,22 +140,12 @@ describe('buildModelPatch', () => {
 		expect(patch.max_input_tokens).toBeNull();
 	});
 
-	it('clears a known context window when the field is left empty', () => {
-		const patch = buildModelPatch(model, { ...modelForm(model), contextWindow: '' });
-		expect(patch.clear_context_window).toBe(true);
-		expect(patch.context_window_tokens).toBeNull();
-	});
-
-	it('sets a context window that was unknown', () => {
+	it('never sends the context window, known or unknown, so the stored value is kept', () => {
+		const known = buildModelPatch(model, { ...modelForm(model), maxOutput: '4096' });
+		expect(known.context_window_tokens).toBeNull();
+		expect(known.clear_context_window).toBe(false);
 		const unknown = { ...model, context_window_tokens: null };
-		const patch = buildModelPatch(unknown, { ...modelForm(unknown), contextWindow: '64000' });
-		expect(patch.context_window_tokens).toBe(64000);
-		expect(patch.clear_context_window).toBe(false);
-	});
-
-	it('does not touch an unknown context window that stays unknown', () => {
-		const unknown = { ...model, context_window_tokens: null };
-		const patch = buildModelPatch(unknown, modelForm(unknown));
+		const patch = buildModelPatch(unknown, { ...modelForm(unknown), name: 'Renamed' });
 		expect(patch.context_window_tokens).toBeNull();
 		expect(patch.clear_context_window).toBe(false);
 	});

@@ -7,6 +7,7 @@ import type { ModelProfileView } from '$lib/ipc/bindings/ModelProfileView';
 import type { ModelView } from '$lib/ipc/bindings/ModelView';
 import type { ProviderPatch } from '$lib/ipc/bindings/ProviderPatch';
 import type { ProviderView } from '$lib/ipc/bindings/ProviderView';
+import type { ReasoningProfileEdit } from '$lib/ipc/bindings/ReasoningProfileEdit';
 import { formatCount } from './format';
 
 export const PROTOCOL_OPTIONS: readonly { value: string; label: string }[] = [
@@ -33,6 +34,13 @@ export const API_KEY_ENV_REQUIRED_MESSAGE =
 	'Indiquez la variable qui contient la clé : elle est requise avec cette authentification.';
 export const API_KEY_ENV_CLEAR_MESSAGE = 'Cette variable ne peut pas être effacée depuis cette fenêtre.';
 
+export const PROFILE_ID_REQUIRED = 'Saisissez un identifiant.';
+export const PROFILE_ID_DUPLICATE = 'Cet identifiant existe déjà pour ce modèle.';
+export const PROFILE_PARAMETERS_OBJECT = 'Les paramètres doivent être un objet JSON, entre accolades.';
+export const PROFILE_POINTER = 'Chaque chemin commence par « / », par exemple /champ/sous-champ.';
+export const DEFAULT_PROFILE_PENDING =
+	'Le profil par défaut a été retiré ou renommé : choisissez-en un autre, ou « Aucun ».';
+
 /** The name to show: the name when it has text, else the id (an empty label would render blank). */
 export function displayName(name: string | null | undefined, id: string): string {
 	const text = name?.trim() ?? '';
@@ -57,6 +65,10 @@ export function modelCountLabel(count: number): string {
 	return `${formatCount(count)} ${count === 1 ? 'modèle' : 'modèles'}`;
 }
 
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 // ─── Forms ───────────────────────────────────────────────────────────────────
 
 export interface ProviderForm {
@@ -79,16 +91,95 @@ export function providerForm(provider: ProviderView): ProviderForm {
 	};
 }
 
+/**
+ * An effort profile as the form edits it. The JSON texts stay as typed until they are checked, so
+ * a mistake is shown and nothing is written.
+ */
+export interface ProfileDraft {
+	id: string;
+	label: string;
+	/** JSON text of the `parameters` object. */
+	parameters: string;
+	/** One JSON Pointer per line. */
+	remove: string;
+}
+
+export function profileDraft(profile: ModelProfileView): ProfileDraft {
+	return {
+		id: profile.id,
+		label: profile.label ?? '',
+		parameters: JSON.stringify(profile.parameters, null, 2),
+		remove: profile.remove.join('\n')
+	};
+}
+
+export function newProfileDraft(): ProfileDraft {
+	return { id: '', label: '', parameters: '{}', remove: '' };
+}
+
+/** Label of a draft in the form: its label when it has text, else its id. */
+export function draftLabel(draft: ProfileDraft): string {
+	return displayName(draft.label, draft.id.trim());
+}
+
+/** The pointers typed: one per line, blank lines ignored, surrounding spaces removed. */
+export function pointerLines(text: string): string[] {
+	return text
+		.split('\n')
+		.map((line) => line.trim())
+		.filter((line) => line !== '');
+}
+
+export interface ProfileErrors {
+	id?: string;
+	parameters?: string;
+	remove?: string;
+}
+
+export type ProfileParse = { ok: true; value: ReasoningProfileEdit } | { ok: false; errors: ProfileErrors };
+
+/**
+ * Checks one profile as typed and turns it into the engine's shape. `takenIds` are the ids of the
+ * other profiles of the model. These are the client rules only: the engine refuses protected
+ * fields and the rest, and its refusal is shown as it is.
+ */
+export function parseProfileDraft(draft: ProfileDraft, takenIds: readonly string[]): ProfileParse {
+	const errors: ProfileErrors = {};
+	const id = draft.id.trim();
+	if (id === '') errors.id = PROFILE_ID_REQUIRED;
+	else if (takenIds.includes(id)) errors.id = PROFILE_ID_DUPLICATE;
+
+	let parameters: Record<string, unknown> | null = null;
+	try {
+		const parsed: unknown = JSON.parse(draft.parameters.trim() === '' ? '{}' : draft.parameters);
+		if (isJsonObject(parsed)) parameters = parsed;
+		else errors.parameters = PROFILE_PARAMETERS_OBJECT;
+	} catch (e) {
+		errors.parameters = `JSON invalide : ${e instanceof Error ? e.message : String(e)}`;
+	}
+
+	const remove = pointerLines(draft.remove);
+	if (remove.some((pointer) => !pointer.startsWith('/'))) errors.remove = PROFILE_POINTER;
+
+	if (errors.id || errors.parameters || errors.remove || parameters === null) return { ok: false, errors };
+	const label = draft.label.trim();
+	return { ok: true, value: { id, label: label === '' ? null : label, parameters, remove } };
+}
+
 export interface ModelForm {
 	name: string;
 	apiModel: string;
 	maxInput: string;
 	maxOutput: string;
-	/** Empty when the context window is unknown. */
-	contextWindow: string;
 	modalities: string[];
-	/** Default reasoning profile id, `null` for none. */
+	profiles: ProfileDraft[];
+	/** Default profile id, `null` for none. */
 	reasoningDefault: string | null;
+	/**
+	 * The default profile was removed or renamed: the user must choose again. `null` (none) is a
+	 * valid choice; leaving the choice open is not.
+	 */
+	defaultPending: boolean;
 }
 
 export function modelForm(model: ModelView): ModelForm {
@@ -97,9 +188,10 @@ export function modelForm(model: ModelView): ModelForm {
 		apiModel: model.api_model,
 		maxInput: String(model.max_input_tokens),
 		maxOutput: String(model.max_output_tokens),
-		contextWindow: model.context_window_tokens === null ? '' : String(model.context_window_tokens),
 		modalities: [...model.input_modalities],
-		reasoningDefault: model.reasoning_default
+		profiles: model.profiles.map(profileDraft),
+		reasoningDefault: model.reasoning_default,
+		defaultPending: false
 	};
 }
 
@@ -107,7 +199,7 @@ export function modelForm(model: ModelView): ModelForm {
 
 /** A whole number above zero typed by the user (spaces and underscores allowed), or `null`. */
 export function parseCount(text: string): number | null {
-	const digits = text.replace(/[\s_  ]/g, '');
+	const digits = text.replace(/[\s_  ]/g, '');
 	if (!/^\d+$/.test(digits)) return null;
 	const value = Number(digits);
 	return Number.isSafeInteger(value) && value > 0 ? value : null;
@@ -118,7 +210,7 @@ export interface ModelFormErrors {
 	apiModel?: string;
 	maxInput?: string;
 	maxOutput?: string;
-	contextWindow?: string;
+	defaultProfile?: string;
 }
 
 export interface ProviderFormErrors {
@@ -129,7 +221,7 @@ export interface ProviderFormErrors {
 
 /**
  * Client checks: required texts are filled, token counts are whole numbers above zero, and the
- * key variable is named when the authentication needs one. Rust checks the rest.
+ * default profile is one of the profiles (or none). Rust checks the rest.
  */
 export function validateModelForm(form: ModelForm): ModelFormErrors {
 	const errors: ModelFormErrors = {};
@@ -137,8 +229,9 @@ export function validateModelForm(form: ModelForm): ModelFormErrors {
 	if (form.apiModel.trim() === '') errors.apiModel = REQUIRED_MESSAGE;
 	if (parseCount(form.maxInput) === null) errors.maxInput = COUNT_ERROR;
 	if (parseCount(form.maxOutput) === null) errors.maxOutput = COUNT_ERROR;
-	if (form.contextWindow.trim() !== '' && parseCount(form.contextWindow) === null) {
-		errors.contextWindow = COUNT_ERROR;
+	const ids = form.profiles.map((p) => p.id.trim());
+	if (form.defaultPending || (form.reasoningDefault !== null && !ids.includes(form.reasoningDefault))) {
+		errors.defaultProfile = DEFAULT_PROFILE_PENDING;
 	}
 	return errors;
 }
@@ -163,6 +256,53 @@ export function validateProviderForm(form: ProviderForm, provider: ProviderView)
 /** True when at least one field has a message. */
 export function hasFormErrors(errors: object): boolean {
 	return Object.values(errors).some((message) => message !== undefined);
+}
+
+// ─── Profiles: the whole list, sent only when it changed ─────────────────────
+
+/** JSON with sorted keys, so two equal profiles compare equal whatever the key order. */
+function stableJson(value: unknown): string {
+	if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+	if (isJsonObject(value)) {
+		const entries = Object.keys(value)
+			.sort()
+			.map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`);
+		return `{${entries.join(',')}}`;
+	}
+	return JSON.stringify(value) ?? 'null';
+}
+
+function editOf(profile: ModelProfileView): ReasoningProfileEdit {
+	const label = profile.label?.trim() ?? '';
+	return {
+		id: profile.id,
+		label: label === '' ? null : label,
+		parameters: profile.parameters,
+		remove: profile.remove
+	};
+}
+
+export type ProfilesOutcome = { ok: true; edits: ReasoningProfileEdit[] | null } | { ok: false; message: string };
+
+/**
+ * The whole profile list as the engine receives it, or `null` when it is the list that was read.
+ * A list that does not parse, or whose ids repeat, is refused and nothing is sent.
+ */
+export function profilesPatch(original: readonly ModelProfileView[], drafts: readonly ProfileDraft[]): ProfilesOutcome {
+	const edits: ReasoningProfileEdit[] = [];
+	for (const [index, draft] of drafts.entries()) {
+		const others = drafts.filter((_, i) => i !== index).map((d) => d.id.trim());
+		const parsed = parseProfileDraft(draft, others);
+		if (!parsed.ok) {
+			const first = parsed.errors.id ?? parsed.errors.parameters ?? parsed.errors.remove ?? '';
+			const name = draft.id.trim() === '' ? 'sans identifiant' : `« ${draft.id.trim()} »`;
+			return { ok: false, message: `Profil ${name} : ${first}` };
+		}
+		edits.push(parsed.value);
+	}
+	const unchanged =
+		edits.length === original.length && edits.every((edit, i) => stableJson(edit) === stableJson(editOf(original[i])));
+	return { ok: true, edits: unchanged ? null : edits };
 }
 
 // ─── Patches (`null` = unchanged, as in the Rust contract) ──────────────────
@@ -210,9 +350,15 @@ export function buildProviderPatch(provider: ProviderView, form: ProviderForm): 
 	};
 }
 
-export function buildModelPatch(model: ModelView, form: ModelForm): ModelPatch {
-	const contextUnknown = form.contextWindow.trim() === '';
-	const context = contextUnknown ? null : parseCount(form.contextWindow);
+/**
+ * The patch of a model. The context window is not edited in this form: its fields are never sent,
+ * so the stored value is kept as it is. `profiles` is the whole list from `profilesPatch`, or `null`.
+ */
+export function buildModelPatch(
+	model: ModelView,
+	form: ModelForm,
+	profiles: ReasoningProfileEdit[] | null = null
+): ModelPatch {
 	const modalitiesNow = orderedModalities(form.modalities);
 	const modalitiesBefore = orderedModalities(model.input_modalities);
 	const reasoningChanged = form.reasoningDefault !== model.reasoning_default;
@@ -221,11 +367,12 @@ export function buildModelPatch(model: ModelView, form: ModelForm): ModelPatch {
 		api_model: changedRequired(model.api_model, form.apiModel),
 		max_input_tokens: changedCount(model.max_input_tokens, form.maxInput),
 		max_output_tokens: changedCount(model.max_output_tokens, form.maxOutput),
-		context_window_tokens: context !== null && context !== model.context_window_tokens ? context : null,
-		clear_context_window: contextUnknown && model.context_window_tokens !== null,
+		context_window_tokens: null,
+		clear_context_window: false,
 		input_modalities: modalitiesNow.join('|') === modalitiesBefore.join('|') ? null : modalitiesNow,
 		reasoning_default: reasoningChanged && form.reasoningDefault !== null ? form.reasoningDefault : null,
-		clear_reasoning_default: reasoningChanged && form.reasoningDefault === null
+		clear_reasoning_default: reasoningChanged && form.reasoningDefault === null,
+		profiles
 	};
 }
 

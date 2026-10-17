@@ -180,10 +180,9 @@
 		</AlertDialog.Root>
 	{/if}
 {:else}
-	<div class="flex flex-col gap-3 text-sm">
-		<p class="text-xs text-pretty text-muted-foreground">
-			Sous-agents de cette conversation. Choisissez-en un pour voir son détail.
-		</p>
+	{#if conv.agents.size === 0}
+		<p class="text-sm text-muted-foreground">Aucun sous-agent dans cette conversation.</p>
+	{:else}
 		<AgentList conversation={conv} />
-	</div>
+	{/if}
 {/if}

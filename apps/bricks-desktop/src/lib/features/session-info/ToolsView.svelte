@@ -63,14 +63,13 @@
 {#if !conv || !sessionId}
 	<EmptyState
 		title="Aucune conversation ouverte"
-		description="Ouvrez une conversation pour voir ses outils."
 	/>
 {:else if loadError}
 	<p role="alert" class="text-sm text-destructive">Lecture des outils impossible : {loadError}</p>
 {:else if tools === null}
 	<p class="text-sm text-muted-foreground" aria-live="polite">Chargement des outils…</p>
 {:else if tools.length === 0}
-	<EmptyState title="Aucun outil disponible" description="Cette session n’a pas d’outil." />
+	<EmptyState title="Aucun outil disponible" />
 {:else}
 	<div class="flex flex-col gap-3">
 		<Input

@@ -77,6 +77,11 @@ pub fn run() {
             commands::providers::model_update,
             commands::providers::provider_delete,
             commands::providers::model_delete,
+            // Skills catalogue for settings (Sprint 14.3)
+            commands::skills::skills_catalog,
+            // Read adapters over engine agent state (Sprint 14.3)
+            commands::adk::session_agents,
+            commands::adk::session_changesets,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Bricks")

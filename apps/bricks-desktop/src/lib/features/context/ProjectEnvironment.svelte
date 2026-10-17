@@ -136,7 +136,7 @@
 	}}
 />
 
-<SectionCard title="Environnement" description="Projet, dépôt Git et réglages de la conversation.">
+<SectionCard title="Environnement">
 	<dl class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
 		<dt class="text-muted-foreground">Projet</dt>
 		<dd class="min-w-0 truncate font-medium" title={projectName}>{projectName}</dd>
@@ -207,10 +207,5 @@
 
 	{#if pendingText}
 		<p class="mt-2 text-xs text-pretty text-muted-foreground">{pendingText}</p>
-	{/if}
-	{#if !conversation}
-		<p class="mt-2 text-xs text-pretty text-muted-foreground">
-			Ouvrez une conversation pour voir son modèle et son raisonnement.
-		</p>
 	{/if}
 </SectionCard>

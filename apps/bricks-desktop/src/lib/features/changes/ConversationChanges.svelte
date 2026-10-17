@@ -3,11 +3,13 @@
 	import { changeLogDiff } from '$lib/ipc/client';
 	import { Button } from '$lib/components/ui/button';
 	import EmptyState from '$lib/layout/EmptyState.svelte';
-	import { app } from '$lib/state/app.svelte';
+		import { app } from '$lib/state/app.svelte';
+	import { ui } from '$lib/state/ui.svelte';
+	import { changesetIdsOf, changesetLinkLabel } from '$lib/features/catalog/changeset-links';
 	import { conversationChanges, type FileView } from './conversation-changes';
 	import FileChangeRow from './FileChangeRow.svelte';
 	import { sessionJournal, type SessionJournal } from './journal.svelte';
-	import { EDIT_SUM_LABEL, formatDateTime, kindLabel, plural, shortId } from './format';
+	import { formatDateTime, kindLabel, plural, shortId } from './format';
 	import type { PatchSource } from './types';
 
 	const conv = $derived(app.current);
@@ -66,19 +68,13 @@
 				<Button variant="outline" size="sm" onclick={() => journal?.load()}>Réessayer</Button>
 			{/snippet}
 		</EmptyState>
-	{:else if !journal?.loaded}
+		{:else if !journal?.loaded}
 		<p class="px-3 py-6 text-center text-sm text-muted-foreground">Chargement…</p>
-	{:else}
-		<EmptyState
-			title="Aucune modification"
-			description="Les fichiers écrits par les agents dans cette conversation apparaîtront ici."
-		/>
 	{/if}
 {:else}
 	<div class="flex flex-col gap-4">
-		<p class="text-xs text-muted-foreground">
-			{plural(fileCount, 'fichier modifié', 'fichiers modifiés')}. Chiffres :
-			<span class="italic">{EDIT_SUM_LABEL}</span>.
+				<p class="text-xs text-muted-foreground">
+			{plural(fileCount, 'fichier modifié', 'fichiers modifiés')}
 		</p>
 
 		{#each groups as group (group.runId ?? 'sans-execution')}
@@ -98,9 +94,21 @@
 							removed={file.removed}
 							binary={file.binary}
 							agents={file.agents.map((id) => `Agent ${shortId(id)}`)}
-							countLabel={EDIT_SUM_LABEL}
 							patches={patchesOf(file)}
-						/>
+						>
+							{#snippet actions()}
+								{@const ids = changesetIdsOf(file.operations)}
+								{#each ids as id (id)}
+									<Button
+										variant="ghost"
+										size="xs"
+										onclick={() => ui.open('changeset', { changesetId: id })}
+									>
+										{changesetLinkLabel(ids, id)}
+									</Button>
+								{/each}
+							{/snippet}
+						</FileChangeRow>
 					{/each}
 				</div>
 			</section>

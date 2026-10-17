@@ -16,8 +16,17 @@ export const NARROW_BREAKPOINT = 800;
 /** Starting sizes used when the caller provides no saved preference. */
 export const LAYOUT_DEFAULTS = {
 	leftWidth: 260,
-	rightWidth: 280,
-	terminalHeight: 240
+	rightWidth: 280
+} as const;
+
+/**
+ * Terminal pane share of the centre column (Sprint 14.3). The saved ratio is kept
+ * within min..max; `fallback` is used until a ratio is known (no preference loaded yet).
+ */
+export const TERMINAL_RATIO = {
+	min: 0.1,
+	max: 0.8,
+	fallback: 0.3
 } as const;
 
 /** Hard limits. The centre column never shrinks below `centerMin` while sides are inline. */

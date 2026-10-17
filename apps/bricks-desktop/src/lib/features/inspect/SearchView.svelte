@@ -101,7 +101,6 @@
 				autocomplete="off"
 				spellcheck={false}
 				class="font-mono"
-				aria-describedby="{uid}-hint"
 			/>
 			<Button type="submit" disabled={pending || !hasText}>
 				{#if pending}
@@ -119,11 +118,6 @@
 				<Label for="{uid}-regex" class="font-normal">Expression régulière</Label>
 			</div>
 		</div>
-		<p id="{uid}-hint" class="text-xs text-pretty text-muted-foreground">
-			Recherche dans le texte des fichiers du dossier de la session, sensible à la casse. Ce n’est pas
-			la recherche dans les conversations. Commencez la saisie par <code class="font-mono">re:</code>
-			pour une expression régulière.
-		</p>
 		{#if formError}
 			<p role="alert" class="text-sm text-destructive">{formError}</p>
 		{/if}

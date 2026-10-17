@@ -52,7 +52,6 @@
 {#if !conv || !sessionId}
 	<EmptyState
 		title="Aucune conversation ouverte"
-		description="Ouvrez une conversation pour voir ses serveurs MCP."
 	/>
 {:else if loadError}
 	<p role="alert" class="text-sm text-destructive">Lecture des serveurs MCP impossible : {loadError}</p>

@@ -56,8 +56,8 @@
   }
 </script>
 
-<div class="flex min-w-0 items-center gap-2">
-  <!-- The page's only h1: the conversation title (the top bar is the page header). -->
+<div class="flex min-w-0 max-w-full items-center justify-center gap-2">
+  <!-- The page's h1 is the sr-only « Bricks » (AppShell): the conversation title is its h2. -->
   <h2 class="flex min-w-0 items-center text-sm font-medium text-foreground">
     {#if editing && conversation}
       <Input
@@ -69,17 +69,9 @@
         onkeydown={onKeydown}
         onblur={commit}
       />
-    {:else if conversation}
-      <button
-        type="button"
-        class="min-w-0 truncate rounded-md px-1.5 py-0.5 hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-        title="Renommer la conversation"
-        onclick={startEdit}
-      >
-        {title}
-      </button>
     {:else}
-      <span class="px-1.5" data-tauri-drag-region>{title}</span>
+      <!-- Plain text: renaming is the pencil button beside it (the single rename control). -->
+      <span class="min-w-0 truncate px-1.5 py-0.5" title={title} data-tauri-drag-region>{title}</span>
     {/if}
   </h2>
 

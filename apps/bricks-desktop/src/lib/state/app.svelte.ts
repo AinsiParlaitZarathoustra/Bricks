@@ -28,6 +28,8 @@ export const DEFAULT_PREFERENCES: Preferences = {
   last_project_id: null,
   last_session_id: null,
   tool_approval: 'standard',
+  colors: { light: { accent: null, background: null, panel: null }, dark: { accent: null, background: null, panel: null } },
+  terminal_ratio: null,
 }
 
 export type RightView = 'context' | 'changes'
@@ -265,6 +267,10 @@ class AppStore {
       if (!conv) {
         conv = new Conversation(opened, projectId)
         this.conversations.set(conv.sessionId, conv)
+        const c = conv
+        Promise.all([ipc.sessionAgents(c.sessionId), ipc.sessionChangesets(c.sessionId)])
+          .then(([records, sets]) => c.hydrateAgents(records, sets))
+          .catch(() => {})
       }
       this.upsertSession(projectId, opened.session)
       this.show(conv)

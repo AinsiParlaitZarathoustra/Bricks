@@ -278,6 +278,9 @@ impl AgentStream {
 
 // ─── Control messages ────────────────────────────────────────────────────────
 
+// `run_stream_input` acts on `Cancel` only. `AgentStream::respond_permission`
+// and `inject_message` send the other two, and its control loop drops them
+// (documented in wiki/05-events-streaming.md, "Current limitation").
 #[derive(Debug)]
 pub(crate) enum AgentControl {
     #[allow(dead_code)]

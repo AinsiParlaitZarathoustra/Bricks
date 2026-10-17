@@ -29,8 +29,5 @@
 				</li>
 			{/each}
 		</ul>
-		<p class="mt-2 text-xs text-pretty text-muted-foreground">
-			Les décisions se prennent dans la conversation.
-		</p>
 	</section>
 {/if}

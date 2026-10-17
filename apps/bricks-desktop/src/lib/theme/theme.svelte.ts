@@ -8,7 +8,18 @@
  * Persistence is the caller's job (prefs IPC): read the saved value, pass it
  * to `initTheme()` once at startup, and call `setTheme()` when the user picks
  * a mode, then save it. This module never touches storage.
+ *
+ * Custom colours (Sprint 14.3) come from `app.prefs.colors` for the resolved
+ * mode. A module-level effect applies them as soon as preferences load, when
+ * the mode changes and when the user edits a colour, so no caller has to
+ * remember to apply them at start-up.
+ *
+ * `fontsReady` resolves once the bundled Geist faces are loaded (the terminal
+ * refits after it).
  */
+
+import { app } from '$lib/state/app.svelte';
+import { applyPaletteVariables, paletteVariables } from './palette';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 export type ResolvedTheme = 'light' | 'dark';
@@ -61,6 +72,32 @@ let disposeListener: (() => void) | null = null;
 function applyToDocument(resolved: ResolvedTheme): void {
 	if (typeof document === 'undefined') return;
 	document.documentElement.classList.toggle('dark', resolved === 'dark');
+}
+
+// Custom colours of the resolved mode. Runs in its own root: it lives as long as the app.
+if (typeof document !== 'undefined') {
+	$effect.root(() => {
+		$effect(() => {
+			applyPaletteVariables(document.documentElement, paletteVariables(app.prefs.colors?.[state.resolved]));
+		});
+	});
+}
+
+/** Resolves once the bundled Geist faces (UI and mono) are loaded. Never rejects: the fallback fonts stay if a face fails. */
+export const fontsReady: Promise<void> = loadBundledFonts();
+
+async function loadBundledFonts(): Promise<void> {
+	if (typeof document === 'undefined' || !document.fonts) return;
+	try {
+		await Promise.all([
+			document.fonts.load('400 1em Geist'),
+			document.fonts.load('500 1em Geist'),
+			document.fonts.load('400 1em "Geist Mono"')
+		]);
+		await document.fonts.ready;
+	} catch {
+		// A face that fails to load leaves the system fallback in place.
+	}
 }
 
 /** Sets the user's theme mode and updates <html> immediately. Does not persist. */

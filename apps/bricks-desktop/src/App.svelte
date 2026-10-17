@@ -28,7 +28,10 @@
   let terminalOpen = $state(false)
   let leftWidth = $state(260)
   let rightWidth = $state(280)
-  let terminalHeight = $state(240)
+  // Terminal share of the centre column (Sprint 14.3). `legacyTerminalHeight` is the
+  // saved pixel height, read by AppShell once to derive the ratio when none is saved.
+  let terminalRatio = $state<number | null>(null)
+  let legacyTerminalHeight = $state<number | undefined>(undefined)
 
   onMount(() => {
     const disposeTheme = initTheme('system')
@@ -40,7 +43,8 @@
       terminalOpen = p.terminal_open
       leftWidth = p.left_width
       rightWidth = p.right_width
-      terminalHeight = p.terminal_height
+      terminalRatio = p.terminal_ratio
+      legacyTerminalHeight = p.terminal_height
     })
     return () => {
       disposeTheme()
@@ -60,7 +64,7 @@
       terminal_open: l.terminalOpen,
       left_width: Math.round(l.leftWidth),
       right_width: Math.round(l.rightWidth),
-      terminal_height: Math.round(l.terminalHeight),
+      terminal_ratio: l.terminalRatio,
     })
   }
 
@@ -93,7 +97,8 @@
       bind:terminalOpen
       bind:leftWidth
       bind:rightWidth
-      bind:terminalHeight
+      bind:terminalRatio
+      {legacyTerminalHeight}
       {onLayoutChange}
     >
       {#snippet topbar(controls)}

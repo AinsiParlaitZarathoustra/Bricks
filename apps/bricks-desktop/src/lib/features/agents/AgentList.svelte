@@ -39,9 +39,7 @@
 	const selected = $derived(selectedId ? (conversation.agents.get(selectedId) ?? null) : null);
 </script>
 
-{#if agents.length === 0}
-	<p class="py-1 text-xs text-pretty text-muted-foreground">Aucun sous-agent dans cette conversation.</p>
-{:else}
+{#if agents.length > 0}
 	<ul class="flex flex-col gap-2">
 		{#each agents as agent (agent.id)}
 			{@const view = agentStateView(agent.state)}

@@ -65,11 +65,6 @@
 </script>
 
 <div class="flex flex-col gap-4 text-sm">
-	<p class="text-xs text-pretty text-muted-foreground">
-		Tâches d’arrière-plan lancées par les agents de cette conversation. Ce ne sont pas vos
-		terminaux.
-	</p>
-
 	{#if !conv}
 		<p class="text-muted-foreground">Aucune conversation ouverte.</p>
 	{:else}
@@ -124,11 +119,7 @@
 			{/if}
 		{/if}
 
-		{#if jobs.length === 0}
-			{#if !refresh.pending}
-				<p class="text-muted-foreground">Aucune tâche d’arrière-plan connue pour cette conversation.</p>
-			{/if}
-		{:else}
+		{#if jobs.length > 0}
 			<!-- A named, focusable scroll container: keyboard users must be able to scroll
 				it (WCAG 2.1.1). The rule only checks the role, so it is suppressed here. -->
 			<!-- svelte-ignore a11y_no_noninteractive_tabindex -->

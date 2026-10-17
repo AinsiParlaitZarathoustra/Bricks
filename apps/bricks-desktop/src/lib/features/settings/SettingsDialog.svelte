@@ -7,17 +7,19 @@
 	import Palette from '@lucide/svelte/icons/palette';
 	import SlidersHorizontal from '@lucide/svelte/icons/sliders-horizontal';
 	import Cpu from '@lucide/svelte/icons/cpu';
+	import Sparkles from '@lucide/svelte/icons/sparkles';
 	import AppWindow from '@lucide/svelte/icons/app-window';
 	import FlaskConical from '@lucide/svelte/icons/flask-conical';
 	import AppearanceSettings from './AppearanceSettings.svelte';
 	import GeneralSettings from './GeneralSettings.svelte';
 	import ModelSettings from './ModelSettings.svelte';
+	import SkillsSettings from './SkillsSettings.svelte';
 	import ApplicationSettings from './ApplicationSettings.svelte';
 	import AdvancedSettings from './AdvancedSettings.svelte';
 
 	let { open = $bindable(false) }: { open?: boolean } = $props();
 
-	type SectionId = 'appearance' | 'general' | 'models' | 'application' | 'advanced';
+	type SectionId = 'appearance' | 'general' | 'models' | 'skills' | 'application' | 'advanced';
 
 	const SECTIONS: {
 		id: SectionId;
@@ -27,6 +29,7 @@
 		{ id: 'appearance', label: 'Apparence', icon: Palette },
 		{ id: 'general', label: 'Général', icon: SlidersHorizontal },
 		{ id: 'models', label: 'Modèles', icon: Cpu },
+		{ id: 'skills', label: 'Skills', icon: Sparkles },
 		{ id: 'application', label: 'Application', icon: AppWindow },
 		{ id: 'advanced', label: 'Avancé', icon: FlaskConical }
 	];
@@ -77,6 +80,9 @@
 			</Tabs.Content>
 			<Tabs.Content value="models" class="min-h-0 flex-1 overflow-y-auto p-6">
 				<ModelSettings />
+			</Tabs.Content>
+			<Tabs.Content value="skills" class="min-h-0 flex-1 overflow-y-auto p-6">
+				<SkillsSettings />
 			</Tabs.Content>
 			<Tabs.Content value="application" class="min-h-0 flex-1 overflow-y-auto p-6">
 				<ApplicationSettings />

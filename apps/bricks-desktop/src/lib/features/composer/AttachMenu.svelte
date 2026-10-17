@@ -6,16 +6,23 @@
   import PlusIcon from '@lucide/svelte/icons/plus'
   import FileIcon from '@lucide/svelte/icons/file'
   import FolderIcon from '@lucide/svelte/icons/folder'
+  import SparklesIcon from '@lucide/svelte/icons/sparkles'
 
   let {
     disabled = false,
     onPick,
     onError,
+    onSkills,
   }: {
     disabled?: boolean
     onPick: (paths: string[], kind: 'file' | 'folder') => void
     onError: (message: string) => void
+    /** Opens the skills choice of the composer (the menu entry is shown only when given). */
+    onSkills?: () => void
   } = $props()
+
+  /** Set when the skills choice was asked: the menu must not give the focus back to its trigger. */
+  let skillsAsked = false
 
   /** Native picker (several items at once); the paths are real file-system paths. */
   async function pick(kind: 'file' | 'folder') {
@@ -32,6 +39,11 @@
       onError(errorMessage(e))
     }
   }
+
+  function askSkills() {
+    skillsAsked = true
+    onSkills?.()
+  }
 </script>
 
 <DropdownMenu.Root>
@@ -43,7 +55,16 @@
   >
     <PlusIcon aria-hidden="true" />
   </DropdownMenu.Trigger>
-  <DropdownMenu.Content align="start" side="top">
+  <DropdownMenu.Content
+    align="start"
+    side="top"
+    onCloseAutoFocus={(event) => {
+      if (!skillsAsked) return
+      // The skills choice takes the focus it opens with.
+      skillsAsked = false
+      event.preventDefault()
+    }}
+  >
     <DropdownMenu.Item onSelect={() => pick('file')}>
       <FileIcon aria-hidden="true" />
       Fichiers…
@@ -52,5 +73,11 @@
       <FolderIcon aria-hidden="true" />
       Dossier…
     </DropdownMenu.Item>
+    {#if onSkills}
+      <DropdownMenu.Item onSelect={askSkills}>
+        <SparklesIcon aria-hidden="true" />
+        Skills…
+      </DropdownMenu.Item>
+    {/if}
   </DropdownMenu.Content>
 </DropdownMenu.Root>

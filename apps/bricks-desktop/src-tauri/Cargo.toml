@@ -17,6 +17,7 @@ tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 bricks-config = { workspace = true }
+bricks-skills = { workspace = true }
 cersei-agent = { workspace = true }
 cersei-provider = { workspace = true }
 cersei-tools = { workspace = true }

@@ -44,7 +44,7 @@
     <div
       class="md text-sm leading-relaxed break-words text-foreground"
       class:streaming={item.streaming}
-      use:markdownClicks={{ onLinkResult: (error) => (linkError = error) }}
+      use:markdownClicks={{ onLinkResult: (error) => (linkError = error), linksEnabled: !item.streaming }}
     >
       {@html html}
     </div>

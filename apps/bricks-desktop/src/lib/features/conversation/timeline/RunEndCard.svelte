@@ -9,32 +9,23 @@
   import DiffStat from '$lib/layout/DiffStat.svelte'
   import type { Conversation, RunEndItem, RunInfo } from '$lib/state/conversation.svelte'
   import type { RunOutcome } from '$lib/ipc/engine'
-  import {
-    OUTCOME_LABEL,
-    formatDuration,
-    parseTestCounts,
-    plural,
-    terminationLabel,
-    truncate,
-  } from '../format'
+  import { formatDuration, parseTestCounts, plural, truncate } from '../format'
+  import { runEndSummary } from '../runend'
   import MonoBlock from './MonoBlock.svelte'
 
   let { item, conversation }: { item: RunEndItem; conversation: Conversation } = $props()
 
   const run: RunInfo | undefined = $derived(conversation.runs.get(item.runId))
+  const summary = $derived(runEndSummary(run))
 
-  const BADGE: Record<RunOutcome, string> = {
-    succeeded: 'bg-success-soft text-success',
-    incomplete: 'bg-warning-soft text-warning',
-    failed: 'bg-destructive/10 text-destructive',
-    cancelled: 'bg-muted text-muted-foreground',
+  const TONE: Record<RunOutcome, string> = {
+    succeeded: 'text-success',
+    incomplete: 'text-warning',
+    failed: 'text-destructive',
+    cancelled: 'text-muted-foreground',
   }
 
-  const duration = $derived(
-    run && run.finishedAt !== undefined ? formatDuration(run.finishedAt - run.startedAt) : null,
-  )
   const files = $derived(run ? [...run.files.values()].sort((a, b) => a.path.localeCompare(b.path)) : [])
-  const reason = $derived(run?.outcome === 'incomplete' ? terminationLabel(run.termination) : null)
   const testReports = $derived(
     (run?.commands ?? []).flatMap((command) => {
       const counts = parseTestCounts(command.output)
@@ -48,45 +39,36 @@
   class="flex flex-col gap-3 rounded-lg border border-border bg-card p-3 text-sm text-card-foreground"
 >
   <h2 class="sr-only">Bilan de l’exécution</h2>
-  <header class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-    {#if run?.outcome}
-      <span class="inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-xs font-medium {BADGE[run.outcome]}">
-        {#if run.outcome === 'succeeded'}
-          <CircleCheck class="size-3.5" aria-hidden="true" />
-        {:else if run.outcome === 'incomplete'}
-          <TriangleAlert class="size-3.5" aria-hidden="true" />
-        {:else if run.outcome === 'failed'}
-          <CircleX class="size-3.5" aria-hidden="true" />
-        {:else}
-          <Ban class="size-3.5" aria-hidden="true" />
-        {/if}
-        {OUTCOME_LABEL[run.outcome]}
-      </span>
-    {:else}
-      <span class="inline-flex items-center gap-1.5 rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+  <p class="flex flex-wrap items-center gap-x-2 gap-y-1">
+    <span class="inline-flex items-center gap-1.5 font-medium {summary.outcome ? TONE[summary.outcome] : 'text-muted-foreground'}">
+      {#if summary.outcome === 'succeeded'}
+        <CircleCheck class="size-3.5" aria-hidden="true" />
+      {:else if summary.outcome === 'incomplete'}
+        <TriangleAlert class="size-3.5" aria-hidden="true" />
+      {:else if summary.outcome === 'failed'}
+        <CircleX class="size-3.5" aria-hidden="true" />
+      {:else if summary.outcome === 'cancelled'}
+        <Ban class="size-3.5" aria-hidden="true" />
+      {:else}
         <CircleAlert class="size-3.5" aria-hidden="true" />
-        Fin de l’exécution
-      </span>
+      {/if}
+      {summary.label}
+    </span>
+    {#if summary.duration !== null}
+      <span aria-hidden="true" class="text-muted-foreground">·</span>
+      <span class="text-muted-foreground tabular-nums">{summary.duration}</span>
     {/if}
-    {#if duration}
-      <span class="text-xs text-muted-foreground">Durée : <span class="tabular-nums">{duration}</span></span>
+    {#if summary.additions !== null && summary.deletions !== null}
+      <span aria-hidden="true" class="text-muted-foreground">·</span>
+      <DiffStat additions={summary.additions} deletions={summary.deletions} />
     {/if}
-    {#if run?.turns !== undefined}
-      <span class="text-xs text-muted-foreground">Tours : <span class="tabular-nums">{run.turns}</span></span>
-    {/if}
-    {#if run?.model}
-      <span class="font-mono text-xs text-muted-foreground">{run.model}</span>
-    {/if}
-  </header>
+  </p>
 
-  {#if reason}
-    <p class="text-xs text-warning break-words">Incomplet : {reason}.</p>
+  {#if summary.reason}
+    <p class="text-xs text-warning break-words">Motif : {summary.reason}.</p>
   {/if}
-  {#if run?.outcome === 'failed' && run.error}
-    <p class="text-xs text-destructive break-words whitespace-pre-wrap">Erreur : {run.error}</p>
-  {/if}
-  {#if run?.outcome === 'cancelled'}
-    <p class="text-xs text-muted-foreground">Exécution annulée avant la fin.</p>
+  {#if summary.error}
+    <p class="text-xs text-destructive break-words whitespace-pre-wrap">Erreur : {summary.error}</p>
   {/if}
 
   {#if run && run.approvalsUnsatisfied.length > 0}
@@ -114,11 +96,7 @@
             {#if file.binary}
               <span class="text-muted-foreground">binaire</span>
             {:else}
-              <DiffStat
-                additions={file.added}
-                deletions={file.removed}
-                label="somme des opérations d’édition, pas un diff Git net"
-              />
+              <DiffStat additions={file.added} deletions={file.removed} />
             {/if}
           </li>
         {/each}
@@ -154,7 +132,7 @@
           <li class="rounded-md border border-border text-xs">
             <Collapsible>
               <CollapsibleTrigger
-                class="group flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                class="group flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-start hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
               >
                 <ChevronDown class="size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" aria-hidden="true" />
                 {#if command.isError}

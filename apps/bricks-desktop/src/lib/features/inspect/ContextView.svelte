@@ -74,7 +74,7 @@
 		{/if}
 		{#if compactPending}
 			<p class="text-muted-foreground">
-				Compaction demandée. Le résultat apparaîtra ici dès que le moteur répond.
+				Compaction en attente de la réponse du moteur…
 			</p>
 		{:else if compactRefused !== null}
 			<p role="alert" class="text-destructive">Compaction refusée : {compactRefused}</p>

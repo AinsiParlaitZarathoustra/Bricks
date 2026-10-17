@@ -26,9 +26,9 @@ describe('displayName', () => {
 
 describe('profileLabel', () => {
 	it('uses the label, or the id when the label is empty or missing', () => {
-		expect(profileLabel({ id: 'high', label: 'Approfondi' })).toBe('Approfondi');
-		expect(profileLabel({ id: 'high', label: '' })).toBe('high');
-		expect(profileLabel({ id: 'high', label: null })).toBe('high');
+		expect(profileLabel({ id: 'high', label: 'Approfondi', parameters: {}, remove: [] })).toBe('Approfondi');
+		expect(profileLabel({ id: 'high', label: '', parameters: {}, remove: [] })).toBe('high');
+		expect(profileLabel({ id: 'high', label: null, parameters: {}, remove: [] })).toBe('high');
 	});
 });
 

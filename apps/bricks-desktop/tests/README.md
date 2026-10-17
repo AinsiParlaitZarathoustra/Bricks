@@ -3,7 +3,9 @@
 Owner: Sprint 14, Haiku 8 (settings and quality). Sprint 14.1 (command mapping tests, regression
 checks, checklist): Haiku 8, 2026-10-16. Sprint 14.2 (validation: approval override, providers editing,
 preferences, tool lines, context, approval card, review): Haiku 4, 2026-10-16. Scope: `tests/**`,
-`src-tauri/tests/*.rs` and `crates/cersei-agent/tests/approval_override.rs`. Product code is not
+`src-tauri/tests/*.rs` and `crates/cersei-agent/tests/approval_override.rs`.
+Sprint 14.3 (validation): Haiku V, `tests/*-14-3.test.ts` and `src-tauri/tests/*_14_3.rs`; the review is in
+`tests/REVIEW_14_3.md`. Product code is not
 covered here beyond what the test files import. The review of the 14.2 Svelte and Rust changes is in
 `tests/REVIEW_14_2.md`.
 
@@ -52,9 +54,9 @@ cargo test -p cersei-agent --lib control::          # approval gate, settings, s
 cargo test -p cersei-agent --test approval_override # 14.2: the runtime approval override
 ```
 
-`cargo test -p cersei-agent` without `--lib` or `--test` does not build at the moment: the files
-`crates/cersei-agent/tests/* 2.rs` (user copies, not touched by the tests) are discovered as test
-targets, and cargo rejects their names (`invalid character ' ' in crate name`). See `REVIEW_14_2.md` I6.
+`cargo test -p cersei-agent` without `--lib` or `--test` builds again since Sprint 14.3: the user copies
+`crates/cersei-agent/tests/* 2.rs` that blocked it were removed (`docs/cleanup-14-3.md`). The problem is listed
+in `REVIEW_14_2.md` I6.
 
 `npm run check` does not type-check `tests/`: `tests/tsconfig.json` does (it extends the app config
 and includes `tests/unit/**` and the state, dispatch and IPC modules they import).
@@ -199,6 +201,66 @@ Earlier run (Haiku 8, Sprint 14.1):
 - `cargo test -p bricks-desktop`: lib 98 passed; `slash_mapping` 12 passed.
 - Negative controls: changing one expected value in `slash_mapping.rs` fails the matrix test (then
   restored); changing the known-gap test to `it` fails with `expected 1 to be +0`.
+
+### Sprint 14.3 tests (validation)
+
+Existing files that already cover the 14.3 changes (read, not repeated):
+
+- `terminal-isolation.test.ts` (three tabs with distinct output, rapid switches, inactive close,
+  projects, detach keeps the shell, refit only when shown, fonts), `terminal-layout.test.ts` (the ratio
+  bounds, the px to ratio migration of `terminal_height`).
+- `theme-palette.test.ts`, `appearance-colors.test.ts` (palette rules, contrast, roles, reset),
+  `theme-fonts.test.ts` (Geist and Geist Mono local, no Inter).
+- `links-message.test.ts` (user-message links: punctuation, `&` in a query, `www.`, code, HTML-like text).
+- `runend-summary.test.ts` (state, duration in ms, edit sums, binary files, reason and error).
+- `models-profiles.test.ts`, `models-patch.test.ts` (profile drafts and list patches, the window never sent).
+- `composer-skills.test.ts`, `settings-skills.test.ts` (skill choices, selection after a run, paging).
+- `history-state.test.ts`, `adk-access.test.ts`, `changeset-links.test.ts` (history states, menu, links).
+- Rust: `prefs.rs` tests (colours, ratio clamp, legacy file), `providers_toml.rs` tests (profiles,
+  defaults, protected fields, context window kept), `commands/providers/tests.rs` (a saved free-named
+  profile reaches the request it selects), `services/skills.rs` tests (listing, project skill listed but
+  not trusted, reload, shadowing).
+
+New in Sprint 14.3 (validation):
+
+- `render-14-3.test.ts` (10): server render of `UserMessage.svelte` (links with trailing punctuation,
+  `&` in a query, `www.`, no link in code, HTML-like text as text, `dir="auto"` and `text-start`) and of
+  `RunEndCard.svelte` built from envelopes fed to `Conversation.apply` (« Terminé · 762 ms · +120 −24 »,
+  no turn count, no model id, no « Durée : », binary files without counts, failed and cancelled states).
+- `appearance-14-3.test.ts` (5): every variable the palette sets is declared in `:root` and `.dark` of
+  `src/app.css`; every accent preset reaches 4.5:1 for its text in both modes; every background and panel
+  preset keeps its text at 4.5:1.
+- `leftovers-14-3.test.ts` (11 passed, 1 `it.fails`): static checks of the sources: the spec §6 texts are
+  absent from the history tab and the run card; « Envoyer » and « Quelque chose à dire ? » are kept; the
+  model form says « Nom API » with no window field; no Inter; the header keeps its three columns; raw HTML
+  only in the sanitised Markdown path. The `it.fails` is an open defect (V2 below).
+- `src-tauri/tests/profiles_14_3.rs` (10): the JSON the model form sends, read as a `ModelPatch` and
+  written to a temporary `providers.toml`: a model edit keeps the context window and the profiles; a
+  free-named profile with nested values and a removed key is read back after a restart and listed by the
+  catalogue; duplicate ids, a non-object parameter block (array, number, string, null), a protected field
+  (`messages`), a pointer without `/`, an unknown or removed default are refused, and the file is
+  byte-for-byte unchanged; a removed default replaced or cleared in the same patch is written; a stale
+  revision is a conflict and keeps the other writer's change.
+- `src-tauri/tests/skills_prompt_14_3.rs` (4): the `submit` JSON the composer sends (text, file, folder and
+  image blocks in order, skill names as chosen) reads back as the engine's `Command::Submit`; no skill
+  field when none is chosen; a skill-only message; an unknown block kind is refused.
+
+Not repeated here: the engine's own skill activation (refusal before anything is sent, trust) is tested in
+`crates/cersei-agent`; the Svelte composer send path (draft kept on refusal) is read in `REVIEW_14_3.md`,
+because it lives in `Composer.svelte` and has no pure function to test.
+
+Last run (2026-10-17, Haiku V, Sprint 14.3 validation):
+
+- `npm run check`: 0 errors, 1 warning (`baseUrl`, already there). `npm run test:unit`: 34 files, 510 passed,
+  1 expected failure. `npm run test:types`: 1 error, V1 in `changeset-links.test.ts`; the new files pass.
+- `npm run build`: ok (chunk-size warning only).
+- `cargo build --examples -p cersei`, `cargo build --workspace`, `cargo test -p cersei-agent --no-run`,
+  `cargo test --workspace --no-run`: ok, no warning.
+- `cargo test -p bricks-desktop`: lib 146, `preferences_approval` 5, `profiles_14_3` 10, `providers_edit` 9,
+  `skills_prompt_14_3` 4, `slash_mapping` 12, all passed.
+- `cargo test -p cersei-tools -p cersei-types --lib`: 194 and 29 passed. `cargo test -p cersei-agent --lib`
+  178 passed; `--test agents_runtime` 21 passed.
+- Not run: the macOS application, the full `cersei-agent` test set, negative controls.
 
 ### WebDriver tests (`tests/e2e`)
 
@@ -403,6 +465,41 @@ Record failures as issues with the steps, the macOS version, and the window size
 - [ ] Composer: the placeholder reads « Quelque chose à dire ? »; `/` opens « Commandes »; `@` opens the
   file list.
 
+**Sprint 14.3 (« non vérifié » for every item until someone ticks it on a real build)**
+
+Appearance and header
+- [ ] Settings › Apparence: pick an accent in light mode, close and reopen the app: the colour persists; switch to dark: the dark value is the one saved for dark (not the light one).
+- [ ] « Réinitialiser : Accent » returns the accent to the theme token; the system mode applies the set of the resolved mode.
+- [ ] Geist renders in the interface and in the terminal; accents, long lines and xterm columns look right after the first load.
+- [ ] Title and project are centred at the top; the centre stays put with few and with many buttons on the right; a long title truncates; the left toggle sits at the top left; the window drags from empty header areas.
+
+Composer and links
+- [ ] The send tooltip reads « Envoyer »; the placeholder reads « Quelque chose à dire ? ».
+- [ ] Type Arabic or Hebrew, then French with an English word: the textarea and the user bubble align by their first strong character.
+- [ ] A user message with `https://exemple.fr/?a=1&b=2.` opens the system browser; the webview does not navigate; a `www.` address opens too; an address in backticks is code.
+- [ ] A message with `<img src=x onerror=…>` shows the text and runs nothing.
+- [ ] `+` menu › Skills: choose two skills, see the removable chips, send with an attachment: the run starts with the skills; remove a chip before sending: no file of the skill is touched.
+- [ ] A skill refused by the engine (for example a project skill not approved) keeps the draft, the attachments and the chips.
+
+Run card and history
+- [ ] A finished run shows « Terminé · N ms · +a −d » (no turn count, no model, no « Durée : »); a cancelled run shows « Annulé » only; a failed run shows its error.
+- [ ] Modifications › Historique: an empty project shows nothing under the tab; entries show directly; a failed load keeps « Réessayer ».
+
+Terminals
+- [ ] Three terminals in one project: each keeps its own output; switching quickly shows only the chosen one; closing an inactive tab leaves the shown one alone.
+- [ ] Switching projects brings back each project's terminals with their state.
+- [ ] Drag the terminal divider, quit and reopen: the proportion comes back; a small window keeps the composer, the tabs and the terminal usable.
+- [ ] The shell's size follows the visible terminal (`stty size` in the shell after a resize).
+
+Models and profiles
+- [ ] The model form shows « Nom API », « Entrée maximale (tokens) », « Sortie maximale (tokens) » and no context window field; a saved change keeps the window (the read-only row still shows it).
+- [ ] Add a profile with a free id and JSON parameters; an invalid JSON keeps the form and writes nothing; a duplicate id is refused; removing the default asks for a new choice.
+- [ ] The saved profile appears in the composer's effort choice after the save. The provider's answer to a free parameter is not checked here (« non vérifié »).
+
+Skills and ADK access
+- [ ] Settings › Skills lists the personal and built-in skills; search, « Recharger », and the project source (listed, not trusted) work.
+- [ ] Panneau droit › Plus lists each view once; each opens; stopping a sub-agent or a job asks for confirmation.
+
 ## 5. Known gaps and limits
 
 - **Session routing (open).** `app.svelte.ts` sends each envelope to `conversations.get(env.session_id)`.
@@ -426,4 +523,15 @@ Record failures as issues with the steps, the macOS version, and the window size
     changed back (`approval.rs`); the session button is shown in that mode with no effect. A decision is
     needed; the tests do not pin the current behaviour.
   - L1: an unknown `tool_approval` value makes the whole preferences file fall back to defaults.
-  - `cargo test -p cersei-agent` does not build while the `… 2.rs` files are in `tests/` (see section 2).
+  - `cargo test -p cersei-agent` without a target builds again (Sprint 14.3, section 2); the `… 2.rs` copies are gone.
+- **Sprint 14.3 open items** (details and fixes in `tests/REVIEW_14_3.md`; product code, not changed here):
+  - V1: `tests/unit/changeset-links.test.ts:17` does not type-check (`npm run test:types`, TS2741): the `{}`
+    operation has no `changesetId`. Test-only fix: give it `{ changesetId: null }`.
+  - V2: `ConversationChanges.svelte:75-83` (Conversation tab) still shows « Aucune modification » and the
+    permanent « Chiffres : somme des opérations… » sentence that spec §6 removes from the history. The
+    `it.fails` in `leftovers-14-3.test.ts` turns into `it` once fixed.
+  - V3 to V5: permanent explanatory texts in `SkillsSettings.svelte:117`, `ModelFormDialog.svelte:265` and
+    `AppearanceSettings.svelte:88` (spec §5, §6 and §9 ask for none).
+  - V6, V7: heading comment in `ConversationTitle.svelte:60` (it is an h2, the page h1 is the sr-only
+    « Bricks »); unnamed icon button in `components/ui/sidebar/sidebar-trigger.svelte`, which nothing imports.
+  - Native behaviour (section 4, Sprint 14.3 items) is not verified: the macOS application was not started.

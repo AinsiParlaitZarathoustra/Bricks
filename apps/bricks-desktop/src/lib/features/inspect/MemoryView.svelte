@@ -70,10 +70,7 @@
 </script>
 
 <div class="flex min-w-0 flex-col gap-5">
-	<div class="flex items-center justify-between gap-2">
-		<p class="text-sm text-pretty text-muted-foreground">
-			Mémoire à long terme de ce projet, en lecture seule.
-		</p>
+	<div class="flex justify-end gap-2">
 		<Button variant="ghost" size="sm" onclick={load} disabled={loading}>
 			<RefreshIcon class={loading ? 'animate-spin' : undefined} aria-hidden="true" />
 			Actualiser
@@ -114,7 +111,7 @@
 			</p>
 			<p class="text-xs text-muted-foreground">Rappel du {formatClock(memory.lastRecall.at)}.</p>
 		{:else}
-			<p class="text-sm text-muted-foreground">Aucun rappel dans cette session pour l’instant.</p>
+			<p class="text-sm text-muted-foreground">Aucun rappel dans cette session.</p>
 		{/if}
 	</section>
 

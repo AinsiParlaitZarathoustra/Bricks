@@ -51,18 +51,9 @@
 
 <div class="flex min-w-0 flex-col gap-4">
 	{#if !conv}
-		<p class="text-sm text-muted-foreground">Ouvrez une session pour vider son contexte.</p>
+		<p class="text-sm text-muted-foreground">Aucune conversation ouverte.</p>
 	{:else}
-		<div class="flex flex-col gap-2 text-sm text-pretty">
-			<p>
-				Le contexte actif du modèle est vidé : au prochain tour, le modèle ne reçoit plus les messages
-				précédents.
-			</p>
-			<p class="text-muted-foreground">
-				Ce n’est pas une suppression. La conversation et son historique brut restent enregistrés et
-				visibles dans la timeline ; un instantané du contexte est conservé.
-			</p>
-		</div>
+		<p class="text-sm text-pretty">Au prochain tour, le modèle ne reçoit plus les messages précédents. L’historique reste visible dans la conversation.</p>
 
 		{#if conv.running}
 			<p role="alert" class="rounded-md border border-border bg-muted p-3 text-sm text-pretty">
@@ -77,8 +68,7 @@
 		<div class="flex flex-wrap items-center gap-2" role="status" aria-live="polite">
 			{#if cleared !== null}
 				<p class="text-sm text-pretty">
-					Contexte vidé : {plural(cleared.messagesRemoved, 'message retiré', 'messages retirés')} du
-					contexte actif. La prochaine mesure s’affichera au prochain tour.
+					Contexte vidé : {plural(cleared.messagesRemoved, 'message retiré', 'messages retirés')} du contexte actif.
 				</p>
 				<Button variant="outline" onclick={() => ui.close()}>Fermer</Button>
 			{:else if pending}

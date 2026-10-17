@@ -66,10 +66,7 @@
 </script>
 
 <div class="flex min-w-0 flex-col gap-5">
-	<div class="flex items-center justify-between gap-2">
-		<p class="text-sm text-pretty text-muted-foreground">
-			Consommation de la session, telle que le moteur l’a comptée.
-		</p>
+	<div class="flex justify-end gap-2">
 		<Button
 			variant="ghost"
 			size="sm"
@@ -86,7 +83,7 @@
 			<Skeleton class="h-24 w-full" />
 		{:else if !total || !consumed}
 			<p class="text-sm text-muted-foreground">
-				Aucune consommation observée dans cette session pour l’instant.
+				Aucune consommation observée.
 			</p>
 		{:else}
 			<dl class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-sm">
@@ -142,15 +139,7 @@
 				</dd>
 			</dl>
 
-			<p class="text-xs text-pretty text-muted-foreground">
-				L’entrée exclut les lectures et écritures du cache ; le raisonnement est déjà compté dans la sortie.
-				Le total couvre toute la session, tous les modèles utilisés et les compactions.
-			</p>
-			{#if !live}
-				<p class="text-xs text-pretty text-muted-foreground">
-					Totaux relus à l’ouverture de la session ; ils se mettent à jour à la prochaine réponse.
-				</p>
-			{/if}
+			
 		{/if}
 		{#if loadError && !total}
 			<p role="alert" class="text-sm text-destructive">Impossible de relire les totaux : {loadError}</p>
@@ -160,7 +149,7 @@
 	<section class="flex flex-col gap-2" aria-labelledby="{uid}-runs">
 		<h3 id="{uid}-runs" class="text-sm font-medium">Par tour (run racine)</h3>
 		{#if runRows.length === 0}
-			<p class="text-sm text-muted-foreground">Aucun décompte par tour reçu pour l’instant.</p>
+			<p class="text-sm text-muted-foreground">Aucun tour compté.</p>
 		{:else}
 			{#each runRows as [rootId, ru] (rootId)}
 				<div class="flex min-w-0 flex-col gap-2 rounded-md border border-border p-3">
@@ -212,15 +201,12 @@
 								ru.pending_agents,
 								'sous-agent encore en cours',
 								'sous-agents encore en cours'
-							)}. Il sera complet à leur fin.
+							)}. 
 						</p>
 					{/if}
 				</div>
 			{/each}
-			<p class="text-xs text-pretty text-muted-foreground">
-				Les usages des sous-agents sont dans « Sous-agents » de leur tour. Ne pas additionner les tours
-				entre eux, ni un tour à son total : chaque réponse n’est comptée qu’une fois dans le total du tour.
-			</p>
+			
 		{/if}
 	</section>
 
@@ -229,8 +215,7 @@
 			<h3 id="{uid}-turns" class="text-sm font-medium">Par réponse</h3>
 			{#if turns.length === 0}
 				<p class="text-sm text-pretty text-muted-foreground">
-					Aucune réponse reçue par cette interface depuis l’ouverture ou la reprise de la session. Les
-					requêtes d’une session reprise ne figurent que dans le total.
+					Aucune réponse reçue depuis l’ouverture de la session.
 				</p>
 			{:else}
 				<div class="overflow-x-auto">
@@ -264,10 +249,7 @@
 					</table>
 				</div>
 				<p class="text-xs text-pretty text-muted-foreground">
-					{plural(turns.length, 'réponse affichée', 'réponses affichées')} : celles reçues par cette
-					interface depuis l’ouverture ou la reprise de la session. Les appels de compaction ne sont pas
-					listés.
-					{#if turns.length >= 2000}Seules les 2 000 dernières réponses sont conservées.{/if}
+					{plural(turns.length, 'réponse affichée', 'réponses affichées')}{#if turns.length >= 2000} · seules les 2 000 dernières sont conservées{/if}
 				</p>
 			{/if}
 		</section>

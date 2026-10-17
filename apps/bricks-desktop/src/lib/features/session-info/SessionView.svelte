@@ -77,7 +77,6 @@
 {#if !conv || !sessionId}
 	<EmptyState
 		title="Aucune conversation ouverte"
-		description="Ouvrez une conversation pour voir ses informations."
 	/>
 {:else}
 	<div class="flex flex-col gap-4">

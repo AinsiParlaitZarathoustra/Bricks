@@ -8,6 +8,7 @@ import DOMPurify from 'dompurify'
 import hljs from 'highlight.js/lib/common'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { Marked } from 'marked'
+import { isOpenableUrl } from './links'
 
 export function escapeHtml(text: string): string {
   return text
@@ -18,15 +19,7 @@ export function escapeHtml(text: string): string {
     .replace(/'/g, '&#39;')
 }
 
-/** Only these schemes are rendered as links and may be opened. */
-export function isOpenableUrl(href: string): boolean {
-  try {
-    const { protocol } = new URL(href)
-    return protocol === 'https:' || protocol === 'http:' || protocol === 'mailto:'
-  } catch {
-    return false
-  }
-}
+export { isOpenableUrl } from './links'
 
 const marked = new Marked({
   gfm: true,
@@ -92,6 +85,8 @@ export function renderMarkdown(source: string): string {
 export interface MarkdownClickOptions {
   /** Result of an attempt to open a link: an error message, or null on success. */
   onLinkResult?: (error: string | null) => void
+  /** False while the text is still streaming: a half-received address must not open. Default true. */
+  linksEnabled?: boolean
 }
 
 function errorText(error: unknown): string {
@@ -131,7 +126,7 @@ export const markdownClicks: Action<HTMLElement, MarkdownClickOptions | undefine
       // Never let the webview navigate, whatever the link target.
       event.preventDefault()
       const href = anchor.getAttribute('href') ?? ''
-      if (!isOpenableUrl(href)) return
+      if (current?.linksEnabled === false || !isOpenableUrl(href)) return
       openUrl(href).then(
         () => current?.onLinkResult?.(null),
         (error: unknown) => current?.onLinkResult?.(errorText(error)),

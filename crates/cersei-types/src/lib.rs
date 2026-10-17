@@ -524,10 +524,8 @@ pub enum StreamEvent {
         index: usize,
         block_type: String,
         /// For tool_use blocks: the tool use ID. Default: None.
-        #[allow(unused)]
         id: Option<String>,
         /// For tool_use blocks: the tool name. Default: None.
-        #[allow(unused)]
         name: Option<String>,
     },
     TextDelta {

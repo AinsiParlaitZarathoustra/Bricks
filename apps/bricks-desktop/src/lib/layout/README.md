@@ -36,7 +36,7 @@ Three zones: left navigation, centre conversation, right context, plus a bottom 
 ```svelte
 <AppShell
   bind:leftOpen bind:rightOpen bind:terminalOpen
-  bind:leftWidth bind:rightWidth bind:terminalHeight
+  bind:leftWidth bind:rightWidth bind:terminalRatio
   onLayoutChange={(layout) => savePrefs(layout)}
 >
   {#snippet left()}…{/snippet}
@@ -55,7 +55,7 @@ Three zones: left navigation, centre conversation, right context, plus a bottom 
 | `leftOpen`, `rightOpen` | `boolean`, bindable, default `true` | User preference. Automatic collapses never change it. |
 | `terminalOpen` | `boolean`, bindable, default `false` | User preference. |
 | `leftWidth`, `rightWidth` | `number` px, bindable, defaults 260 and 280 | Preferred inline widths. |
-| `terminalHeight` | `number` px, bindable, default 240 | Preferred terminal height. |
+| `terminalRatio` | `number | null`, bindable, default `null` | Terminal share of the centre column (0.1–0.8); `null` until derived once from the legacy px height. |
 | `onLayoutChange` | `(layout: ShellLayout) => void` | Debounced (300 ms). Fires after user resize or toggle, never after automatic changes. |
 
 Limits: side panels 200–480 px; centre at least 480 px; terminal at least 120 px; conversation at least 240 px tall.
@@ -87,7 +87,7 @@ Limits: side panels 200–480 px; centre at least 480 px; terminal at least 120 
 
 | Prop | Type | Notes |
 | --- | --- | --- |
-| `title` | `Snippet` | Left slot (session name, breadcrumb). |
+| `title` | `Snippet` | Centred slot (conversation title and project), stable whatever the number of right actions. |
 | `actions` | `Snippet` | Right slot, before the toggles. |
 | `leftPressed`, `rightPressed`, `terminalPressed`, `changesPressed` | `boolean` | Toggle state. |
 | `onToggleLeft`, `onToggleRight`, `onToggleTerminal`, `onToggleChanges` | `() => void` | A toggle is shown only when its callback is set. |

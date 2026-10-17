@@ -163,10 +163,6 @@
 			tabindex="0"
 			class="flex max-h-[62vh] flex-col gap-5 overflow-y-auto rounded-sm pr-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
 		>
-			<p class="text-xs text-pretty text-muted-foreground">
-				Le texte des sous-agents n’est pas diffusé en direct ; voir le résumé final.
-			</p>
-
 			{#if cancellable}
 				<div>
 					<Button
@@ -264,9 +260,7 @@
 					Appels d’outils
 					<span class="font-mono tabular-nums">{agent.tools.length}</span>
 				</h3>
-				{#if agent.tools.length === 0}
-					<p class="text-xs text-muted-foreground">Aucun appel d’outil pour l’instant.</p>
-				{:else}
+				{#if agent.tools.length > 0}
 					<ul class="flex flex-col gap-0.5">
 						{#each agent.tools as tool, i (tool.toolCallId || i)}
 							<li>
@@ -333,7 +327,7 @@
 					<p class="text-xs text-pretty text-muted-foreground">
 						{live
 							? 'Le résultat sera disponible à la fin du sous-agent.'
-							: 'Aucun résultat enregistré : le sous-agent s’est arrêté avant de produire un résumé.'}
+							: 'Aucun résultat enregistré.'}
 					</p>
 				{:else}
 					{#if result.error}

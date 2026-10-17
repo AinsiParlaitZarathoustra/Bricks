@@ -10,6 +10,7 @@ pub mod prefs;
 pub mod projects;
 pub mod providers;
 pub mod providers_toml;
+pub mod skills;
 
 use crate::contract::{IpcError, IpcErrorCode};
 use std::fmt::Display;

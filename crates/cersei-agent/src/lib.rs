@@ -172,7 +172,6 @@ type EventFilter = Arc<dyn Fn(&AgentEvent) -> bool + Send + Sync>;
 
 // ─── Agent ───────────────────────────────────────────────────────────────────
 
-#[allow(dead_code)]
 pub struct Agent {
     /// Provider, model label and reasoning profile, changed together by
     /// [`Agent::set_model`] / [`Agent::set_reasoning`]. A run takes one
@@ -181,6 +180,9 @@ pub struct Agent {
     selection: parking_lot::RwLock<Selection>,
     tools: Vec<Box<dyn Tool>>,
     system_prompt: Option<String>,
+    // Set by `AgentBuilder::append_system_prompt` but not read yet: the
+    // prompt built by `effective_system` ignores it.
+    #[allow(dead_code)]
     append_system_prompt: Option<String>,
     max_tokens: u32,
     temperature: Option<f32>,

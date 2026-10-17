@@ -15,8 +15,8 @@ export interface ShellLayout {
 	leftWidth: number;
 	/** Preferred inline width of the right panel, px. */
 	rightWidth: number;
-	/** Preferred height of the terminal pane, px. */
-	terminalHeight: number;
+	/** Share of the centre column given to the terminal pane, 0.1–0.8. */
+	terminalRatio: number;
 }
 
 /**

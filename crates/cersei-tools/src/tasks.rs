@@ -82,9 +82,11 @@ impl Tool for TaskCreateTool {
     async fn execute(&self, input: Value, ctx: &ToolContext) -> ToolResult {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
-        #[allow(dead_code)]
         struct Input {
             description: String,
+            // Part of the advertised schema and accepted, but the task is
+            // created from `description` alone.
+            #[allow(dead_code)]
             prompt: Option<String>,
         }
 

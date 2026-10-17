@@ -185,17 +185,15 @@
 		</ul>
 	{:else if query}
 		{#if !searching && !searchError}
-			<EmptyState title="Aucune conversation trouvée" description="Essayez un autre titre ou un mot du texte." />
+			<EmptyState title="Aucune conversation trouvée" />
 		{/if}
 	{:else if !app.currentProject}
 		<EmptyState
 			title="Aucun projet sélectionné"
-			description="Choisissez un projet pour voir ses conversations, ou recherchez dans tous les projets."
 		/>
 	{:else}
 		<EmptyState
 			title="Aucune conversation dans ce projet"
-			description="Recherchez dans tous les projets pour retrouver une conversation."
 		/>
 	{/if}
 </div>

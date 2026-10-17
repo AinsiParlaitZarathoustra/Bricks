@@ -58,11 +58,6 @@
 </script>
 
 <div class="flex flex-col gap-4 text-sm">
-	<p class="text-xs text-pretty text-muted-foreground">
-		Skills disponibles pour cette session, avec leur provenance et leur état. Les skills du projet
-		ne sont utilisés qu’après votre autorisation.
-	</p>
-
 	{#if !conv}
 		<p class="text-muted-foreground">Aucune conversation ouverte.</p>
 	{:else}
@@ -74,12 +69,12 @@
 				<h3 class="text-xs font-medium text-muted-foreground">Skills du projet</h3>
 				{#if decision === 'pending'}
 					<p class="text-xs text-pretty">
-						Le modèle n’utilise pas ces skills tant que vous ne les autorisez pas pour cette session.
+						En attente de votre décision pour cette session.
 					</p>
 				{:else if decision === 'granted'}
-					<p class="text-xs text-pretty">Autorisés pour cette session : le modèle peut les utiliser.</p>
+					<p class="text-xs text-pretty">Autorisés pour cette session.</p>
 				{:else}
-					<p class="text-xs text-pretty">Refusés pour cette session : le modèle ne les utilise pas.</p>
+					<p class="text-xs text-pretty">Refusés pour cette session.</p>
 				{/if}
 
 				{#if trustRequest}

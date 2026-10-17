@@ -68,5 +68,10 @@ fn export_bindings() {
         ModelProfileView,
         ProviderPatch,
         ModelPatch,
+        ThemeColors,
+        ColorSet,
+        ReasoningProfileEdit,
+        SkillsCatalog,
+        SkillSourceView,
     );
 }

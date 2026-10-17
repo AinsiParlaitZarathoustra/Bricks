@@ -5,10 +5,6 @@
 	/** Planned options. Not implemented yet: shown as placeholders, never as working controls. */
 	const PLANNED = [
 		{
-			title: 'Approbation par défaut des outils',
-			description: 'Choisir quels outils demandent une confirmation avant d’agir.'
-		},
-		{
 			title: 'Export des conversations',
 			description: 'Enregistrer une conversation dans un fichier lisible.'
 		},

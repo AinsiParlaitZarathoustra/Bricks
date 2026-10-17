@@ -9,10 +9,18 @@
 	import {
 		LAYOUT_DEFAULTS,
 		LAYOUT_LIMITS,
+		TERMINAL_RATIO,
 		WIDE_BREAKPOINT,
 		layoutModeFor
 	} from './constants.js';
-	import { fitSidebars, fitTerminal, toPercent, toPx } from './geometry.js';
+	import {
+		clampRatio,
+		fitSidebars,
+		fitTerminalRatio,
+		migrateTerminalRatio,
+		toPercent,
+		toPx
+	} from './geometry.js';
 	import type { ShellControls, ShellLayout } from './types.js';
 
 	interface Props {
@@ -30,10 +38,16 @@
 		leftOpen?: boolean;
 		rightOpen?: boolean;
 		terminalOpen?: boolean;
-		/** Preferred inline widths and height, in px. */
+		/** Preferred inline widths, in px. */
 		leftWidth?: number;
 		rightWidth?: number;
-		terminalHeight?: number;
+		/**
+		 * Terminal share of the centre column, 0.1–0.8. `null` while no ratio is saved:
+		 * it is then derived once from `legacyTerminalHeight` (the saved pixel height).
+		 */
+		terminalRatio?: number | null;
+		/** Saved terminal height in px (legacy preference). Undefined until preferences are loaded. */
+		legacyTerminalHeight?: number;
 		/** Called after the user resizes or toggles a pane (debounced ~300 ms). Not called for automatic changes. */
 		onLayoutChange?: (layout: ShellLayout) => void;
 	}
@@ -49,7 +63,8 @@
 		terminalOpen = $bindable(false),
 		leftWidth = $bindable(LAYOUT_DEFAULTS.leftWidth),
 		rightWidth = $bindable(LAYOUT_DEFAULTS.rightWidth),
-		terminalHeight = $bindable(LAYOUT_DEFAULTS.terminalHeight),
+		terminalRatio = $bindable(null),
+		legacyTerminalHeight,
 		onLayoutChange
 	}: Props = $props();
 
@@ -103,8 +118,11 @@
 	const leftMaxPct = $derived(toPercent(maxSidePx(sides.right), bodyWidth));
 	const rightMaxPct = $derived(toPercent(maxSidePx(sides.left), bodyWidth));
 
-	// Vertical geometry inside the centre column.
-	const termPx = $derived(fitTerminal(centerHeight, terminalHeight));
+	// Vertical geometry inside the centre column. The terminal keeps its share of the
+	// column, clamped to the pixel limits of both panes.
+	const termPx = $derived(
+		fitTerminalRatio(centerHeight, terminalRatio ?? TERMINAL_RATIO.fallback)
+	);
 	const termPct = $derived(toPercent(termPx, centerHeight));
 	const convPct = $derived(100 - termPct);
 	const termMinPct = $derived(toPercent(LAYOUT_LIMITS.terminalMin, centerHeight));
@@ -206,7 +224,7 @@
 
 	function onVerticalLayout(layout: number[]): void {
 		if (!terminalInline || centerHeight <= 0 || !isUserResizing()) return;
-		terminalHeight = toPx(layout[1] ?? 0, centerHeight);
+		terminalRatio = clampRatio((layout[1] ?? 0) / 100);
 		scheduleEmit();
 	}
 
@@ -215,7 +233,14 @@
 	let lastEmitted = JSON.stringify(snapshot());
 
 	function snapshot(): ShellLayout {
-		return { leftOpen, rightOpen, terminalOpen, leftWidth, rightWidth, terminalHeight };
+		return {
+			leftOpen,
+			rightOpen,
+			terminalOpen,
+			leftWidth,
+			rightWidth,
+			terminalRatio: clampRatio(terminalRatio ?? TERMINAL_RATIO.fallback)
+		};
 	}
 
 	function scheduleEmit(): void {
@@ -230,6 +255,20 @@
 	}
 
 	$effect(() => () => clearTimeout(emitTimer));
+
+	// One-time migration: a saved pixel height becomes a share of the centre column.
+	// The result is saved through the normal layout change, like a user resize.
+	$effect(() => {
+		const ratio = migrateTerminalRatio(terminalRatio, legacyTerminalHeight, centerHeight);
+		if (ratio === null) return;
+		untrack(() => {
+			terminalRatio = ratio;
+			// The snapshot at start-up already showed the fallback ratio: a migrated value
+			// equal to it must still be saved.
+			lastEmitted = '';
+			scheduleEmit();
+		});
+	});
 
 	function toggleLeft(): void {
 		if (leftIsOverlay) leftOverlay = !leftOverlay;

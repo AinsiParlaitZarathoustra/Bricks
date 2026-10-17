@@ -20,6 +20,7 @@
   import ArrowUpIcon from '@lucide/svelte/icons/arrow-up'
   import SquareIcon from '@lucide/svelte/icons/square'
   import XIcon from '@lucide/svelte/icons/x'
+  import SparklesIcon from '@lucide/svelte/icons/sparkles'
   import ProjectStrip from './ProjectStrip.svelte'
   import AttachMenu from './AttachMenu.svelte'
   import AttachmentChip from './AttachmentChip.svelte'
@@ -28,6 +29,8 @@
   import CommandPalette from '$lib/features/commands/CommandPalette.svelte'
   import QuitDialog from '$lib/features/commands/QuitDialog.svelte'
   import MentionPalette from './MentionPalette.svelte'
+  import SkillPicker from './SkillPicker.svelte'
+  import { selectionAfterRun, toggleSkill } from './skills'
   import { MentionFiles } from './mention-files.svelte'
   import { mentionAt, mentionKind, projectEntryPath, removeMention, type MentionToken } from './mentions'
   import type { ProjectFileEntry } from '$lib/ipc/bindings/ProjectFileEntry'
@@ -63,7 +66,7 @@
   // ─── Draft ────────────────────────────────────────────────────────────────
   // An open conversation keeps its own draft (it survives switches). Without
   // one, a local draft is used until the first send creates the conversation.
-  let localDraft = $state<Draft>({ text: '', attachments: [] })
+  let localDraft = $state<Draft>({ text: '', attachments: [], skills: [] })
   const draft: Draft = $derived(conversation ? conversation.draft : localDraft)
 
   function revoke(a: DraftAttachment) {
@@ -83,6 +86,8 @@
   // Set by `/model`, `/effort` (through `ui.picker`) to open the selects.
   let modelOpen = $state(false)
   let effortOpen = $state(false)
+  /** The skills choice of the `+` menu. */
+  let skillsOpen = $state(false)
 
   const hasModels = $derived(app.models.length > 0)
   const selection: string | null = $derived(
@@ -371,6 +376,8 @@
     text: string
     restore: string | null
     skill: string | null
+    /** Skills chosen for this message: no longer chosen once its run starts. */
+    skills: string[]
   } | null>(null)
 
   /** Input history browsing: the draft kept aside while an older prompt is shown. */
@@ -390,8 +397,10 @@
     // The local draft moves into the new conversation: a refusal keeps it there.
     created.draft.text = localDraft.text
     created.draft.attachments = [...localDraft.attachments]
+    created.draft.skills = [...localDraft.skills]
     localDraft.text = ''
     localDraft.attachments = []
+    localDraft.skills = []
     return { conversation: created }
   }
 
@@ -406,6 +415,7 @@
     const blocks: PromptBlock[] = []
     if (text) blocks.push({ kind: 'text', text })
     for (const a of draft.attachments) blocks.push(toBlock(a))
+    const skills = [...draft.skills]
 
     const sentAt = Date.now()
     sending = true
@@ -418,7 +428,8 @@
       const target = ensured.conversation
       const runsBefore = target.runs.size
       const sentText = target.draft.text
-      const error = await app.command(target.sessionId, { type: 'submit', prompt: { blocks } })
+      const prompt = skills.length > 0 ? { blocks, skills } : { blocks }
+      const error = await app.command(target.sessionId, { type: 'submit', prompt })
       if (error) {
         refusal = error
         return
@@ -432,6 +443,7 @@
         text: sentText,
         restore: restore?.text ?? null,
         skill: null,
+        skills,
       }
     } finally {
       sending = false
@@ -453,6 +465,9 @@
     const skill = conv.lastSkill
     const failed =
       pending.skill !== null && skill !== null && !skill.ok && skill.at >= pending.sentAt ? skill : null
+    // A chosen skill the engine could not activate: its choice stays for the next message.
+    const chosenRefused =
+      skill !== null && !skill.ok && skill.at >= pending.sentAt && pending.skills.includes(skill.name)
     const started = conv.runs.size > pending.runsBefore
     if (!refusedByEngine && !failed && !started) return
     untrack(() => {
@@ -462,6 +477,7 @@
         return
       }
       if (refusedByEngine) return
+      if (!chosenRefused) conv.draft.skills = selectionAfterRun(conv.draft.skills, pending.skills)
       if (pending.restore !== null) {
         for (const a of conv.draft.attachments) revoke(a)
         conv.draft.text = pending.restore
@@ -545,6 +561,7 @@
             text: sentText,
             restore,
             skill: watch.kind === 'skill' ? watch.name : null,
+            skills: [],
           }
           return
         }
@@ -617,6 +634,27 @@
     },
     attach: attachByPath,
     quit: requestQuit,
+  }
+
+  // ─── Skills for the next message ──────────────────────────────────────────
+
+  function openSkills() {
+    refusal = null
+    skillsOpen = true
+  }
+
+  function closeSkills() {
+    skillsOpen = false
+    editorEl?.focus()
+  }
+
+  /** Adds a skill to the next message, or removes it when already chosen (no file is touched). */
+  function chooseSkill(name: string) {
+    draft.skills = toggleSkill(draft.skills, name)
+  }
+
+  function removeSkill(name: string) {
+    draft.skills = draft.skills.filter((n) => n !== name)
   }
 
   // ─── Palette `/` ──────────────────────────────────────────────────────────
@@ -981,6 +1019,16 @@
         />
       {/if}
 
+      {#if skillsOpen}
+        <SkillPicker
+          conversation={conversation}
+          projectId={project?.id ?? null}
+          selected={draft.skills}
+          onToggle={chooseSkill}
+          onClose={closeSkills}
+        />
+      {/if}
+
       {#if dragging}
         <p class="px-1 text-sm text-muted-foreground">Déposez les fichiers pour les joindre.</p>
       {/if}
@@ -994,6 +1042,20 @@
                 error={chipError(attachment)}
                 onRemove={() => removeAttachment(attachment.id)}
               />
+            </li>
+          {/each}
+        </ul>
+      {/if}
+
+      {#if draft.skills.length > 0}
+        <ul class="flex flex-wrap gap-1.5" aria-label="Skills pour le prochain message">
+          {#each draft.skills as name (name)}
+            <li class="inline-flex max-w-full items-center gap-1.5 rounded-md border border-transparent bg-muted/60 py-1 pr-1 pl-1.5 text-sm">
+              <SparklesIcon class="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <span class="min-w-0 max-w-56 truncate font-mono text-xs" title={name}>{name}</span>
+              <Button variant="ghost" size="icon-xs" aria-label={`Retirer le skill ${name}`} onclick={() => removeSkill(name)}>
+                <XIcon aria-hidden="true" />
+              </Button>
             </li>
           {/each}
         </ul>
@@ -1023,7 +1085,8 @@
         onkeyup={syncCaret}
         onclick={syncCaret}
         onselect={syncCaret}
-        class="max-h-[40vh] min-h-10 resize-none overflow-y-auto border-0 bg-transparent px-1 py-1 shadow-none focus-visible:ring-0 dark:bg-transparent"
+        dir="auto"
+        class="max-h-[40vh] min-h-10 resize-none overflow-y-auto border-0 bg-transparent px-1 py-1 text-start shadow-none focus-visible:ring-0 dark:bg-transparent"
       />
 
       <div class="flex flex-wrap items-center gap-1">
@@ -1031,6 +1094,7 @@
           disabled={!editable || sending}
           onPick={(paths, kind) => addPicked(paths, kind === 'folder')}
           onError={(message) => (refusal = message)}
+          onSkills={openSkills}
         />
         <ModelSelect
           bind:open={modelOpen}
@@ -1075,9 +1139,7 @@
                   </Button>
                 {/snippet}
               </Tooltip.Trigger>
-              <Tooltip.Content side="top">
-                Envoyer (Entrée). Maj+Entrée : nouvelle ligne. Tapez / pour les commandes.
-              </Tooltip.Content>
+              <Tooltip.Content side="top">Envoyer</Tooltip.Content>
             </Tooltip.Root>
           {/if}
         </div>

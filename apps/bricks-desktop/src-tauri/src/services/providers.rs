@@ -117,6 +117,8 @@ fn provider_view(p: &ProviderConfig, has_credentials: bool) -> ProviderView {
                     .map(|x| ModelProfileView {
                         id: x.id.clone(),
                         label: x.label.clone(),
+                        parameters: serde_json::Value::Object(x.parameters.clone()),
+                        remove: x.remove.clone(),
                     })
                     .collect(),
                 priced: m.pricing.is_some(),

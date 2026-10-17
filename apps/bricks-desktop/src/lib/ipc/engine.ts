@@ -171,6 +171,16 @@ export interface SpawnInfo {
   skills?: { name: string; state: string; source?: string; [k: string]: unknown }[]
 }
 
+/** A sub-agent as the agent runtime keeps it (durable across runs). */
+export interface InstanceRecord {
+  info: SpawnInfo
+  state: InstanceState
+  reason?: string
+  result?: AgentResult
+  background: boolean
+  updated_at_ms: number
+}
+
 export interface CommandRun {
   tool: string
   command: string

@@ -222,3 +222,23 @@ export const providerDelete = (providerId: string, revision: string) =>
   call<ProvidersFile>('provider_delete', { providerId, revision })
 export const modelDelete = (providerId: string, modelId: string, revision: string) =>
   call<ProvidersFile>('model_delete', { providerId, modelId, revision })
+
+// ─── Sprint 14.3: skills catalogue, colours, reasoning profiles ──────────────
+
+export type * from './bindings/ThemeColors'
+export type * from './bindings/ColorSet'
+export type * from './bindings/ReasoningProfileEdit'
+export type * from './bindings/SkillsCatalog'
+export type * from './bindings/SkillSourceView'
+import type { SkillsCatalog } from './bindings/SkillsCatalog'
+
+/** Settings: skills of the user/built-in sources (+ a project's, never trusted). */
+export const skillsCatalog = (projectId: string | null, query = '', page = 0, reload = false) =>
+  call<SkillsCatalog>('skills_catalog', { projectId, query, page, reload })
+
+/** Sub-agent instance records of an open session (engine `InstanceRecord[]`). */
+export const sessionAgents = (sessionId: string) =>
+  call<import('./engine').InstanceRecord[]>('session_agents', { sessionId })
+/** Isolated ChangeSets of an open session (engine `ChangeSet[]`). */
+export const sessionChangesets = (sessionId: string) =>
+  call<import('./engine').ChangeSet[]>('session_changesets', { sessionId })

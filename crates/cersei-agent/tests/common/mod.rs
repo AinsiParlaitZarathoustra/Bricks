@@ -3,8 +3,6 @@
 //! The key comes through `api_key_env` and an injected lookup, so no key —
 //! not even a fake one — is written into a configuration fixture.
 
-#![allow(dead_code)]
-
 use cersei_provider::{ConfiguredProvider, ProviderRegistry};
 
 /// A single-model provider speaking `protocol` (`chat_completions`,

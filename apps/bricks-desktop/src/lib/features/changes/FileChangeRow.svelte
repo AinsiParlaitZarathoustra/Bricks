@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import { Badge } from '$lib/components/ui/badge';
 	import DiffStat from '$lib/layout/DiffStat.svelte';
@@ -22,8 +23,10 @@
 		countLabel?: string;
 		/** Extra line under the path, e.g. the original path of a rename. */
 		note?: string;
-		/** Patches loaded when the row is expanded. None: the row cannot expand. */
+				/** Patches loaded when the row is expanded. None: the row cannot expand. */
 		patches?: PatchSource[];
+		/** Controls shown beside the row, outside its toggle (e.g. a link). */
+		actions?: Snippet;
 	}
 
 	let {
@@ -34,8 +37,9 @@
 		binary = false,
 		agents = [],
 		countLabel,
-		note,
-		patches = []
+				note,
+		patches = [],
+		actions
 	}: Props = $props();
 
 	let expanded = $state(false);
@@ -67,37 +71,44 @@
 </script>
 
 <div class="border-b border-border last:border-b-0">
-	<button
-		type="button"
-		class="flex w-full min-w-0 items-start gap-2 rounded-sm px-1 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
-		aria-expanded={expandable ? expanded : undefined}
-		disabled={!expandable}
-		onclick={() => (expanded = !expanded)}
-	>
-		{#if expandable}
-			<ChevronDownIcon
-				class={cn('mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform duration-150', expanded && 'rotate-180')}
-				aria-hidden="true"
-			/>
-		{:else}
-			<span class="size-4 shrink-0" aria-hidden="true"></span>
+	<div class="flex min-w-0 items-start gap-2">
+		<button
+			type="button"
+			class="flex min-w-0 flex-1 items-start gap-2 rounded-sm px-1 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
+			aria-expanded={expandable ? expanded : undefined}
+			disabled={!expandable}
+			onclick={() => (expanded = !expanded)}
+		>
+			{#if expandable}
+				<ChevronDownIcon
+					class={cn('mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform duration-150', expanded && 'rotate-180')}
+					aria-hidden="true"
+				/>
+			{:else}
+				<span class="size-4 shrink-0" aria-hidden="true"></span>
+			{/if}
+			<span class="flex min-w-0 flex-1 flex-col gap-0.5">
+				<span class="truncate font-mono text-xs" title={path}>
+					{#if dirName(path)}<span class="text-muted-foreground">{dirName(path)}/</span>{/if}{baseName(path)}
+				</span>
+				<span class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+					{#if status}<span>{status}</span>{/if}
+					{#if agents.length > 0}<span>{agents.join(', ')}</span>{/if}
+					{#if binary}
+						<Badge variant="outline">Binaire</Badge>
+					{:else if hasCounts}
+						<DiffStat additions={added ?? 0} deletions={removed ?? 0} label={countLabel} />
+					{/if}
+				</span>
+				{#if note}<span class="truncate text-xs text-muted-foreground">{note}</span>{/if}
+			</span>
+		</button>
+		{#if actions}
+			<div class="shrink-0 py-1.5 pr-1">
+				{@render actions()}
+			</div>
 		{/if}
-		<span class="flex min-w-0 flex-1 flex-col gap-0.5">
-			<span class="truncate font-mono text-xs" title={path}>
-				{#if dirName(path)}<span class="text-muted-foreground">{dirName(path)}/</span>{/if}{baseName(path)}
-			</span>
-			<span class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-				{#if status}<span>{status}</span>{/if}
-				{#if agents.length > 0}<span>{agents.join(', ')}</span>{/if}
-				{#if binary}
-					<Badge variant="outline">Binaire</Badge>
-				{:else if hasCounts}
-					<DiffStat additions={added ?? 0} deletions={removed ?? 0} label={countLabel} />
-				{/if}
-			</span>
-			{#if note}<span class="truncate text-xs text-muted-foreground">{note}</span>{/if}
-		</span>
-	</button>
+	</div>
 
 	{#if expanded}
 		<div class="flex flex-col gap-3 pr-1 pb-3 pl-6">

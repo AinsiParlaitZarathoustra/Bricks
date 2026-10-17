@@ -78,7 +78,7 @@
 			<dt class="text-muted-foreground">Sélection</dt>
 			<dd class="font-mono break-all text-foreground">{model.selection}</dd>
 
-			<dt class="text-muted-foreground">Modèle de l’API</dt>
+			<dt class="text-muted-foreground">Nom API</dt>
 			<dd class="font-mono break-all text-foreground">{model.api_model}</dd>
 
 			<dt class="text-muted-foreground">Fenêtre de contexte</dt>

@@ -1,7 +1,8 @@
 <script lang="ts">
 	// Bottom pane: interactive shells on a real PTY, one set per project.
-	// The sessions live in terminals.svelte.ts; this component only attaches
-	// the active one. Owner: Haiku 7 (terminal feature).
+	// The sessions live in terminals.svelte.ts (store and session rules in
+	// terminal-store / terminal-session); this component only shows the active
+	// one. Owner: Haiku F3 (Sprint 14.3, terminals).
 	import '@xterm/xterm/css/xterm.css';
 	import { untrack } from 'svelte';
 	import Plus from '@lucide/svelte/icons/plus';
@@ -30,7 +31,9 @@
 	});
 
 	// Show the active terminal here, start its shell if needed, and keep its
-	// size in step with the pane.
+	// size in step with the pane. The cleanup runs before the next terminal is
+	// attached (tab switch, project switch) and when the pane closes: it takes
+	// this terminal out of the container, without disposing it.
 	$effect(() => {
 		const session = active;
 		const element = container;
@@ -40,9 +43,12 @@
 			if (session.status === 'idle') session.start();
 		});
 		session.focus();
-		const observer = new ResizeObserver(() => session.refit());
+		const observer = new ResizeObserver(() => session.requestRefit());
 		observer.observe(element);
-		return () => observer.disconnect();
+		return () => {
+			observer.disconnect();
+			session.detach();
+		};
 	});
 
 	// Terminal colours follow the theme. Read after the `.dark` class is set.

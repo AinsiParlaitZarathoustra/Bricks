@@ -1,8 +1,10 @@
-import { LAYOUT_LIMITS } from './constants.js';
+import { LAYOUT_LIMITS, TERMINAL_RATIO } from './constants.js';
 
 /**
- * Pure layout maths for AppShell. Pane sizes are stored in px (user
- * preferences) and converted to percentages for paneforge at render time.
+ * Pure layout maths for AppShell. Side pane sizes are stored in px (user
+ * preferences) and converted to percentages for paneforge at render time. The
+ * terminal share is stored as a ratio of the centre column, so it keeps its
+ * proportion when the window is resized.
  */
 
 export interface SidebarFit {
@@ -56,11 +58,47 @@ export function toPx(percent: number, containerPx: number): number {
 }
 
 /**
- * Clamps the terminal height so the conversation pane keeps its minimum.
- * Returns px, never less than `terminalMin`.
+ * Clamps a terminal share of the centre column to the saved bounds, rounded to
+ * 0.001 so that the saved value stays short. A value that is not a number gives
+ * the fallback.
  */
-export function fitTerminal(containerHeight: number, terminalHeight: number): number {
+export function clampRatio(ratio: number): number {
+	if (!Number.isFinite(ratio)) return TERMINAL_RATIO.fallback;
+	const clamped = Math.min(TERMINAL_RATIO.max, Math.max(TERMINAL_RATIO.min, ratio));
+	return Math.round(clamped * 1000) / 1000;
+}
+
+/**
+ * Terminal share for a legacy pixel height (`terminal_height`), taken against the
+ * current centre column. Used once, when no ratio is saved yet.
+ */
+export function ratioFromPx(px: number, containerHeight: number): number {
+	if (containerHeight <= 0) return TERMINAL_RATIO.fallback;
+	return clampRatio(px / containerHeight);
+}
+
+/**
+ * Decides the one-time migration: returns the ratio to save, or null when nothing
+ * must be saved. `legacyPx` is undefined until the preferences are loaded, and the
+ * centre column must be measured first.
+ */
+export function migrateTerminalRatio(
+	saved: number | null,
+	legacyPx: number | undefined,
+	containerHeight: number
+): number | null {
+	if (saved !== null || legacyPx === undefined || containerHeight <= 0) return null;
+	return ratioFromPx(legacyPx, containerHeight);
+}
+
+/**
+ * Terminal height in px for a share of the centre column, kept inside the pane
+ * limits: the terminal is never shorter than `terminalMin`, and the conversation
+ * keeps `conversationMin` whenever the column is tall enough for both.
+ */
+export function fitTerminalRatio(containerHeight: number, ratio: number): number {
 	const { terminalMin, conversationMin } = LAYOUT_LIMITS;
+	const wanted = clampRatio(ratio) * containerHeight;
 	const maxHeight = Math.max(terminalMin, containerHeight - conversationMin);
-	return Math.min(maxHeight, Math.max(terminalMin, terminalHeight));
+	return Math.min(maxHeight, Math.max(terminalMin, wanted));
 }

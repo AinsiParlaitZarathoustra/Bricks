@@ -5,6 +5,7 @@
 import { SvelteMap } from 'svelte/reactivity'
 import type { HistoryMessage, OpenedSession, SessionItem } from '$lib/ipc/client'
 import type {
+  InstanceRecord,
   AgentProfilesEvent,
   SearchHit,
   SkillsListing,
@@ -183,6 +184,8 @@ export interface DraftAttachment {
 export interface Draft {
   text: string
   attachments: DraftAttachment[]
+  /** Skills to activate with the next message (`Prompt.skills`), Sprint 14.3. */
+  skills: string[]
 }
 
 export interface TurnUsage {
@@ -256,7 +259,7 @@ export class Conversation {
   contextStale = $state(false)
   usageTotal = $state<{ input: number; output: number; costUsd?: number } | null>(null)
 
-  draft = $state<Draft>({ text: '', attachments: [] })
+  draft = $state<Draft>({ text: '', attachments: [], skills: [] })
   /** Last refusal of a command (e.g. submit during a run). */
   lastRejection = $state<{ command: string; reason: string; at: number } | null>(null)
   /** Last answer to an `agent_control` command (apply/discard/cancel). */
@@ -303,6 +306,30 @@ export class Conversation {
   /** Run of a timeline item. */
   run(runId: string | undefined): RunInfo | undefined {
     return runId ? this.runs.get(runId) : undefined
+  }
+
+  /**
+   * Restores sub-agents and ChangeSets kept by the engine runtime (after a
+   * reopen the events of earlier runs are gone). Live entries win.
+   */
+  hydrateAgents(records: InstanceRecord[], changesets: ChangeSet[]) {
+    for (const r of records) {
+      if (this.agents.has(r.info.agent_id)) continue
+      this.agents.set(
+        r.info.agent_id,
+        reactive<AgentInfo>({
+          id: r.info.agent_id,
+          spawn: r.info,
+          state: r.state,
+          reason: r.reason,
+          spawnedAt: Date.parse(r.info.created_at) || r.updated_at_ms,
+          endedAt: TERMINAL_AGENT_STATES.includes(r.state) ? r.updated_at_ms : undefined,
+          tools: [],
+          result: r.result,
+        }),
+      )
+    }
+    for (const cs of changesets) if (!this.changesets.has(cs.id)) this.changesets.set(cs.id, reactive(cs))
   }
 
   applySnapshot(s: Snapshot) {

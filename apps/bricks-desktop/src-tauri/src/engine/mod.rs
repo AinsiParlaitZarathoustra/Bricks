@@ -18,6 +18,7 @@ use crate::services::conversations::path_text;
 use crate::services::paths::check_folder;
 use crate::services::prefs::PrefsStore;
 use crate::services::projects::ProjectStore;
+use crate::services::skills::SkillsCatalogStore;
 use cersei_agent::control::{ApprovalMode, ApprovalOverride, ModelCatalog};
 use cersei_provider::ProviderRegistry;
 use cersei_provider::config::{AuthMode, ProviderConfig};
@@ -51,6 +52,8 @@ pub struct AppState {
     attachments_dir: PathBuf,
     pub(crate) projects: Arc<ProjectStore>,
     pub(crate) prefs: Arc<PrefsStore>,
+    /// The skills catalogue of the settings page (Sprint 14.3), outside any session.
+    pub(crate) skills: Arc<SkillsCatalogStore>,
     pub(crate) hub: Arc<Hub>,
     /// The open sessions, by session id.
     sessions: Mutex<HashMap<String, Arc<OpenSession>>>,
@@ -97,6 +100,7 @@ impl AppState {
             sessions_dir: home.join("sessions"),
             attachments_dir: desktop.join("attachments"),
             prefs: Arc::new(prefs),
+            skills: Arc::new(SkillsCatalogStore::new(dirs::home_dir())),
             projects: Arc::new(projects),
             hub: Arc::new(Hub::new(journal)),
             sessions: Mutex::new(HashMap::new()),
