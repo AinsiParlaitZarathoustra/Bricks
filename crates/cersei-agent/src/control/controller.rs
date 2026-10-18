@@ -530,6 +530,11 @@ fn build_agent(
         Some(files_dir(cfg, &meta.id).join("jobs")),
     );
     ext.insert(cersei_tools::jobs::JobsHandle(jobs));
+    // The `[bash]` settings of the project (`yield_time_ms`) shape the shell
+    // of the Bash tool; everything else keeps its default.
+    let mut shell = cersei_tools::shell::ShellConfig::default();
+    project.bricks.bash.apply_to(&mut shell);
+    ext.insert(shell);
     if let Some(sp) = &spawner {
         // The session agent records its usage in its root runs' ledger and
         // sees the session's sub-agents.

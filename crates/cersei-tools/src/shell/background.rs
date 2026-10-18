@@ -1,12 +1,12 @@
-//! Background tasks of a shell session.
+//! Supervised processes of a shell session: ordinary commands and background
+//! tasks.
 //!
-//! A task is a separate `bash` started from a snapshot of the persistent
-//! shell taken at launch: working directory, shell options, exported
-//! variables, functions and aliases. It runs in its own session and process
-//! group, with its own pipes, so it never blocks the next commands, its
-//! output never mixes with theirs, and what it changes never reaches the
-//! persistent shell. Non-exported shell variables are not inherited (a
-//! foreground `cmd &` would see them; a task does not).
+//! A [`Task`] is one `bash` started from a copy of the session state (see
+//! [`super::state`]): its working directory and environment are exactly the
+//! exported variables and directory of that copy, and a prelude restores its
+//! aliases and functions. It runs in its own session and process group, with
+//! its own pipes, so it never blocks another command, its output never mixes
+//! with theirs, and it reads nothing from the caller's terminal.
 //!
 //! Output is read continuously, whatever the limits (the pipes are always
 //! drained), into a bounded in-memory window of lines per stream — bounded
@@ -14,10 +14,17 @@
 //! `max_line_bytes` with a marker — (with absolute line numbers, so a reader
 //! can page with a cursor and is told what was dropped) and into a raw log
 //! file capped in size (a write error is kept and reported).
+//!
+//! An *ordinary* task (an ordinary command, see [`Ordinary`]) also keeps its
+//! output as a capture for its final result, records its final state in a
+//! file when its shell ends normally (an EXIT trap, never the output), and
+//! has the processes it left in its group stopped when it ends.
 
+use super::capture::{CaptureLimits, Captured, StreamCapture};
 use super::clean::TerminalCleaner;
 use super::procs;
 use std::collections::VecDeque;
+use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -257,19 +264,40 @@ pub struct Page {
     pub received_bytes: u64,
 }
 
-/// What to start: `command`, with the shell state written in `snapshot`.
+/// What makes a task an ordinary command.
+pub struct Ordinary {
+    /// Limits of the output kept for the command's result.
+    pub capture: CaptureLimits,
+    /// Where each stream spills when it outgrows memory (kept: the result
+    /// names them).
+    pub spill: [PathBuf; 2],
+    /// Between TERM and KILL for the processes it left behind.
+    pub grace: Duration,
+}
+
+/// Name of the file the recording shell writes its final state to, and the
+/// name it is renamed to once complete (in the task's directory).
+const STATE_TMP: &str = "state.tmp";
+const STATE_FILE: &str = "state";
+
+/// What to start.
 pub struct TaskSpec<'a> {
     pub id: String,
     pub command: &'a str,
-    pub snapshot: &'a Path,
-    /// Directory if the snapshot cannot restore one.
-    pub fallback_cwd: &'a Path,
+    /// Script sourced before the command (see [`super::state::Launch`]).
+    pub prelude: &'a [u8],
+    /// Directory the task starts in.
+    pub cwd: &'a Path,
+    /// The task's whole environment.
+    pub env: &'a [(OsString, OsString)],
     pub stdin: Option<&'a str>,
     pub ready_pattern: Option<regex::Regex>,
-    /// The task's own directory (command, logs).
+    /// The task's own directory (command, logs, state).
     pub dir: PathBuf,
     pub bash: &'a Path,
     pub limits: TaskLimits,
+    /// Set for an ordinary command.
+    pub ordinary: Option<Ordinary>,
 }
 
 pub struct Task {
@@ -282,6 +310,14 @@ pub struct Task {
     ready: parking_lot::Mutex<Readiness>,
     ready_pattern: Option<regex::Regex>,
     logs: [Arc<parking_lot::Mutex<Log>>; 2],
+    /// Output kept for the result of an ordinary command.
+    captures: Option<[Arc<parking_lot::Mutex<StreamCapture>>; 2]>,
+    /// The captures, once the task ended.
+    captured: parking_lot::Mutex<Option<[Captured; 2]>>,
+    /// Processes left in the group by an ordinary command, and stopped.
+    leftovers: parking_lot::Mutex<Option<procs::Termination>>,
+    /// Final state file of an ordinary command, complete once it ended.
+    state_file: Option<PathBuf>,
     finished: tokio::sync::watch::Receiver<bool>,
     stop_requested: std::sync::atomic::AtomicBool,
     dir: PathBuf,
@@ -302,23 +338,67 @@ pub struct TaskStatus {
     pub stderr_bytes: u64,
 }
 
+/// Replaces a capture by an empty one and returns the old one, finished.
+fn take(cap: Arc<parking_lot::Mutex<StreamCapture>>) -> Captured {
+    let placeholder = StreamCapture::new(CaptureLimits::default(), PathBuf::new());
+    let inner = std::mem::replace(&mut *cap.lock(), placeholder);
+    inner.finish()
+}
+
+/// The recording wrapper: restores the prelude and the command, and writes
+/// the final state at the end (EXIT trap). A trap that the command replaces,
+/// or an `exec`, leaves no state, and nothing is published.
+const RECORDING_WRAPPER: &str = r#"__bricks_dump_path=$3
+__bricks_dump() {
+  {
+    set -f
+    builtin printf 'cwd\0%s\0' "$PWD"
+    if [ -n "${OLDPWD+x}" ]; then builtin printf 'oldpwd\0%s\0' "$OLDPWD"; else builtin printf 'oldpwd-unset\0'; fi
+    compgen -e | while IFS= read -r __bricks_n; do
+      case $__bricks_n in *[!A-Za-z0-9_]*|[0-9]*|'') continue ;; esac
+      case $__bricks_n in PWD|OLDPWD|SHLVL|_) continue ;; esac
+      builtin printf 'env\0%s\0%s\0' "$__bricks_n" "${!__bricks_n}"
+    done
+    compgen -A function | while IFS= read -r __bricks_n; do
+      case $__bricks_n in *[!A-Za-z0-9_]*|[0-9]*|'') continue ;; esac
+      case $__bricks_n in __bricks_*) continue ;; esac
+      builtin printf 'fn\0%s\0' "$__bricks_n"; builtin declare -f -- "$__bricks_n"; builtin printf '\0'
+    done
+    compgen -a | while IFS= read -r __bricks_n; do
+      builtin printf 'alias\0%s\0' "$__bricks_n"; builtin alias "$__bricks_n"; builtin printf '\0'
+    done
+    builtin printf 'end\0'
+  } >"$__bricks_dump_path" 2>/dev/null
+}
+trap __bricks_dump EXIT
+builtin . "$1" 2>/dev/null
+builtin . "$2"
+"#;
+
+/// The plain wrapper: the prelude, then the command.
+const PLAIN_WRAPPER: &str = "builtin . \"$1\" 2>/dev/null; builtin . \"$2\"";
+
 impl Task {
     /// Start a task (see [`TaskSpec`]).
     pub async fn start(spec: TaskSpec<'_>) -> std::io::Result<Arc<Task>> {
         let TaskSpec {
             id,
             command,
-            snapshot,
-            fallback_cwd,
+            prelude,
+            cwd,
+            env,
             stdin,
             ready_pattern,
             dir,
             bash,
             limits,
+            ordinary,
         } = spec;
         std::fs::create_dir_all(&dir)?;
         let script = dir.join("command");
         std::fs::write(&script, command)?;
+        let prelude_path = dir.join("prelude.sh");
+        std::fs::write(&prelude_path, prelude)?;
         let stdin_cfg = match stdin {
             Some(text) => {
                 let p = dir.join("stdin");
@@ -328,24 +408,29 @@ impl Task {
             None => std::process::Stdio::null(),
         };
         let mut cmd = tokio::process::Command::new(bash);
-        cmd.args([
-            "--noprofile",
-            "--norc",
-            "-c",
-            // The snapshot restores the state; its errors (read-only
-            // variables re-declared) are not the task's output.
-            "builtin . \"$1\" 2>/dev/null; builtin . \"$2\"",
-            "bricks-task",
-        ])
-        .arg(snapshot)
-        .arg(&script)
-        .current_dir(fallback_cwd)
-        .stdin(stdin_cfg)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .env_remove("BASH_ENV")
-        .env_remove("ENV");
-        #[cfg(unix)]
+        if ordinary.is_some() {
+            cmd.args([
+                "--noprofile",
+                "--norc",
+                "-c",
+                RECORDING_WRAPPER,
+                "bricks-task",
+            ])
+            .arg(&prelude_path)
+            .arg(&script)
+            .arg(dir.join(STATE_TMP));
+        } else {
+            cmd.args(["--noprofile", "--norc", "-c", PLAIN_WRAPPER, "bricks-task"])
+                .arg(&prelude_path)
+                .arg(&script);
+        }
+        cmd.current_dir(cwd)
+            .env_clear()
+            .envs(env.iter().map(|(k, v)| (k.as_os_str(), v.as_os_str())))
+            .env("PWD", cwd)
+            .stdin(stdin_cfg)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
         // SAFETY: setsid is async-signal-safe.
         unsafe {
             cmd.pre_exec(|| {
@@ -357,6 +442,21 @@ impl Task {
         }
         let mut child = cmd.spawn()?;
         let pid = child.id().unwrap_or(0);
+        let is_ordinary = ordinary.is_some();
+        let (captures, grace, state_file) = match ordinary {
+            Some(o) => {
+                let [out, err] = o.spill;
+                let caps = [
+                    Arc::new(parking_lot::Mutex::new(StreamCapture::new(
+                        o.capture.clone(),
+                        out,
+                    ))),
+                    Arc::new(parking_lot::Mutex::new(StreamCapture::new(o.capture, err))),
+                ];
+                (Some(caps), Some(o.grace), Some(dir.join(STATE_FILE)))
+            }
+            None => (None, None, None),
+        };
         let logs = [
             Arc::new(parking_lot::Mutex::new(Log::new(
                 dir.join("stdout.log"),
@@ -382,9 +482,13 @@ impl Task {
             }),
             ready_pattern,
             logs,
+            captures: captures.clone(),
+            captured: parking_lot::Mutex::new(None),
+            leftovers: parking_lot::Mutex::new(None),
+            state_file: state_file.clone(),
             finished: done_rx,
             stop_requested: std::sync::atomic::AtomicBool::new(false),
-            dir,
+            dir: dir.clone(),
         });
 
         let mut readers = Vec::new();
@@ -401,6 +505,9 @@ impl Task {
                     match stream.read(&mut buf).await {
                         Ok(0) | Err(_) => break,
                         Ok(n) => {
+                            if let Some(c) = &t.captures {
+                                c[i].lock().push(&buf[..n]);
+                            }
                             let new = t.logs[i].lock().push(&buf[..n]);
                             t.check_ready(&new);
                         }
@@ -413,9 +520,27 @@ impl Task {
         let t = task.clone();
         tokio::spawn(async move {
             let status = child.wait().await;
+            if is_ordinary && pid != 0 && procs::group_alive(pid) {
+                // An ordinary command's processes left in its group (`cmd &`)
+                // are not its to keep: stopped now, so the streams close.
+                let members = procs::group_members(pid);
+                if !members.is_empty() {
+                    let term = procs::terminate(members, grace.unwrap_or_default()).await;
+                    *t.leftovers.lock() = Some(term);
+                }
+            }
             for r in readers {
                 // The streams close with the processes; bounded anyway.
                 let _ = tokio::time::timeout(Duration::from_secs(2), r).await;
+            }
+            if let (Some(tmp), Some(done)) = (dir_file(&t, STATE_TMP), &state_file) {
+                // Complete (the shell ended): then, and only then, published.
+                let _ = std::fs::rename(tmp, done);
+            }
+            if let Some(caps) = &t.captures {
+                let out = take(caps[0].clone());
+                let err = take(caps[1].clone());
+                *t.captured.lock() = Some([out, err]);
             }
             let state = if t.stop_requested.load(std::sync::atomic::Ordering::SeqCst) {
                 TaskState::Stopped
@@ -512,6 +637,12 @@ impl Task {
         ended.unwrap_or(false)
     }
 
+    /// Wait for the task to end, however long it takes.
+    pub async fn wait_end(&self) {
+        let mut rx = self.finished.clone();
+        let _ = rx.wait_for(|d| *d).await;
+    }
+
     /// Lines from `offset` (0-based), at most `limit`.
     pub fn read(&self, stream: Stream, offset: u64, limit: usize) -> Page {
         let log = self.logs[match stream {
@@ -544,23 +675,50 @@ impl Task {
         }
     }
 
+    /// The output of an ordinary command: complete once it ended, what it
+    /// has produced so far before. `None` for other tasks.
+    pub fn output(&self) -> Option<[Captured; 2]> {
+        if let Some(done) = self.captured.lock().clone() {
+            return Some(done);
+        }
+        self.captures
+            .as_ref()
+            .map(|c| [c[0].lock().view(), c[1].lock().view()])
+    }
+
+    /// The final state file of an ordinary command (complete once it ended).
+    pub fn state_file(&self) -> Option<&Path> {
+        self.state_file.as_deref()
+    }
+
+    /// The processes an ordinary command left running in its group, stopped
+    /// when it ended.
+    pub fn leftovers(&self) -> Option<procs::Termination> {
+        self.leftovers.lock().clone()
+    }
+
     /// Stop the task: TERM to its group and tree, grace, KILL. Idempotent.
     pub async fn stop(&self, grace: Duration) -> TaskState {
+        self.stop_report(grace).await.0
+    }
+
+    /// As [`Self::stop`], with the processes that were terminated.
+    pub async fn stop_report(&self, grace: Duration) -> (TaskState, procs::Termination) {
         if self.state().is_finished() {
-            return self.state();
+            return (self.state(), procs::Termination::default());
         }
         self.stop_requested
             .store(true, std::sync::atomic::Ordering::SeqCst);
         let mut tree = procs::descendants(self.pid);
         tree.insert(0, self.pid);
         procs::signal_group(self.pid, false);
-        let _ = procs::terminate(tree.clone(), grace).await;
+        let report = procs::terminate(tree.clone(), grace).await;
         procs::signal_group(self.pid, true);
         if !self.wait_finished(Duration::from_secs(5)).await {
             procs::terminate_tree_now(self.pid);
             let _ = self.wait_finished(Duration::from_secs(2)).await;
         }
-        self.state()
+        (self.state(), report)
     }
 
     pub fn kill_now(&self) {
@@ -588,6 +746,12 @@ impl Task {
     pub fn elapsed(&self) -> Duration {
         self.started.elapsed()
     }
+}
+
+/// The temporary state file of a task, while it still exists.
+fn dir_file(task: &Task, name: &str) -> Option<PathBuf> {
+    let p = task.dir.join(name);
+    p.exists().then_some(p)
 }
 
 #[cfg(test)]

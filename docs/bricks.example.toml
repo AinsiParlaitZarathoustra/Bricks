@@ -24,7 +24,7 @@
 default = "ask"
 none = "allow"
 read_only = "allow"
-write = "ask"                    # Write, Edit, MultiEdit, ApplyPatch: shown as a diff first
+write = "ask"                    # Write, Edit, ApplyPatch, NotebookEdit: shown as a diff first
 execute = "ask"                  # shell commands
 dangerous = "ask"
 
@@ -155,6 +155,10 @@ max_session_bytes = 67108864    # documents kept per session (oldest removed bey
 # skills_max_bytes = 24000     # profile skills loaded into a child, in total
 # [agents.reasoning_aliases]
 # high = "deep"                          # a profile's `high` → this model's `deep`
+
+[bash]
+# Foreground Bash commands. See docs/shell.md.
+# yield_time_ms = 10000        # before a still-running command is handed over as a task
 
 [background]
 # Background commands (Bash `background: true`, the Job tool). See docs/agents.md.

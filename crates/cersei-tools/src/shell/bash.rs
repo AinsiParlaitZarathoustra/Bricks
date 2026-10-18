@@ -1,777 +1,324 @@
-//! A persistent bash interpreter driven over a dedicated control channel.
+//! Ordinary commands: one `bash` process per call, supervised as a task.
 //!
-//! The driver (`driver.sh`) runs at the top level of one long-lived `bash`.
-//! Bricks sends requests on fd 198 and reads framed replies on fd 199; a
-//! command's text travels in a file that the driver sources in the shell's
-//! own scope, and its stdout and stderr go to two FIFOs created for that
-//! request and read from the start. Nothing is parsed out of the user's
-//! output: the status and working directory come only from the control
-//! channel, so output that imitates a marker or a control message is just
-//! output.
+//! Each command starts from a copy of the session state (see [`super::state`]):
+//! its working directory, its exported variables, its functions and aliases.
+//! It runs in its own session and process group, with its own pipes. Nothing
+//! is serialised: commands of one session run side by side, and a command
+//! that waits does not hold anything another one needs.
 //!
-//! The shell runs in its own session (`setsid`), without a controlling
-//! terminal: a program that would prompt on `/dev/tty` fails instead of
-//! blocking. Foreground commands are serialised. On timeout the command's
-//! process tree is terminated (TERM, grace, KILL) and the shell keeps its
-//! state; if the shell itself does not come back (a builtin loop, a hung
-//! shell), it is destroyed and the next command starts a fresh one, which is
-//! reported.
+//! When a command ends normally, its shell records its final state in a
+//! file (an EXIT trap; the output is never parsed), and the changes it made,
+//! compared with the copy it started from, are published to the session (see
+//! [`super::state::ShellState::publish`]). A command that is interrupted,
+//! times out, or replaces its shell with `exec` publishes nothing, and the
+//! result says so.
+//!
+//! The timeout is a deadline from the start, enforced by the command's
+//! watcher: it still applies after the command was handed over as a task
+//! ([`Command::detach`]). The end is published once, by whichever of the
+//! caller and the watcher gets there first, before the caller sees it.
 
 #![cfg(unix)]
 
-use super::capture::{CaptureLimits, Captured, StreamCapture};
+use super::background::{Ordinary, Task, TaskSpec, TaskState};
+use super::capture::Captured;
 use super::procs;
-use super::{Progress, ShellConfig};
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use super::state::{ShellState, Snapshot, parse_dump};
+use super::{ShellConfig, ShellSessions};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::time::{Duration, Instant};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::unix::pipe;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
-pub(crate) const DRIVER: &str = include_str!("driver.sh");
-const REQUEST_FD: i32 = 198;
-const REPLY_FD: i32 = 199;
-
-/// How a foreground command ended.
+/// How an ordinary command ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunStatus {
     /// The command completed; `code` is its exit status.
     Exited { code: i32 },
     /// The timeout expired and the command was terminated.
-    TimedOut {
-        /// The shell had to be destroyed (its state is lost).
-        shell_destroyed: bool,
-    },
-    /// The command was interrupted because the caller gave up (turn
-    /// cancelled).
+    TimedOut,
+    /// Stopped without a timeout (the call gave up, or the task was stopped).
     Cancelled,
-    /// The shell itself ended during the command (`exit`, `exec`, a crash,
-    /// a lost control channel). Its state is lost.
-    ShellEnded {
-        code: Option<i32>,
-        signal: Option<i32>,
-    },
+    /// Killed by a signal Bricks did not send for a timeout or a cancel.
+    Killed { signal: Option<i32> },
 }
 
-/// Everything known about a foreground command.
+/// Everything known about an ordinary command that ended.
 #[derive(Debug, Clone)]
 pub struct RunOutcome {
     pub status: RunStatus,
     pub stdout: Captured,
     pub stderr: Captured,
     /// Monotonic duration of the command.
-    pub duration: Duration,
-    /// Working directory of the shell after the command, when known.
+    pub duration: std::time::Duration,
+    /// Working directory the session has after the command, when its end was
+    /// published (`None`: its changes were not kept).
     pub cwd: Option<PathBuf>,
-    /// Facts the caller should show: session reset, leftover processes
-    /// stopped, termination details.
+    /// Facts the caller should show: a missing directory, leftover processes
+    /// stopped, environment changes not kept.
     pub notes: Vec<String>,
-    /// Processes terminated because of a timeout, with those that needed
-    /// the forced signal.
+    /// Processes terminated because of a timeout or a stop.
     pub terminated: procs::Termination,
 }
 
-/// Reply frames of the driver.
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum Frame {
-    Ready,
-    Start(u64),
-    End { id: u64, status: i32, cwd: PathBuf },
+struct Settled {
+    /// The directory the session has after the command, when published.
+    published_cwd: Option<PathBuf>,
 }
 
-/// Reads NUL-separated fields from the reply pipe. Cancel-safe: bytes are
-/// only consumed once a read completes.
-struct FrameReader {
-    rx: pipe::Receiver,
-    buf: Vec<u8>,
+/// One ordinary command, from its start to its end.
+pub struct Run {
+    task: Arc<Task>,
+    seq: u64,
+    base: Snapshot,
+    state: Arc<ShellState>,
+    timed_out: AtomicBool,
+    stop_report: parking_lot::Mutex<procs::Termination>,
+    launch_notes: Vec<String>,
+    settled: parking_lot::Mutex<Option<Settled>>,
+    /// Set once the watcher has recorded the end (stop report, publication).
+    watched: tokio::sync::watch::Receiver<bool>,
 }
 
-impl FrameReader {
-    fn try_parse(&mut self) -> Option<Frame> {
-        loop {
-            // Positions of the complete (NUL-terminated) fields.
-            let mut bounds = Vec::new();
-            let mut start = 0;
-            for (i, b) in self.buf.iter().enumerate() {
-                if *b == 0 {
-                    bounds.push((start, i));
-                    start = i + 1;
+impl Run {
+    /// The task behind the command: its id, its pid, its output.
+    pub fn task(&self) -> &Arc<Task> {
+        &self.task
+    }
+
+    /// Publishes the command's end, once. Called only once the task ended.
+    fn settle(&self) {
+        let mut settled = self.settled.lock();
+        if settled.is_some() {
+            return;
+        }
+        let normal = matches!(
+            self.task.state(),
+            TaskState::Completed { .. }
+                | TaskState::Failed {
+                    code: Some(_),
+                    signal: None
                 }
-            }
-            let &(k0, k1) = bounds.first()?;
-            let kind = self.buf[k0..k1].to_vec();
-            let arity = match kind.as_slice() {
-                b"READY" => 3,
-                b"START" => 2,
-                b"END" => 4,
-                _ => 1,
-            };
-            if bounds.len() < arity {
-                return None;
-            }
-            let field = |i: usize| self.buf[bounds[i].0..bounds[i].1].to_vec();
-            let text = |i: usize| String::from_utf8_lossy(&field(i)).to_string();
-            let frame = match kind.as_slice() {
-                b"READY" => Some(Frame::Ready),
-                b"START" => text(1).parse().ok().map(Frame::Start),
-                b"END" => {
-                    use std::os::unix::ffi::OsStrExt;
-                    Some(Frame::End {
-                        id: text(1).parse().unwrap_or(u64::MAX),
-                        status: text(2).parse().unwrap_or(-1),
-                        cwd: PathBuf::from(std::ffi::OsStr::from_bytes(&field(3))),
-                    })
-                }
-                _ => None,
-            };
-            let consumed = bounds[arity - 1].1 + 1;
-            self.buf.drain(..consumed);
-            if frame.is_some() {
-                return frame;
+        );
+        let mut published_cwd = None;
+        if normal && !self.timed_out.load(Ordering::SeqCst) {
+            let end = self
+                .task
+                .state_file()
+                .and_then(|p| std::fs::read(p).ok())
+                .and_then(|bytes| parse_dump(&bytes));
+            if let Some(end) = end {
+                self.state.publish(self.seq, &self.base, &end);
+                published_cwd = Some(end.cwd.pwd);
             }
         }
+        *settled = Some(Settled { published_cwd });
     }
 
-    async fn next(&mut self) -> std::io::Result<Option<Frame>> {
-        loop {
-            if let Some(f) = self.try_parse() {
-                return Ok(Some(f));
-            }
-            let mut tmp = [0u8; 4096];
-            let n = self.rx.read(&mut tmp).await?;
-            if n == 0 {
-                return Ok(None);
-            }
-            self.buf.extend_from_slice(&tmp[..n]);
-        }
-    }
-}
-
-/// The live parts of a session, used under the foreground lock.
-struct Live {
-    child: tokio::process::Child,
-    requests: pipe::Sender,
-    replies: FrameReader,
-}
-
-/// One persistent bash.
-pub struct BashSession {
-    pid: u32,
-    dir: PathBuf,
-    config: ShellConfig,
-    live: tokio::sync::Mutex<Option<Live>>,
-    dead: AtomicBool,
-    next_id: AtomicU64,
-    /// Output the shell wrote outside of any command (driver errors).
-    stray: Arc<parking_lot::Mutex<String>>,
-}
-
-fn make_pipe() -> std::io::Result<(OwnedFd, OwnedFd)> {
-    let mut fds = [0i32; 2];
-    // SAFETY: `pipe` writes two descriptors into the array on success.
-    if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    for fd in fds {
-        // Close-on-exec: these ends reach the shell only through dup2.
-        // SAFETY: fcntl on a descriptor we just created.
-        unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
-    }
-    // SAFETY: both descriptors are open and owned by nobody else.
-    Ok(unsafe { (OwnedFd::from_raw_fd(fds[0]), OwnedFd::from_raw_fd(fds[1])) })
-}
-
-fn mkfifo(path: &Path) -> std::io::Result<()> {
-    use std::os::unix::ffi::OsStrExt;
-    let c = std::ffi::CString::new(path.as_os_str().as_bytes())
-        .map_err(|_| std::io::Error::other("path contains a NUL byte"))?;
-    // SAFETY: valid C string; mkfifo does not retain the pointer.
-    if unsafe { libc::mkfifo(c.as_ptr(), 0o600) } != 0 {
-        return Err(std::io::Error::last_os_error());
-    }
-    Ok(())
-}
-
-/// Reads one FIFO into a shared capture until EOF.
-fn spawn_reader(
-    path: &Path,
-    capture: Arc<parking_lot::Mutex<StreamCapture>>,
-) -> std::io::Result<(pipe::Sender, tokio::task::JoinHandle<()>)> {
-    let mut rx = pipe::OpenOptions::new().open_receiver(path)?;
-    // Our own writer keeps the FIFO open until the command's end is known,
-    // so an early EOF cannot be mistaken for the end of the output.
-    let keeper = pipe::OpenOptions::new().open_sender(path)?;
-    let task = tokio::spawn(async move {
-        let mut buf = vec![0u8; 64 * 1024];
-        loop {
-            match rx.read(&mut buf).await {
-                Ok(0) | Err(_) => break,
-                Ok(n) => capture.lock().push(&buf[..n]),
-            }
-        }
-    });
-    Ok((keeper, task))
-}
-
-impl BashSession {
-    /// Start a shell in `cwd`, ready to take requests.
-    pub async fn start(
-        cwd: &Path,
-        config: ShellConfig,
-        dir: PathBuf,
-    ) -> std::io::Result<Arc<Self>> {
-        std::fs::create_dir_all(&dir)?;
-        let bash = config
-            .bash_path
-            .clone()
-            .or_else(|| which::which("bash").ok())
-            .ok_or_else(|| {
-                std::io::Error::new(std::io::ErrorKind::NotFound, "bash was not found on PATH")
-            })?;
-
-        let (req_read, req_write) = make_pipe()?;
-        let (rep_read, rep_write) = make_pipe()?;
-        let (child_req, child_rep) = (req_read.as_raw_fd(), rep_write.as_raw_fd());
-
-        let mut cmd = tokio::process::Command::new(&bash);
-        cmd.args(["--noprofile", "--norc", "-c", DRIVER, "bricks-shell"])
-            .current_dir(cwd)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .env_remove("BASH_ENV")
-            .env_remove("ENV")
-            .env_remove("PROMPT_COMMAND");
-        // SAFETY: only async-signal-safe calls between fork and exec.
-        unsafe {
-            cmd.pre_exec(move || {
-                if libc::setsid() == -1 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                for (from, to) in [(child_req, REQUEST_FD), (child_rep, REPLY_FD)] {
-                    if from == to {
-                        libc::fcntl(to, libc::F_SETFD, 0);
-                    } else if libc::dup2(from, to) == -1 {
-                        return Err(std::io::Error::last_os_error());
-                    }
-                }
-                Ok(())
-            });
-        }
-        let mut child = cmd.spawn()?;
-        drop(req_read);
-        drop(rep_write);
-        let pid = child.id().unwrap_or(0);
-
-        let stray = Arc::new(parking_lot::Mutex::new(String::new()));
-        for stream in [
-            child
-                .stdout
-                .take()
-                .map(|s| Box::new(s) as Box<dyn tokio::io::AsyncRead + Unpin + Send>),
-            child
-                .stderr
-                .take()
-                .map(|s| Box::new(s) as Box<dyn tokio::io::AsyncRead + Unpin + Send>),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            let stray = stray.clone();
-            tokio::spawn(async move {
-                let mut s = stream;
-                let mut buf = [0u8; 4096];
-                while let Ok(n) = s.read(&mut buf).await {
-                    if n == 0 {
-                        break;
-                    }
-                    let mut st = stray.lock();
-                    st.push_str(&String::from_utf8_lossy(&buf[..n]));
-                    if st.len() > 8192 {
-                        let cut = st.len() - 4096;
-                        let cut = (cut..st.len())
-                            .find(|&i| st.is_char_boundary(i))
-                            .unwrap_or(0);
-                        st.drain(..cut);
-                    }
-                }
-            });
-        }
-
-        let requests = pipe::Sender::from_owned_fd(req_write)?;
-        let mut replies = FrameReader {
-            rx: pipe::Receiver::from_owned_fd(rep_read)?,
-            buf: Vec::new(),
-        };
-        match tokio::time::timeout(Duration::from_secs(10), replies.next()).await {
-            Ok(Ok(Some(Frame::Ready))) => {}
-            other => {
-                let _ = child.start_kill();
-                let _ = child.wait().await;
-                return Err(std::io::Error::other(format!(
-                    "the shell did not start its driver ({}): {}",
-                    match other {
-                        Err(_) => "timeout".to_string(),
-                        Ok(Err(e)) => e.to_string(),
-                        Ok(Ok(f)) => format!("{f:?}"),
-                    },
-                    stray.lock().trim()
-                )));
-            }
-        }
-        Ok(Arc::new(Self {
-            pid,
-            dir,
-            config,
-            live: tokio::sync::Mutex::new(Some(Live {
-                child,
-                requests,
-                replies,
-            })),
-            dead: AtomicBool::new(false),
-            next_id: AtomicU64::new(1),
-            stray,
-        }))
-    }
-
-    pub fn pid(&self) -> u32 {
-        self.pid
-    }
-
-    /// The shell ended or was destroyed; a new one is needed.
-    pub fn is_dead(&self) -> bool {
-        self.dead.load(Ordering::SeqCst)
-    }
-
-    /// Write the shell's current state (cwd, options, exported variables,
-    /// functions, aliases) as a script a new bash can source.
-    pub async fn snapshot(self: &Arc<Self>, path: &Path) -> std::io::Result<()> {
-        self.control("snapshot", "", path).await.map(|_| ())
-    }
-
-    /// Definitions of the aliases and functions among `names` (for
-    /// permission checks); empty when none is defined.
-    pub async fn describe(self: &Arc<Self>, names: &[String]) -> std::io::Result<String> {
-        let safe: Vec<&str> = names
-            .iter()
-            .map(String::as_str)
-            .filter(|n| {
-                !n.is_empty()
-                    && n.chars()
-                        .all(|c| c.is_alphanumeric() || "_-.:@+".contains(c))
-            })
-            .collect();
-        if safe.is_empty() {
-            return Ok(String::new());
-        }
-        let out = self
-            .dir
-            .join(format!("describe-{}", self.next_id.load(Ordering::SeqCst)));
-        self.control("describe", &safe.join(" "), &out).await?;
-        let text = std::fs::read_to_string(&out).unwrap_or_default();
-        let _ = std::fs::remove_file(&out);
-        Ok(text)
-    }
-
-    async fn control(self: &Arc<Self>, kind: &str, arg: &str, out: &Path) -> std::io::Result<()> {
-        let mut guard = self.live.lock().await;
-        let live = guard
-            .as_mut()
-            .ok_or_else(|| std::io::Error::other("the shell has ended"))?;
-        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        let fields = [
-            id.to_string(),
-            kind.into(),
-            arg.into(),
-            out.display().to_string(),
-            String::new(),
-            String::new(),
-        ];
-        send_request(&mut live.requests, &fields).await?;
-        match wait_end(live, id, Duration::from_secs(10)).await {
-            Some(_) => Ok(()),
-            None => Err(std::io::Error::other("the shell did not answer")),
-        }
-    }
-
-    /// Run one foreground command in the shell's scope.
-    pub async fn run(
-        self: &Arc<Self>,
-        command: &str,
-        stdin: Option<&str>,
-        timeout: Duration,
-        progress: Option<Progress>,
-    ) -> std::io::Result<RunOutcome> {
-        let mut guard = self.live.lock().await;
-        if self.is_dead() || guard.is_none() {
-            return Err(std::io::Error::other("the shell has ended"));
-        }
-        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        let req_dir = self.dir.join(format!("req-{id}"));
-        std::fs::create_dir_all(&req_dir)?;
-        let script = req_dir.join("command");
-        std::fs::write(&script, command)?;
-        let input = match stdin {
-            Some(text) => {
-                let p = req_dir.join("stdin");
-                std::fs::write(&p, text)?;
-                p
-            }
-            None => PathBuf::from("/dev/null"),
-        };
-        let (out_fifo, err_fifo) = (req_dir.join("stdout"), req_dir.join("stderr"));
-        mkfifo(&out_fifo)?;
-        mkfifo(&err_fifo)?;
-        let limits = self.config.capture.clone();
-        let out_cap = Arc::new(parking_lot::Mutex::new(StreamCapture::new(
-            limits.clone(),
-            self.dir.join(format!("raw-{id}.stdout")),
-        )));
-        let err_cap = Arc::new(parking_lot::Mutex::new(StreamCapture::new(
-            limits,
-            self.dir.join(format!("raw-{id}.stderr")),
-        )));
-        let (out_keep, out_task) = spawn_reader(&out_fifo, out_cap.clone())?;
-        let (err_keep, err_task) = spawn_reader(&err_fifo, err_cap.clone())?;
-
-        // If this future is dropped mid-command (turn cancelled), interrupt
-        // the command in the background instead of leaving it running.
-        let mut cancel = CancelGuard {
-            session: Some(self.clone()),
-            id,
-        };
-
-        let live = guard.as_mut().expect("checked above");
-        let fields = [
-            id.to_string(),
-            "run".into(),
-            script.display().to_string(),
-            out_fifo.display().to_string(),
-            err_fifo.display().to_string(),
-            input.display().to_string(),
-        ];
-        let started = Instant::now();
-        send_request(&mut live.requests, &fields).await?;
-
-        let mut notes = Vec::new();
-        let mut terminated = procs::Termination::default();
-        let deadline = tokio::time::Instant::now() + timeout;
-        let mut ticker = tokio::time::interval(self.config.progress_every);
-        ticker.tick().await;
-        let mut last_bytes = 0u64;
-        let mut quiet_since = Instant::now();
-
-        enum Waited {
-            End(i32, PathBuf),
-            Lost,
-            Timeout,
-        }
-        let waited = loop {
-            tokio::select! {
-                frame = live.replies.next() => match frame {
-                    Ok(Some(Frame::End { id: got, status, cwd })) if got == id => break Waited::End(status, cwd),
-                    Ok(Some(_)) => continue,
-                    Ok(None) | Err(_) => break Waited::Lost,
-                },
-                _ = tokio::time::sleep_until(deadline) => break Waited::Timeout,
-                _ = ticker.tick() => {
-                    let bytes = out_cap.lock().raw_bytes() + err_cap.lock().raw_bytes();
-                    if bytes != last_bytes {
-                        last_bytes = bytes;
-                        quiet_since = Instant::now();
-                    }
-                    if let Some(p) = &progress {
-                        let quiet = quiet_since.elapsed();
-                        let mut msg = format!(
-                            "still running after {} ({} bytes of output so far)",
-                            cersei_types::duration::display_ms(started.elapsed()),
-                            bytes
-                        );
-                        if quiet >= self.config.progress_every {
-                            msg.push_str(&format!(
-                                "; no output for {} — it may be computing, or waiting for input it \
-                                 will not get (stdin is {})",
-                                cersei_types::duration::display_ms(quiet),
-                                if stdin.is_some() { "the provided input" } else { "empty" }
-                            ));
-                        }
-                        p(msg);
-                    }
-                }
-            }
-        };
-
-        let (status, cwd) = match waited {
-            Waited::End(code, cwd) => (RunStatus::Exited { code }, Some(cwd)),
-            Waited::Lost => {
-                let st = tokio::time::timeout(Duration::from_secs(2), live.child.wait()).await;
-                self.dead.store(true, Ordering::SeqCst);
-                let (code, signal) = match st {
-                    Ok(Ok(s)) => {
-                        use std::os::unix::process::ExitStatusExt;
-                        (s.code(), s.signal())
-                    }
-                    _ => {
-                        procs::signal_group(self.pid, true);
-                        (None, None)
-                    }
-                };
-                let stray = self.stray.lock().trim().to_string();
-                notes.push(format!(
-                    "the shell ended during this command ({}); its state (directory, variables, \
-                     functions, aliases) is lost and the next command starts a new shell{}",
-                    match (code, signal) {
-                        (Some(c), _) => format!("exit status {c}"),
-                        (None, Some(s)) => format!("signal {s}"),
-                        _ => "no status".into(),
-                    },
-                    if stray.is_empty() {
-                        String::new()
-                    } else {
-                        format!(": {stray}")
-                    }
-                ));
-                (RunStatus::ShellEnded { code, signal }, None)
-            }
-            Waited::Timeout => {
-                if let Some(p) = &progress {
-                    p(format!(
-                        "timeout of {:.0}s reached: stopping the command",
-                        timeout.as_secs_f64()
-                    ));
-                }
-                let (destroyed, term, end_cwd) = self.interrupt(live, id).await;
-                terminated = term;
-                if destroyed {
-                    notes.push(
-                        "the command did not stop with its processes, so the shell was destroyed: its \
-                         state is lost and the next command starts a new shell"
-                            .into(),
-                    );
-                }
-                (
-                    RunStatus::TimedOut {
-                        shell_destroyed: destroyed,
-                    },
-                    end_cwd,
-                )
-            }
-        };
-        cancel.session = None;
-        let duration = started.elapsed();
-
-        // Collect the output: our keepers go, then the readers see EOF once
-        // nothing else holds the FIFOs.
-        drop(out_keep);
-        drop(err_keep);
-        let readers = vec![out_task, err_task];
-        let pending = if !self.is_dead() && procs::descendants(self.pid).is_empty() {
-            // Nothing the command started is left: nobody can write to the
-            // FIFOs any more. Some kernels (macOS) never report the EOF of a
-            // FIFO to the readers, so instead of waiting for it, read what
-            // already arrived (until the streams are quiet) and stop.
-            let bytes = || out_cap.lock().raw_bytes() + err_cap.lock().raw_bytes();
-            settle(readers, bytes).await;
-            Vec::new()
+    /// The outcome, once the task ended.
+    fn outcome(&self) -> RunOutcome {
+        let published_cwd = self
+            .settled
+            .lock()
+            .as_ref()
+            .and_then(|s| s.published_cwd.clone());
+        let status = if self.timed_out.load(Ordering::SeqCst) {
+            RunStatus::TimedOut
         } else {
-            drain(readers, self.config.drain).await
+            match self.task.state() {
+                TaskState::Completed { code } => RunStatus::Exited { code },
+                TaskState::Failed {
+                    code: Some(code),
+                    signal: None,
+                } => RunStatus::Exited { code },
+                TaskState::Failed { signal, .. } => RunStatus::Killed { signal },
+                TaskState::Stopped | TaskState::Starting | TaskState::Running => {
+                    RunStatus::Cancelled
+                }
+            }
         };
-        if !self.is_dead() {
-            // Processes left behind by the command (`cmd &`, a daemon that
-            // kept the shell's outputs) must not outlive it unsupervised.
-            let leftovers = procs::descendants(self.pid);
-            if !leftovers.is_empty() {
-                let t = procs::terminate(leftovers, self.config.term_grace).await;
-                notes.push(format!(
-                    "{} process(es) left running by the command were stopped ({}); use \
-                     `background: true` for long-running processes",
-                    t.targeted.len(),
-                    t.targeted
-                        .iter()
-                        .map(|p| p.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ));
-            }
+        let [stdout, stderr] = self
+            .task
+            .output()
+            .unwrap_or_else(|| [Captured::default(), Captured::default()]);
+        let mut notes = self.launch_notes.clone();
+        if published_cwd.is_none() {
+            notes.push(
+                "environment changes not available: the command did not end normally \
+                 (interrupted, timed out, or it replaced its shell with exec), so its \
+                 directory and variables are not kept"
+                    .into(),
+            );
         }
-        if !pending.is_empty() {
-            // Writers outside our supervision still hold the streams: stop
-            // reading after one more bounded window; what was read is kept.
-            for h in drain(pending, self.config.drain).await {
-                h.abort();
-            }
+        if let Some(t) = self.task.leftovers()
+            && !t.targeted.is_empty()
+        {
+            notes.push(format!(
+                "{} process(es) left running by the command were stopped ({}); use \
+                 `background: true` for long-running processes",
+                t.targeted.len(),
+                t.targeted
+                    .iter()
+                    .map(|p| p.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
         }
-        let _ = std::fs::remove_dir_all(&req_dir);
-        let stdout = take(out_cap);
-        let stderr = take(err_cap);
-        if self.is_dead() {
-            *guard = None;
-        }
-        Ok(RunOutcome {
+        RunOutcome {
             status,
             stdout,
             stderr,
-            duration,
-            cwd,
+            duration: self.task.elapsed(),
+            cwd: published_cwd,
             notes,
-            terminated,
-        })
+            terminated: self.stop_report.lock().clone(),
+        }
+    }
+}
+
+/// The caller's handle on an ordinary command. Dropped before its end (the
+/// call was cancelled), the command is killed: its group, at once.
+pub struct Command {
+    run: Option<Arc<Run>>,
+}
+
+impl Command {
+    /// The task behind the command.
+    pub fn task(&self) -> &Arc<Task> {
+        &self.run.as_ref().expect("command handed over").task
     }
 
-    /// Stop the running command `id`: its process tree first (TERM, grace,
-    /// KILL); the shell itself if it does not come back. Returns whether the
-    /// shell was destroyed, the termination record and the cwd if the
-    /// command ended.
-    async fn interrupt(
+    /// Waits for the command's end, publishes it and returns its outcome.
+    pub async fn finish(&mut self) -> RunOutcome {
+        let run = Arc::clone(self.run.as_ref().expect("command handed over"));
+        let mut watched = run.watched.clone();
+        let _ = watched.wait_for(|done| *done).await;
+        run.settle();
+        let outcome = run.outcome();
+        self.run = None;
+        outcome
+    }
+
+    /// Hands the command over to the session: it goes on as a task, and
+    /// its end is still published. Nothing is killed when this handle goes.
+    pub fn detach(mut self) -> Arc<Run> {
+        self.run.take().expect("command handed over")
+    }
+}
+
+impl Drop for Command {
+    fn drop(&mut self) {
+        if let Some(run) = self.run.take() {
+            run.task.kill_now();
+        }
+    }
+}
+
+impl ShellSessions {
+    /// Starts an ordinary command in `default_cwd` (used when the session
+    /// has no directory yet, or the recorded one vanished). `timeout` is a
+    /// deadline from now: at its end the command's processes are stopped.
+    pub async fn spawn_command(
         &self,
-        live: &mut Live,
-        id: u64,
-    ) -> (bool, procs::Termination, Option<PathBuf>) {
-        let tree = procs::descendants(self.pid);
-        let term = procs::terminate(tree, self.config.term_grace).await;
-        if let Some(cwd) = wait_end(live, id, Duration::from_secs(2)).await {
-            return (false, term, Some(cwd));
-        }
-        // The shell itself is busy (a builtin loop) or hung: destroy it.
-        self.dead.store(true, Ordering::SeqCst);
-        procs::signal_group(self.pid, true);
-        let _ = tokio::time::timeout(Duration::from_secs(2), live.child.wait()).await;
-        (true, term, None)
-    }
-
-    /// Stop the shell and everything it started. Awaitable and bounded.
-    pub async fn close(&self) {
-        self.dead.store(true, Ordering::SeqCst);
-        let tree = procs::descendants(self.pid);
-        procs::signal_group(self.pid, false);
-        let mut all = tree;
-        all.push(self.pid);
-        let _ = procs::terminate(all, self.config.term_grace).await;
-        if let Ok(mut guard) = tokio::time::timeout(Duration::from_secs(2), self.live.lock()).await
-        {
-            if let Some(live) = guard.as_mut() {
-                let _ = tokio::time::timeout(Duration::from_secs(2), live.child.wait()).await;
-            }
-            *guard = None;
-        }
-        let _ = std::fs::remove_dir_all(&self.dir);
-    }
-
-    /// Synchronous last resort (drop paths): kill the whole tree now.
-    pub fn kill_now(&self) {
-        self.dead.store(true, Ordering::SeqCst);
-        procs::terminate_tree_now(self.pid);
-        procs::signal_group(self.pid, true);
-        let _ = std::fs::remove_dir_all(&self.dir);
-    }
-}
-
-impl Drop for BashSession {
-    fn drop(&mut self) {
-        if !self.dead.load(Ordering::SeqCst) {
-            procs::terminate_tree_now(self.pid);
-            procs::signal_group(self.pid, true);
-        }
-    }
-}
-
-async fn send_request(tx: &mut pipe::Sender, fields: &[String]) -> std::io::Result<()> {
-    let mut frame = Vec::new();
-    for f in fields {
-        frame.extend_from_slice(f.as_bytes());
-        frame.push(0);
-    }
-    tx.write_all(&frame).await
-}
-
-/// Wait for the readers until `limit`; returns those still running.
-async fn drain(
-    tasks: Vec<tokio::task::JoinHandle<()>>,
-    limit: Duration,
-) -> Vec<tokio::task::JoinHandle<()>> {
-    let deadline = tokio::time::Instant::now() + limit;
-    let mut pending = Vec::new();
-    for mut h in tasks {
-        if tokio::time::timeout_at(deadline, &mut h).await.is_err() {
-            pending.push(h);
-        }
-    }
-    pending
-}
-
-/// Wait until the readers end, or their streams have been quiet for a
-/// while (bounded), then stop them. For streams nobody can write to any
-/// more: what is in flight is still read, nothing is waited for beyond it.
-async fn settle(tasks: Vec<tokio::task::JoinHandle<()>>, bytes: impl Fn() -> u64) {
-    const QUIET: Duration = Duration::from_millis(15);
-    const LIMIT: Duration = Duration::from_millis(200);
-    let started = Instant::now();
-    let mut last = bytes();
-    let mut quiet_since = Instant::now();
-    while started.elapsed() < LIMIT && tasks.iter().any(|h| !h.is_finished()) {
-        tokio::time::sleep(Duration::from_millis(2)).await;
-        let now = bytes();
-        if now != last {
-            last = now;
-            quiet_since = Instant::now();
-        } else if quiet_since.elapsed() >= QUIET {
-            break;
-        }
-    }
-    for h in tasks {
-        h.abort();
-    }
-}
-
-/// Wait for the END reply of request `id`, up to `limit`.
-async fn wait_end(live: &mut Live, id: u64, limit: Duration) -> Option<PathBuf> {
-    let fut = async {
-        loop {
-            match live.replies.next().await {
-                Ok(Some(Frame::End { id: got, cwd, .. })) if got == id => return Some(cwd),
-                Ok(Some(_)) => continue,
-                _ => return None,
-            }
-        }
-    };
-    tokio::time::timeout(limit, fut).await.ok().flatten()
-}
-
-fn take(cap: Arc<parking_lot::Mutex<StreamCapture>>) -> Captured {
-    let placeholder = StreamCapture::new(CaptureLimits::default(), PathBuf::new());
-    let inner = std::mem::replace(&mut *cap.lock(), placeholder);
-    inner.finish()
-}
-
-/// Interrupts a command whose `run` future was dropped.
-struct CancelGuard {
-    session: Option<Arc<BashSession>>,
-    id: u64,
-}
-
-impl Drop for CancelGuard {
-    fn drop(&mut self) {
-        let Some(session) = self.session.take() else {
-            return;
+        command: &str,
+        stdin: Option<&str>,
+        default_cwd: &Path,
+        config: &ShellConfig,
+        timeout: Duration,
+    ) -> std::io::Result<Command> {
+        let n = self.next_task.fetch_add(1, Ordering::SeqCst);
+        let dir = self.dir.join(format!("task-{n}"));
+        let launch = self.state.launch(default_cwd);
+        let bash = super::bash_path(config)?;
+        let ordinary = Ordinary {
+            capture: config.capture.clone(),
+            spill: [
+                self.dir.join(format!("raw-{n}.stdout")),
+                self.dir.join(format!("raw-{n}.stderr")),
+            ],
+            grace: config.term_grace,
         };
-        let id = self.id;
-        match tokio::runtime::Handle::try_current() {
-            Ok(rt) => {
-                rt.spawn(async move {
-                    // The dropped `run` released the lock; take it so the next
-                    // command waits for this cleanup.
-                    let mut guard = session.live.lock().await;
-                    if let Some(live) = guard.as_mut() {
-                        let (destroyed, _, _) = session.interrupt(live, id).await;
-                        if destroyed {
-                            *guard = None;
-                        }
-                    }
-                });
+        let task = match Task::start(TaskSpec {
+            id: format!("bg-{n}"),
+            command,
+            prelude: &launch.prelude,
+            cwd: &launch.base.cwd.pwd,
+            env: &launch.env,
+            stdin,
+            ready_pattern: None,
+            dir: dir.clone(),
+            bash: &bash,
+            limits: config.tasks.clone(),
+            ordinary: Some(ordinary),
+        })
+        .await
+        {
+            Ok(t) => t,
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&dir);
+                return Err(e);
             }
-            Err(_) => session.kill_now(),
+        };
+        let (watched_tx, _) = tokio::sync::watch::channel(false);
+        let watched_rx = watched_tx.subscribe();
+        let run = Arc::new(Run {
+            task,
+            seq: launch.seq,
+            base: launch.base,
+            state: Arc::clone(&self.state),
+            timed_out: AtomicBool::new(false),
+            stop_report: parking_lot::Mutex::new(procs::Termination::default()),
+            launch_notes: launch.notes,
+            settled: parking_lot::Mutex::new(None),
+            watched: watched_rx,
+        });
+        self.track(Arc::clone(&run));
+        let watch = Arc::clone(&run);
+        let grace = config.term_grace;
+        tokio::spawn(async move {
+            tokio::select! {
+                _ = watch.task.wait_end() => {}
+                _ = tokio::time::sleep(timeout) => {
+                    if !watch.task.state().is_finished() {
+                        watch.timed_out.store(true, Ordering::SeqCst);
+                        let (_, report) = watch.task.stop_report(grace).await;
+                        *watch.stop_report.lock() = report;
+                    }
+                }
+            }
+            watch.task.wait_end().await;
+            watch.settle();
+            let _ = watched_tx.send(true);
+        });
+        Ok(Command { run: Some(run) })
+    }
+
+    /// Keeps a command's run among the session's, until it ends.
+    fn track(&self, run: Arc<Run>) {
+        let mut commands = self.commands.lock();
+        commands.retain(|r| !r.task().state().is_finished());
+        commands.push(run);
+    }
+
+    /// Makes a yielded command's task visible to the task tools.
+    pub(crate) fn adopt(&self, task: Arc<Task>) {
+        self.tasks.lock().push(task);
+    }
+
+    /// Remembers what a command was described as for an approval.
+    pub(crate) fn remember(&self, command: &str, fingerprint: String) {
+        let mut d = self.described.lock();
+        d.retain(|(c, _)| c != command);
+        if d.len() >= 32 {
+            d.remove(0);
         }
+        d.push((command.to_string(), fingerprint));
+    }
+
+    /// The fingerprint a command was described with, consumed.
+    pub(crate) fn take_remembered(&self, command: &str) -> Option<String> {
+        let mut d = self.described.lock();
+        let pos = d.iter().position(|(c, _)| c == command)?;
+        Some(d.remove(pos).1)
     }
 }

@@ -171,8 +171,14 @@ impl StreamCapture {
         if let Some(f) = &mut self.spill {
             let _ = f.flush();
         }
+        self.view()
+    }
+
+    /// The output so far, the capture going on (a partial last line is not
+    /// in it, it is not finished yet).
+    pub fn view(&self) -> Captured {
         let raw_path = self.spill.as_ref().map(|_| self.spill_path.clone());
-        let mut text = self.head;
+        let mut text = self.head.clone();
         if self.omitted_bytes > 0 {
             if !text.ends_with('\n') {
                 text.push('\n');

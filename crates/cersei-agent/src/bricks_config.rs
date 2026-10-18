@@ -38,6 +38,8 @@ pub struct BricksConfig {
     /// `[background]`: background jobs (`Bash` with `background: true`,
     /// the `Job` tool).
     pub background: cersei_tools::jobs::JobSettings,
+    /// `[bash]`: foreground commands (`yield_time_ms`, the hand-over to a task).
+    pub bash: cersei_tools::shell::BashSettings,
 }
 
 impl Default for BricksConfig {
@@ -55,6 +57,7 @@ impl Default for BricksConfig {
             semantic: bricks_semantic::SemanticConfig::default(),
             agents: crate::agents::DelegationSettings::default(),
             background: cersei_tools::jobs::JobSettings::default(),
+            bash: cersei_tools::shell::BashSettings::default(),
         }
     }
 }
@@ -156,6 +159,13 @@ impl BricksConfig {
             Err(e) => c
                 .diagnostics
                 .push(format!("{name}: [background]: {e} (job defaults used)")),
+        }
+        match table_from_bricks_toml::<cersei_tools::shell::BashSettings>(text, "bash") {
+            Ok(Some(b)) => c.bash = b,
+            Ok(None) => {}
+            Err(e) => c
+                .diagnostics
+                .push(format!("{name}: [bash]: {e} (bash defaults used)")),
         }
         match semantic_from_bricks_toml(text) {
             Ok(Some(sem)) => c.semantic = sem,
@@ -372,8 +382,28 @@ mod tests {
         );
     }
 
-    /// The commented `[agents]` and `[background]` values of the example,
-    /// uncommented, are the defaults.
+    /// `[bash] yield_time_ms` is read; a bad key is reported and defaults
+    /// are used.
+    #[test]
+    fn the_bash_section_sets_the_yield_time_and_bad_keys_fall_back() {
+        let c = BricksConfig::from_texts(Some("[bash]\nyield_time_ms = 2500\n"), &[]);
+        assert!(c.diagnostics.is_empty(), "{:#?}", c.diagnostics);
+        assert_eq!(c.bash.yield_time_ms, 2500);
+        let c = BricksConfig::from_texts(Some("[bash]\nbogus = 1\n"), &[]);
+        assert_eq!(
+            c.bash,
+            cersei_tools::shell::BashSettings::default(),
+            "defaults used"
+        );
+        assert!(
+            c.diagnostics.iter().any(|d| d.contains("[bash]")),
+            "{:#?}",
+            c.diagnostics
+        );
+    }
+
+    /// The commented `[agents]`, `[background]` and `[bash]` values of the
+    /// example, uncommented, are the defaults.
     #[test]
     fn the_documented_agent_and_job_limits_are_the_defaults() {
         let text = include_str!("../../../docs/bricks.example.toml");
@@ -382,7 +412,7 @@ mod tests {
         for line in text.lines() {
             let t = line.trim();
             if t.starts_with('[') {
-                section = if t == "[agents]" || t == "[background]" {
+                section = if t == "[agents]" || t == "[background]" || t == "[bash]" {
                     t
                 } else {
                     ""
@@ -413,6 +443,7 @@ mod tests {
                 "raw_log_bytes",
                 "stop_grace_ms",
                 "max_page_bytes",
+                "yield_time_ms",
             ];
             if !section.is_empty() && known.contains(&key) {
                 out.push_str(rest.split(" #").next().unwrap_or(rest));
@@ -431,7 +462,7 @@ mod tests {
             cersei_tools::jobs::JobSettings::default(),
             "{out}"
         );
-        assert_eq!(out.matches(" = ").count(), 15, "{out}");
+        assert_eq!(out.matches(" = ").count(), 16, "{out}");
     }
 
     #[test]

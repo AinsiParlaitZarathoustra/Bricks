@@ -1,18 +1,23 @@
-//! Persistent shells, supervised execution and background tasks.
+//! Shell execution of a session: ordinary commands, background tasks and
+//! PowerShell.
 //!
 //! One [`ShellSessions`] per tool-context session id (an agent session; a
-//! sub-agent gets its own id and therefore its own shells). It owns:
+//! sub-agent gets its own id and therefore its own state). It owns:
 //!
-//! * the persistent bash ([`bash::BashSession`], Unix) — foreground commands
-//!   are serialised in it and share its state for its whole life;
-//! * the persistent PowerShell ([`powershell::PwshSession`]);
-//! * the background tasks ([`background::Task`]).
+//! * the session's state ([`state::ShellState`]): working directory, exported
+//!   variables, functions and aliases, shared by the session's commands;
+//! * the ordinary commands ([`bash::Command`]): each one a separate `bash`
+//!   process started from a copy of that state, running side by side (no
+//!   command waits for another), with a deadline, and handed over as a task
+//!   when a call stops waiting for it (`yield_time_ms`);
+//! * the background tasks ([`background::Task`]): started from a copy of the
+//!   state, never publishing into it;
+//! * the persistent PowerShell ([`powershell::PwshSession`]), unchanged.
 //!
-//! State persists while the interpreter lives. When it ends (`exit`, `exec`,
-//! a crash, a timeout that required destroying it), the next command starts
-//! a fresh one and says so; nothing is restored behind the user's back.
-//! [`close_session`] stops everything, awaitably and within bounds; dropping
-//! the registry entry kills what is left (synchronous last resort).
+//! State persists while the session lives; non-exported variables do not
+//! (see [`state`]). [`close_session`] stops everything, awaitably and within
+//! bounds; dropping the registry entry kills what is left (synchronous last
+//! resort).
 //!
 //! See `docs/shell.md` for the contracts and the per-OS guarantees.
 
@@ -23,7 +28,9 @@ pub mod capture;
 pub mod clean;
 pub mod powershell;
 pub mod procs;
+pub mod state;
 
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -40,6 +47,31 @@ pub struct ProgressSink(pub Arc<ProgressSinkFn>);
 /// `(tool name, message)`.
 pub type ProgressSinkFn = dyn Fn(&str, &str) + Send + Sync;
 
+/// `[bash]` in `bricks.toml`: settings of the Bash tool.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct BashSettings {
+    /// Milliseconds a foreground command runs before the call returns it as
+    /// a task (`Running`, with a task id) while it goes on. A call's
+    /// `yield_time_ms` overrides it; `timeout` still ends the command.
+    pub yield_time_ms: u64,
+}
+
+impl Default for BashSettings {
+    fn default() -> Self {
+        Self {
+            yield_time_ms: 10_000,
+        }
+    }
+}
+
+impl BashSettings {
+    /// Applies these settings to a shell configuration.
+    pub fn apply_to(&self, config: &mut ShellConfig) {
+        config.yield_time = Duration::from_millis(self.yield_time_ms);
+    }
+}
+
 /// Settings of shell execution. Put one in `ToolContext::extensions` to
 /// override the defaults.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +84,9 @@ pub struct ShellConfig {
     pub default_timeout: Duration,
     /// Upper bound of a requested timeout.
     pub max_timeout: Duration,
+    /// Foreground time before a still-running command is handed over as a
+    /// task (see [`BashSettings`]).
+    pub yield_time: Duration,
     /// Between the graceful and the forced signal.
     pub term_grace: Duration,
     /// How long to keep reading outputs after a command ended.
@@ -60,7 +95,7 @@ pub struct ShellConfig {
     pub progress_every: Duration,
     pub capture: capture::CaptureLimits,
     pub tasks: background::TaskLimits,
-    /// Where session files (FIFOs, scripts, spilled outputs, task logs) go.
+    /// Where session files (spilled outputs, task logs) go.
     pub base_dir: PathBuf,
 }
 
@@ -71,6 +106,7 @@ impl Default for ShellConfig {
             pwsh_path: None,
             default_timeout: Duration::from_secs(120),
             max_timeout: Duration::from_secs(600),
+            yield_time: Duration::from_millis(BashSettings::default().yield_time_ms),
             term_grace: Duration::from_secs(2),
             drain: Duration::from_millis(500),
             progress_every: Duration::from_secs(10),
@@ -81,17 +117,22 @@ impl Default for ShellConfig {
     }
 }
 
-/// The shells and tasks of one session.
+/// The commands and tasks of one session.
 pub struct ShellSessions {
     pub id: String,
     dir: PathBuf,
-    #[cfg(unix)]
-    bash: tokio::sync::Mutex<Option<Arc<bash::BashSession>>>,
+    state: Arc<state::ShellState>,
     pwsh: tokio::sync::Mutex<Option<Arc<powershell::PwshSession>>>,
-    /// Set when a shell of this session ended; reported once by the next
-    /// command, which runs in a new shell.
+    /// Set when the PowerShell of this session ended; reported once by the
+    /// next command, which runs in a new one.
     reset_notice: parking_lot::Mutex<Option<String>>,
+    /// Tasks the caller can read and stop: background tasks and handed-over
+    /// commands.
     tasks: parking_lot::Mutex<Vec<Arc<background::Task>>>,
+    /// Ordinary commands in flight (possibly handed over too).
+    commands: parking_lot::Mutex<Vec<Arc<bash::Run>>>,
+    /// Commands described for an approval: `(command, fingerprint)`.
+    described: parking_lot::Mutex<Vec<(String, String)>>,
     next_task: AtomicU64,
     generation: AtomicU64,
 }
@@ -124,11 +165,12 @@ pub fn session(id: &str, config: &ShellConfig) -> Arc<ShellSessions> {
                 dir: config
                     .base_dir
                     .join(format!("{}-{}-{n}", sanitize(id), std::process::id())),
-                #[cfg(unix)]
-                bash: tokio::sync::Mutex::new(None),
+                state: Arc::new(state::ShellState::from_env()),
                 pwsh: tokio::sync::Mutex::new(None),
                 reset_notice: parking_lot::Mutex::new(None),
                 tasks: parking_lot::Mutex::new(Vec::new()),
+                commands: parking_lot::Mutex::new(Vec::new()),
+                described: parking_lot::Mutex::new(Vec::new()),
                 next_task: AtomicU64::new(1),
                 generation: AtomicU64::new(0),
             })
@@ -136,7 +178,7 @@ pub fn session(id: &str, config: &ShellConfig) -> Arc<ShellSessions> {
         .clone()
 }
 
-/// Close the shells and tasks of session `id`: graceful, bounded, awaited.
+/// Close the commands and tasks of session `id`: graceful, bounded, awaited.
 pub async fn close_session(id: &str) {
     if let Some((_, s)) = REGISTRY.remove(id) {
         s.close().await;
@@ -150,12 +192,29 @@ pub fn close_session_now(id: &str) {
     }
 }
 
+/// The `bash` to run: configured, or the first on `PATH`.
+#[cfg(unix)]
+pub(crate) fn bash_path(config: &ShellConfig) -> std::io::Result<PathBuf> {
+    config
+        .bash_path
+        .clone()
+        .or_else(|| which::which("bash").ok())
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::NotFound, "bash was not found on PATH")
+        })
+}
+
 impl ShellSessions {
     pub fn dir(&self) -> &Path {
         &self.dir
     }
 
-    /// Take the pending reset notice, if a shell ended since the last call.
+    /// The session's shell state (directory, exports, functions, aliases).
+    pub fn state(&self) -> &state::ShellState {
+        &self.state
+    }
+
+    /// Take the pending reset notice, if a PowerShell ended since the last call.
     pub fn take_reset_notice(&self) -> Option<String> {
         self.reset_notice.lock().take()
     }
@@ -165,33 +224,6 @@ impl ShellSessions {
             "{what} ended before this command; this command runs in a new {what} — the previous \
              working directory, variables, functions and aliases are gone"
         ));
-    }
-
-    /// The live bash of this session, started in `cwd` if there is none.
-    #[cfg(unix)]
-    pub async fn bash(
-        &self,
-        cwd: &Path,
-        config: &ShellConfig,
-    ) -> std::io::Result<Arc<bash::BashSession>> {
-        let mut slot = self.bash.lock().await;
-        if let Some(b) = slot.as_ref() {
-            if !b.is_dead() {
-                return Ok(b.clone());
-            }
-            b.close().await;
-            *slot = None;
-            self.note_reset("shell");
-        }
-        let generation = self.generation.fetch_add(1, Ordering::SeqCst);
-        let b = bash::BashSession::start(
-            cwd,
-            config.clone(),
-            self.dir.join(format!("bash-{generation}")),
-        )
-        .await?;
-        *slot = Some(b.clone());
-        Ok(b)
     }
 
     /// The live PowerShell of this session.
@@ -220,7 +252,8 @@ impl ShellSessions {
         Ok(p)
     }
 
-    /// Start a background task with the current state of the bash.
+    /// Start a background task from a copy of the session state. It never
+    /// publishes into the state.
     #[cfg(unix)]
     pub async fn start_task(
         &self,
@@ -230,30 +263,22 @@ impl ShellSessions {
         cwd: &Path,
         config: &ShellConfig,
     ) -> std::io::Result<Arc<background::Task>> {
-        let shell = self.bash(cwd, config).await?;
         let n = self.next_task.fetch_add(1, Ordering::SeqCst);
-        let id = format!("bg-{n}");
         let dir = self.dir.join(format!("task-{n}"));
-        std::fs::create_dir_all(&dir)?;
-        let snapshot = dir.join("state.sh");
-        shell.snapshot(&snapshot).await?;
-        let bash = config
-            .bash_path
-            .clone()
-            .or_else(|| which::which("bash").ok())
-            .ok_or_else(|| {
-                std::io::Error::new(std::io::ErrorKind::NotFound, "bash was not found on PATH")
-            })?;
+        let launch = self.state.launch(cwd);
+        let bash = bash_path(config)?;
         match background::Task::start(background::TaskSpec {
-            id,
+            id: format!("bg-{n}"),
             command,
-            snapshot: &snapshot,
-            fallback_cwd: cwd,
+            prelude: &launch.prelude,
+            cwd: &launch.base.cwd.pwd,
+            env: &launch.env,
             stdin,
             ready_pattern,
             dir: dir.clone(),
             bash: &bash,
             limits: config.tasks.clone(),
+            ordinary: None,
         })
         .await
         {
@@ -280,12 +305,12 @@ impl ShellSessions {
 
     pub async fn close(&self) {
         let tasks = self.tasks.lock().clone();
+        let runs = self.commands.lock().clone();
         for t in tasks {
             t.stop(Duration::from_secs(2)).await;
         }
-        #[cfg(unix)]
-        if let Some(b) = self.bash.lock().await.take() {
-            b.close().await;
+        for r in runs {
+            r.task().stop(Duration::from_secs(2)).await;
         }
         if let Some(p) = self.pwsh.lock().await.take() {
             p.close().await;
@@ -297,11 +322,8 @@ impl ShellSessions {
         for t in self.tasks.lock().iter() {
             t.kill_now();
         }
-        #[cfg(unix)]
-        if let Ok(mut slot) = self.bash.try_lock()
-            && let Some(b) = slot.take()
-        {
-            b.kill_now();
+        for r in self.commands.lock().iter() {
+            r.task().kill_now();
         }
         if let Ok(mut slot) = self.pwsh.try_lock()
             && let Some(p) = slot.take()
@@ -316,6 +338,9 @@ impl Drop for ShellSessions {
     fn drop(&mut self) {
         for t in self.tasks.lock().iter() {
             t.kill_now();
+        }
+        for r in self.commands.lock().iter() {
+            r.task().kill_now();
         }
     }
 }

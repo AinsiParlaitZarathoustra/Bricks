@@ -3,6 +3,10 @@
 //! quota, events, durable logs, and the `Job` tool (`list`, `status`,
 //! `output`, `wait`, `stop`).
 //!
+//! * A job is either a background command (`background: true`, explicitly
+//!   durable) or a foreground command handed over after `yield_time_ms`
+//!   (not durable: it ends with its run). Both are seen through `Job` by the
+//!   agent that started them.
 //! * A job belongs to the agent that started it (and its root run and
 //!   workspace); only that agent sees it through `Job` (an id guessed from
 //!   another agent, run or session gives nothing). Frontends see the
@@ -11,6 +15,9 @@
 //!   exported variables, functions, aliases); what it changes never reaches
 //!   that shell. A sub-agent's jobs are stopped when it ends; the session
 //!   agent's jobs live until the session closes. No job outlives Bricks.
+//! * Quota: a place is reserved before anything starts ([`JobRegistry::reserve`],
+//!   atomic), and kept by the job until it ends; beyond `max_jobs` the start
+//!   is refused, with nothing launched.
 //! * Stop: TERM to the task's process group and tree, a grace period, then
 //!   KILL; idempotent. A process that leaves its group and the task's tree
 //!   on purpose can escape (no sandbox).
@@ -107,15 +114,39 @@ struct Entry {
     task: Arc<Task>,
     cwd: PathBuf,
     logs: Vec<String>,
+    /// Explicitly started in the background (not a handed-over command):
+    /// survives the run that started it.
+    durable: bool,
+}
+
+#[derive(Default)]
+struct Table {
+    entries: Vec<Entry>,
+    /// Places reserved and not yet taken by a job.
+    reserved: usize,
 }
 
 /// The session's jobs.
 pub struct JobRegistry {
     pub settings: JobSettings,
-    jobs: Mutex<Vec<Entry>>,
+    table: Mutex<Table>,
     sink: Mutex<Option<JobSink>>,
     /// Where finished jobs' logs are copied.
     durable_dir: Option<PathBuf>,
+}
+
+/// A place reserved for a job: taken by [`JobRegistry::register`], given
+/// back when dropped unused (the start failed).
+pub struct JobSlot {
+    registry: Option<Arc<JobRegistry>>,
+}
+
+impl Drop for JobSlot {
+    fn drop(&mut self) {
+        if let Some(reg) = self.registry.take() {
+            reg.table.lock().reserved -= 1;
+        }
+    }
 }
 
 /// The session's job registry, in a tool context.
@@ -126,7 +157,7 @@ impl JobRegistry {
     pub fn new(settings: JobSettings, durable_dir: Option<PathBuf>) -> Arc<Self> {
         Arc::new(Self {
             settings,
-            jobs: Mutex::new(Vec::new()),
+            table: Mutex::new(Table::default()),
             sink: Mutex::new(None),
             durable_dir,
         })
@@ -144,27 +175,47 @@ impl JobRegistry {
 
     /// Jobs running now.
     pub fn running(&self) -> usize {
-        self.jobs
+        self.table
             .lock()
+            .entries
             .iter()
             .filter(|e| !e.task.state().is_finished())
             .count()
     }
 
-    /// Refuse a new job beyond the quota (before anything starts).
-    pub fn check_capacity(&self) -> std::result::Result<(), String> {
-        let n = self.running();
+    /// Reserves a place for a job, atomically: the places in use are the
+    /// running jobs plus the reservations. Refused beyond `max_jobs`, before
+    /// anything is started.
+    pub fn reserve(self: &Arc<Self>) -> std::result::Result<JobSlot, String> {
+        let mut table = self.table.lock();
+        let running = table
+            .entries
+            .iter()
+            .filter(|e| !e.task.state().is_finished())
+            .count();
+        let n = running + table.reserved;
         if n >= self.settings.max_jobs {
             return Err(format!(
-                "{n} background job(s) already run in this session; the limit is {} ([background] max_jobs). Stop one first (Job stop).",
+                "{n} background job(s) already run or are starting in this session; the limit is {} ([background] max_jobs). Stop one first (Job stop).",
                 self.settings.max_jobs
             ));
         }
-        Ok(())
+        table.reserved += 1;
+        Ok(JobSlot {
+            registry: Some(Arc::clone(self)),
+        })
     }
 
-    /// Track a started task as a job; watch it until it ends.
-    pub fn register(self: &Arc<Self>, owner: JobOwner, task: Arc<Task>, cwd: &Path) -> String {
+    /// Track a started task as a job, in the place `slot` reserved; watch it
+    /// until it ends. `durable`: a background command, which outlives its run.
+    pub fn register(
+        self: &Arc<Self>,
+        mut slot: JobSlot,
+        owner: JobOwner,
+        task: Arc<Task>,
+        cwd: &Path,
+        durable: bool,
+    ) -> String {
         let id = format!("job_{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
         self.emit(JobEvent::Started {
             job_id: id.clone(),
@@ -174,13 +225,20 @@ impl JobRegistry {
             cwd: cwd.display().to_string(),
             pid: task.pid,
         });
-        self.jobs.lock().push(Entry {
-            id: id.clone(),
-            owner,
-            task: Arc::clone(&task),
-            cwd: cwd.to_path_buf(),
-            logs: Vec::new(),
-        });
+        {
+            // The place reserved becomes the job, in one step.
+            let mut table = self.table.lock();
+            table.reserved -= 1;
+            slot.registry = None;
+            table.entries.push(Entry {
+                id: id.clone(),
+                owner,
+                task: Arc::clone(&task),
+                cwd: cwd.to_path_buf(),
+                logs: Vec::new(),
+                durable,
+            });
+        }
         let me = Arc::clone(self);
         let jid = id.clone();
         tokio::spawn(async move {
@@ -201,7 +259,7 @@ impl JobRegistry {
                 }
             }
             let logs = me.preserve_logs(&jid, &task);
-            if let Some(e) = me.jobs.lock().iter_mut().find(|e| e.id == jid) {
+            if let Some(e) = me.table.lock().entries.iter_mut().find(|e| e.id == jid) {
                 e.logs = logs.clone();
             }
             let (state, code, signal) = match task.state() {
@@ -248,8 +306,9 @@ impl JobRegistry {
         id: &str,
         viewer: Option<&str>,
     ) -> Option<(Arc<Task>, JobOwner, PathBuf, Vec<String>)> {
-        self.jobs
+        self.table
             .lock()
+            .entries
             .iter()
             .find(|e| e.id == id && viewer.is_none_or(|v| e.owner.agent_id == v))
             .map(|e| {
@@ -267,8 +326,9 @@ impl JobRegistry {
         &self,
         viewer: Option<&str>,
     ) -> Vec<(String, JobOwner, crate::shell::background::TaskStatus)> {
-        self.jobs
+        self.table
             .lock()
+            .entries
             .iter()
             .filter(|e| viewer.is_none_or(|v| e.owner.agent_id == v))
             .map(|e| (e.id.clone(), e.owner.clone(), e.task.status()))
@@ -287,10 +347,28 @@ impl JobRegistry {
     /// Stop every job of an agent (it ended).
     pub async fn stop_owned_by(&self, agent_id: &str) {
         let tasks: Vec<Arc<Task>> = self
-            .jobs
+            .table
             .lock()
+            .entries
             .iter()
             .filter(|e| e.owner.agent_id == agent_id)
+            .map(|e| Arc::clone(&e.task))
+            .collect();
+        for t in tasks {
+            t.stop(Duration::from_millis(self.settings.stop_grace_ms))
+                .await;
+        }
+    }
+
+    /// Stop the commands of an agent that were handed over (not the
+    /// background jobs it started explicitly): its run ended.
+    pub async fn stop_ordinary_owned_by(&self, agent_id: &str) {
+        let tasks: Vec<Arc<Task>> = self
+            .table
+            .lock()
+            .entries
+            .iter()
+            .filter(|e| e.owner.agent_id == agent_id && !e.durable)
             .map(|e| Arc::clone(&e.task))
             .collect();
         for t in tasks {
@@ -302,8 +380,9 @@ impl JobRegistry {
     /// Stop everything (the session closes).
     pub async fn stop_all(&self) {
         let tasks: Vec<Arc<Task>> = self
-            .jobs
+            .table
             .lock()
+            .entries
             .iter()
             .map(|e| Arc::clone(&e.task))
             .collect();
@@ -711,7 +790,7 @@ mod tests {
             assert!(!crate::shell::procs::is_running(k), "{k} survived");
         }
         // Room again.
-        assert!(reg.check_capacity().is_ok());
+        assert!(reg.reserve().is_ok());
     }
 
     #[tokio::test]
@@ -744,5 +823,43 @@ mod tests {
         // The agent ends: its jobs go.
         reg.stop_owned_by("agent_a").await;
         assert_eq!(reg.running(), 0);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod reservation_tests {
+    use super::*;
+
+    /// Concurrent reservations never exceed the quota: a slot is taken by
+    /// one caller only, and given back when dropped unused.
+    #[tokio::test]
+    async fn concurrent_reservations_never_exceed_the_quota() {
+        let settings = JobSettings {
+            max_jobs: 8,
+            ..Default::default()
+        };
+        let reg = JobRegistry::new(settings, None);
+        let mut handles = Vec::new();
+        for _ in 0..32 {
+            let r = Arc::clone(&reg);
+            handles.push(tokio::spawn(async move { r.reserve() }));
+        }
+        let mut slots = Vec::new();
+        let mut refused = 0;
+        for h in handles {
+            match h.await.unwrap() {
+                Ok(slot) => slots.push(slot),
+                Err(e) => {
+                    assert!(e.contains("max_jobs"), "{e}");
+                    refused += 1;
+                }
+            }
+        }
+        assert_eq!(slots.len(), 8, "exactly the quota is granted");
+        assert_eq!(refused, 24);
+        assert!(reg.reserve().is_err(), "no place left while the slots live");
+        // A dropped slot gives its place back.
+        slots.pop();
+        assert!(reg.reserve().is_ok());
     }
 }

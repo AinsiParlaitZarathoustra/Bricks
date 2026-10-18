@@ -94,6 +94,35 @@ mod imp {
         }
     }
 
+    /// Whether any process is left in the group `pgid` (cheap: no table read).
+    pub fn group_alive(pgid: u32) -> bool {
+        killpg(Pid::from_raw(pgid as i32), None).is_ok()
+    }
+
+    /// Live processes whose process group is `pgid` (the group outlives its
+    /// leader while members remain: leftovers of a finished command).
+    pub fn group_members(pgid: u32) -> Vec<u32> {
+        let out = std::process::Command::new("ps")
+            .args(["-A", "-o", "pid=", "-o", "pgid="])
+            .stdin(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .output();
+        let Ok(out) = out else { return Vec::new() };
+        let mut pids = Vec::new();
+        for line in String::from_utf8_lossy(&out.stdout).lines() {
+            let mut it = line.split_whitespace();
+            if let (Some(pid), Some(pg)) = (it.next(), it.next())
+                && let (Ok(pid), Ok(pg)) = (pid.parse::<u32>(), pg.parse::<u32>())
+                && pg == pgid
+                && pid != pgid
+            {
+                pids.push(pid);
+            }
+        }
+        pids.retain(|&p| is_running(p));
+        pids
+    }
+
     fn signal(pids: &[u32], sig: Signal) {
         for &p in pids {
             let _ = kill(Pid::from_raw(p as i32), sig);
@@ -184,6 +213,14 @@ mod imp {
         }
     }
 
+    pub fn group_members(_pgid: u32) -> Vec<u32> {
+        Vec::new()
+    }
+
+    pub fn group_alive(_pgid: u32) -> bool {
+        false
+    }
+
     pub fn terminate_tree_now(root: u32) {
         let _ = std::process::Command::new("taskkill")
             .args(["/T", "/F", "/PID", &root.to_string()])
@@ -191,7 +228,10 @@ mod imp {
     }
 }
 
-pub use imp::{descendants, is_running, signal_group, terminate, terminate_tree_now};
+pub use imp::{
+    descendants, group_alive, group_members, is_running, signal_group, terminate,
+    terminate_tree_now,
+};
 
 /// Wait until none of `pids` is running, up to `limit`.
 pub async fn wait_gone(pids: &[u32], limit: Duration) -> bool {
