@@ -18,10 +18,11 @@ export type InspectorView =
   | 'jobs'
   | 'changeset'
   | 'clear'
+  | 'file'
 
 export interface InspectorState {
   view: InspectorView
-  /** View options: `details` (context, cost), `query`, `changesetId`, `agentId`... */
+  /** View options: `details` (context, cost), `query`, `changesetId`, `agentId`, `projectId`/`path`/`line`/`endLine` (file)... */
   args: Record<string, string | boolean | undefined>
 }
 

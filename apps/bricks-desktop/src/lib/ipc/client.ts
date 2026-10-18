@@ -22,6 +22,7 @@ import type { PtyOpenRequest } from './bindings/PtyOpenRequest'
 import type { SavedAttachment } from './bindings/SavedAttachment'
 import type { SessionItem } from './bindings/SessionItem'
 import type { SessionSearchHit } from './bindings/SessionSearchHit'
+import type { ProjectFileWindow } from './bindings/ProjectFileWindow'
 import type { Command, ModelChoice, Snapshot } from './engine'
 
 export type * from './bindings/AppInfo'
@@ -105,6 +106,19 @@ export const projectAdd = (path: string) => call<Project>('project_add', { path 
 export const projectRemove = (projectId: string) => call<void>('project_remove', { projectId })
 export const projectRename = (projectId: string, name: string) =>
   call<Project>('project_rename', { projectId, name })
+
+// ─── Project files (references of messages, SVG export) ─────────────────────
+
+/** Read-only window of a project file: `line` alone centres a window on it, with `endLine` a range. */
+export const projectFileRead = (
+  projectId: string,
+  path: string,
+  line: number | null = null,
+  endLine: number | null = null,
+) => call<ProjectFileWindow>('project_file_read', { projectId, path, line, endLine })
+/** Native save dialog for an SVG document: the path written, or null when cancelled. */
+export const saveSvgFile = (defaultName: string, contents: string) =>
+  call<string | null>('save_svg_file', { defaultName, contents })
 
 // ─── Conversations ───────────────────────────────────────────────────────────
 

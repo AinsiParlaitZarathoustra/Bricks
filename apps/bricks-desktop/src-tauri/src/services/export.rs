@@ -61,6 +61,7 @@ fn export_bindings() {
         SessionConfigInfo,
         ConfigEntry,
         ProjectFileEntry,
+        ProjectFileWindow,
         RunLabel,
         ToolApproval,
         ProvidersFile,

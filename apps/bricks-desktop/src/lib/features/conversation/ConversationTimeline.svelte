@@ -114,8 +114,11 @@
     })
   })
 
-  // Panel resizes: stay at the bottom if we were there. Content that grows
-  // without new output (e.g. a tool row expanded) only updates the state.
+  // Panel resizes: stay at the bottom if we were there. While a run streams,
+  // the rendered answer grows after the text changed (throttled rendering):
+  // a reader following the bottom stays there; only their own scroll stops
+  // it. Content that grows without a run (e.g. a diagram rendered, a tool row
+  // expanded) only updates the state.
   $effect(() => {
     const scroller = scrollEl
     const list = listEl
@@ -123,7 +126,10 @@
     const containerObserver = new ResizeObserver(() => {
       if (nearBottom) scrollToBottom()
     })
-    const listObserver = new ResizeObserver(() => updateNearBottom())
+    const listObserver = new ResizeObserver(() => {
+      if (nearBottom && conversation.running) scrollToBottom()
+      else updateNearBottom()
+    })
     containerObserver.observe(scroller)
     listObserver.observe(list)
     return () => {
@@ -170,6 +176,7 @@
   <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
   <div
     bind:this={scrollEl}
+    data-conversation-scroll
     onscroll={updateNearBottom}
     role="region"
     aria-label="Conversation"

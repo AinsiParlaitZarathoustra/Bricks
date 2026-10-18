@@ -111,14 +111,23 @@ describe('text direction and links', () => {
 			for (const entry of readdirSync(new URL(`../../src/${dir}`, import.meta.url), { withFileTypes: true })) {
 				const rel = `${dir}/${entry.name}`;
 				if (entry.isDirectory()) walk(rel);
-				else if (entry.name.endsWith('.svelte')) files.push(rel);
+				// Local « … 2 » copies of the user are not sources.
+				else if (entry.name.endsWith('.svelte') && !/ \d+\.svelte$/.test(entry.name)) files.push(rel);
 			}
 		};
 		walk('lib');
-		const withHtml = files.filter((f) => readFileSync(new URL(`../../src/${f}`, import.meta.url), 'utf8').includes('{@html'));
-		expect(withHtml).toEqual(['lib/features/conversation/timeline/AssistantMessage.svelte']);
-		expect(src('lib/features/conversation/timeline/AssistantMessage.svelte')).toContain('renderMarkdown');
-		expect(src('lib/features/conversation/markdown.ts')).toContain('DOMPurify.sanitize');
+		const withHtml = files
+			.filter((f) => readFileSync(new URL(`../../src/${f}`, import.meta.url), 'utf8').includes('{@html'))
+			.sort();
+		// Message blocks come from the Markdown document (sanitizeMarkdown/sanitizeKatex);
+		// diagrams from renderMermaid (sanitizeSvg).
+		expect(withHtml).toEqual([
+			'lib/features/conversation/markdown/MermaidBlock.svelte',
+			'lib/features/conversation/timeline/AssistantMessage.svelte',
+		]);
+		expect(src('lib/features/conversation/timeline/AssistantMessage.svelte')).toContain('MarkdownDocument');
+		expect(src('lib/features/conversation/markdown/sanitize.ts')).toContain('DOMPurify.sanitize');
+		expect(src('lib/features/conversation/markdown/mermaid.ts')).toContain('sanitizeSvg');
 	});
 
 	it('user messages never go through Markdown or HTML: they are built from text parts', () => {

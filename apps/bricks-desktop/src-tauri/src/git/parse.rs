@@ -283,7 +283,7 @@ pub(super) fn is_binary_patch(patch: &str) -> bool {
 }
 
 /// Git's own heuristic: a NUL byte in the first 8000 bytes.
-pub(super) fn is_binary_content(bytes: &[u8]) -> bool {
+pub(crate) fn is_binary_content(bytes: &[u8]) -> bool {
     bytes.iter().take(8000).any(|b| *b == 0)
 }
 

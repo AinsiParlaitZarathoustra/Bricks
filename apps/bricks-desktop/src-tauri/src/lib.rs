@@ -71,6 +71,9 @@ pub fn run() {
             commands::inspect::app_quit,
             // File index for @ mentions
             commands::files::project_files,
+            // Read-only file windows of message references, SVG save dialog (Sprint 14.5)
+            commands::project_file::project_file_read,
+            commands::project_file::save_svg_file,
             // Provider/model editing
             commands::providers::providers_config,
             commands::providers::provider_update,

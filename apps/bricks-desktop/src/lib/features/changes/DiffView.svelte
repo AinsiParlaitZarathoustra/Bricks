@@ -12,12 +12,14 @@
 		binary?: boolean;
 		/** Lines added per « Afficher plus ». */
 		pageSize?: number;
+		/** A patch written in a message: `+`/`-` lines count even without hunk headers. */
+		loose?: boolean;
 		class?: string;
 	}
 
-	let { patch, truncated = false, binary = false, pageSize = 400, class: className }: Props = $props();
+	let { patch, truncated = false, binary = false, pageSize = 400, loose = false, class: className }: Props = $props();
 
-	const lines = $derived(parsePatch(patch));
+	const lines = $derived(parsePatch(patch, { loose }));
 	let extra = $state(0);
 	const limit = $derived(pageSize + extra);
 	const shown = $derived(lines.slice(0, limit));

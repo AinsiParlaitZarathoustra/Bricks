@@ -8,5 +8,8 @@ mod ops;
 mod parse;
 mod run;
 
+pub(crate) use ops::validate_relative_path;
+pub(crate) use parse::is_binary_content;
+
 #[cfg(test)]
 mod tests;

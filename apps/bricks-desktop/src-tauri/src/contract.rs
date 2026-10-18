@@ -483,6 +483,24 @@ pub struct ProjectFileEntry {
     pub is_dir: bool,
 }
 
+/// A read-only window of a project text file (`project_file_read`): at most
+/// 400 lines, `start` being the 1-based number of the first one.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectFileWindow {
+    /// Relative to the project, as asked.
+    pub path: String,
+    /// First line returned (1-based); 1 when the window is empty.
+    pub start: u32,
+    pub lines: Vec<String>,
+    /// Lines of the file that were read: a lower bound when the read limit cut it.
+    pub total_lines: u32,
+    /// The file is larger than the window, or the read limit cut it.
+    pub truncated: bool,
+    /// Highlight.js language name from the extension, when known.
+    pub language: Option<String>,
+}
+
 // ─── tool approval policy and provider/model editing ───────────
 
 /// Global approval policy of the desktop. Priority (one place, in the engine

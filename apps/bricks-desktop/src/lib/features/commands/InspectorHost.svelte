@@ -20,6 +20,7 @@
   import ToolsView from '$lib/features/session-info/ToolsView.svelte'
   import McpView from '$lib/features/session-info/McpView.svelte'
   import ConfigView from '$lib/features/session-info/ConfigView.svelte'
+  import FileView from '$lib/features/inspect/FileView.svelte'
 
   type ViewProps = { args: InspectorState['args'] }
   const VIEWS: Record<InspectorView, { title: string; component: Component<ViewProps> }> = {
@@ -39,6 +40,7 @@
     tools: { title: 'Outils', component: ToolsView },
     mcp: { title: 'Serveurs MCP', component: McpView },
     config: { title: 'Configuration', component: ConfigView },
+    file: { title: 'Fichier du projet', component: FileView },
   }
 
   const entry = $derived(ui.inspector ? VIEWS[ui.inspector.view] : null)

@@ -14,7 +14,7 @@
 {#if item.kind === 'user'}
   <UserMessage {item} />
 {:else if item.kind === 'assistant'}
-  <AssistantMessage {item} />
+  <AssistantMessage {item} {conversation} />
 {:else if item.kind === 'tool'}
   <ToolRow {item} {conversation} />
 {:else if item.kind === 'approval'}

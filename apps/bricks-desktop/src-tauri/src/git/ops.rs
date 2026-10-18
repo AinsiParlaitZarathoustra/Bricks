@@ -435,7 +435,7 @@ fn cut_section(text: &str, forced: bool) -> (&str, bool) {
     (head, true)
 }
 
-fn validate_relative_path(path: &str) -> IpcResult<()> {
+pub(crate) fn validate_relative_path(path: &str) -> IpcResult<()> {
     let invalid = || IpcError {
         code: IpcErrorCode::Invalid,
         message: "Chemin invalide : il doit être relatif au projet.".into(),
