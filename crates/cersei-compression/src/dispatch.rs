@@ -81,7 +81,7 @@ pub struct Processed {
     /// The text differs from the tool's output.
     pub transformed: bool,
     /// The text is a partial view of a file (skeleton, JSON summary): it does
-    /// not show the file's exact text and must not count as having read it.
+    /// not show the file's exact text, so a change must not be prepared from it.
     pub partial_view: bool,
     /// The saved original, when one was saved.
     pub raw: Option<RawRef>,
@@ -383,7 +383,7 @@ impl Compressor {
                 "skeleton view of {path} ({}, Tree-sitter) — an exploration aid, NOT the file's text: \
                  do not edit from it. {} of {} lines shown (L{first_line}–L{last}); each `⋯` marker gives \
                  the omitted range. Read a range with Read file_path=\"{path}\" offset=<first line − 1> \
-                 limit=<count>, and read the exact lines before any edit",
+                 limit=<count>; before editing, read the exact lines a change needs",
                 lang.name(),
                 sk.shown_lines,
                 sk.total_lines

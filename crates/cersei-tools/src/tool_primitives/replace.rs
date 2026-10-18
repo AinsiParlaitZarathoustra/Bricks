@@ -121,8 +121,8 @@ pub fn describe_failure(err: &ReplaceError, file: &str) -> String {
         ReplaceError::NotFound { candidates } => format!(
             "old_string does not match {file} (differences are not admissible: only line endings, \
              trailing whitespace, a uniform indentation shift, blank lines and spacing outside \
-             quoted text are tolerated). Closest regions:\n{}\nRead those lines and copy \
-             old_string exactly before editing.",
+             quoted text are tolerated). Closest regions:\n{}\nCopy old_string exactly from the current \
+             text of those lines before editing.",
             show(candidates)
         ),
         ReplaceError::Ambiguous { count, candidates } => format!(

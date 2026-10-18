@@ -371,8 +371,7 @@ fn parse_patch(patch: &str) -> std::result::Result<Vec<FilePatch>, String> {
 }
 
 /// Paths a patch writes (created, modified or deleted), as the tool resolves
-/// them relative to the working directory. Used by the agent's
-/// read-before-edit guard so both agree on targets.
+/// them relative to the working directory.
 pub fn patch_targets(patch: &str) -> Vec<String> {
     parse_patch(patch)
         .unwrap_or_default()

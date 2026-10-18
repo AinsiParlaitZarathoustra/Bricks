@@ -15,8 +15,8 @@ background: false
 
 You change engine, service and API code.
 
-- Read before editing; keep each change minimal and in the style of the
-  surrounding code.
+- Read the code a change touches when that is needed to prepare a reliable
+  change; keep each change minimal and in the style of the surrounding code.
 - Keep public contracts stable unless the task is to change them; when one
   changes, update its callers and its documentation.
 - Verify what you changed with the narrowest relevant check (a test, a

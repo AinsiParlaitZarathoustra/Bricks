@@ -522,7 +522,7 @@ async fn an_unconfigured_counting_route_is_never_called() {
 }
 
 #[tokio::test]
-async fn a_skeleton_view_does_not_count_as_having_read_the_file() {
+async fn a_skeleton_view_does_not_stop_an_edit() {
     let work = tempfile::tempdir().unwrap();
     let file = work.path().join("lib.rs");
     let mut src = String::new();
@@ -540,7 +540,11 @@ async fn a_skeleton_view_does_not_count_as_having_read_the_file() {
         chat_tool_call(
             "e1",
             "Edit",
-            &json!({ "file_path": path, "old_string": "let v3 = x + 3;", "new_string": "let v3 = 0;" }),
+            &json!({
+                "file_path": path,
+                "old_string": "pub fn f7(x: u32) -> u32 {\n    let v0 = x + 0;\n    let v1 = x + 1;\n    let v2 = x + 2;\n    let v3 = x + 3;",
+                "new_string": "pub fn f7(x: u32) -> u32 {\n    let v0 = x + 0;\n    let v1 = x + 1;\n    let v2 = x + 2;\n    let v3 = 0;"
+            }),
         ),
         chat_text("stopping", None),
         chat_text("stopping", None),
@@ -584,15 +588,21 @@ async fn a_skeleton_view_does_not_count_as_having_read_the_file() {
         "{}",
         &results[0][..200]
     );
+    // The edit is not refused for having read only a skeleton: the bytes it
+    // changes are the file's exact text, which the skeleton does not show.
     assert!(
-        results[1].contains("was not run"),
-        "the edit must be refused: {}",
+        results[1].contains("has been updated"),
+        "the edit must run: {}",
         results[1]
     );
     assert_eq!(
         std::fs::read_to_string(&file).unwrap(),
-        src,
-        "nothing written"
+        src.replacen(
+            "pub fn f7(x: u32) -> u32 {\n    let v0 = x + 0;\n    let v1 = x + 1;\n    let v2 = x + 2;\n    let v3 = x + 3;",
+            "pub fn f7(x: u32) -> u32 {\n    let v0 = x + 0;\n    let v1 = x + 1;\n    let v2 = x + 2;\n    let v3 = 0;",
+            1
+        ),
+        "the edit is written"
     );
     // The raw history keeps the exact text the tool returned.
     let raw_read = agent

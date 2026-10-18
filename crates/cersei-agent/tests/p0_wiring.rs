@@ -141,17 +141,16 @@ fn provider_against(base_url: &str, model: &str) -> cersei_provider::ConfiguredP
     common::provider(base_url, "chat_completions", window)
 }
 
-// ─── F-11: the read-before-edit guard must run BEFORE the write lands ────────
+// ─── An edit does not need a prior read of its file ─────────────────────────
 
-/// The audit's finding: 12 unit tests exercise `refusals_for_batch`, yet
-/// replacing its call in the dispatch path with an empty map failed nothing.
-/// The defect class is silent data corruption, so the load-bearing assertion
-/// here is (b): the bytes on disk. Assertion (a) alone would pass even if the
-/// guard ran after the write, which is exactly the bug F-11 fixed.
+/// The runtime does not require a `Read` before an `Edit`: a scripted edit of
+/// a file the model never read runs, and the file holds the result. The
+/// load-bearing assertion is the bytes on disk, which only exist if the call
+/// was executed through the runner.
 #[tokio::test]
-async fn edit_of_unread_file_is_refused_and_the_file_is_untouched() {
+async fn edit_of_an_unread_file_runs_through_the_runner() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let target = dir.path().join("guarded.txt");
+    let target = dir.path().join("unread.txt");
     std::fs::write(&target, "ORIGINAL CONTENT").expect("seed file");
 
     let (url, _bodies) = serve_recording(vec![
@@ -178,33 +177,24 @@ async fn edit_of_unread_file_is_refused_and_the_file_is_untouched() {
         .expect("build agent");
 
     let out = agent
-        .run("Replace ORIGINAL with CLOBBERED in guarded.txt")
+        .run("Replace ORIGINAL with CLOBBERED in unread.txt")
         .await
         .expect("run must complete");
 
-    // (b) — the assertion that binds guard *placement*: nothing reached disk.
-    let on_disk = std::fs::read_to_string(&target).expect("read back");
-    assert_eq!(
-        on_disk, "ORIGINAL CONTENT",
-        "the Edit executed before (or despite) the refusal — the guard is \
-         wired after dispatch or not at all"
-    );
-
-    // (a) — the refusal actually reached the model as an error it can act on.
     let edit_call = out
         .tool_calls
         .iter()
         .find(|c| c.name == "Edit")
         .expect("the scripted Edit call must appear in tool_calls");
     assert!(
-        edit_call.is_error,
-        "the guard must refuse the unread-file edit, got success: {}",
+        !edit_call.is_error,
+        "an edit of a file that was never read must run: {}",
         edit_call.result
     );
-    assert!(
-        edit_call.result.contains("Read"),
-        "the refusal must tell the model the way forward (Read first): {}",
-        edit_call.result
+    assert_eq!(
+        std::fs::read_to_string(&target).expect("read back"),
+        "CLOBBERED CONTENT",
+        "the Edit ran and its change is on disk"
     );
 }
 
