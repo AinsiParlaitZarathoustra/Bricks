@@ -9,6 +9,7 @@ pub mod config_tool;
 pub mod cron;
 pub mod file_edit;
 pub mod file_history;
+pub mod file_lock;
 pub mod file_read;
 pub mod file_snapshot;
 pub mod file_watcher;
@@ -19,7 +20,6 @@ pub mod grep_tool;
 pub mod jobs;
 pub mod lsp_tool;
 pub mod mcp_tool;
-pub mod multi_edit;
 pub mod notebook_edit;
 pub mod permissions;
 pub mod plan_mode;
@@ -422,14 +422,13 @@ pub fn coding() -> Vec<Box<dyn Tool>> {
     tools
 }
 
-/// File system tools: Read, Write, Edit, MultiEdit, ApplyPatch, Glob, Grep,
+/// File system tools: Read, Write, Edit, ApplyPatch, Glob, Grep,
 /// CodeSearch, CodeScout, NotebookEdit.
 pub fn filesystem() -> Vec<Box<dyn Tool>> {
     vec![
         Box::new(file_read::FileReadTool),
         Box::new(file_write::FileWriteTool),
         Box::new(file_edit::FileEditTool),
-        Box::new(multi_edit::MultiEditTool),
         Box::new(apply_patch::ApplyPatchTool),
         Box::new(glob_tool::GlobTool),
         Box::new(grep_tool::GrepTool),

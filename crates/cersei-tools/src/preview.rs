@@ -1,14 +1,26 @@
 //! Previews of the file changes a tool call would make, computed without
 //! writing anything, so an approval can show them before the write.
 //!
-//! A preview records, for each file, its SHA-256 at the time of the preview.
-//! [`ChangePreview::check_current`] tells whether the files are still what
-//! the preview was computed from: an approval given for an older state is
-//! not applied to a newer one.
+//! A preview records, for each file, the SHA-256 of the text its diff was
+//! computed from. [`ChangePreview::check_current`] tells whether the files are
+//! still that text: an approval given for an older state is not applied to a
+//! newer one.
+//!
+//! The approval travels with the call as an [`ApprovedState`]. The tool that
+//! executes the call checks it again under the file's lock, just before it
+//! writes ([`ensure_still_approved`]): a file changed in between is not written,
+//! and the runner asks again.
 
+use crate::ToolResult;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
+
+/// Key of the `metadata` of a [`ToolResult`] that reports a change refused
+/// because the file changed after it was approved. The runner decides again
+/// on the current state; nothing was written.
+pub const STALE_APPROVAL_KEY: &str = "approval_stale";
 
 /// What happens to a file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -128,11 +140,85 @@ pub fn file_change(
         path: path.to_string(),
         absolute: absolute.to_path_buf(),
         kind,
-        before_sha256: before.map(|_| file_sha256(absolute)).unwrap_or(None),
+        // The text the diff was computed from, not whatever the disk holds
+        // when the preview is read back: the approval is for this text.
+        before_sha256: before.map(|text| sha256_hex(text.as_bytes())),
         diff: text,
         added,
         removed,
     }
+}
+
+/// The state of the files an approval was given for: for each file of the
+/// preview, its absolute path and the SHA-256 of its text before the change
+/// (`None`: the file did not exist).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ApprovedState {
+    files: Vec<(PathBuf, Option<String>)>,
+}
+
+impl ApprovedState {
+    pub fn of(preview: &ChangePreview) -> Self {
+        Self {
+            files: preview
+                .files
+                .iter()
+                .map(|f| (f.absolute.clone(), f.before_sha256.clone()))
+                .collect(),
+        }
+    }
+
+    /// The state approved for `absolute`, if the approval covers it.
+    pub fn expected(&self, absolute: &Path) -> Option<&Option<String>> {
+        self.files
+            .iter()
+            .find(|(p, _)| p == absolute)
+            .map(|(_, sha)| sha)
+    }
+}
+
+/// Under the file's lock, before a write: `Err` with the refusal when the
+/// call carries an approval for `absolute` and the file's current bytes
+/// (`None`: absent) are not the state it was approved for. Nothing may be
+/// written then; the runner decides again.
+///
+/// Without an approval in `ctx`, or for a file the approval does not cover,
+/// there is nothing to check and the call proceeds.
+pub fn ensure_still_approved(
+    ctx: &crate::ToolContext,
+    absolute: &Path,
+    shown: &str,
+    current: Option<&[u8]>,
+) -> Result<(), ToolResult> {
+    let Some(approved) = ctx.extensions.get::<ApprovedState>() else {
+        return Ok(());
+    };
+    let Some(expected) = approved.expected(absolute) else {
+        return Ok(());
+    };
+    if current.map(sha256_hex) == *expected {
+        return Ok(());
+    }
+    Err(stale_approval_result(shown))
+}
+
+/// The refusal for a change whose file moved on after its approval.
+pub fn stale_approval_result(shown: &str) -> ToolResult {
+    ToolResult::error(format!(
+        "{shown} changed after its change was approved, so nothing was written. Read it again \
+         and retry."
+    ))
+    .with_metadata(json!({ STALE_APPROVAL_KEY: true }))
+}
+
+/// Whether `result` is the refusal of [`stale_approval_result`].
+pub fn is_stale_approval(result: &ToolResult) -> bool {
+    result
+        .metadata
+        .as_ref()
+        .and_then(|m| m.get(STALE_APPROVAL_KEY))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
 }
 
 /// Resolve a path named by a tool call against the working directory.
@@ -163,10 +249,15 @@ mod tests {
             change.diff
         );
         let preview = ChangePreview {
-            files: vec![change],
+            files: vec![change.clone()],
             refusal: None,
         };
         assert_eq!(preview.check_current(), Ok(()));
+        // The recorded state is the text the diff came from, byte for byte.
+        assert_eq!(
+            change.before_sha256.as_deref(),
+            Some(sha256_hex(b"one\ntwo\n").as_str())
+        );
         std::fs::write(&path, "changed meanwhile\n").unwrap();
         assert_eq!(preview.check_current(), Err(vec!["a.txt".to_string()]));
 

@@ -48,8 +48,11 @@ impl Tool for NotebookEditTool {
             Err(e) => return e,
         };
 
-        let content = match tokio::fs::read_to_string(ctx.working_dir.join(&input.file_path)).await
-        {
+        let resolved = ctx.working_dir.join(&input.file_path);
+        let absolute = std::path::absolute(&resolved).unwrap_or(resolved);
+        // Held from the read to the write (see `file_lock`).
+        let _lock = crate::file_lock::lock_paths(std::slice::from_ref(&absolute)).await;
+        let content = match tokio::fs::read_to_string(&absolute).await {
             Ok(c) => c,
             Err(e) => return ToolResult::error(format!("Failed to read notebook: {}", e)),
         };
@@ -99,7 +102,7 @@ impl Tool for NotebookEditTool {
         }
 
         let output = serde_json::to_string_pretty(&notebook).unwrap_or_default();
-        match tokio::fs::write(ctx.working_dir.join(&input.file_path), output).await {
+        match crate::tool_primitives::fs::write_atomic(&absolute, output.as_bytes()).await {
             Ok(()) => ToolResult::success(format!(
                 "Updated cell {} in {}",
                 input.cell_index, input.file_path

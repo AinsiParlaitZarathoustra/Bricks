@@ -1,6 +1,6 @@
 //! F-A5: the `file_path` / `path` naming split is a convention, not drift.
 //!
-//! `file_path` names a specific file (Read/Write/Edit/MultiEdit/NotebookEdit);
+//! `file_path` names a specific file (Read/Write/Edit/NotebookEdit);
 //! `path` names a search or worktree *scope* that may be a directory
 //! (Glob/Grep/CodeSearch/EnterWorktree/ExitWorktree). This mirrors the tool
 //! surface models are most heavily trained on, so unifying the names was
@@ -21,7 +21,7 @@ fn properties(schema: &Value) -> Vec<String> {
 
 #[test]
 fn file_tools_declare_file_path_and_scope_tools_declare_path() {
-    const FILE_TOOLS: &[&str] = &["Read", "Write", "Edit", "MultiEdit", "NotebookEdit"];
+    const FILE_TOOLS: &[&str] = &["Read", "Write", "Edit", "NotebookEdit"];
     const SCOPE_TOOLS: &[&str] = &[
         "Glob",
         "Grep",

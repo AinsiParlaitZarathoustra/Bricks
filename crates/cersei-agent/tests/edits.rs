@@ -101,8 +101,8 @@ async fn every_native_edit_tool_reports_its_complete_diff_once() {
                 json!({"file_path": "big.txt", "old_string": "line 10\n", "new_string": "ten\nTEN\n"}),
             ),
             Reply::tool(
-                "m1",
-                "MultiEdit",
+                "e2",
+                "Edit",
                 json!({"file_path": "big.txt", "edits": [
                     {"old_string": "line 20\n", "new_string": ""},
                     {"old_string": "line 30\n", "new_string": "thirty\n"}
@@ -123,7 +123,7 @@ async fn every_native_edit_tool_reports_its_complete_diff_once() {
         vec![
             ("w1".into(), vec![("big.txt".into(), 5000, 0)]),
             ("e1".into(), vec![("big.txt".into(), 2, 1)]),
-            ("m1".into(), vec![("big.txt".into(), 1, 2)]),
+            ("e2".into(), vec![("big.txt".into(), 1, 2)]),
             ("p1".into(), vec![("p.txt".into(), 1, 1)]),
             ("w2".into(), vec![("last.txt".into(), 1, 0)]),
         ],

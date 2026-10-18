@@ -211,8 +211,8 @@ pub fn invalid_input_message(
 
 /// Reject any key the tool does not declare, phrased exactly as serde phrases it.
 ///
-/// `Edit` and `MultiEdit` parse their arguments by hand — they coerce numbers
-/// and stringified booleans that a derived `Deserialize` would refuse — so they
+/// `Edit` parses its arguments by hand — it coerces numbers and stringified
+/// booleans that a derived `Deserialize` would refuse — so it
 /// cannot inherit `#[serde(deny_unknown_fields)]`. Reusing serde's exact wording
 /// keeps one policy readable as one policy, at the wire and in tests, rather
 /// than as two rules that happen to agree today.
@@ -231,11 +231,9 @@ pub fn reject_unknown_keys(input: &Value, known: &[&str]) -> std::result::Result
 
 /// serde's `OneOf` phrasing, which branches on arity: one field renders as
 /// "expected `a`", two as "expected `a` or `b`", and only three or more as
-/// "expected one of `a`, `b`, `c`". Reproducing the branching matters because
-/// `MultiEdit` declares exactly two top-level parameters — emitting the plural
-/// form there would make the hand-rolled path diverge from every two-field
-/// serde tool (`Write`, `Bash`, `CronCreate`, …) for no reason a reader could
-/// see.
+/// "expected one of `a`, `b`, `c`". Reproducing the branching keeps the
+/// hand-rolled path reading exactly like the serde tools (`Write`, `Bash`,
+/// `CronCreate`, …) for the same arity.
 fn expected_one_of(known: &[&str]) -> String {
     let q: Vec<String> = known.iter().map(|k| format!("`{k}`")).collect();
     match q.len() {

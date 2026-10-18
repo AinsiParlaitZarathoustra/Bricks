@@ -6,11 +6,13 @@
 use async_trait::async_trait;
 use cersei_agent::Agent;
 use cersei_agent::control::scripted::{Reply, Script, ScriptedProvider};
+use cersei_hooks::{Hook, HookAction, HookContext, HookEvent};
 use cersei_tools::permissions::{PermissionDecision, PermissionPolicy, PermissionRequest};
 use serde_json::json;
 use std::path::Path;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// A permission policy that counts its questions and records the diff each
 /// one was asked about.
@@ -47,6 +49,23 @@ impl PermissionPolicy for Asked {
         } else {
             PermissionDecision::Allow
         }
+    }
+}
+
+/// A hook running a closure on every PreToolUse.
+struct OnPreToolUse<F>(F);
+
+#[async_trait]
+impl<F> Hook for OnPreToolUse<F>
+where
+    F: Fn(&HookContext) -> HookAction + Send + Sync,
+{
+    fn events(&self) -> &[HookEvent] {
+        &[HookEvent::PreToolUse]
+    }
+
+    async fn on_event(&self, ctx: &HookContext) -> HookAction {
+        (self.0)(ctx)
     }
 }
 
@@ -215,4 +234,247 @@ async fn write_notebook_and_patch_of_unread_files_run() {
     assert_eq!(std::fs::read_to_string(&text).unwrap(), "new\n");
     assert!(std::fs::read_to_string(&nb).unwrap().contains("x = 2"));
     assert_eq!(std::fs::read_to_string(&patched).unwrap(), "one\nTWO\n");
+}
+
+/// The file moves on after its check and before its write: nothing is
+/// written under the stale approval, the call is asked again on the file as
+/// it now is, and the change applies to that.
+#[tokio::test]
+async fn a_file_changed_after_its_check_is_decided_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_file(dir.path(), "a.txt", "alpha\nbeta\n");
+    let policy = Asked::new(false);
+    let hooked = Arc::new(AtomicUsize::new(0));
+    let hook_path = path.clone();
+    let hook_count = Arc::clone(&hooked);
+    let out = Agent::builder()
+        .provider(ScriptedProvider::new(
+            "a",
+            Script::new(vec![
+                Reply::tool(
+                    "e1",
+                    "Edit",
+                    json!({"file_path": path, "old_string": "beta", "new_string": "BETA"}),
+                ),
+                Reply::text("done"),
+            ]),
+        ))
+        .model("a")
+        .working_dir(dir.path())
+        .tools(cersei_tools::filesystem())
+        .permission_policy_arc(Arc::clone(&policy) as Arc<dyn PermissionPolicy>)
+        .hook(OnPreToolUse(move |_: &HookContext| {
+            // Between the check and the write, once: someone else appends.
+            if hook_count.fetch_add(1, Ordering::SeqCst) == 0 {
+                std::fs::write(&hook_path, "alpha\nbeta\nadded meanwhile\n").unwrap();
+            }
+            HookAction::Continue
+        }))
+        .build()
+        .unwrap()
+        .run("edit a.txt")
+        .await
+        .unwrap();
+
+    let e = call(&out.tool_calls, "e1");
+    assert!(!e.is_error, "{}", e.result);
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "alpha\nBETA\nadded meanwhile\n",
+        "the change applies to the file as it now is"
+    );
+    assert_eq!(policy.questions(), 2, "the stale approval was not reused");
+}
+
+/// A file that keeps moving is not written after the bound on decisions.
+#[tokio::test]
+async fn a_file_that_keeps_moving_is_not_written() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_file(dir.path(), "a.txt", "alpha\nbeta\n");
+    let policy = Asked::new(false);
+    let rounds = Arc::new(AtomicUsize::new(0));
+    let hook_path = path.clone();
+    let hook_rounds = Arc::clone(&rounds);
+    let out = Agent::builder()
+        .provider(ScriptedProvider::new(
+            "a",
+            Script::new(vec![
+                Reply::tool(
+                    "e1",
+                    "Edit",
+                    json!({"file_path": path, "old_string": "beta", "new_string": "BETA"}),
+                ),
+                Reply::text("done"),
+            ]),
+        ))
+        .model("a")
+        .working_dir(dir.path())
+        .tools(cersei_tools::filesystem())
+        .permission_policy_arc(Arc::clone(&policy) as Arc<dyn PermissionPolicy>)
+        .hook(OnPreToolUse(move |_: &HookContext| {
+            let n = hook_rounds.fetch_add(1, Ordering::SeqCst) + 1;
+            std::fs::write(&hook_path, format!("alpha\nbeta\nmoved {n}\n")).unwrap();
+            HookAction::Continue
+        }))
+        .build()
+        .unwrap()
+        .run("edit a.txt")
+        .await
+        .unwrap();
+
+    let e = call(&out.tool_calls, "e1");
+    assert!(e.is_error, "{}", e.result);
+    assert!(e.result.contains("nothing was written"), "{}", e.result);
+    assert_eq!(policy.questions(), 3, "decided at most three times");
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "alpha\nbeta\nmoved 3\n",
+        "the edit did not write over the moved file"
+    );
+}
+
+/// A hook that changes the input is not executed under the old approval: the
+/// new change is asked for, and what runs is that change.
+#[tokio::test]
+async fn a_hook_that_changes_the_input_is_asked_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_file(dir.path(), "a.txt", "alpha\nbeta\n");
+    let policy = Asked::new(false);
+    let out = Agent::builder()
+        .provider(ScriptedProvider::new(
+            "a",
+            Script::new(vec![
+                Reply::tool(
+                    "e1",
+                    "Edit",
+                    json!({"file_path": path, "old_string": "beta", "new_string": "BETA"}),
+                ),
+                Reply::text("done"),
+            ]),
+        ))
+        .model("a")
+        .working_dir(dir.path())
+        .tools(cersei_tools::filesystem())
+        .permission_policy_arc(Arc::clone(&policy) as Arc<dyn PermissionPolicy>)
+        .hook(OnPreToolUse(|ctx: &HookContext| {
+            let input = ctx.tool_input.clone().unwrap_or_default();
+            if input.get("new_string").and_then(|v| v.as_str()) == Some("BETA") {
+                let mut changed = input;
+                changed["new_string"] = json!("GAMMA");
+                return HookAction::ModifyInput(changed);
+            }
+            HookAction::Continue
+        }))
+        .build()
+        .unwrap()
+        .run("edit a.txt")
+        .await
+        .unwrap();
+
+    let e = call(&out.tool_calls, "e1");
+    assert!(!e.is_error, "{}", e.result);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "alpha\nGAMMA\n");
+    let diffs = policy.diffs.lock().unwrap().clone();
+    assert_eq!(diffs.len(), 2, "the changed input is decided on its own");
+    assert!(
+        diffs[0].contains("+BETA") && !diffs[0].contains("GAMMA"),
+        "{}",
+        diffs[0]
+    );
+    assert!(
+        diffs[1].contains("+GAMMA") && !diffs[1].contains("BETA"),
+        "{}",
+        diffs[1]
+    );
+}
+
+/// A permission policy that lets the question wait on the file: the file
+/// moves on while the first question is pending.
+struct MovesWhileAsked {
+    path: std::path::PathBuf,
+    asked: AtomicUsize,
+    diffs: Mutex<Vec<String>>,
+}
+
+#[async_trait]
+impl PermissionPolicy for MovesWhileAsked {
+    async fn check(&self, request: &PermissionRequest) -> PermissionDecision {
+        let diff = request
+            .preview
+            .as_ref()
+            .and_then(|p| p.files.first())
+            .map(|f| f.diff.clone())
+            .unwrap_or_default();
+        self.diffs.lock().unwrap().push(diff);
+        if self.asked.fetch_add(1, Ordering::SeqCst) == 0 {
+            std::fs::write(&self.path, "alpha\nbeta\nwhile asked\n").unwrap();
+        }
+        PermissionDecision::Allow
+    }
+}
+
+/// A file that changes while its change awaits approval is asked about again,
+/// on the file as it now is; the answer given for the older state is not used.
+#[tokio::test]
+async fn a_file_that_moves_while_its_change_is_asked_about_is_asked_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_file(dir.path(), "a.txt", "alpha\nbeta\n");
+    let policy = Arc::new(MovesWhileAsked {
+        path: path.clone(),
+        asked: AtomicUsize::new(0),
+        diffs: Mutex::new(Vec::new()),
+    });
+    let out = Agent::builder()
+        .provider(ScriptedProvider::new(
+            "a",
+            Script::new(vec![
+                Reply::tool(
+                    "e1",
+                    "Edit",
+                    json!({"file_path": path, "old_string": "beta", "new_string": "BETA"}),
+                ),
+                Reply::text("done"),
+            ]),
+        ))
+        .model("a")
+        .working_dir(dir.path())
+        .tools(cersei_tools::filesystem())
+        .permission_policy_arc(Arc::clone(&policy) as Arc<dyn PermissionPolicy>)
+        .build()
+        .unwrap()
+        .run("edit a.txt")
+        .await
+        .unwrap();
+
+    let e = call(&out.tool_calls, "e1");
+    assert!(!e.is_error, "{}", e.result);
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "alpha\nBETA\nwhile asked\n"
+    );
+    let diffs = policy.diffs.lock().unwrap().clone();
+    assert_eq!(diffs.len(), 2);
+    assert!(!diffs[0].contains("while asked"), "{}", diffs[0]);
+    assert!(diffs[1].contains("while asked"), "{}", diffs[1]);
+}
+
+/// The name `MultiEdit` is gone: an old call with it is an unknown tool.
+#[tokio::test]
+async fn a_multi_edit_call_is_now_an_unknown_tool() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = write_file(dir.path(), "a.txt", "alpha\n");
+    let out = agent(
+        dir.path(),
+        vec![
+            Reply::tool("m1", "MultiEdit", json!({"file_path": path, "edits": [{"old_string": "alpha", "new_string": "beta"}]})),
+            Reply::text("done"),
+        ],
+        Asked::new(false),
+    )
+    .run("edit")
+    .await
+    .unwrap();
+    let m = call(&out.tool_calls, "m1");
+    assert!(m.is_error, "{}", m.result);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "alpha\n");
 }

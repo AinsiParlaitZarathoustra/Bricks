@@ -3,7 +3,7 @@
 //! Read, write, edit, diff, and patch files. All async via tokio::fs.
 
 use super::diff;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// File content with metadata.
 #[derive(Debug, Clone)]
@@ -75,21 +75,82 @@ pub fn clip(s: &str, max: usize) -> String {
     }
 }
 
-/// Replace `path` with `content` through a temporary file in the same
-/// directory and a rename, keeping the original permissions: a reader never
-/// sees a half-written file.
+/// Where a write to `path` lands.
+///
+/// A symbolic link is followed, through any chain of links, so a write through
+/// it changes the file it points to and the link stays a link. The directories
+/// of the result are canonical, so the name is the one the file has in its real
+/// directory. A file that does not exist yet is named in its canonical parent,
+/// and a dangling link names the file it points to. The per-file locks are keyed
+/// by this same path (`file_lock::lock_key`).
+pub fn write_target(path: &Path) -> std::io::Result<PathBuf> {
+    const MAX_LINKS: usize = 40;
+    let mut current = std::path::absolute(path)?;
+    for _ in 0..MAX_LINKS {
+        if !std::fs::symlink_metadata(&current).is_ok_and(|m| m.file_type().is_symlink()) {
+            return Ok(canonical_or_missing(&current));
+        }
+        let link = std::fs::read_link(&current)?;
+        // A relative link is relative to the directory the link is in, once
+        // that directory is canonical (so its `..` mean what the disk means).
+        let base = current
+            .parent()
+            .map(canonical_or_missing)
+            .unwrap_or_else(|| PathBuf::from("/"));
+        current = base.join(link);
+    }
+    Err(std::io::Error::other(format!(
+        "{}: too many levels of symbolic links",
+        path.display()
+    )))
+}
+
+/// The canonical form of `path`, resolved the way the disk resolves it: the
+/// longest existing prefix is canonicalised (so `..` after a linked directory
+/// means its real parent), and the components after it, which do not exist,
+/// are normalised lexically.
+pub(crate) fn canonical_or_missing(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let parts: Vec<Component> = path.components().collect();
+    for end in (1..=parts.len()).rev() {
+        let prefix: PathBuf = parts[..end].iter().collect();
+        if let Ok(base) = std::fs::canonicalize(&prefix) {
+            let mut out = base;
+            for part in &parts[end..] {
+                match part {
+                    Component::CurDir => {}
+                    Component::ParentDir => {
+                        out.pop();
+                    }
+                    other => out.push(other),
+                }
+            }
+            return out;
+        }
+    }
+    path.to_path_buf()
+}
+
+/// Replace what `path` names with `content`, through a temporary file in the
+/// directory of the file written and a rename onto it, keeping its permissions:
+/// a reader never sees a half-written file. A symbolic link at `path` stays a
+/// link; the file it points to is the one replaced (see [`write_target`]).
 pub async fn write_atomic(path: &Path, content: &[u8]) -> Result<(), std::io::Error> {
-    let dir = path
+    let target = write_target(path)?;
+    let dir = target
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or(Path::new("."));
-    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+    let name = target
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file");
     let tmp = dir.join(format!(
         ".{name}.bricks-{}-{}.tmp",
         std::process::id(),
         uuid::Uuid::new_v4()
     ));
-    let perms = tokio::fs::metadata(path)
+    let perms = tokio::fs::metadata(&target)
         .await
         .ok()
         .map(|m| m.permissions());
@@ -97,7 +158,7 @@ pub async fn write_atomic(path: &Path, content: &[u8]) -> Result<(), std::io::Er
     if let Some(p) = perms {
         let _ = tokio::fs::set_permissions(&tmp, p).await;
     }
-    if let Err(e) = tokio::fs::rename(&tmp, path).await {
+    if let Err(e) = tokio::fs::rename(&tmp, &target).await {
         let _ = tokio::fs::remove_file(&tmp).await;
         return Err(e);
     }
@@ -562,5 +623,161 @@ mod tests {
         let path = tmp.path().join("yes.txt");
         write_file(&path, "").await.unwrap();
         assert!(file_exists(&path).await);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod link_tests {
+    use super::*;
+    use std::os::unix::fs::{PermissionsExt, symlink};
+
+    fn leftovers(dir: &Path) -> Vec<String> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| n.ends_with(".tmp"))
+            .collect()
+    }
+
+    /// The write changes the file the link names; the link is still a link.
+    #[tokio::test]
+    async fn a_write_through_a_link_changes_the_target_and_keeps_the_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target.txt");
+        std::fs::write(&target, "one\n").unwrap();
+        let link = dir.path().join("link.txt");
+        symlink(&target, &link).unwrap();
+
+        write_atomic(&link, b"two\n").await.unwrap();
+
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "two\n");
+        assert!(
+            std::fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(std::fs::read_link(&link).unwrap(), target);
+        assert!(
+            leftovers(dir.path()).is_empty(),
+            "no temporary file is left"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_chain_of_links_ends_at_the_file_and_keeps_every_link() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("real.txt");
+        std::fs::write(&target, "a\n").unwrap();
+        let middle = dir.path().join("middle");
+        symlink("real.txt", &middle).unwrap(); // relative
+        let first = dir.path().join("first");
+        symlink(&middle, &first).unwrap();
+
+        write_atomic(&first, b"b\n").await.unwrap();
+
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "b\n");
+        assert!(
+            std::fs::symlink_metadata(&first)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert!(
+            std::fs::symlink_metadata(&middle)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+    }
+
+    /// A dangling link names the file it points to: the write creates it there.
+    #[tokio::test]
+    async fn a_dangling_link_creates_the_file_it_points_to() {
+        let dir = tempfile::tempdir().unwrap();
+        let link = dir.path().join("link.txt");
+        symlink("made.txt", &link).unwrap();
+
+        write_atomic(&link, b"new\n").await.unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("made.txt")).unwrap(),
+            "new\n"
+        );
+        assert!(
+            std::fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+    }
+
+    /// A link to a directory: a new file named through it is created in the
+    /// real directory.
+    #[tokio::test]
+    async fn a_file_named_through_a_linked_directory_is_created_in_the_real_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        let alias = dir.path().join("alias");
+        symlink(&real, &alias).unwrap();
+
+        write_atomic(&alias.join("new.txt"), b"x\n").await.unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(real.join("new.txt")).unwrap(),
+            "x\n"
+        );
+        assert!(!dir.path().join("alias").join("new.txt.tmp").exists());
+        assert!(leftovers(&real).is_empty());
+    }
+
+    /// The permissions of the file written are the target's, not the
+    /// temporary file's default.
+    #[tokio::test]
+    async fn the_target_keeps_its_permissions() {
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("private.txt");
+        std::fs::write(&target, "x\n").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o640)).unwrap();
+        let link = dir.path().join("link.txt");
+        symlink(&target, &link).unwrap();
+
+        write_atomic(&link, b"y\n").await.unwrap();
+
+        let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o640);
+    }
+
+    /// `..` after a linked directory means the real parent, as on the disk.
+    #[tokio::test]
+    async fn dotdot_after_a_linked_directory_follows_the_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("real");
+        std::fs::create_dir_all(real.join("sub")).unwrap();
+        let alias = dir.path().join("alias");
+        symlink(real.join("sub"), &alias).unwrap();
+
+        write_atomic(&alias.join("..").join("top.txt"), b"t\n")
+            .await
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(real.join("top.txt")).unwrap(),
+            "t\n"
+        );
+        assert!(!dir.path().join("top.txt").exists());
+    }
+
+    /// A link cycle is refused rather than written somewhere by guesswork.
+    #[tokio::test]
+    async fn a_link_cycle_is_refused_and_writes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a");
+        let b = dir.path().join("b");
+        symlink(&b, &a).unwrap();
+        symlink(&a, &b).unwrap();
+        assert!(write_atomic(&a, b"z").await.is_err());
+        assert!(leftovers(dir.path()).is_empty());
     }
 }

@@ -4,9 +4,10 @@ use crate::compact;
 use crate::context::{BudgetDecision, ContextStatus, ModelView, RequestView};
 use crate::events::{AgentEvent, CompactReason};
 use crate::{Agent, AgentOutput, ToolCallRecord, UserInput};
-use cersei_hooks::{HookAction, HookContext, HookEvent};
+use cersei_hooks::{Hook, HookAction, HookContext, HookEvent};
 use cersei_provider::{CompletionRequest, ProviderOptions, StreamAccumulator};
-use cersei_tools::permissions::{PermissionDecision, PermissionRequest};
+use cersei_tools::permissions::{PermissionDecision, PermissionPolicy, PermissionRequest};
+use cersei_tools::preview::{ApprovedState, ChangePreview, is_stale_approval};
 use cersei_tools::{ToolContext, ToolResult};
 use cersei_types::*;
 use std::sync::Arc;
@@ -337,6 +338,7 @@ pub(crate) async fn run_prepared_controlled(
         permissions,
     )
     .await;
+    end_root_run_commands(agent).await;
     if let Some(s) = agent.skill_session() {
         s.ledger.lock().clear_pending();
     }
@@ -376,6 +378,23 @@ pub(crate) async fn run_prepared_controlled(
         }
     }
     result
+}
+
+/// The end of a root run, whether it completed, failed or was cancelled: the
+/// commands of its agent that were handed over as tasks (a foreground command
+/// past `yield_time_ms`, not started with `background: true`) end with it.
+/// Explicit background jobs outlive the run and end with the session. A
+/// sub-agent's jobs end with the sub-agent (see `agents::spawn`).
+async fn end_root_run_commands(agent: &Agent) {
+    let Some(identity) = agent.extensions.get::<crate::agents::AgentIdentity>() else {
+        return;
+    };
+    if identity.parent_id.is_some() {
+        return;
+    }
+    if let Some(jobs) = agent.extensions.get::<cersei_tools::jobs::JobsHandle>() {
+        jobs.0.stop_ordinary_owned_by(&identity.agent_id).await;
+    }
 }
 
 /// Answer every tool call left without a result (a run stopped while tools
@@ -1466,129 +1485,29 @@ async fn run_loop(
 
                     async move {
                         let start = Instant::now();
-                        // The change an approval was given for (written
-                        // if the call succeeds).
-                        let mut approved_change: Option<cersei_tools::preview::ChangePreview> = None;
-                        // The tool itself ran (it may have changed files).
-                        let mut executed = false;
-
-                        let result = if let Some(tool) = tool_ref {
-                            // Check permissions. Session state a shell
-                            // command depends on (aliases, functions) is
-                            // shown to the policy, so it cannot hide what
-                            // will actually run.
-                            let mut description = format!("Execute tool '{}'", tool_name);
-                            if let Some(details) = tool.permission_details(&tool_input, &tool_ctx).await {
-                                description.push('\n');
-                                description.push_str(&details);
-                            }
-                            // What the call would change, computed
-                            // without writing, so the decision is taken
-                            // on it. If a file changes while the decision
-                            // is pending, the change is recomputed and
-                            // asked again: an approval never applies to
-                            // a state it was not given for.
-                            let mut preview = tool.preview(&tool_input, &tool_ctx).await;
-                            let mut stale_rounds = 0;
-                            let decision = loop {
-                                if let Some(reason) = preview.as_ref().and_then(|p| p.refusal.clone()) {
-                                    // The tool would refuse it: nothing to approve.
-                                    break PermissionDecision::Deny(format!("{reason}\nNothing was written."));
-                                }
-                                let perm_req = PermissionRequest {
-                                    tool_name: tool_name.clone(),
-                                    tool_input: tool_input.clone(),
-                                    permission_level: tool.permission_level_for(&tool_input),
-                                    description: description.clone(),
-                                    id: tool_id.clone(),
-                                    preview: preview.clone(),
-                                    agent_id: None,
+                        let run = match tool_ref {
+                            Some(tool) => {
+                                let site = CallSite {
+                                    tool_id: &tool_id,
+                                    tool_ctx: &tool_ctx,
+                                    permissions: permission_policy.as_ref(),
+                                    hooks: &hooks,
+                                    turn,
+                                    cumulative_cost,
+                                    message_count: msg_count,
                                 };
-                                let d = permission_policy.check(&perm_req).await;
-                                let allowed = matches!(
-                                    d,
-                                    PermissionDecision::Allow
-                                        | PermissionDecision::AllowOnce
-                                        | PermissionDecision::AllowForSession
-                                );
-                                match preview.as_ref().map(|p| p.check_current()) {
-                                    Some(Err(changed)) if allowed => {
-                                        stale_rounds += 1;
-                                        if stale_rounds >= 3 {
-                                            break PermissionDecision::Deny(format!(
-                                                "{} changed on disk while the change was awaiting approval; \
-                                                 nothing was written. Read the file again and retry.",
-                                                changed.join(", ")
-                                            ));
-                                        }
-                                        preview = tool.preview(&tool_input, &tool_ctx).await;
-                                    }
-                                    _ => {
-                                        if allowed {
-                                            approved_change = preview.clone();
-                                        }
-                                        break d;
-                                    }
-                                }
-                            };
-
-                            match decision {
-                                PermissionDecision::Allow
-                                | PermissionDecision::AllowOnce
-                                | PermissionDecision::AllowForSession => {
-                                    let hook_ctx = HookContext {
-                                        event: HookEvent::PreToolUse,
-                                        tool_name: Some(tool_name.clone()),
-                                        tool_input: Some(tool_input.clone()),
-                                        tool_result: None,
-                                        tool_is_error: None,
-                                        turn,
-                                        cumulative_cost_usd: cumulative_cost,
-                                        message_count: msg_count,
-                                    };
-                                    let hook_action =
-                                        cersei_hooks::run_hooks(&hooks, &hook_ctx).await;
-
-                                    match hook_action {
-                                        HookAction::Block(reason) => ToolResult::error(
-                                            format!("Blocked by hook: {}", reason),
-                                        ),
-                                        HookAction::ModifyInput(new_input) => {
-                                            // What is written is the new
-                                            // input's change, not the one
-                                            // previewed for the old input.
-                                            if approved_change.is_some() {
-                                                approved_change = tool
-                                                    .preview(&new_input, &tool_ctx)
-                                                    .await
-                                                    .filter(|p| p.refusal.is_none());
-                                            }
-                                            executed = true;
-                                            execute_admitted(tool, new_input, &tool_ctx).await
-                                        }
-                                        _ => {
-                                            executed = true;
-                                            execute_admitted(tool, tool_input.clone(), &tool_ctx)
-                                                .await
-                                        }
-                                    }
-                                }
-                                PermissionDecision::Deny(reason) => {
-                                    ToolResult::error(format!("Permission denied: {}", reason))
-                                }
+                                decide_and_run(&site, tool, &tool_name, tool_input.clone()).await
                             }
-                        } else {
                             // F-A15: weak models hallucinate tool names
                             // constantly, and "Unknown tool: X" gave them
                             // nothing to correct toward.
-                            cersei_tools::tool_feedback::not_found(
+                            None => CallRun::not_run(cersei_tools::tool_feedback::not_found(
                                 "tool",
                                 &tool_name,
                                 &registered_tool_names,
                                 "Call ToolSearch with a keyword to find the right tool, then call that tool by its exact name.",
-                            )
+                            )),
                         };
-
                         // Measured when the call ends, not when it is published.
                         let duration = start.elapsed();
                         FinishedCall {
@@ -1596,10 +1515,10 @@ async fn run_loop(
                             id: tool_id,
                             name: tool_name,
                             input: tool_input,
-                            result,
+                            result: run.result,
                             duration,
-                            change: approved_change,
-                            executed,
+                            change: run.change,
+                            executed: run.executed,
                         }
                     }
                 })
@@ -2730,6 +2649,179 @@ fn record_run_usage(agent: &Agent, usage: &cersei_types::Usage) {
         agent.extensions.get::<crate::agents::AgentIdentity>(),
     ) {
         rt.0.add_usage(&id.root_run_id, id.parent_id.is_none(), usage);
+    }
+}
+
+// ─── Decision, hooks and execution of one call ───────────────────────────────
+
+/// How many times a call is decided when the file it would change moves on
+/// while the decision is pending or after it. Past this, nothing is written.
+const MAX_DECISION_ROUNDS: u32 = 3;
+
+/// What a call needs from its round to be decided and run.
+struct CallSite<'a> {
+    tool_id: &'a str,
+    tool_ctx: &'a ToolContext,
+    permissions: &'a dyn PermissionPolicy,
+    hooks: &'a [Arc<dyn Hook>],
+    turn: u32,
+    cumulative_cost: f64,
+    message_count: usize,
+}
+
+/// What a call came to.
+struct CallRun {
+    result: ToolResult,
+    /// The tool ran (it may have changed files).
+    executed: bool,
+    /// The change the call was approved for, and executed.
+    change: Option<ChangePreview>,
+}
+
+impl CallRun {
+    fn not_run(result: ToolResult) -> Self {
+        Self {
+            result,
+            executed: false,
+            change: None,
+        }
+    }
+}
+
+/// Decides a call and runs it.
+///
+/// The decision is taken on the change the call would make, computed without
+/// writing. The hooks then see the call. When a hook changes the input and
+/// the change differs from the approved one, the new input needs its own
+/// decision. The tool itself checks the approval under the file's lock before
+/// it writes (see `cersei_tools::file_lock`): a file that moved on since the
+/// approval is not written, and the call is decided again on its current
+/// state. The change executed is therefore always the change approved.
+async fn decide_and_run(
+    site: &CallSite<'_>,
+    tool: &dyn cersei_tools::Tool,
+    tool_name: &str,
+    input: serde_json::Value,
+) -> CallRun {
+    let mut input = input;
+    for _ in 0..MAX_DECISION_ROUNDS {
+        let (decision, approved) = decide(site, tool, tool_name, &input).await;
+        if let PermissionDecision::Deny(reason) = decision {
+            return CallRun::not_run(ToolResult::error(format!("Permission denied: {reason}")));
+        }
+
+        let hook_ctx = HookContext {
+            event: HookEvent::PreToolUse,
+            tool_name: Some(tool_name.to_string()),
+            tool_input: Some(input.clone()),
+            tool_result: None,
+            tool_is_error: None,
+            turn: site.turn,
+            cumulative_cost_usd: site.cumulative_cost,
+            message_count: site.message_count,
+        };
+        let (effective, modified) = match cersei_hooks::run_hooks(site.hooks, &hook_ctx).await {
+            HookAction::Block(reason) => {
+                return CallRun::not_run(ToolResult::error(format!("Blocked by hook: {}", reason)));
+            }
+            HookAction::ModifyInput(new_input) => (new_input, true),
+            _ => (input.clone(), false),
+        };
+        if modified {
+            let now = tool
+                .preview(&effective, site.tool_ctx)
+                .await
+                .filter(|p| p.refusal.is_none());
+            if now != approved {
+                input = effective;
+                continue;
+            }
+        }
+
+        let mut exec_ctx = site.tool_ctx.clone();
+        if let Some(change) = &approved {
+            exec_ctx.extensions = exec_ctx.extensions.with_local(ApprovedState::of(change));
+        }
+        let result = execute_admitted(tool, effective.clone(), &exec_ctx).await;
+        if is_stale_approval(&result) {
+            input = effective;
+            continue;
+        }
+        return CallRun {
+            result,
+            executed: true,
+            change: approved,
+        };
+    }
+    CallRun::not_run(ToolResult::error(
+        "The file changed on disk while the change was awaiting approval, so nothing was \
+         written. Read the file again and retry.",
+    ))
+}
+
+/// The decision on a call, and the change it was given for (`None` when the
+/// call was not allowed, or has no change to show).
+///
+/// The preview is computed without writing. If the files it describes move on
+/// while the decision is pending, the preview is computed again and asked
+/// again, up to [`MAX_DECISION_ROUNDS`].
+async fn decide(
+    site: &CallSite<'_>,
+    tool: &dyn cersei_tools::Tool,
+    tool_name: &str,
+    input: &serde_json::Value,
+) -> (PermissionDecision, Option<ChangePreview>) {
+    let mut description = format!("Execute tool '{}'", tool_name);
+    if let Some(details) = tool.permission_details(input, site.tool_ctx).await {
+        description.push('\n');
+        description.push_str(&details);
+    }
+    let mut preview = tool.preview(input, site.tool_ctx).await;
+    let mut stale_rounds = 0;
+    loop {
+        if let Some(reason) = preview.as_ref().and_then(|p| p.refusal.clone()) {
+            // The tool would refuse it: nothing to approve.
+            return (
+                PermissionDecision::Deny(format!("{reason}\nNothing was written.")),
+                None,
+            );
+        }
+        let request = PermissionRequest {
+            tool_name: tool_name.to_string(),
+            tool_input: input.clone(),
+            permission_level: tool.permission_level_for(input),
+            description: description.clone(),
+            id: site.tool_id.to_string(),
+            preview: preview.clone(),
+            agent_id: None,
+        };
+        let decision = site.permissions.check(&request).await;
+        let allowed = matches!(
+            decision,
+            PermissionDecision::Allow
+                | PermissionDecision::AllowOnce
+                | PermissionDecision::AllowForSession
+        );
+        match preview.as_ref().map(|p| p.check_current()) {
+            Some(Err(changed)) if allowed => {
+                stale_rounds += 1;
+                if stale_rounds >= MAX_DECISION_ROUNDS {
+                    return (
+                        PermissionDecision::Deny(format!(
+                            "{} changed on disk while the change was awaiting approval; \
+                             nothing was written. Read the file again and retry.",
+                            changed.join(", ")
+                        )),
+                        None,
+                    );
+                }
+                preview = tool.preview(input, site.tool_ctx).await;
+            }
+            _ => {
+                let approved = if allowed { preview } else { None };
+                return (decision, approved);
+            }
+        }
     }
 }
 

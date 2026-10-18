@@ -104,6 +104,27 @@ impl Tool for ApplyPatchTool {
             Ok(i) => i,
             Err(e) => return e,
         };
+        let targets = match patch_files(&input.patch, &ctx.working_dir) {
+            Ok(targets) => targets,
+            Err(e) => return ToolResult::error(format!("The patch was not applied: {e}")),
+        };
+        // Every file the patch writes is held from the read to the last write
+        // (see `file_lock`), and checked against the approval under the locks.
+        let _locks = crate::file_lock::lock_paths(
+            &targets
+                .iter()
+                .map(|(path, _)| path.clone())
+                .collect::<Vec<_>>(),
+        )
+        .await;
+        for (path, shown) in &targets {
+            let current = std::fs::read(path).ok();
+            if let Err(stale) =
+                crate::preview::ensure_still_approved(ctx, path, shown, current.as_deref())
+            {
+                return stale;
+            }
+        }
         match apply_unified_patch(&input.patch, &ctx.working_dir) {
             Ok(changes) if changes.is_empty() => {
                 ToolResult::success("The patch contains no file changes.")
@@ -370,13 +391,23 @@ fn parse_patch(patch: &str) -> std::result::Result<Vec<FilePatch>, String> {
     Ok(files)
 }
 
-/// Paths a patch writes (created, modified or deleted), as the tool resolves
-/// them relative to the working directory.
+/// Paths a patch writes (created, modified or deleted), as the patch names
+/// them, relative to the working directory. The same normalisation the patch
+/// is applied with.
 pub fn patch_targets(patch: &str) -> Vec<String> {
     parse_patch(patch)
         .unwrap_or_default()
         .into_iter()
         .filter_map(|f| f.new.or(f.old))
+        .collect()
+}
+
+/// The files a patch writes, as the patch application resolves them: the
+/// absolute path, and the name the patch gives it.
+fn patch_files(patch: &str, root: &Path) -> std::result::Result<Vec<(PathBuf, String)>, String> {
+    patch_targets(patch)
+        .into_iter()
+        .map(|rel| resolve(root, &rel).map(|path| (path, rel)))
         .collect()
 }
 

@@ -1,5 +1,32 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed — file edits (Sprint 14.6)
+
+- **No read is required before a change.** The runtime no longer refuses `Edit`, `Write`, `NotebookEdit` or `ApplyPatch` on a file the model has not read in the session (the read-before-edit guard is removed). A change is still decided on what it would do to the file, and the tool descriptions and error messages recommend reading the code when a change needs it; none of them requires it.
+- **`Edit` takes several replacements.** `Edit` accepts `{file_path, edits: [{old_string, new_string?, replace_all?}, …]}` next to the one-replacement form `{file_path, old_string, new_string?, replace_all?}`; the two forms cannot be mixed. The replacements are applied in order, each against the result of the previous one, and the file is written once, only if all of them apply. `file_path` is the only required parameter. An omitted `new_string` deletes the match, as before.
+- **Per-file write lock.** `Edit`, `Write`, `NotebookEdit` and `ApplyPatch` hold a lock on each file they write from the read to the write (`cersei_tools::file_lock`). The lock is keyed by canonical path and shared by every session and agent of the process, so two edits of different parts of one file no longer overwrite each other, and a symbolic link and its target share one lock. Locks are never held while an approval is pending.
+- **The approval is checked where the write happens.** The approval records the SHA-256 of the text the diff was computed from. Under the file's lock, before writing, the tool compares the file with that state: a file changed since its approval is not written, and the call is decided again on the file as it now is. A hook that changes a tool's input makes the call decided again when its change differs from the approved one, so the change written is the change approved.
+- `Write` writes through `write_atomic` (a temporary file, then a rename).
+- The system prompt and the tool descriptions no longer state a read as a precondition of an edit.
+
+### Removed — `MultiEdit` (SDK breaking change)
+
+- The `MultiEdit` tool is removed: `cersei_tools::multi_edit` (`MultiEditTool`), its registration in `cersei_tools::filesystem()`, its schema and tests. A call named `MultiEdit` is now an unknown tool. Recorded history that contains `MultiEdit` calls still reads and displays.
+- Migration for SDK users: replace `MultiEditTool` with `cersei_tools::file_edit::FileEditTool` and send the same arguments under the name `Edit`: `{"file_path": "…", "edits": [{"old_string": "…", "new_string": "…", "replace_all": false}]}`.
+
+### Added — SDK
+
+- `cersei_tools::file_lock` (`lock_paths`, `lock_key`, `FileLocks`).
+- `cersei_tools::preview::{ApprovedState, ensure_still_approved, is_stale_approval, STALE_APPROVAL_KEY}`.
+- `cersei_tools::file_edit::{EditCall, EditSpec, parse_call, prepare}`.
+
+### Compatibility
+
+- `Processed::partial_view` is still produced by the output compressor but no longer decides what the runner treats as read.
+- `tool_primitives::fs::edit_file` is kept as it was; the `Edit` tool no longer uses it.
+
 ## [0.6.1] — 2026-10-14
 
 ### Changed — system prompt (Sprint 13.2)
