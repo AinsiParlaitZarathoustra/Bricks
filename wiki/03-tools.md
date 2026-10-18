@@ -27,7 +27,7 @@ pub trait Tool: Send + Sync {
 ```rust
 cersei::tools::all()          // every set below, plus AskUserQuestion, SyntheticOutput, Config, ToolSearch
 cersei::tools::coding()       // filesystem() + shell() + web()
-cersei::tools::filesystem()   // Read, Write, Edit, MultiEdit, ApplyPatch, Glob, Grep, CodeSearch, CodeScout, NotebookEdit
+cersei::tools::filesystem()   // Read, Write, Edit, ApplyPatch, Glob, Grep, CodeSearch, CodeScout, NotebookEdit
 cersei::tools::shell()        // Bash (+ BashTaskStatus, BashTaskOutput, BashTaskStop), Job, PowerShell
 cersei::tools::web()          // WebFetch, WebSearch
 cersei::tools::planning()     // EnterPlanMode, ExitPlanMode, TodoWrite
@@ -47,7 +47,6 @@ Permission levels are those declared in the code. Where a level depends on the i
 | `Read` | ReadOnly | `filesystem()` |
 | `Write` | Write | `filesystem()` |
 | `Edit` | Write | `filesystem()` |
-| `MultiEdit` | Write | `filesystem()` |
 | `ApplyPatch` | Write | `filesystem()` |
 | `Glob` | ReadOnly | `filesystem()` |
 | `Grep` | ReadOnly | `filesystem()` |
@@ -91,7 +90,7 @@ Tools outside the sets:
 | `RecvVmMessage`, `SharedStateGet` | ReadOnly | same as above |
 | `LSP` | ReadOnly | `cersei_tools::lsp_tool::LspTool`; defined, but no set includes it |
 
-The `Bash` and `PowerShell` tools keep a persistent interpreter per agent session: `cd`, `export` and shell variables survive from one call to the next while the interpreter lives. A sub-agent has its own session.
+`Bash` runs each call as its own process, started from the agent session's state: `cd`, `export`, functions and aliases carry over to the next call when a command ends normally. Commands of one session run side by side. `PowerShell` keeps one interpreter per agent session. A sub-agent has its own session.
 
 ### Glob and CodeSearch: what they walk
 
@@ -120,7 +119,7 @@ until a writing tool runs or the inventory changes.
 
 ### Bash: shell state persistence
 
-`Bash` runs in one persistent `bash` per agent session (`BashSession`, Unix only):
+Each `Bash` call is a separate `bash` process (Unix only). It starts from the session's state and, when it ends normally, its directory and exports (and functions and aliases) are published for the next calls. See `docs/shell.md` §1:
 
 ```
 Turn 1: Bash("cd src && export FOO=bar")
@@ -128,7 +127,7 @@ Turn 2: Bash("pwd")       → outputs /project/src
 Turn 3: Bash("echo $FOO") → outputs bar
 ```
 
-If the interpreter ends (`exit`, `exec`, a crash, or a timeout that required destroying it), the next command starts a fresh one and says so.
+A command that is interrupted, times out or calls `exec` publishes nothing; the result says so. A command still running after `yield_time_ms` is handed over as a task and keeps running.
 
 ## Creating Custom Tools
 
@@ -283,7 +282,7 @@ ToolResult::success("ok").with_metadata(json!({ "diff": "..." }))
 |-------|---------|----------|
 | `None` | No side effects on the machine | Task tools, TodoWrite, Sleep |
 | `ReadOnly` | Reads the filesystem or network | Read, Glob, Grep, WebFetch, Skill |
-| `Write` | Modifies files | Write, Edit, MultiEdit, ApplyPatch, NotebookEdit |
+| `Write` | Modifies files | Write, Edit, ApplyPatch, NotebookEdit |
 | `Execute` | Runs commands or changes scheduled work | Bash, PowerShell, CronCreate |
 | `Dangerous` | Irreversible or destructive | MCP tools annotated `destructiveHint` |
 | `Forbidden` | Never allowed | No built-in tool declares it |

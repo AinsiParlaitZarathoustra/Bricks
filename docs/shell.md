@@ -1,249 +1,309 @@
 # Shell, file tools and tool results
 
-Contracts of the `Bash`, `PowerShell`, background-task, `Edit`/`MultiEdit`,
-`ApplyPatch` and `Read` tools, and of the result format every tool shares.
+Contracts of the `Bash`, `PowerShell`, background-task and `Job` tools, of
+`Edit`, `ApplyPatch` and `Read`, and of the result format every tool shares.
 
-## 1. Persistent shell
+## 1. Bash: one process per command, shared state
 
-**One live shell per agent session.** An agent's tools share one session id
-(its `session_id` when set, else one generated per agent), hence one bash,
-one PowerShell and one set of background tasks. Another agent — a sub-agent
-included — has its own. Foreground commands in a session are serialised.
+**Every `Bash` call is its own `bash` process.** Commands of one agent session
+run side by side: none waits for another, and a long command does not hold
+back a short one. An agent's tools share one session id (its `session_id` when
+set, else one generated per agent), hence one state and one set of background
+tasks. Another agent, a sub-agent included, has its own.
 
-**What persists**, for as long as the interpreter lives: the current
-directory, variables (exported or not), `PATH`, activated environments
-(`source .venv/bin/activate`; nvm/conda when installed and initialised by the
-command), aliases, functions, shell options and traps. The process
-environment of Bricks itself is never modified.
+**What a command starts from.** At launch it gets a copy of the session state:
+the current directory, the exported variables, the functions and the aliases
+(restored by a prelude sourced before the command). The process environment of
+Bricks itself is never modified.
 
-**What does not**: nothing is reconstructed after the interpreter ends. An
-`exit`, an `exec`, a crash, `kill -9 $$`, an enabled `set -e` followed by a
-failing command, or a timeout that required destroying the shell end the
-session; the result says so, and the next command runs in a fresh shell with
-a "session reset" note. Changes made inside a sub-shell `( … )` stay there.
+**What a command publishes.** When it ends normally, its shell records its
+final state and Bricks publishes the **delta** against its launch copy only:
 
-### How bash is driven (Unix)
+* the working directory (`PWD` and `OLDPWD` move together);
+* exported variables added, changed or removed;
+* functions and aliases added, changed or removed.
 
-* One `bash --noprofile --norc` (no user profile is sourced; `BASH_ENV`, `ENV`
-  and `PROMPT_COMMAND` are removed), started in its own session (`setsid`),
-  without a controlling terminal: a program that would prompt on `/dev/tty`
-  (sudo, ssh) fails instead of hanging.
-* A small driver runs **at the top level** of that shell (not inside a
-  function), so `declare`, `local`-free variables, `return` and aliases behave
-  as in an interactive shell. `expand_aliases` is on. Bash ≥ 3.2.
-* **Control channel**: requests on fd 198, replies on fd 199 — NUL-separated
-  fields with a request id: `READY`, `START id`, `END id status cwd`. Status
-  and working directory come only from there; nothing is parsed out of the
-  command's output, so output that imitates a marker or the protocol is just
-  output.
-* **The command's text** is written to a file and sourced (`.`) in the shell's
+Rules for the published state:
+
+* For one field, the command that was **launched most recently** among those
+  that publish wins, whatever the order of their ends. An older slow command
+  that ends late restores nothing.
+* A non-zero exit code does not discard the changes: a command that failed
+  after a `cd` or an `export` still publishes them.
+* `exit` publishes; `exec` does not.
+* An interrupted command, a timed-out one, one that replaced the EXIT trap
+  (the recording trap) or one that was killed publishes nothing. The result
+  says `environment changes not available`.
+* `background: true` tasks start from a copy and never publish (§3).
+
+**What does not persist**: non-exported shell variables, shell options
+(`set`, `shopt`), and what a command changes after it was interrupted. A
+`deactivate` of a Python virtual environment does not restore the `PATH`
+it had set. A `source .venv/bin/activate` persists through the exports it
+makes. nvm and conda persist when their setup exports what they need.
+
+Interactions to know: `set -e` is not kept (each command has its own shell
+options); a user `trap … EXIT` replaces the recording trap, so that command
+publishes nothing; a process that detaches from the command's group (a daemon
+that double-forks) escapes the group cleanup (§2).
+
+### How a command is run (Unix)
+
+* One `bash --noprofile --norc` per call (no user profile; `BASH_ENV`, `ENV`
+  and `PROMPT_COMMAND` are removed), in its own session (`setsid`) and process
+  group, without a controlling terminal: a program that would prompt on
+  `/dev/tty` (sudo, ssh) fails instead of hanging.
+* Stdout and stderr are separate pipes, read continuously. stdin is
+  `/dev/null` unless `input` is given.
+* The command's text is passed to the shell as a file and sourced in its
   scope: quotes, newlines, here-documents and unicode are preserved exactly.
   `return N` ends the command with status N.
-* **Streams**: each command gets two FIFOs (stdout, stderr), read from the
-  start, concurrently, chunk by chunk — large outputs cannot fill a pipe and
-  block. stdin is `/dev/null` unless `input` is given. fds 198/199 are closed
-  for the command: `read`, `cat` or a child process can never consume the
-  next request.
+* Status and final state come from the process, never from its output: output
+  that imitates a marker is just output.
 * Names starting with `__bricks_` are reserved.
-
-Interactions to know: a user `trap … EXIT` runs when the shell ends; `set -e`
-persists like in a terminal (a later failing command ends the session,
-reported); `exec cmd` replaces the shell (session ends); `exec >file` inside a
-command is undone when the command ends.
 
 ### Working directories
 
 | Tool | Relative paths resolved against |
 | --- | --- |
-| `Bash` | the shell's own current directory (changed by `cd`, reported in each result's data as `cwd`) |
+| `Bash` | the command's own current directory, which starts from the session's directory and is reported in each result's data as `cwd` |
 | `PowerShell` | the PowerShell session's location (`Set-Location`) |
-| `Read`, `Edit`, `MultiEdit`, `Write`, `ApplyPatch`, `Glob`, `Grep` | the agent's working directory — a `cd` in a shell never moves them |
-| read-before-edit guard | the agent's working directory |
+| `Read`, `Edit`, `Write`, `ApplyPatch`, `NotebookEdit`, `Glob`, `Grep` | the agent's working directory: a `cd` in a shell never moves them |
 
 A `cd` in the shell does not change the agent's working directory nor the
 permission root of the workspace.
 
 ### Permissions
 
-Permission checks run before execution on the command text, as before. In
-addition, when the command invokes an alias or function defined in the
-session, its definition is appended to the permission request's
-`description`, so session state cannot hide what will actually run (a policy
-that matches `rm -rf` sees `alias tidy='rm -rf …'`).
+Permission checks run before execution on the command text. In addition, when
+the command invokes an alias or function defined in the session, its
+definition is appended to the permission request's `description`, so session
+state cannot hide what will actually run (a policy that matches `rm -rf` sees
+`alias tidy='rm -rf …'`).
 
 ## 2. Execution, timeouts, supervision
 
 | Option (Bash input) | Default | Meaning |
 | --- | --- | --- |
-| `timeout` | 120 000 ms (max 600 000) | Foreground timeout. |
+| `timeout` | 120 000 ms (max 600 000) | Deadline from the start of the command, enforced also after it was handed over (see `yield_time_ms`). |
+| `yield_time_ms` | `[bash] yield_time_ms`, 10 000 ms | Foreground only. Time the call waits before a command still running is handed over as a task (§3). Not a deadline: `timeout` is. |
 | `input` | none (empty stdin) | Text given on stdin. Prompts are never answered automatically. |
-| `background` | `false` | Start a supervised task instead (§3). |
+| `background` | `false` | Start a supervised task at once (§3). |
 | `ready_pattern` / `ready_timeout` | — / 10 s | Background only: readiness regex on output lines, and how long to wait for it. |
 
-`ShellConfig` (put in `ToolContext::extensions`, e.g. via
-`AgentBuilder::extensions`) sets the defaults: `default_timeout`,
-`max_timeout`, `term_grace` (2 s), `drain` (500 ms), `progress_every` (10 s),
-capture limits, task log limits, `base_dir`, `bash_path`, `pwsh_path`.
+`[bash] yield_time_ms` in `bricks.toml` sets the default (see
+`docs/bricks.example.toml`). `ShellConfig` (put in `ToolContext::extensions`,
+e.g. via `AgentBuilder::extensions`) sets the other defaults: `default_timeout`,
+`max_timeout`, `yield_time`, `term_grace` (2 s), `drain` (500 ms),
+`progress_every` (10 s), capture limits, task log limits, `base_dir`,
+`bash_path`, `pwsh_path`.
 
 **Progress.** While a command runs, a progress message is emitted every
 `progress_every` (`AgentEvent::ToolProgress`): elapsed time, bytes so far,
-and — when nothing was printed for a while — that the command may be
-computing or waiting for input it will not get. This is a hint, not a
-diagnosis: silence does not mean a prompt.
+and, when nothing was printed for a while, that the command may be computing
+or waiting for input it will not get. This is a hint, not a diagnosis.
 
 **Timeout.** An event is emitted; the command's process tree (every live
-descendant of the shell) gets `SIGTERM`, then `SIGKILL` after `term_grace`;
-termination is verified (a process is stopped only when gone or a zombie).
-If the shell then reports the end of the command, it keeps its state. If it
-does not (a builtin loop such as `while :; do :; done`, a hung shell), the
-shell is destroyed and the next command starts a new one, which is reported.
-The result has status `timed_out`, no exit code, the partial output and the
-number of processes stopped (and forced). Background tasks are not touched.
+descendant, found by parent links) gets `SIGTERM`, then `SIGKILL` after
+`term_grace`; termination is verified (a process is reported stopped only when
+gone or a zombie). The command publishes nothing. The result has status
+`timed_out`, no exit code, the partial output and the number of processes
+stopped (and forced). Background tasks are not touched.
+
+**Yield.** A foreground command still running after `yield_time_ms` is not
+killed. The call returns status `Running` with its ids and cursors (§3), and
+the command goes on until it ends or its `timeout` expires.
 
 **Leftovers.** When a foreground command ends, any process it left running
-(`cmd &`, a daemon that kept the outputs) is stopped and listed in the
-result, with a pointer to `background: true`. Unknown descendants never keep
-writing into the streams of a finished command.
+(`cmd &`, a daemon that kept the outputs) is stopped and listed in the result,
+with a pointer to `background: true`. Unknown descendants never keep writing
+into the streams of a finished command. A process that leaves the group on
+purpose (`setsid`, a double-forked daemon re-parented to init) is not found:
+it survives this cleanup.
 
 **Cancellation.** Cancelling the agent's turn drops the running tool call;
-the shell then interrupts the command in the background (tree first, shell
-if needed) before taking the next request.
+each ordinary command still active is interrupted at once (its group, then
+its tree). Background tasks (`background: true`) keep their own rule: they
+survive the turn, not the session (§3). An individual task stopped with
+`BashTaskStop` or `Job stop` is terminated as a group and reaped.
 
 **Output.** Bytes are cleaned incrementally (ANSI CSI/OSC/DCS/APC sequences
 and their 8-bit forms, carriage-return progress, backspace, control
-characters), across chunk boundaries — including escapes and UTF-8
-characters split between reads. Raw bytes are kept in memory up to 4 MiB per
-stream, then the complete raw stream is spilled to a file whose path is in
-the result; the cleaned view keeps 1 MiB of head and 1 MiB of tail and states
-the gap. Output compression (`docs/compression.md`) runs afterwards, on the
-cleaned text only.
+characters), across chunk boundaries, including escapes and UTF-8 characters
+split between reads. Raw bytes are kept in memory up to 4 MiB per stream, then
+the complete raw stream is spilled to a file whose path is in the result; the
+cleaned view keeps 1 MiB of head and 1 MiB of tail and states the gap. Output
+compression (`docs/compression.md`) runs afterwards, on the cleaned text only.
 
-**Closing.** `Agent::close().await` stops the session's tasks and shells
-(graceful, bounded, awaited); dropping the `Agent` does the same
-synchronously with forced signals.
+**Closing.** `Agent::close().await` stops the session's tasks and commands
+(graceful, bounded, awaited); dropping the `Agent` does the same synchronously
+with forced signals.
 
 ### Termination guarantees by OS
 
 | Situation | Unix (macOS, Linux) | Windows |
 | --- | --- | --- |
-| Normal close / drop | Shell and tasks: whole trees terminated and reaped. | `taskkill /T /F` on each tree. |
-| Timeout of a foreground command | Descendants of the shell, found by parent links (`ps`), TERM then KILL, verified. | Not stopped individually: the PowerShell session is destroyed with its tree. |
-| Process that double-forks and is re-parented to init (a deliberately detached daemon) | Not found — no longer a descendant. | Not found. |
-| Bricks killed with SIGKILL / crash | Nothing runs to clean up: shells and tasks survive in their own sessions. | Same. |
+| Normal close / drop | Commands and tasks: whole trees terminated and reaped. | `taskkill /T /F` on each tree. |
+| Timeout or stop of a foreground command | Descendants found by parent links (`ps`), TERM then KILL, verified. | Not stopped individually: the PowerShell session is destroyed with its tree. |
+| Process that double-forks and is re-parented to init (a deliberately detached daemon) | Not found: no longer a descendant. | Not found. |
+| Bricks killed with SIGKILL / crash | Nothing runs to clean up: commands and tasks survive in their own sessions. | Same. |
 
 Process groups alone do not contain every descendant (`setsid` escapes a
 group); Bricks follows parent links instead, with the limits above. No
-administrator privilege is required. Job Objects are not used yet on
-Windows (see §9).
+administrator privilege is required. Job Objects are not used yet on Windows
+(see §9).
 
-## 3. Background tasks
+## 3. Yielded commands and background tasks
 
-`Bash` with `background: true` returns as soon as the task is started: a
-stable `task_id` (`bg-1`, `bg-2`, …), its pid and state. A task is a separate
-bash started from a **snapshot** of the persistent shell taken at launch:
-working directory, shell options, exported variables, functions and aliases.
-Non-exported variables are not inherited. What the task changes never reaches
-the persistent shell. It runs in its own session and process group, with its
-own pipes: it never blocks the next commands and its output never mixes
-with theirs.
+A `Bash` call returns one of two ways when a command is still running:
+
+* **At once**, with `background: true`: the call returns as soon as the task is
+  started, with a stable `task_id` (`bg-1`, `bg-2`, …), a `job_id`, its pid and
+  state.
+* **After `yield_time_ms`**, for a foreground command that is still running: the
+  call returns status `Running` with the same ids and the cursors to read the
+  output. The command is not restarted and not killed; its `timeout` still
+  applies.
+
+Both are supervised tasks: a separate `bash` started from a **snapshot** of the
+session state taken at launch (§1). A task never publishes into the session,
+so what it changes never reaches the next commands. It runs in its own session
+and process group, with its own pipes: it never blocks the next commands and
+its output never mixes with theirs.
 
 * **States**: `running`, `completed` (exit 0), `failed` (non-zero exit, or a
   signal Bricks did not send), `stopped`. The exit code exists only after a
   normal exit.
-* **Ready ≠ running**: with `ready_pattern`, readiness is reported when a
-  line matches (e.g. `port \d+`); without it, the result says readiness was
-  not checked.
-* `BashTaskStatus` (one or all tasks), `BashTaskOutput` (`stream`, `offset`
-  in lines, `limit` ≤ 2000; returns the next offset, and says when earlier
-  lines are no longer in memory), `BashTaskStop` (graceful then forced;
-  idempotent).
-* **Bounded capture**: 5 000 lines per stream in memory; raw logs up to
-  50 MiB per stream in the session directory.
-* Tasks are visible and stoppable only from their own session. They are
-  stopped when the session closes; a launch that fails leaves nothing behind.
+* **Ready is not running**: with `ready_pattern`, readiness is reported when a
+  line matches (e.g. `port \d+`); without it, the result says readiness was not
+  checked. Ready is still not proof that the service works.
+* **Tools**: `BashTaskStatus` (one or all tasks), `BashTaskOutput` (`stream`,
+  `offset` in lines, `limit` ≤ 2000; returns the next offset and says when
+  earlier lines are no longer in memory), `BashTaskStop` (graceful then forced;
+  idempotent). `Job` (`list`, `status`, `output`, `wait`, `stop`) shows the same
+  jobs to the agent that started them, see `docs/agents.md`.
+* **Quota**: `[background] max_jobs` (default 16) counts the running jobs of the
+  session and the places being started. A place is reserved atomically before
+  anything starts. Beyond the limit the start is refused with a clear message
+  and nothing is launched: there is no queue.
+* **Ownership and lifetime**: tasks are visible and stoppable only from their
+  own session and agent. A background task (`background: true`) survives the
+  turn that started it and ends with the session. A yielded command is not
+  durable: it ends with the run that started it.
+* **Bounded capture**: 5 000 lines per stream in memory; raw logs up to 50 MiB
+  per stream in the session directory.
 
-Prefer `background: true` to `cmd &` in a foreground command (whose leftovers
-are stopped when the command ends).
+Prefer `background: true`, or a yield, to `cmd &` in a foreground command
+(whose leftovers are stopped when the command ends).
 
 ## 4. PowerShell
 
 One `pwsh` (or `powershell` on Windows) per session, started with
 `-NoProfile -NonInteractive`, its stdin empty. Each request is dot-sourced at
 the driver's level, so `$env:…`, `Set-Location`, variables, functions and
-aliases persist. Control and output travel on an authenticated loopback TCP
-connection (JSON lines), never through the process's stdin/stdout.
+aliases persist. Requests run one after another in that session (unlike
+`Bash`, which runs commands side by side). Control and output travel on an
+authenticated loopback TCP connection (JSON lines), never through the process's
+stdin/stdout.
 
-The result separates PowerShell's success (`$?`), cmdlet errors (counted),
-and the exit code of a native program — reported only when one ran in that
-request (`$LASTEXITCODE` is reset before each request, so an old code is
-never recycled). A timeout, `exit`, a crash or a lost connection ends the
-session with its tree; the next command starts a new one (reported). Output
-objects are formatted one by one with `Out-String`.
+The result separates PowerShell's success (`$?`), cmdlet errors (counted), and
+the exit code of a native program, reported only when one ran in that request
+(`$LASTEXITCODE` is reset before each request, so an old code is never
+recycled). A timeout, `exit`, a crash or a lost connection ends the session
+with its tree; the next command starts a new one (reported). Output objects are
+formatted one by one with `Out-String`.
 
-## 5. Edit and MultiEdit
+## 5. Edit
 
-Three stages, the first unique match wins:
+`Edit` makes one write per call. A call is either one replacement or several:
 
-1. **Exact.** Several identical occurrences are refused unless
-   `replace_all` (unchanged policy).
-2. **Normalised**, line by line, with explicit rules only: LF/CRLF, trailing
-   whitespace, one constant indentation shift for the whole block (tabs or
-   spaces, tab = 4, 8 or 2 columns) — relative indentation must match, which
-   protects Python. Lines inside multi-line strings, template literals, Rust
-   raw strings and here-documents must match exactly. Exception to the
-   line-based rule: a single-line `old_string` also matches its trimmed text
-   when that text occurs once in the file, ignoring its surrounding
-   whitespace (`crates/cersei-tools/src/tool_primitives/replace.rs`, lines
-   386–412). This is a substring match, not a line match.
-3. **Relocation** (bounded: files ≤ 100 000 lines, blocks ≤ 400 lines): the
-   same lines allowing only blank lines and runs of spaces *outside quoted
-   text* to differ, with the same constant indentation shift. It finds a block
-   whose layout drifted; it never accepts different code, however similar.
+| Form | Input |
+| --- | --- |
+| One replacement | `{file_path, old_string, new_string?, replace_all?}` |
+| Several replacements | `{file_path, edits: [{old_string, new_string?, replace_all?}, …]}` |
 
-The replacement is re-indented by the same shift in the block's style, and
-follows the file's line endings; bytes outside the block are untouched. On
-refusal, nothing is written and the message says why — absent, ambiguous, or
-"the code itself differs" — with the closest regions (line ranges, an
-excerpt, similarity). The file is re-read just before writing: if it changed
-since the match was resolved, nothing is written. Writes are atomic
-(temporary file + rename, permissions kept). A skeleton view still does not
-count as having read the file.
+* The two forms cannot be mixed. `edits` is a non-empty list. Unknown keys are
+  refused and named, with the index of the entry for an `edits` item.
+* An omitted or empty `new_string` deletes the match.
+* Several replacements are applied **in order, in memory**, each against the
+  result of the previous one. The file is written **only if every replacement
+  applies** (all or nothing), through one atomic write (temporary file and
+  rename, permissions kept). A failure names the edit (`edit N of M`) and
+  nothing is written.
+* A call that would change nothing is refused.
+* Matching (first stage that finds a unique match wins):
+  1. **Exact.** Several identical occurrences are refused unless `replace_all`.
+  2. **Normalised**, line by line, with explicit rules only: LF/CRLF, trailing
+     whitespace, one constant indentation shift for the whole block (tabs or
+     spaces, tab = 4, 8 or 2 columns). Relative indentation must match, which
+     protects Python. Lines inside multi-line strings, template literals, Rust
+     raw strings and here-documents must match exactly. A single-line
+     `old_string` also matches its trimmed text when that text occurs once in the
+     file (`crates/cersei-tools/src/tool_primitives/replace.rs`).
+  3. **Relocation** (bounded: files ≤ 100 000 lines, blocks ≤ 400 lines): the
+     same lines allowing only blank lines and runs of spaces outside quoted text
+     to differ, with the same constant indentation shift. It finds a block whose
+     layout drifted; it never accepts different code, however similar.
+* The replacement is re-indented in the block's style and follows the file's
+  line endings; bytes outside the block are untouched.
+* On refusal, the message says why (absent, ambiguous, or "the code itself
+  differs") and gives the closest regions (line ranges, an excerpt, similarity).
+
+**Concurrency.** A per-file lock inside the Bricks process is held from the
+read of the file to the write, so two calls of Bricks that edit one file run one
+after the other and never overwrite each other's change. The lock does not
+arbitrate external programs (an editor, a script): Bricks still checks that the
+file did not change on disk between its read and its write, and refuses the
+call if it did. Edit and Read calls in the same batch have no guaranteed order.
+
+**Approval.** The preview shown for an approval and the text the execution
+writes come from the same preparation. Execution checks the approval again under
+the lock. An approval that became stale (the file changed, or a hook changed the
+input) gives a new decision; nothing is written without one.
+
+**Migration from `MultiEdit`.** `MultiEdit` is removed; an unknown tool name is
+an error. Use `Edit` with `edits`. SDK code uses `file_edit::FileEditTool`
+with the same `edits` form.
 
 ## 6. ApplyPatch
 
 Unified diffs (`diff -u`, `git diff`): several files and hunks, creation and
-deletion through `/dev/null`, `a/`/`b/` prefixes, timestamps after a tab,
-C-quoted paths and plain paths with spaces, CRLF files, `\ No newline at end
-of file`. Hunk line counts are checked; context and removed lines must match
-the file exactly (at the stated line, or the nearest place after the previous
-hunk). Refused explicitly: binary patches, renames, copies, mode changes, a
-file appearing twice. Paths must be relative, stay inside the working
-directory and go through no symlink. Everything is validated before anything
-is written; files are then written atomically one by one, and if a write
-fails the files already written are restored (and any that could not be is
-named). This is not a multi-file transaction.
+deletion through `/dev/null`, `a/`/`b/` prefixes, timestamps after a tab, C-quoted
+paths and plain paths with spaces, CRLF files, `\ No newline at end of file`.
+Hunk line counts are checked; context and removed lines must match the file
+exactly (at the stated line, or the nearest place after the previous hunk).
+Refused explicitly: binary patches, renames, copies, mode changes, a file
+appearing twice. Paths must be relative, stay inside the working directory and
+go through no symlink. Everything is validated before anything is written; files
+are then written atomically one by one, and if a write fails the files already
+written are restored (and any that could not be is named). This is not a
+multi-file transaction.
 
 ## 7. Read
 
-`  12 | text` lines, numbered from 1 and aligned. Pages of `limit` lines
-(default 2000) from `offset`; the window is stated against the exact total,
-counted by streaming through the file (memory bounded by the page), with the
-next offset. A file that changes during the read is flagged. Binary files are
-reported with their size and probable type, never shown; UTF-16 and non-UTF-8
-text (Latin-1…) are reported as unsupported encodings. Accepted: UTF-8, with
-or without a BOM (the BOM is not shown); CRLF is reported in the data. Lines
-longer than 4000 characters are cut with a marker. Relative paths are
-resolved against the agent's working directory.
+`  12 | text` lines, numbered from 1 and aligned. Pages of `limit` lines (default
+2000) from `offset`; the window is stated against the exact total, counted by
+streaming through the file (memory bounded by the page), with the next offset. A
+file that changes during the read is flagged. Binary files are reported with
+their size and probable type, never shown; UTF-16 and non-UTF-8 text (Latin-1…)
+are reported as unsupported encodings. Accepted: UTF-8, with or without a BOM
+(the BOM is not shown); CRLF is reported in the data. Lines longer than 4000
+characters are cut with a marker. Relative paths are resolved against the
+agent's working directory.
+
+Reading a file before changing it is recommended when the change needs its
+exact text, but no tool requires it: `Edit`, `Write`, `ApplyPatch` and
+`NotebookEdit` do not check that a `Read` came first.
 
 ## 8. Tool results
 
-Every tool result is data plus one rendering. `ToolResult::report`
-(`ToolReport`) holds the status (`success`, `failure`, `timed_out`,
-`cancelled`, `running`), the exit code when a process exited normally (never
-invented: none for timeouts, signals, launch failures and file tools), the
-termination cause, the monotonic duration, the streams as captured
-(`Streams { stdout, stderr }`, or `Combined` announced as such), a suggestion
-tied to an identified error, notes and structured data. The agent renders:
+Every tool result is data plus one rendering. `ToolResult::report` (`ToolReport`)
+holds the status (`success`, `failure`, `timed_out`, `cancelled`, `running`), the
+exit code when a process exited normally (never invented: none for timeouts,
+signals, launch failures and file tools), the termination cause, the monotonic
+duration, the streams as captured (`Streams { stdout, stderr }`, or `Combined`
+announced as such), a suggestion tied to an identified error, notes and
+structured data. The agent renders:
 
 ```text
 ✓ [Bash] Succès (0.42s) — code 0
@@ -266,10 +326,11 @@ Vérifiez que l'outil est installé ou disponible dans le PATH.
 …
 ```
 
-A successful command without output reads `(Commande exécutée avec succès
-sans sortie)`; a running task `… [Bash] En cours`. The header describes the
-call — it is not output, and compression never sees it. Notes (`--- remarques
----`: session reset, raw output paths, processes stopped) and the suggestion
+A successful command without output reads `(Commande exécutée avec succès sans
+sortie)`; a yielded or background command reads `… [Bash] En cours`, with its
+`task_id`, `job_id`, pid and cursors. The header describes the call: it is not
+output, and compression never sees it. Notes (`--- remarques ---`: environment
+changes not available, raw output paths, processes stopped) and the suggestion
 come after the output. Tools that do not provide a report get the same header
 from their error flag, without a code.
 
@@ -277,6 +338,6 @@ from their error flag, without a code.
 
 | Platform | What ran |
 | --- | --- |
-| macOS (arm64), bash 3.2.57 | Everything in this document: the shell tests (`crates/cersei-tools/tests/shell_session.rs`), the agent tests (`crates/cersei-agent/tests/shell_tools_e2e.rs`), the file-tool tests. |
+| macOS (arm64), bash 3.2.57 | The shell tests (`crates/cersei-tools/tests/shell_session.rs`), the agent tests (`crates/cersei-agent/tests/shell_tools_e2e.rs`), the file-tool tests. |
 | Linux | Not executed. The Unix code path is the same as macOS (bash, `ps`, `setsid`, FIFOs), but nothing was run on Linux. |
 | Windows / PowerShell | Not executed, not compiled: no Windows machine, and cross-compilation fails on C dependencies (`ring`). `pwsh` is not installed on the development machine; `crates/cersei-tools/tests/powershell_session.rs` is `#[ignore]` and must be run with `--ignored` where PowerShell exists. Job Objects are not implemented (trees are terminated with `taskkill /T /F`). The Bash tool is unavailable on Windows. |

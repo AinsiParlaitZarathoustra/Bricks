@@ -171,8 +171,8 @@ Covered: Rust, Python, TypeScript, JavaScript/JSX/TSX (TSX grammar), Go. Other
 languages are shown as text.
 
 A skeleton is an exploration view, not source: it is flagged as such, it does
-not count as having read the file (the read-before-edit guard still requires an
-exact read), and the header says how to read a range
+not count as having read the file (an exact read is what a change that needs
+the exact text should rely on; no tool requires one), and the header says how to read a range
 (`Read offset=<first line − 1> limit=<n>`) or the whole file. A body containing
 an `ERROR` or `MISSING` node is kept in full; if more than 30 % of the file is
 uncertain, or the skeleton would hide less than 15 %, the text is shown as is.

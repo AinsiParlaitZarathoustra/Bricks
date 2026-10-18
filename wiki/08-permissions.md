@@ -109,7 +109,7 @@ Each tool declares a level (see [Tools](03-tools.md) for the level of every buil
 |-------|------|----------|
 | `None` | Safe | Task tools, TodoWrite, Sleep |
 | `ReadOnly` | Low | Read, Glob, Grep, WebFetch, Skill |
-| `Write` | Medium | Write, Edit, MultiEdit, ApplyPatch |
+| `Write` | Medium | Write, Edit, ApplyPatch |
 | `Execute` | High | Bash, PowerShell, CronCreate |
 | `Dangerous` | Very high | MCP tools annotated `destructiveHint` |
 | `Forbidden` | Never | No built-in tool; refused by the approval policy |
@@ -145,7 +145,7 @@ Bash = "ask"
 2. The person answers `allow`, `allow_for_session` (applies to later calls of the same tool in this session) or `deny`.
 3. `ApprovalResolved` is emitted with `decision` and `by` (`user`, `session`, `non_interactive` or `cancelled`).
 
-File changes (`Write`, `Edit`, `MultiEdit`, `ApplyPatch`) are computed without writing, and nothing is written before the decision. If a file changes while the approval is pending, the change is recomputed and asked again; after three changes in a row it is refused. Shell commands and MCP calls have no preview, so the approval shows the command and its context.
+File changes (`Write`, `Edit`, `ApplyPatch`) are computed without writing, and nothing is written before the decision. If a file changes while the approval is pending, the change is recomputed and asked again; after three changes in a row it is refused. Shell commands and MCP calls have no preview, so the approval shows the command and its context.
 
 With `--non-interactive`, or without a terminal, nobody can be asked: the call is refused, and the run stops with `failure = "approval_required"` and exit code 3. `--non-interactive` grants nothing by itself.
 

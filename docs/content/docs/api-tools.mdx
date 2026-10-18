@@ -103,9 +103,9 @@ Convenience functions that return pre-configured tool collections:
 
 | Function | Count | Tools Included |
 |----------|-------|----------------|
-| `cersei::tools::all()` | 39 | Everything below, plus `AskUserQuestion`, `SyntheticOutput`, `Config` and `ToolSearch` |
-| `cersei::tools::coding()` | 18 | filesystem + shell + web |
-| `cersei::tools::filesystem()` | 10 | Read, Write, Edit, MultiEdit, ApplyPatch, Glob, Grep, CodeSearch, CodeScout, NotebookEdit |
+| `cersei::tools::all()` | 38 | Everything below, plus `AskUserQuestion`, `SyntheticOutput`, `Config` and `ToolSearch` |
+| `cersei::tools::coding()` | 17 | filesystem + shell + web |
+| `cersei::tools::filesystem()` | 9 | Read, Write, Edit, ApplyPatch, Glob, Grep, CodeSearch, CodeScout, NotebookEdit |
 | `cersei::tools::shell()` | 6 | Bash, BashTaskStatus, BashTaskOutput, BashTaskStop, Job, PowerShell |
 | `cersei::tools::web()` | 2 | WebFetch, WebSearch |
 | `cersei::tools::planning()` | 3 | EnterPlanMode, ExitPlanMode, TodoWrite |
@@ -117,14 +117,13 @@ Convenience functions that return pre-configured tool collections:
 
 The permission level is the one each tool declares in code (`permission_level()`).
 
-**Filesystem (10 tools)**
+**Filesystem (9 tools)**
 
 | Tool | Permission | Description |
 |------|-----------|-------------|
 | `FileReadTool` | ReadOnly | Read files with optional line offset/limit. Numbered lines, binary and encoding detection. |
 | `FileWriteTool` | Write | Create or overwrite files. Creates parent directories automatically. |
-| `FileEditTool` | Write | String replacement edits. Tolerates indentation drift; refuses ambiguous matches. |
-| `MultiEditTool` | Write | Several ordered replacements in one file, applied all or nothing. |
+| `FileEditTool` | Write | String replacement: one replacement, or several (`edits`) applied in order and written all or nothing. Tolerates indentation drift; refuses ambiguous matches. Replaces the former `MultiEditTool`. |
 | `ApplyPatchTool` | Write | Apply a patch with strict parsing and rollback on failure. |
 | `GlobTool` | ReadOnly | Pattern matching across directories. |
 | `GrepTool` | ReadOnly | Regex search with ripgrep's libraries, gitignore-aware. No external `rg` binary is needed. |
@@ -136,9 +135,9 @@ The permission level is the one each tool declares in code (`permission_level()`
 
 | Tool | Permission | Description |
 |------|-----------|-------------|
-| `BashTool` | Execute | Run a command in the session's persistent shell. Timeout, output bounded. `background: true` starts a background task. |
-| `BashTaskStatusTool` | ReadOnly | Status of a background task started by `Bash`. |
-| `BashTaskOutputTool` | ReadOnly | Output of a background task, with a cursor. |
+| `BashTool` | Execute | Run a command as its own process, started from the session's state. Timeout, output bounded. A command still running after `yield_time_ms` is handed over as a task; `background: true` starts one at once. |
+| `BashTaskStatusTool` | ReadOnly | Status of a background task or a handed-over command started by `Bash`. |
+| `BashTaskOutputTool` | ReadOnly | Output of such a task, with a cursor. |
 | `BashTaskStopTool` | Execute | Stop a background task. |
 | `JobTool` | Execute | List, inspect, read, wait for and stop background jobs of the calling agent. |
 | `PowerShellTool` | Execute | Windows PowerShell execution, with one interpreter per session. |
@@ -381,7 +380,7 @@ Sources by priority: `<project>/.agents/skills`, `<project>/.claude/skills`, `~/
 
 ## Persistent Shell
 
-`BashTool` and `PowerShellTool` keep one live shell per agent session. The working directory, variables, `PATH`, aliases and functions persist across calls while the shell lives; a shell that ends is reported and replaced, never faked. Stdin is empty unless an `input` is given, and the shell has no controlling terminal.
+`BashTool` runs each call as its own `bash` process, started from the agent session's state. Commands of one session run side by side. When a command ends normally, its working directory, exported variables, functions and aliases are published to the session (the most recently launched command wins per field); a command that is interrupted, times out or calls `exec` publishes nothing, and the result says so. Non-exported variables and shell options do not persist. `PowerShellTool` keeps one interpreter per agent session, unchanged. Stdin is empty unless an `input` is given, and no command has a controlling terminal. See `docs/shell.md` §1.
 
 ```rust
 // First call: cd /tmp

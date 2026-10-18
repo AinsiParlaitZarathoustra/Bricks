@@ -87,8 +87,9 @@ open a project, then pick a conversation in the sidebar or use `/resume`.
   * Every reduced output names its saved original. See
     [docs/compression.md](docs/compression.md).
 * **Shell and files.**
-  * The shell is persistent: directory, variables, aliases and functions
-    survive between commands.
+  * Each command is its own process, started from the session's state:
+    directory, exported variables, aliases and functions carry over to the
+    next command when it ends normally. Commands run side by side.
   * Execution is supervised: timeouts, process-tree termination,
     cancellation and background tasks.
   * Edits are tolerant but safe: they are re-validated before an atomic
@@ -250,9 +251,11 @@ is now checked for success.
   comparable.
 * **Read** detects binary and non-UTF-8 files, handles BOMs, counts the
   exact total and checks that the file did not change during the read.
-* **Bash** runs in a persistent shell that keeps state, supervises the
-  whole process tree and spills large outputs to disk: each command pays a
-  request/response round-trip and a short output-settling window (15 ms).
+* **Bash** runs each command as its own process, supervises the whole
+  process tree and spills large outputs to disk. The Bash figure above
+  predates this design (one persistent shell, a request/response round-trip
+  and a 15 ms output-settling window per command) and has not been measured
+  again.
 
 The standalone suite (`examples/benchmark`, 100 iterations) gives the same
 picture: Read 0.118 ms, Write 0.050 ms, Edit 0.759 ms, Glob 0.066 ms,

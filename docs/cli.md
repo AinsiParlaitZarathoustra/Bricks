@@ -246,7 +246,7 @@ Events (`type`):
 | `tool_finished` | `tool_call_id, name, is_error, duration_ms, output` | sent as soon as the call is done, without waiting for the other calls of its round: several calls finish in the order they end. The history sent to the model keeps the order of the calls |
 | `approval_requested` | `approval{approval_id, tool_call_id, tool, level, description, input, preview?, agent_id?}` | `preview.files[{path, kind, before_sha256, diff, added, removed}]` |
 | `approval_resolved` | `approval_id, tool_call_id, decision, by` | `decision`: `allow`, `allow_for_session`, `deny`; `by`: `user`, `session`, `non_interactive`, `cancelled` |
-| `edit_applied` | `tool_call_id, tool, files[{path, kind, added, removed, binary?}], agent_id?, changeset_id?` | a change was applied to the session's workspace: a successful `Write`, `Edit`, `MultiEdit` or `ApplyPatch` of the session agent, or of a sub-agent working in that workspace (`agent_id`), or a ChangeSet applied (`changeset_id`); never for a denial, a refusal or a failure. Counts are those of the complete diff; one event per change |
+| `edit_applied` | `tool_call_id, tool, files[{path, kind, added, removed, binary?}], agent_id?, changeset_id?` | a change was applied to the session's workspace: a successful `Write`, `Edit` or `ApplyPatch` of the session agent, or of a sub-agent working in that workspace (`agent_id`), or a ChangeSet applied (`changeset_id`); never for a denial, a refusal or a failure. Counts are those of the complete diff; one event per change |
 | `memory_recalled` | `items, tokens, omitted, budget` | what went into the system prompt |
 | `context` | `status{context_used{tokens, provenance, …}, context_window, input_limit, totals, …}` | `provenance`: `measured`, `counted`, `mixed`, `estimated` |
 | `usage` | `turn{…}, total{…}` | observed token usage; `cost_usd` absent = unknown, not zero |
@@ -376,7 +376,7 @@ application and the headless mode. It is configured in `[permissions]`:
 
 When a call must be asked about:
 
-* **File changes** (`Write`, `Edit`, `MultiEdit`, `ApplyPatch`). The tool
+* **File changes** (`Write`, `Edit`, `ApplyPatch`). The tool
   computes the change without writing: files, kind, diff, and the SHA-256
   of each file at that time. Nothing is written before the decision.
 * **A file changed meanwhile.** If a file changed while the decision was
@@ -456,7 +456,7 @@ registry (`cersei_agent::control::slash`).
   session's workspace since the session was opened: a sum of operations (two
   edits of one file both count; an edit undone by another counts twice), not
   a `git diff`. They come from `edit_applied` only: `Write`, `Edit`,
-  `MultiEdit`, `ApplyPatch` that succeeded, a sub-agent's in the same
+  `ApplyPatch` that succeeded, a sub-agent's in the same
   workspace, a ChangeSet applied (once). Not counted: denied, refused or
   failed calls, previews, files changed by `Bash`, MCP tools,
   `NotebookEdit` (no preview) or by hand, a worktree's writes before their
@@ -527,9 +527,9 @@ to the current folder. No replacement is chosen silently; `--model` picks
 one explicitly. An older session without recorded settings resumes in the
 current project folder with the selected model, and a warning says which.
 
-The persistent shell has its own life cycle. A resumed session starts a
-new shell: processes, background tasks and shell variables of the old one
-are not restored.
+Shell state has its own life cycle. A resumed session starts with no running
+commands: processes, background tasks and shell variables of the old one are
+not restored.
 
 Deleting a session (`Memory::delete`) removes its history, raw history,
 snapshots, saved tool outputs and `session.json` (its settings).

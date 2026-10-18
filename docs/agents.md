@@ -338,8 +338,9 @@ never forces, and refuses the runtime's own worktrees.
 
 ## Background commands: jobs
 
-`Bash` with `background: true` starts a supervised task and returns a
-`job_id` (and its working directory). `Job`:
+`Bash` with `background: true` starts a supervised task and returns its
+`task_id`, its `job_id`, its pid and its working directory. A foreground
+command still running after `yield_time_ms` is handed over the same way. `Job`:
 
 | action | effect |
 |---|---|
@@ -351,8 +352,9 @@ never forces, and refuses the runtime's own worktrees.
 
 A job belongs to the agent that started it: another agent, run or session
 sees nothing. Running is not ready: `ready_pattern` makes it ready, and
-ready is still not proof the service works. Quota `[background] max_jobs`
-is checked before anything starts. Output is drained continuously; memory
+ready is still not proof the service works. A place under `[background]
+max_jobs` is reserved atomically before anything starts; beyond the limit
+the start is refused, with nothing launched and no queue. Output is drained continuously; memory
 is bounded per stream and per line (a longer line is cut, marked), raw
 logs are capped and copied to the session's files when the job ends. A
 sub-agent's jobs stop when it ends; the session's when it closes; no job
@@ -457,6 +459,9 @@ skills_max_bytes = 24000
 
 [agents.reasoning_aliases]
 # high = "deep"
+
+[bash]
+yield_time_ms = 10000           # foreground command handed over as a task after this
 
 [background]
 max_jobs = 16
