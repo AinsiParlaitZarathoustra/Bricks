@@ -140,7 +140,7 @@ fn every_range_is_held_by_a_window_of_400_lines() {
                 assert_eq!(window.lines[0], format!("ligne {first}"));
                 assert!(first <= line, "{total} lines, range {line}..={end}: starts at {first}");
                 if end - line + 1 < 400 {
-                    assert!(first + count - 1 >= end, "{total} lines, range {line}..={end}");
+                    assert!(first + count > end, "{total} lines, range {line}..={end}");
                 } else {
                     assert_eq!(first, line, "a range as long as the window starts it");
                 }

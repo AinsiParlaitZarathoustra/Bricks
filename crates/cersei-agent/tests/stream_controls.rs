@@ -165,13 +165,13 @@ async fn cancellation_unblocks_permission_and_next_run_works() {
         agent
             .messages()
             .iter()
-            .any(|m| m.get_text().as_deref() == Some("retained on cancellation"))
+            .any(|m| m.get_text() == Some("retained on cancellation"))
     );
     assert!(
         agent
             .raw_history()
             .iter()
-            .any(|m| m.get_text().as_deref() == Some("retained on cancellation"))
+            .any(|m| m.get_text() == Some("retained on cancellation"))
     );
     // Dropping an old stream must not cancel a later run.
     let mut later = agent.run_stream("again");
@@ -255,7 +255,7 @@ async fn injected_messages_follow_tool_results_in_order_without_queue_loss() {
     for i in 0..100 {
         assert_eq!(messages[result + 1 + i].role, Role::User);
         assert_eq!(
-            messages[result + 1 + i].get_text().as_deref(),
+            messages[result + 1 + i].get_text(),
             Some(format!("injected-{i}").as_str())
         );
     }
@@ -264,7 +264,7 @@ async fn injected_messages_follow_tool_results_in_order_without_queue_loss() {
     for i in 0..100 {
         assert_eq!(
             raw.iter()
-                .filter(|m| m.get_text().as_deref() == Some(format!("injected-{i}").as_str()))
+                .filter(|m| m.get_text() == Some(format!("injected-{i}").as_str()))
                 .count(),
             1
         );
@@ -326,10 +326,10 @@ async fn injection_during_final_generation_causes_another_request() {
             .1
             .messages
             .iter()
-            .any(|m| m.get_text().as_deref() == Some("follow-up"))
+            .any(|m| m.get_text() == Some("follow-up"))
     );
     assert_eq!(
-        reqs[1].1.messages.last().unwrap().get_text().as_deref(),
+        reqs[1].1.messages.last().unwrap().get_text(),
         Some("follow-up")
     );
     stream.inject_message("too-late".into());
@@ -337,7 +337,7 @@ async fn injection_during_final_generation_causes_another_request() {
         !agent
             .messages()
             .iter()
-            .any(|m| m.get_text().as_deref() == Some("too-late"))
+            .any(|m| m.get_text() == Some("too-late"))
     );
 }
 

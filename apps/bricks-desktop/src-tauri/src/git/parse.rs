@@ -197,7 +197,9 @@ pub(super) fn parse_log_z(input: &[u8]) -> Vec<GitCommit> {
         fields.pop();
     }
     fields
-        .chunks_exact(5)
+        .as_chunks::<5>()
+        .0
+        .iter()
         .map(|c| GitCommit {
             hash: c[0].clone(),
             short: c[1].clone(),
@@ -371,7 +373,8 @@ mod tests {
 
     #[test]
     fn log_parses_fixed_field_records() {
-        let input = b"aaa\0aa\0Ada Lovelace\01700000000\0first commit\0bbb\0bb\0Grace\01700000100\0\0";
+        let input =
+            b"aaa\0aa\0Ada Lovelace\x001700000000\0first commit\0bbb\0bb\0Grace\x001700000100\0\0";
         let commits = parse_log_z(input);
         assert_eq!(commits.len(), 2);
         assert_eq!(commits[0].short, "aa");

@@ -135,10 +135,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = PrefsStore::at(dir.path().join("desktop").join("preferences.json"));
         assert_eq!(store.get().left_width, 260, "defaults when absent");
-        let mut p = Preferences::default();
-        p.theme = Theme::Dark;
-        p.left_width = 9_000;
-        p.terminal_height = 3;
+        let p = Preferences {
+            theme: Theme::Dark,
+            left_width: 9_000,
+            terminal_height: 3,
+            ..Preferences::default()
+        };
         store.set(p).unwrap();
         let back = store.get();
         assert!(matches!(back.theme, Theme::Dark));
@@ -253,8 +255,10 @@ mod tests {
     #[test]
     fn a_non_finite_or_out_of_range_ratio_is_clamped_or_dropped() {
         let ratio = |r: f32| {
-            let mut p = Preferences::default();
-            p.terminal_ratio = Some(r);
+            let p = Preferences {
+                terminal_ratio: Some(r),
+                ..Preferences::default()
+            };
             sanitize(p).terminal_ratio
         };
         assert_eq!(ratio(f32::NAN), None);
