@@ -4,7 +4,9 @@ import type { ChangeKind, Decision, DecidedBy, RunOutcome, Termination } from '$
 const numberFormat = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 })
 const integerFormat = new Intl.NumberFormat('fr-FR')
 
-export const SHELL_TOOLS = new Set(['Bash', 'bash', 'Shell', 'PowerShell'])
+const SHELL_TOOLS = new Set(['Bash', 'bash', 'Shell', 'PowerShell'])
+// `Edit` may carry `edits` (several replacements in one call): its summary is still the path.
+// `MultiEdit` is the historical name of an earlier call: kept as recorded, never an alias.
 const PATH_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
 const SEARCH_TOOLS = new Set(['Grep', 'Glob'])
 

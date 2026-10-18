@@ -141,8 +141,8 @@
           <ContextPanel />
         {/if}
       {/snippet}
-      {#snippet terminal()}
-        <TerminalPanel />
+      {#snippet terminal(hide)}
+        <TerminalPanel onHide={hide} />
       {/snippet}
     </AppShell>
   {/if}

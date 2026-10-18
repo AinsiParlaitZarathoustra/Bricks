@@ -122,10 +122,11 @@ describe('text direction and links', () => {
 		// Message blocks come from the Markdown document (sanitizeMarkdown/sanitizeKatex);
 		// diagrams from renderMermaid (sanitizeSvg).
 		expect(withHtml).toEqual([
+			'lib/features/conversation/markdown/MarkdownView.svelte',
 			'lib/features/conversation/markdown/MermaidBlock.svelte',
-			'lib/features/conversation/timeline/AssistantMessage.svelte',
 		]);
-		expect(src('lib/features/conversation/timeline/AssistantMessage.svelte')).toContain('MarkdownDocument');
+		expect(src('lib/features/conversation/markdown/MarkdownView.svelte')).toContain('MarkdownDocument');
+		expect(src('lib/features/conversation/timeline/AssistantMessage.svelte')).toContain('MarkdownView');
 		expect(src('lib/features/conversation/markdown/sanitize.ts')).toContain('DOMPurify.sanitize');
 		expect(src('lib/features/conversation/markdown/mermaid.ts')).toContain('sanitizeSvg');
 	});

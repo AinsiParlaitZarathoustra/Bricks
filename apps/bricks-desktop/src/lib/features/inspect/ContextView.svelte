@@ -1,7 +1,6 @@
 <script lang="ts">
-	// Context occupation (`/context`, `/ctx`): the same compact line as the context
-	// card, and explicit compaction and clearing.
-	// after Haiku 4.
+	// Context occupation (`/context`, `/ctx`): the same line as the context card
+	// (contextView.ts), and explicit compaction and clearing.
 	import type { InspectorState } from '$lib/state/ui.svelte';
 	import { app } from '$lib/state/app.svelte';
 	import { ui } from '$lib/state/ui.svelte';

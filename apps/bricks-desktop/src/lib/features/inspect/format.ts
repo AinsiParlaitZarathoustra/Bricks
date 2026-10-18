@@ -44,12 +44,6 @@ export function formatClock(at: number): string {
 	return CLOCK.format(new Date(at));
 }
 
-/** A percentage with a French space before the sign. */
-export function formatPercent(p: number): string {
-	if (p > 0 && p < 1) return '< 1 %';
-	return `${Math.round(p)} %`;
-}
-
 /** A dollar amount: an exact zero reads as zero, a small positive amount never does. */
 export function formatUsd(amount: number): string {
 	if (amount === 0) return USD.format(0);

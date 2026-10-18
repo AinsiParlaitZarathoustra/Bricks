@@ -1,4 +1,5 @@
 pub mod adk;
+pub mod agent_file;
 pub mod app;
 pub mod changes;
 pub mod files;

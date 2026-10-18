@@ -30,8 +30,8 @@
 		center: Snippet;
 		/** Right context column (inline at >= 1200px, Sheet below). */
 		right?: Snippet;
-		/** Bottom terminal pane inside the centre column. Mounted only while open. */
-		terminal?: Snippet;
+		/** Bottom terminal pane inside the centre column. Mounted only while open; receives the hide action. */
+		terminal?: Snippet<[() => void]>;
 		/** Top bar. Receives the toggle controls; defaults to a plain TopBar with those toggles. */
 		topbar?: Snippet<[ShellControls]>;
 		/** User preferences. Automatic collapses never change these. */
@@ -287,6 +287,11 @@
 		scheduleEmit();
 	}
 
+	/** The pane's own close button: same state and persistence as the top bar toggle. */
+	function hideTerminal(): void {
+		if (terminalOpen) toggleTerminal();
+	}
+
 	const controls: ShellControls = $derived({
 		leftPressed: leftIsOverlay ? leftOverlay : leftOpen,
 		rightPressed: rightIsOverlay ? rightOverlay : rightOpen,
@@ -328,7 +333,7 @@
 							<Resizable.Handle class="bg-border/50" aria-label="Redimensionner le terminal" onDraggingChange={onHandleDragging} />
 							<Pane id="bricks-terminal" order={2} defaultSize={termPct} minSize={termMinPct} maxSize={termMaxPct}>
 								<section aria-label="Terminal" class="flex h-full min-h-0 flex-col bg-background">
-									{@render terminal()}
+									{@render terminal(hideTerminal)}
 								</section>
 							</Pane>
 						{/if}

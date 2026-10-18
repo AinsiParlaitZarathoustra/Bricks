@@ -25,6 +25,7 @@
   import AttachMenu from './AttachMenu.svelte'
   import AttachmentChip from './AttachmentChip.svelte'
   import ModelSelect from './ModelSelect.svelte'
+  import ContextGauge from '$lib/features/context/ContextGauge.svelte'
   import EffortSelect from './EffortSelect.svelte'
   import CommandPalette from '$lib/features/commands/CommandPalette.svelte'
   import QuitDialog from '$lib/features/commands/QuitDialog.svelte'
@@ -1014,7 +1015,7 @@
     {/if}
 
     <div
-      class="relative flex flex-col gap-2 rounded-xl border bg-card p-2 shadow-xs transition-colors focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/20"
+      class="relative mt-1 flex flex-col gap-2 rounded-2xl border bg-card p-2 shadow-xs transition-colors focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/20"
       class:border-ring={dragging}
       class:bg-accent={dragging}
     >
@@ -1122,6 +1123,7 @@
           onError={(message) => (refusal = message)}
           onSkills={openSkills}
         />
+        <ContextGauge {conversation} />
         <ModelSelect
           bind:open={modelOpen}
           value={selection}

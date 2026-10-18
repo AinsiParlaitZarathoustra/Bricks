@@ -1,4 +1,4 @@
-// Unit tests for the context line « ≈ 12 374 / 1 000 000 tokens » (contextView.ts), and
+// Unit tests for the context line « 12 374 / 1 000 000 tokens » (contextView.ts), and
 // for the reducer events that make the measure stale. Hand-built envelopes (fixtures.ts).
 import { describe, expect, it } from 'vitest';
 import { Conversation } from '../../src/lib/state/conversation.svelte';
@@ -40,8 +40,8 @@ function measure(overrides: Partial<ContextStatus> = {}, provenance: Provenance 
 }
 
 describe('context line: numerator and denominator', () => {
-	it('shows the occupation over the model window, in French format and qualified by ≈', () => {
-		expect(plain(contextLine(measure(), false))).toBe('≈ 12 374 / 1 000 000 tokens');
+	it('shows the occupation over the model window, in French format and without ≈', () => {
+		expect(plain(contextLine(measure(), false))).toBe('12 374 / 1 000 000 tokens');
 	});
 
 	it.each<Provenance>(['measured', 'counted', 'mixed', 'estimated'])(
@@ -49,26 +49,26 @@ describe('context line: numerator and denominator', () => {
 		(provenance) => {
 			const status = measure({}, provenance);
 			expect(contextFigures(status, false).used).toBe(12_374);
-			expect(plain(contextLine(status, false))).toBe('≈ 12 374 / 1 000 000 tokens');
+			expect(plain(contextLine(status, false))).toBe('12 374 / 1 000 000 tokens');
 		}
 	);
 
 	it('never takes the cumulative billed totals as numerator', () => {
 		const status = measure({ total_tokens: 9_999_999 });
-		expect(plain(contextLine(status, false))).toBe('≈ 12 374 / 1 000 000 tokens');
+		expect(plain(contextLine(status, false))).toBe('12 374 / 1 000 000 tokens');
 		expect(plain(contextLine(status, false))).not.toContain('9 999 999');
 	});
 
 	it('does not replace an unknown window by the input limit', () => {
 		const status = measure({ context_window: { model: MODEL, total: null, max_input_tokens: 900_000, max_output_tokens: null } });
-		expect(plain(contextLine(status, false))).toBe('≈ 12 374 / — tokens');
+		expect(plain(contextLine(status, false))).toBe('12 374 / — tokens');
 		expect(plain(contextLine(status, false))).not.toContain('900 000');
 	});
 
 	it('treats a zero window as unknown', () => {
 		const status = measure({ context_window: { model: MODEL, total: 0, max_input_tokens: 0, max_output_tokens: null } });
 		expect(contextFigures(status, false).total).toBeNull();
-		expect(plain(contextLine(status, false))).toBe('≈ 12 374 / — tokens');
+		expect(plain(contextLine(status, false))).toBe('12 374 / — tokens');
 	});
 });
 
@@ -99,7 +99,7 @@ describe('context line: stale measure', () => {
 	it('a model change makes the shown value stale until the next context event', () => {
 		const feed = new EnvelopeFeed();
 		const conv = new Conversation(openedSession({ snapshot: snapshot({ context: measure() }) }), PROJECT_ID);
-		expect(plain(contextLine(conv.context, conv.contextStale))).toBe('≈ 12 374 / 1 000 000 tokens');
+		expect(plain(contextLine(conv.context, conv.contextStale))).toBe('12 374 / 1 000 000 tokens');
 
 		conv.apply(feed.next({ type: 'model_changed', model: 'anthropic/other-model', applies: 'next_run' }));
 		expect(conv.contextStale).toBe(true);
@@ -111,7 +111,7 @@ describe('context line: stale measure', () => {
 		});
 		conv.apply(feed.next({ type: 'context', status: fresh }));
 		expect(conv.contextStale).toBe(false);
-		expect(plain(contextLine(conv.context, conv.contextStale))).toBe('≈ 500 / 200 000 tokens');
+		expect(plain(contextLine(conv.context, conv.contextStale))).toBe('500 / 200 000 tokens');
 	});
 
 	it('a cleared context is stale until the next measure', () => {

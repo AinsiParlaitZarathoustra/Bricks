@@ -7,21 +7,11 @@ const DATE_TIME = new Intl.DateTimeFormat('fr-FR', {
   minute: '2-digit',
 })
 
-const DATE_LONG = new Intl.DateTimeFormat('fr-FR', {
-  day: 'numeric',
-  month: 'long',
-  year: 'numeric',
-})
-
 /** What the edit counts are: sums of edit operations, not a Git diff. */
 export const EDIT_SUM_LABEL = 'somme des opérations d’édition (pas un diff Git net)'
 
 export function formatDateTime(ms: number): string {
   return DATE_TIME.format(new Date(ms))
-}
-
-export function formatDateLong(ms: number): string {
-  return DATE_LONG.format(new Date(ms))
 }
 
 /** Label of a change-journal `kind` (`create` | `modify` | `delete`). */

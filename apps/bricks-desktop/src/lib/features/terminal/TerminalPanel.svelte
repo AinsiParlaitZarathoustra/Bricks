@@ -15,6 +15,9 @@
 	import { theme } from '$lib/theme/theme.svelte';
 	import { terminals } from './terminals.svelte';
 
+	/** Hides the pane (its sessions keep running); owned by the shell's `terminalOpen`. */
+	let { onHide }: { onHide?: () => void } = $props();
+
 	let container = $state<HTMLDivElement | null>(null);
 
 	const projectId = $derived(app.currentProjectId);
@@ -109,6 +112,17 @@
 		>
 			<Plus class="size-4" aria-hidden="true" />
 		</Button>
+		{#if onHide}
+			<Button
+				variant="ghost"
+				size="icon-sm"
+				aria-label="Masquer le terminal"
+				title="Masquer le terminal"
+				onclick={onHide}
+			>
+				<X class="size-4" aria-hidden="true" />
+			</Button>
+		{/if}
 	</div>
 
 	{#if active?.cwd}

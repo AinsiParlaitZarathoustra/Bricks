@@ -41,3 +41,22 @@ Run the app (`npx tauri build --bundles app`, then open `target/release/bundle/m
 
 Note: each new build changes the app's signature, so macOS asks again for access to protected folders
 (e.g. the Desktop) used by a project; Bricks waits on that prompt at start-up.
+
+### Concurrent execution and chat details
+
+Automated: `crates/cersei-tools/tests/{shell_session,shell_recipe,edit_recipe}.rs`,
+`crates/cersei-agent/tests/{edit_runtime,edit_history,bash_run_lifetime}.rs`,
+`src-tauri/src/commands/agent_file.rs` (tests), `tests/unit/{context-gauge,context-card-structure,copy-inspector-terminal-structure,edit-formats}.test.ts`.
+
+In the app, with a test project (never a real conversation):
+
+- `Edit` on a file never read in the session; one `Edit` with `edits` (several replacements, one write).
+- Four Bash calls of one turn run together (same start second); a long command does not block a quick one.
+- Composer ring left of the model select: neutral without a conversation; hover or focus shows
+  « Contexte », the compact value with its percentage, a thin bar and the cache rate (`—` without counts);
+  light and dark.
+- Context card: one line without `≈`; « Consommation session »: Entrée, Sortie, Cache, Requêtes, Coût.
+- « Copier » under an answer copies its Markdown source only (✓ for a moment).
+- Sub-agent details: no « Identifiant » / « Parent »; task and result rendered as Markdown; « Fichiers
+  modifiés » shows file names, a click reveals the file in the Finder (nothing is opened).
+- Terminal: the cross after `+` hides the pane; reopening shows the same tab, output and height.

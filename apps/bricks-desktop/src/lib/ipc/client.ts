@@ -119,6 +119,13 @@ export const projectFileRead = (
 /** Native save dialog for an SVG document: the path written, or null when cancelled. */
 export const saveSvgFile = (defaultName: string, contents: string) =>
   call<string | null>('save_svg_file', { defaultName, contents })
+/**
+ * Reveals in the Finder a file a sub-agent changed, resolved in that agent's
+ * recorded workspace (shared project or isolated worktree) by Rust; a deleted
+ * file reveals its nearest existing folder. Nothing is opened or run.
+ */
+export const revealAgentFile = (sessionId: string, agentId: string, path: string) =>
+  call<void>('reveal_agent_file', { sessionId, agentId, path })
 
 // ─── Conversations ───────────────────────────────────────────────────────────
 
@@ -174,7 +181,6 @@ export const ptyWrite = (ptyId: string, data: string) => call<void>('pty_write',
 export const ptyResize = (ptyId: string, cols: number, rows: number) =>
   call<void>('pty_resize', { ptyId, cols, rows })
 export const ptyKill = (ptyId: string) => call<void>('pty_kill', { ptyId })
-export const ptyList = (projectId: string | null) => call<PtyInfo[]>('pty_list', { projectId })
 
 // ─── Paths ───────────────────────────────────────────────────────────────────
 

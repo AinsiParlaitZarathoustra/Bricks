@@ -780,3 +780,31 @@ async fn a_skill_activation_before_the_prompt_is_not_taken_for_it() {
 }
 
 
+
+#[tokio::test]
+async fn revealing_a_file_of_an_unknown_session_is_refused() {
+    let home = tempfile::tempdir().unwrap();
+    let state = AppState::assemble(home.path().to_path_buf(), Err("aucun registre dans ce test".into()));
+    let result = crate::commands::agent_file::agent_root_of(&state, "ses_absente", "agent_x");
+    assert!(matches!(
+        result,
+        Err(crate::contract::IpcError { code: IpcErrorCode::NotFound, .. })
+    ));
+}
+
+#[tokio::test]
+async fn revealing_a_file_of_an_unknown_agent_is_refused() {
+    let home = tempfile::tempdir().unwrap();
+    let wd_dir = tempfile::tempdir().unwrap();
+    let wd = std::fs::canonicalize(wd_dir.path()).unwrap();
+    let (state, project) = state_with_project(home.path(), &wd);
+    let entry = open_scripted(&state, &project, &wd, Script::new(vec![Reply::text("ok")])).await;
+    let id = entry.session_id.clone();
+
+    let result = crate::commands::agent_file::agent_root_of(&state, &id, "agent_absent");
+    assert!(matches!(
+        result,
+        Err(crate::contract::IpcError { code: IpcErrorCode::NotFound, .. })
+    ));
+    let _ = state.close_session(&id, false).await;
+}

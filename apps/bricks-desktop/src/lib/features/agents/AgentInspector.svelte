@@ -27,6 +27,8 @@
 		terminationLabel
 	} from './agentView';
 	import ToolLine from '$lib/features/conversation/timeline/ToolLine.svelte';
+	import MarkdownView from '$lib/features/conversation/markdown/MarkdownView.svelte';
+	import { revealAgentFile } from '$lib/ipc/client';
 	import { toolLineState } from '$lib/features/conversation/timeline/toolLine';
 
 	interface Props {
@@ -120,6 +122,32 @@
 		return `demandé : ${choice.requested}${choice.reason ? ` (${choice.reason})` : ''}`;
 	}
 
+	// Ids of the rendered task and result: unique per agent and zone, never a
+	// prefix of another (length in front), so no anchor collides with the chat.
+	const safeId = $derived(agent.id.toLowerCase().replace(/[^a-z0-9-]/g, '-'));
+	const taskPrefix = $derived(`a${safeId.length}-${safeId}-task`);
+	const resultPrefix = $derived(`a${safeId.length}-${safeId}-result`);
+
+	/** A changed file as shown: its name; the path relative to the agent's workspace as a hint. */
+	function fileName(path: string): string {
+		return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+	}
+	function relativePath(path: string): string {
+		const root = spawn.workspace.replace(/[\\/]+$/, '');
+		return path.startsWith(root + '/') ? path.slice(root.length + 1) : path;
+	}
+
+	/** Error of the last file that could not be revealed in the Finder. */
+	let revealError = $state<string | null>(null);
+	async function reveal(path: string) {
+		revealError = null;
+		try {
+			await revealAgentFile(conversation.sessionId, agent.id, path);
+		} catch (e) {
+			revealError = e instanceof Error ? e.message : String(e);
+		}
+	}
+
 	const modelNote = $derived(choiceNote(spawn.model));
 	const reasoningNote = $derived(choiceNote(spawn.reasoning));
 </script>
@@ -150,9 +178,11 @@
 				<span class="min-w-0 truncate">{spawn.profile}</span>
 				<StatusDot status={view.dot} label={view.label} showLabel class="shrink-0" />
 			</Dialog.Title>
-			<Dialog.Description class="text-pretty">
-				{spawn.description || spawn.task}
-			</Dialog.Description>
+			{#if spawn.description}
+				<Dialog.Description class="text-pretty">{spawn.description}</Dialog.Description>
+			{:else}
+				<Dialog.Description class="sr-only">Détails du sous-agent</Dialog.Description>
+			{/if}
 		</Dialog.Header>
 
 		<!-- Scrollable region: it must be keyboard-focusable (WAI). -->
@@ -197,10 +227,6 @@
 			<section class="flex flex-col gap-2">
 				<h3 class="text-xs font-medium text-muted-foreground">Identité</h3>
 				<dl class="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-xs">
-					<dt class="text-muted-foreground">Identifiant</dt>
-					<dd class="font-mono break-all">{agent.id}</dd>
-					<dt class="text-muted-foreground">Parent</dt>
-					<dd class="font-mono break-all">{spawn.parent_id ?? 'Conversation principale'}</dd>
 					<dt class="text-muted-foreground">Profondeur</dt>
 					<dd class="tabular-nums">{spawn.depth}</dd>
 					<dt class="text-muted-foreground">Profil</dt>
@@ -218,7 +244,7 @@
 
 			<section class="flex flex-col gap-2">
 				<h3 class="text-xs font-medium text-muted-foreground">Mission</h3>
-				<p class="text-pretty whitespace-pre-wrap">{spawn.task}</p>
+				<MarkdownView source={spawn.task} idPrefix={taskPrefix} />
 			</section>
 
 			<section class="flex flex-col gap-2">
@@ -255,12 +281,12 @@
 				</dl>
 			</section>
 
+			{#if agent.tools.length > 0}
 			<section class="flex flex-col gap-2">
 				<h3 class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
 					Appels d’outils
 					<span class="font-mono tabular-nums">{agent.tools.length}</span>
 				</h3>
-				{#if agent.tools.length > 0}
 					<ul class="flex flex-col gap-0.5">
 						{#each agent.tools as tool, i (tool.toolCallId || i)}
 							<li>
@@ -272,19 +298,15 @@
 							</li>
 						{/each}
 					</ul>
-				{/if}
 			</section>
+			{/if}
 
+			{#if changesets.length > 0}
 			<section class="flex flex-col gap-2">
 				<h3 class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
 					Modifications isolées
-					{#if changesets.length > 0}
-						<span class="font-mono tabular-nums">{changesets.length}</span>
-					{/if}
+					<span class="font-mono tabular-nums">{changesets.length}</span>
 				</h3>
-				{#if changesets.length === 0}
-					<p class="text-xs text-muted-foreground">Aucune modification isolée.</p>
-				{:else}
 					{#each changesets as cs (cs.id)}
 						<div class="flex flex-col gap-2 rounded-md border border-border p-2.5">
 							<div class="flex flex-wrap items-center gap-2 text-xs">
@@ -318,8 +340,8 @@
 							{/if}
 						</div>
 					{/each}
-				{/if}
 			</section>
+			{/if}
 
 			<section class="flex flex-col gap-2">
 				<h3 class="text-xs font-medium text-muted-foreground">Résultat</h3>
@@ -337,21 +359,35 @@
 						<p class="text-xs text-muted-foreground">{termination}</p>
 					{/if}
 
-					<div class="flex flex-col gap-1">
-						<p class="text-pretty whitespace-pre-wrap">{result.summary || 'Aucun résumé.'}</p>
-						{#if result.summary_truncated}
-							<p class="text-xs text-muted-foreground">Résumé tronqué.</p>
-						{/if}
-					</div>
+					{#if result.summary}
+						<div class="flex flex-col gap-1">
+							<MarkdownView source={result.summary} idPrefix={resultPrefix} />
+							{#if result.summary_truncated}
+								<p class="text-xs text-muted-foreground">Résumé tronqué.</p>
+							{/if}
+						</div>
+					{/if}
 
 					{#if result.files_changed.length > 0}
 						<div class="flex flex-col gap-1">
 							<p class="text-xs font-medium text-muted-foreground">Fichiers modifiés</p>
-							<ul class="flex flex-col gap-0.5 font-mono text-xs break-all">
+							<ul class="flex flex-col gap-0.5 text-xs">
 								{#each result.files_changed as path (path)}
-									<li>{path}</li>
+									<li class="min-w-0">
+										<button
+											type="button"
+											class="max-w-full truncate rounded-sm text-left font-mono text-primary underline decoration-dotted underline-offset-2 hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+											title={relativePath(path)}
+											onclick={() => reveal(path)}
+										>
+											{fileName(path)}
+										</button>
+									</li>
 								{/each}
 							</ul>
+							{#if revealError}
+								<p role="alert" class="text-xs text-pretty text-destructive">{revealError}</p>
+							{/if}
 						</div>
 					{/if}
 
