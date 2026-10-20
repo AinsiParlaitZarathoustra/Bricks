@@ -113,5 +113,48 @@ pub async fn model_delete(
     .await
 }
 
+#[tauri::command]
+pub async fn provider_create(
+    state: State<'_, AppState>,
+    provider_id: String,
+    patch: ProviderPatch,
+    revision: String,
+) -> IpcResult<ProvidersFile> {
+    run_edit(
+        &state,
+        revision,
+        Edit::ProviderCreate { provider_id, patch },
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn model_create(
+    state: State<'_, AppState>,
+    provider_id: String,
+    model_id: String,
+    patch: ModelPatch,
+    revision: String,
+) -> IpcResult<ProvidersFile> {
+    run_edit(
+        &state,
+        revision,
+        Edit::ModelCreate {
+            provider_id,
+            model_id,
+            patch,
+        },
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn providers_fill_missing_prices(
+    state: State<'_, AppState>,
+    revision: String,
+) -> IpcResult<ProvidersFile> {
+    run_edit(&state, revision, Edit::FillMissingPrices).await
+}
+
 #[cfg(test)]
 mod tests;

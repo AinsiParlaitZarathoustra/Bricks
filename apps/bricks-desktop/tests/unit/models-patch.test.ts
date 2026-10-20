@@ -48,7 +48,9 @@ const model: ModelView = {
 		{ id: 'low', label: 'Léger', parameters: {}, remove: [] },
 		{ id: 'high', label: 'Approfondi', parameters: {}, remove: [] }
 	],
-	priced: true
+	priced: true,
+	document_mime_types: [],
+	pricing: { input: '0.30', output: '1.20', cache_read: '0.03' }
 };
 
 describe('parseCount', () => {
@@ -156,8 +158,8 @@ describe('buildModelPatch', () => {
 	});
 
 	it('sends the modality list when it changed, in display order', () => {
-		const form = { ...modelForm(model), modalities: ['pdf', 'text'] };
-		expect(buildModelPatch(model, form).input_modalities).toEqual(['text', 'pdf']);
+		const form = { ...modelForm(model), modalities: ['document', 'image', 'text'], documentTypes: 'application/pdf' };
+		expect(buildModelPatch(model, form).input_modalities).toEqual(['text', 'image', 'document']);
 	});
 
 	it('keeps modalities the form does not offer', () => {

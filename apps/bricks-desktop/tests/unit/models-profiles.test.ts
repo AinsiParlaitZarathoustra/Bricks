@@ -40,7 +40,9 @@ const model: ModelView = {
 		{ id: 'low', label: 'Léger', parameters: { budget: 1024 }, remove: ['/thinking'] },
 		{ id: 'high', label: null, parameters: {}, remove: [] }
 	],
-	priced: false
+	priced: false,
+	document_mime_types: [],
+	pricing: { input: '0.30', output: '1.20', cache_read: '0.03' }
 };
 
 function draft(overrides: Partial<ProfileDraft> = {}): ProfileDraft {

@@ -228,6 +228,8 @@ export type * from './bindings/ModelView'
 export type * from './bindings/ModelProfileView'
 export type * from './bindings/ProviderPatch'
 export type * from './bindings/ModelPatch'
+export type * from './bindings/PricingView'
+export type * from './bindings/PricingEdit'
 import type { ProvidersFile } from './bindings/ProvidersFile'
 import type { ProviderPatch } from './bindings/ProviderPatch'
 import type { ModelPatch } from './bindings/ModelPatch'
@@ -243,6 +245,13 @@ export const providerDelete = (providerId: string, revision: string) =>
   call<ProvidersFile>('provider_delete', { providerId, revision })
 export const modelDelete = (providerId: string, modelId: string, revision: string) =>
   call<ProvidersFile>('model_delete', { providerId, modelId, revision })
+export const providerCreate = (providerId: string, patch: ProviderPatch, revision: string) =>
+  call<ProvidersFile>('provider_create', { providerId, patch, revision })
+export const modelCreate = (providerId: string, modelId: string, patch: ModelPatch, revision: string) =>
+  call<ProvidersFile>('model_create', { providerId, modelId, patch, revision })
+/** Writes 0 for every missing input, output and cache-read price, in one edit. */
+export const providersFillMissingPrices = (revision: string) =>
+  call<ProvidersFile>('providers_fill_missing_prices', { revision })
 
 // ─── skills catalogue, colours, reasoning profiles ──────────────
 

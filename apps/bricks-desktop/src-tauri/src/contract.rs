@@ -673,6 +673,28 @@ pub struct ModelView {
     pub reasoning_default: Option<String>,
     pub profiles: Vec<ModelProfileView>,
     pub priced: bool,
+    /// MIME types of the documents the model accepts (`document` input).
+    pub document_mime_types: Vec<String>,
+    /// Prices per million tokens in USD, as written (exact decimals).
+    pub pricing: Option<PricingView>,
+}
+
+/// A model's prices, USD per million tokens, as exact decimal strings.
+/// `None`: the price is not in the file (unknown, not free).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct PricingView {
+    pub input: Option<String>,
+    pub output: Option<String>,
+    pub cache_read: Option<String>,
+}
+
+/// Prices the model form writes, USD per million tokens, as exact decimal
+/// strings (`"0.30"`, `"0"`). All three are required.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct PricingEdit {
+    pub input: String,
+    pub output: String,
+    pub cache_read: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -715,6 +737,10 @@ pub struct ModelPatch {
     /// Remove `context_window_tokens` (unknown window).
     pub clear_context_window: bool,
     pub input_modalities: Option<Vec<String>>,
+    /// MIME types of the accepted documents; empty removes the key. Leaving
+    /// `document` out of `input_modalities` removes it too.
+    pub document_mime_types: Option<Vec<String>>,
+    pub pricing: Option<PricingEdit>,
     /// Default reasoning profile id (must be one of the model's profiles).
     pub reasoning_default: Option<String>,
     pub clear_reasoning_default: bool,

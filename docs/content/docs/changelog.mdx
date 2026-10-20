@@ -58,6 +58,10 @@ export function Tag({ type }) {
 
 <Tag type="changed" /> **Display details.** The reasoning label is « Réfléchit », and the diff additions and deletions use brighter colours.
 
+<Tag type="added" /> **Models page: providers and models from the app.** « Ajouter un fournisseur » and the « + » of a provider add `[[providers]]` and `[[providers.models]]` tables to `providers.toml`. Other tables and comments are kept, and the whole file is validated before writing. A file changed elsewhere is a conflict: nothing is overwritten.
+
+<Tag type="changed" /> **Models page: costs and documents.** The model form requires input, output and cache-read prices in USD per million tokens (`0` allowed), and « Compléter les coûts manquants à 0 » writes `0` for every missing one. The engine's rule is unchanged: a missing price is unknown, not free. The input modalities offered are `text`, `image`, `audio`, `video` and `document` (`pdf` and `file` are no longer offered); `document` takes the accepted types, PDF or any file.
+
 </Version>
 
 <Version version="0.6.1" date="2026-10-14">

@@ -19,9 +19,15 @@ export const MODALITY_LABELS: Record<string, string> = {
 	image: 'Image',
 	audio: 'Audio',
 	video: 'Vidéo',
-	pdf: 'PDF',
-	file: 'Fichier'
+	document: 'Document'
 };
+
+const price = new Intl.NumberFormat('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 12 });
+
+/** A price per million tokens, « 0,30 $ », or « — » when it is not in the file. */
+export function formatPrice(value: string | null | undefined): string {
+	return value == null ? '—' : `${price.format(Number(value))} $`;
+}
 
 /** Input modalities as a French list, unknown values shown as they are. Nothing declared says so. */
 export function formatModalities(input: readonly string[]): string {

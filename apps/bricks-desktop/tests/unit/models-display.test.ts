@@ -70,7 +70,9 @@ describe('deletion text with unnamed models', () => {
 					context_window_tokens: null,
 					reasoning_default: null,
 					profiles: [],
-					priced: false
+					priced: false,
+					document_mime_types: [],
+					pricing: null
 				}
 			]
 		};

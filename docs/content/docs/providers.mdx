@@ -84,6 +84,25 @@ bricks --providers ./providers.toml --model my-provider/my-model
   `providers.toml: provider "custom", model "flash", field limits.max_input_tokens: must be greater than 0`.
   A type error never echoes the offending value.
 
+## Editing from the desktop app
+
+The settings page « Modèles » of the desktop app edits `providers.toml` in place.
+The file must already exist: the app does not create it.
+
+* **Adding.** « Ajouter un fournisseur » writes a `[[providers]]` table, and the « + »
+  of a provider writes a `[[providers.models]]` table with its `[limits]`.
+  Identifiers use letters, digits, `.`, `_` and `-`, start with a letter or a digit,
+  and are unique.
+* **Required fields.** A provider needs `name`, `endpoint`, `protocol` and `auth`, and
+  an `api_key_env` unless `auth = "none"`. A model needs `name`, `api_model`,
+  `max_input_tokens`, `max_output_tokens` and the three prices (see *Prices and usage*).
+* **Editing.** Only the tables concerned change; comments, order and the other tables
+  are kept byte for byte. The whole file is validated before writing, and a refused
+  change writes nothing. A provider or model written as an inline table cannot be
+  edited from the app.
+* **Conflicts.** If the file changed since the page was read, nothing is overwritten:
+  the values are reloaded for checking.
+
 ## Provider and model fields
 
 | Field | Required | Meaning |
@@ -191,6 +210,10 @@ attachment is dropped or converted silently.
 
 Model-native output is text only. Tool calls are carried by every adapter.
 
+In the desktop form, *Document* offers the accepted types, with the presets PDF
+(`application/pdf`) and any file (`*/*`); at least one type, written `type/subtype`,
+is required. Unchecking *Document* removes `document_mime_types`.
+
 ## Limits and counting
 
 A request is checked against the prompt budget before it is sent. When a model
@@ -226,6 +249,12 @@ which bounds only the single rate-limit wait of a web-search provider.
   categories whose counter and price are both known; otherwise the estimate says
   it is partial and lists what it could not price. With no known price there is
   no estimate at all.
+* The desktop form makes `input`, `output` and `cache_read` mandatory, in USD per
+  million tokens (`0` allowed), and writes `currency = "USD"` and
+  `per_tokens = 1000000` with them. `cache_write`, `cache_write_variants` and
+  `variants` are kept as written. The settings page banner « Compléter les coûts
+  manquants à 0 » writes `0` for every missing one. The engine is unchanged: a missing
+  price is unknown, not free, and a hand-written file may omit any of the three.
 * `input_tokens` is always the uncached prompt; cache reads and writes are
   counted apart. `output_tokens` includes reasoning tokens.
 * No price list or catalogue is ever downloaded.

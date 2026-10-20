@@ -65,6 +65,13 @@ describe('model form: two limits, no context window field', () => {
 		expect(text).toContain('Sortie maximale (tokens)');
 		expect(forbidden(text, ['Modèle de l’API', "Modèle de l'API", 'Fenêtre de contexte', 'context_window'])).toEqual([]);
 	});
+
+	it('the model card shows the two limits and no context window', () => {
+		const text = src('lib/features/settings/ModelRow.svelte');
+		expect(text).toContain('Entrée maximale');
+		expect(text).toContain('Sortie maximale');
+		expect(forbidden(text, ['Fenêtre de contexte', 'context_window'])).toEqual([]);
+	});
 });
 
 describe('appearance: Geist only, no Inter', () => {

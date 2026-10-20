@@ -41,6 +41,24 @@ let agent = Agent::builder()
   Type errors never echo the offending value; TOML syntax errors report line and
   column but never quote the line (it could hold a key).
 
+### Editing from the desktop app
+
+The settings page « Modèles » of the desktop app edits this file in place. The
+file must already exist: the app does not create `providers.toml`.
+
+* **Adding.** « Ajouter un fournisseur » writes a `[[providers]]` table; the « + »
+  of a provider writes a `[[providers.models]]` table with its `[limits]`. Identifiers
+  use letters, digits, `.`, `_` and `-`, start with a letter or a digit, and are
+  unique (in the file for a provider, in the provider for a model). A new provider
+  takes its key from `api_key_env`. A new model needs `name`, `api_model`, both token
+  limits and the three prices of §9.
+* **Editing.** Only the tables concerned change; comments, order and the other tables
+  stay byte for byte. The whole file is validated before anything is written, and a
+  refused change writes nothing. A provider or model written as an inline table
+  cannot be edited from the app.
+* **Conflicts.** If the file changed since the page was read, nothing is overwritten:
+  the values are reloaded and must be checked before saving again.
+
 ## 2. Provider
 
 | Field | Req. | Meaning |
@@ -209,6 +227,11 @@ fragmented across stream chunks, results, stop reasons). A document produced *by
 a tool* (a tool result) is distinct from a document produced natively by a model;
 only the former is represented, and only where the table says so.
 
+**Desktop form.** The model form offers `text`, `image`, `audio`, `video` and
+`document`. Choosing `document` asks for the accepted types, with two presets: PDF
+(`application/pdf`) and any file (`*/*`). At least one type, written `type/subtype`,
+is required. Unchecking `document` removes `document_mime_types`.
+
 **What additional adapters or endpoints would be needed** (not built here):
 
 * video input — a native Gemini-style adapter, or a compatible endpoint with a
@@ -245,6 +268,14 @@ valid Anthropic history and is not sent.
   second, per image or per other unit cannot be expressed with per-token prices
   and are reported as unpriced. With no known price at all there is **no
   estimate** (not `$0`).
+* **The desktop form makes three prices mandatory**: `input`, `output` and
+  `cache_read`, in USD per million tokens, written as exact decimals (`0` allowed),
+  with `currency = "USD"` and `per_tokens = 1000000`. `cache_write`,
+  `cache_write_variants` and `variants` are kept as written and are not edited there.
+  The banner « Compléter les coûts manquants à 0 » on the settings page writes `0` for
+  every missing input, output or cache-read price of every model, in one edit. This
+  requirement belongs to the form only: the engine still treats a missing price as
+  unknown, never as free, and a hand-written file may omit any of the three.
 * One tariff is selected per estimate (`provider().tariff("offpeak")`); its name
   is reported. The result is an estimate under that tariff, not an invoice.
 * Counters are normalized per protocol so nothing is counted twice:

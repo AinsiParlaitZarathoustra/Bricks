@@ -6,17 +6,21 @@
 	import { app } from '$lib/state/app.svelte';
 	import {
 		errorMessage,
+		modelCreate,
 		modelDelete,
 		modelUpdate,
+		providerCreate,
 		providerDelete,
 		providerUpdate,
-		providersConfig
+		providersConfig,
+		providersFillMissingPrices
 	} from '$lib/ipc/client';
 	import type { ModelPatch } from '$lib/ipc/bindings/ModelPatch';
 	import type { ModelView } from '$lib/ipc/bindings/ModelView';
 	import type { ProviderPatch } from '$lib/ipc/bindings/ProviderPatch';
 	import type { ProviderView } from '$lib/ipc/bindings/ProviderView';
 	import type { ProvidersFile } from '$lib/ipc/bindings/ProvidersFile';
+	import Plus from '@lucide/svelte/icons/plus';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import ProviderGroup from './ProviderGroup.svelte';
@@ -27,6 +31,7 @@
 		CONFLICT_MESSAGE,
 		displayName,
 		providerDeletionDetail,
+		unpricedModels,
 		writeFailure,
 		type WriteOutcome
 	} from './models';
@@ -36,6 +41,8 @@
 	 * the dialog was reopened after the file changed elsewhere.
 	 */
 	type Dialog =
+		| { kind: 'create-provider'; notice?: string }
+		| { kind: 'create-model'; provider: ProviderView; notice?: string }
 		| { kind: 'edit-provider'; provider: ProviderView; notice?: string }
 		| { kind: 'edit-model'; provider: ProviderView; model: ModelView; notice?: string }
 		| { kind: 'delete-provider'; provider: ProviderView; notice?: string }
@@ -49,6 +56,17 @@
 	let pageNotice = $state<string | null>(null);
 
 	const providers = $derived(file?.providers ?? []);
+	const unpriced = $derived(unpricedModels(providers));
+	let filling = $state(false);
+	let fillError = $state<string | null>(null);
+
+	async function fillMissingPrices() {
+		if (filling) return;
+		filling = true;
+		const outcome = await write((revision) => providersFillMissingPrices(revision));
+		filling = false;
+		fillError = outcome.ok ? null : outcome.message;
+	}
 
 	/** Reads the file. Resolves with whether it could be read. */
 	async function load(): Promise<boolean> {
@@ -110,12 +128,16 @@
 			dialog = null;
 			return;
 		}
+		// A creation keeps what was typed: the same dialog stays open and the next save uses the
+		// fresh revision (the ids are checked again against the file).
+		if (open.kind === 'create-provider') return;
 		const provider = fresh.providers.find((p) => p.id === open.provider.id);
 		if (!provider) {
 			dialog = null;
 			pageNotice = `Le fournisseur « ${displayName(open.provider.name, open.provider.id)} » n’existe plus dans le fichier des fournisseurs.`;
 			return;
 		}
+		if (open.kind === 'create-model') return;
 		if (open.kind === 'edit-provider' || open.kind === 'delete-provider') {
 			dialog = { kind: open.kind, provider, notice: CONFLICT_MESSAGE };
 			return;
@@ -137,6 +159,14 @@
 		return write((revision) => modelUpdate(provider.id, model.id, patch, revision));
 	}
 
+	function createProvider(id: string, patch: ProviderPatch): Promise<WriteOutcome> {
+		return write((revision) => providerCreate(id, patch, revision));
+	}
+
+	function createModel(provider: ProviderView, id: string, patch: ModelPatch): Promise<WriteOutcome> {
+		return write((revision) => modelCreate(provider.id, id, patch, revision));
+	}
+
 	function removeProvider(provider: ProviderView): Promise<WriteOutcome> {
 		return write((revision) => providerDelete(provider.id, revision));
 	}
@@ -148,8 +178,14 @@
 
 <div class="flex flex-col gap-6">
 	<section class="flex flex-col gap-3" aria-labelledby="models-providers-title">
-		<div class="flex flex-col gap-1">
+		<div class="flex items-center justify-between gap-2">
 			<h3 id="models-providers-title" class="text-[13px] font-semibold text-foreground">Fournisseurs et modèles</h3>
+			{#if file}
+				<Button variant="outline" size="sm" onclick={() => openDialog({ kind: 'create-provider' })}>
+					<Plus aria-hidden="true" />
+					Ajouter un fournisseur
+				</Button>
+			{/if}
 		</div>
 
 		{#if pageNotice}
@@ -189,6 +225,21 @@
 				</div>
 			{/if}
 
+			{#if unpriced > 0}
+				<div class="flex flex-wrap items-center gap-3 rounded-lg border border-warning/40 bg-warning/5 p-3 text-[13px]">
+					<p class="flex flex-1 items-center gap-2">
+						<TriangleAlert class="size-4 shrink-0 text-warning" aria-hidden="true" />
+						{unpriced === 1 ? '1 modèle sans coûts' : `${unpriced} modèles sans coûts`}
+					</p>
+					<Button variant="outline" size="sm" onclick={fillMissingPrices} disabled={filling}>
+						Compléter les coûts manquants à 0
+					</Button>
+					{#if fillError}
+						<p role="alert" class="w-full text-pretty text-destructive">{fillError}</p>
+					{/if}
+				</div>
+			{/if}
+
 			{#if providers.length === 0}
 				{#if !file.error}
 					<p class="text-[13px] text-muted-foreground">Aucun fournisseur configuré.</p>
@@ -203,6 +254,7 @@
 								onDeleteProvider={() => openDialog({ kind: 'delete-provider', provider })}
 								onEditModel={(model) => openDialog({ kind: 'edit-model', provider, model })}
 								onDeleteModel={(model) => openDialog({ kind: 'delete-model', provider, model })}
+								onAddModel={() => openDialog({ kind: 'create-model', provider })}
 							/>
 						</li>
 					{/each}
@@ -213,7 +265,24 @@
 
 	<!-- Keyed on the dialog: a reopened dialog (after a conflict) starts again from the fresh values. -->
 	{#key dialog}
-		{#if dialog?.kind === 'edit-provider'}
+		{#if dialog?.kind === 'create-provider'}
+			<ProviderFormDialog
+				provider={null}
+				takenIds={providers.map((p) => p.id)}
+				notice={dialog.notice}
+				onSave={(patch, id) => createProvider(id, patch)}
+				onClose={closeDialog}
+			/>
+		{:else if dialog?.kind === 'create-model'}
+			{@const owner = dialog.provider}
+			<ModelFormDialog
+				model={null}
+				takenIds={(providers.find((p) => p.id === owner.id) ?? owner).models.map((m) => m.id)}
+				notice={dialog.notice}
+				onSave={(patch, id) => createModel(owner, id, patch)}
+				onClose={closeDialog}
+			/>
+		{:else if dialog?.kind === 'edit-provider'}
 			{@const target = dialog.provider}
 			<ProviderFormDialog
 				provider={target}

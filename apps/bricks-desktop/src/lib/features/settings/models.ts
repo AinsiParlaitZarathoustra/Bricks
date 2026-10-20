@@ -5,6 +5,7 @@
 import type { ModelPatch } from '$lib/ipc/bindings/ModelPatch';
 import type { ModelProfileView } from '$lib/ipc/bindings/ModelProfileView';
 import type { ModelView } from '$lib/ipc/bindings/ModelView';
+import type { PricingEdit } from '$lib/ipc/bindings/PricingEdit';
 import type { ProviderPatch } from '$lib/ipc/bindings/ProviderPatch';
 import type { ProviderView } from '$lib/ipc/bindings/ProviderView';
 import type { ReasoningProfileEdit } from '$lib/ipc/bindings/ReasoningProfileEdit';
@@ -23,12 +24,24 @@ export const AUTH_OPTIONS: readonly { value: string; label: string }[] = [
 ];
 
 /** Input modalities the form offers, in display order (unknown ones are kept as they are). */
-export const MODALITY_OPTIONS: readonly string[] = ['text', 'image', 'pdf', 'audio', 'video', 'file'];
+export const MODALITY_OPTIONS: readonly string[] = ['text', 'image', 'audio', 'video', 'document'];
+
+/** Accepted file types offered with the document input. */
+export const DOCUMENT_TYPE_PRESETS: readonly { value: string; label: string }[] = [
+	{ value: 'application/pdf', label: 'PDF' },
+	{ value: '*/*', label: 'Tout fichier' }
+];
 
 export const CONFLICT_MESSAGE =
 	'Le fichier des fournisseurs a été modifié ailleurs. Vos modifications n’ont pas été enregistrées : les valeurs ont été rechargées, vérifiez-les avant d’enregistrer à nouveau.';
 
 export const COUNT_ERROR = 'Saisissez un nombre entier supérieur à 0.';
+export const PRICE_ERROR = 'Saisissez un nombre positif ou nul, par exemple 0.30.';
+export const ID_ERROR = 'Lettres, chiffres, « . », « _ » et « - », en commençant par une lettre ou un chiffre.';
+export const ID_DUPLICATE = 'Cet identifiant existe déjà.';
+export const MODALITY_REQUIRED = 'Cochez au moins une entrée.';
+export const DOCUMENT_TYPES_REQUIRED = 'Indiquez au moins un type de fichier.';
+export const DOCUMENT_TYPE_INVALID = 'Chaque type s’écrit type/sous-type, par exemple application/pdf.';
 export const REQUIRED_MESSAGE = 'Ce champ est requis.';
 export const API_KEY_ENV_REQUIRED_MESSAGE =
 	'Indiquez la variable qui contient la clé : elle est requise avec cette authentification.';
@@ -78,6 +91,10 @@ export interface ProviderForm {
 	auth: string;
 	authHeader: string;
 	apiKeyEnv: string;
+}
+
+export function newProviderForm(): ProviderForm {
+	return { name: '', endpoint: '', protocol: 'chat_completions', auth: 'bearer', authHeader: '', apiKeyEnv: '' };
 }
 
 export function providerForm(provider: ProviderView): ProviderForm {
@@ -172,6 +189,12 @@ export interface ModelForm {
 	maxInput: string;
 	maxOutput: string;
 	modalities: string[];
+	/** Accepted document types, separated by commas or spaces. */
+	documentTypes: string;
+	/** USD per million tokens, as typed. */
+	priceInput: string;
+	priceOutput: string;
+	priceCache: string;
 	profiles: ProfileDraft[];
 	/** Default profile id, `null` for none. */
 	reasoningDefault: string | null;
@@ -189,8 +212,29 @@ export function modelForm(model: ModelView): ModelForm {
 		maxInput: String(model.max_input_tokens),
 		maxOutput: String(model.max_output_tokens),
 		modalities: [...model.input_modalities],
+		documentTypes: model.document_mime_types.join(', '),
+		priceInput: model.pricing?.input ?? '',
+		priceOutput: model.pricing?.output ?? '',
+		priceCache: model.pricing?.cache_read ?? '',
 		profiles: model.profiles.map(profileDraft),
 		reasoningDefault: model.reasoning_default,
+		defaultPending: false
+	};
+}
+
+export function newModelForm(): ModelForm {
+	return {
+		name: '',
+		apiModel: '',
+		maxInput: '',
+		maxOutput: '',
+		modalities: ['text'],
+		documentTypes: '',
+		priceInput: '',
+		priceOutput: '',
+		priceCache: '',
+		profiles: [],
+		reasoningDefault: null,
 		defaultPending: false
 	};
 }
@@ -205,8 +249,35 @@ export function parseCount(text: string): number | null {
 	return Number.isSafeInteger(value) && value > 0 ? value : null;
 }
 
+/** A price as typed: a decimal number, 0 allowed (spaces ignored, comma as decimal point accepted). */
+export function parsePrice(text: string): string | null {
+	const value = text.replace(/[\s  ]/g, '').replace(',', '.');
+	return /^\d+(\.\d+)?$/.test(value) ? value : null;
+}
+
+/** The document types typed, in order, without repeats. */
+export function documentTypes(text: string): string[] {
+	return [...new Set(text.split(/[\s,;]+/).filter((t) => t !== ''))];
+}
+
+const MIME = /^[^\s/]+\/[^\s/]+$/;
+
+/** A new id: letters, digits, `.`, `_` and `-`, starting with a letter or a digit. */
+export function validateNewId(id: string, taken: readonly string[]): string | undefined {
+	const value = id.trim();
+	if (value === '') return REQUIRED_MESSAGE;
+	if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value)) return ID_ERROR;
+	if (taken.includes(value)) return ID_DUPLICATE;
+	return undefined;
+}
+
 export interface ModelFormErrors {
 	name?: string;
+	modalities?: string;
+	documentTypes?: string;
+	priceInput?: string;
+	priceOutput?: string;
+	priceCache?: string;
 	apiModel?: string;
 	maxInput?: string;
 	maxOutput?: string;
@@ -229,6 +300,15 @@ export function validateModelForm(form: ModelForm): ModelFormErrors {
 	if (form.apiModel.trim() === '') errors.apiModel = REQUIRED_MESSAGE;
 	if (parseCount(form.maxInput) === null) errors.maxInput = COUNT_ERROR;
 	if (parseCount(form.maxOutput) === null) errors.maxOutput = COUNT_ERROR;
+	if (form.modalities.length === 0) errors.modalities = MODALITY_REQUIRED;
+	if (form.modalities.includes('document')) {
+		const types = documentTypes(form.documentTypes);
+		if (types.length === 0) errors.documentTypes = DOCUMENT_TYPES_REQUIRED;
+		else if (!types.every((t) => MIME.test(t))) errors.documentTypes = DOCUMENT_TYPE_INVALID;
+	}
+	if (parsePrice(form.priceInput) === null) errors.priceInput = PRICE_ERROR;
+	if (parsePrice(form.priceOutput) === null) errors.priceOutput = PRICE_ERROR;
+	if (parsePrice(form.priceCache) === null) errors.priceCache = PRICE_ERROR;
 	const ids = form.profiles.map((p) => p.id.trim());
 	if (form.defaultPending || (form.reasoningDefault !== null && !ids.includes(form.reasoningDefault))) {
 		errors.defaultProfile = DEFAULT_PROFILE_PENDING;
@@ -236,12 +316,15 @@ export function validateModelForm(form: ModelForm): ModelFormErrors {
 	return errors;
 }
 
-export function validateProviderForm(form: ProviderForm, provider: ProviderView): ProviderFormErrors {
+/** `provider` is `null` for a new provider. */
+export function validateProviderForm(form: ProviderForm, provider: ProviderView | null): ProviderFormErrors {
 	const errors: ProviderFormErrors = {};
 	if (form.name.trim() === '') errors.name = REQUIRED_MESSAGE;
 	if (form.endpoint.trim() === '') errors.endpoint = REQUIRED_MESSAGE;
 	// A provider with an inline key has no variable to name: the field is disabled there.
-	if (!provider.has_inline_key) {
+	if (provider === null) {
+		if (form.apiKeyEnv.trim() === '' && form.auth !== 'none') errors.apiKeyEnv = API_KEY_ENV_REQUIRED_MESSAGE;
+	} else if (!provider.has_inline_key) {
 		const variable = form.apiKeyEnv.trim();
 		if (variable === '' && form.auth !== 'none') {
 			errors.apiKeyEnv = API_KEY_ENV_REQUIRED_MESSAGE;
@@ -370,10 +453,86 @@ export function buildModelPatch(
 		context_window_tokens: null,
 		clear_context_window: false,
 		input_modalities: modalitiesNow.join('|') === modalitiesBefore.join('|') ? null : modalitiesNow,
+		document_mime_types: changedDocumentTypes(model, form),
+		pricing: changedPricing(model, form),
 		reasoning_default: reasoningChanged && form.reasoningDefault !== null ? form.reasoningDefault : null,
 		clear_reasoning_default: reasoningChanged && form.reasoningDefault === null,
 		profiles
 	};
+}
+
+/** The accepted document types when they changed; `[]` removes them with the document input. */
+function changedDocumentTypes(model: ModelView, form: ModelForm): string[] | null {
+	const next = form.modalities.includes('document') ? documentTypes(form.documentTypes) : [];
+	return next.join('|') === model.document_mime_types.join('|') ? null : next;
+}
+
+function pricingOf(form: ModelForm): PricingEdit | null {
+	const input = parsePrice(form.priceInput);
+	const output = parsePrice(form.priceOutput);
+	const cache = parsePrice(form.priceCache);
+	return input === null || output === null || cache === null ? null : { input, output, cache_read: cache };
+}
+
+/** A decimal written without its insignificant zeros (`0.30` and `00.3` are both `0.3`). */
+function decimalKey(value: string): string {
+	const [int, frac = ''] = value.trim().split('.');
+	const whole = int.replace(/^0+(?=\d)/, '');
+	const fraction = frac.replace(/0+$/, '');
+	return fraction === '' ? whole : `${whole}.${fraction}`;
+}
+
+/** The three prices when one of them differs from the file (an exact decimal compare). */
+function changedPricing(model: ModelView, form: ModelForm): PricingEdit | null {
+	const next = pricingOf(form);
+	if (next === null) return null;
+	const same = (a: string | null | undefined, b: string) => a != null && decimalKey(a) === decimalKey(b);
+	const before = model.pricing;
+	if (before && same(before.input, next.input) && same(before.output, next.output) && same(before.cache_read, next.cache_read)) {
+		return null;
+	}
+	return next;
+}
+
+/** Every field of a new provider (the file has none of them yet). */
+export function buildProviderCreatePatch(form: ProviderForm): ProviderPatch {
+	const header = form.authHeader.trim();
+	const variable = form.apiKeyEnv.trim();
+	return {
+		name: form.name.trim(),
+		endpoint: form.endpoint.trim(),
+		protocol: form.protocol,
+		auth: form.auth,
+		auth_header: header === '' ? null : header,
+		api_key_env: variable === '' ? null : variable
+	};
+}
+
+/** Every field of a new model. Validate first: the counts and prices must parse. */
+export function buildModelCreatePatch(form: ModelForm, profiles: ReasoningProfileEdit[] | null = null): ModelPatch {
+	const types = form.modalities.includes('document') ? documentTypes(form.documentTypes) : [];
+	return {
+		name: form.name.trim(),
+		api_model: form.apiModel.trim(),
+		max_input_tokens: parseCount(form.maxInput),
+		max_output_tokens: parseCount(form.maxOutput),
+		context_window_tokens: null,
+		clear_context_window: false,
+		input_modalities: orderedModalities(form.modalities),
+		document_mime_types: types.length === 0 ? null : types,
+		pricing: pricingOf(form),
+		reasoning_default: form.reasoningDefault,
+		clear_reasoning_default: false,
+		profiles: profiles && profiles.length > 0 ? profiles : null
+	};
+}
+
+/** Models that have no price for input, output or cache read. */
+export function unpricedModels(providers: readonly ProviderView[]): number {
+	return providers
+		.flatMap((p) => p.models)
+		.filter((m) => !m.pricing || m.pricing.input == null || m.pricing.output == null || m.pricing.cache_read == null)
+		.length;
 }
 
 export function isEmptyProviderPatch(patch: ProviderPatch): boolean {

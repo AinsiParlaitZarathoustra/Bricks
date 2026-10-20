@@ -6,7 +6,7 @@
 use super::providers_toml::{self, Edit};
 use super::{error, io_error, not_found};
 use crate::contract::{
-    IpcErrorCode, IpcResult, ModelProfileView, ModelView, ProviderView, ProvidersFile,
+    IpcErrorCode, IpcResult, ModelProfileView, ModelView, PricingView, ProviderView, ProvidersFile,
 };
 use bricks_provider::config::{ProviderConfig, ProvidersConfig};
 use sha2::{Digest, Sha256};
@@ -122,6 +122,12 @@ fn provider_view(p: &ProviderConfig, has_credentials: bool) -> ProviderView {
                     })
                     .collect(),
                 priced: m.pricing.is_some(),
+                document_mime_types: m.document_mime_types.clone(),
+                pricing: m.pricing.as_ref().map(|x| PricingView {
+                    input: x.input.map(|d| d.to_string()),
+                    output: x.output.map(|d| d.to_string()),
+                    cache_read: x.cache_read.map(|d| d.to_string()),
+                }),
             })
             .collect(),
     }

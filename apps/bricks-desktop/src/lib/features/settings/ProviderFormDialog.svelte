@@ -1,5 +1,6 @@
 <script lang="ts">
-	// Edit form of a provider. Starts from the provider as it was when opened; Cancel discards.
+	// Form of a provider: a new one (`provider` null) or an existing one, from its values when opened.
+	// Cancel discards.
 	import { untrack } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Select from '$lib/components/ui/select';
@@ -12,12 +13,15 @@
 		AUTH_OPTIONS,
 		PROTOCOL_OPTIONS,
 		authLabel,
+		buildProviderCreatePatch,
 		buildProviderPatch,
 		hasFormErrors,
 		displayName,
 		isEmptyProviderPatch,
+		newProviderForm,
 		protocolLabel,
 		providerForm,
+		validateNewId,
 		validateProviderForm,
 		type ProviderForm,
 		type WriteOutcome
@@ -25,27 +29,33 @@
 
 	let {
 		provider,
+		takenIds = [],
 		notice = null,
 		onSave,
 		onClose
 	}: {
-		provider: ProviderView;
+		/** `null`: a new provider. */
+		provider: ProviderView | null;
+		/** Ids already in the file (a new provider needs its own). */
+		takenIds?: readonly string[];
 		/** Set when the dialog was reopened after the file changed elsewhere. */
 		notice?: string | null;
-		/** Writes the patch (only the changed fields); resolves with the outcome. */
-		onSave: (patch: ProviderPatch) => Promise<WriteOutcome>;
+		/** Writes the patch (every field for a new provider, else only the changed ones). */
+		onSave: (patch: ProviderPatch, id: string) => Promise<WriteOutcome>;
 		/** The dialog must go: closed by the user, or after a successful save. */
 		onClose: () => void;
 	} = $props();
 
 	const uid = $props.id();
 	const original = untrack(() => provider);
-	let form = $state<ProviderForm>(providerForm(original));
+	let form = $state<ProviderForm>(original ? providerForm(original) : newProviderForm());
+	let id = $state('');
 	let attempted = $state(false);
 	let saving = $state(false);
 	let error = $state<string | null>(null);
 
 	const errors = $derived(validateProviderForm(form, original));
+	const idError = $derived(original ? undefined : validateNewId(id, takenIds));
 	/** Field messages show once the user tried to save. */
 	const shown = $derived(attempted ? errors : {});
 
@@ -53,15 +63,15 @@
 		event.preventDefault();
 		if (saving) return;
 		attempted = true;
-		if (hasFormErrors(errors)) return;
-		const patch = buildProviderPatch(original, form);
-		if (isEmptyProviderPatch(patch)) {
+		if (hasFormErrors(errors) || idError) return;
+		const patch = original ? buildProviderPatch(original, form) : buildProviderCreatePatch(form);
+		if (original && isEmptyProviderPatch(patch)) {
 			onClose();
 			return;
 		}
 		saving = true;
 		error = null;
-		const outcome = await onSave(patch);
+		const outcome = await onSave(patch, original ? original.id : id.trim());
 		saving = false;
 		if (outcome.ok) onClose();
 		else error = outcome.message;
@@ -72,11 +82,32 @@
 	<Dialog.Content class="max-h-[min(44rem,calc(100dvh-2rem))] overflow-y-auto sm:max-w-lg">
 		<form onsubmit={submit} class="flex flex-col gap-5">
 			<Dialog.Header>
-				<Dialog.Title>Modifier le fournisseur {displayName(original.name, original.id)}</Dialog.Title>
+				<Dialog.Title>
+					{original ? `Modifier le fournisseur ${displayName(original.name, original.id)}` : 'Ajouter un fournisseur'}
+				</Dialog.Title>
 			</Dialog.Header>
 
 			{#if notice}
 				<p role="alert" class="text-sm text-pretty text-destructive">{notice}</p>
+			{/if}
+
+			{#if !original}
+				<div class="flex flex-col gap-2">
+					<Label for={`${uid}-id`}>Identifiant</Label>
+					<Input
+						id={`${uid}-id`}
+						bind:value={id}
+						maxlength={64}
+						autocomplete="off"
+						spellcheck={false}
+						class="font-mono text-sm"
+						aria-invalid={attempted && idError ? 'true' : undefined}
+						aria-describedby={attempted && idError ? `${uid}-id-error` : undefined}
+					/>
+					{#if attempted && idError}
+						<p id={`${uid}-id-error`} role="alert" class="text-xs text-pretty text-destructive">{idError}</p>
+					{/if}
+				</div>
 			{/if}
 
 			<div class="flex flex-col gap-2">
@@ -168,7 +199,7 @@
 				<Input
 					id={`${uid}-env`}
 					bind:value={form.apiKeyEnv}
-					disabled={original.has_inline_key}
+					disabled={original?.has_inline_key ?? false}
 					autocomplete="off"
 					spellcheck={false}
 					class="font-mono text-sm"
@@ -179,7 +210,7 @@
 					<p id={`${uid}-env-help`} role="alert" class="text-xs text-pretty text-destructive">{shown.apiKeyEnv}</p>
 				{:else}
 					<p id={`${uid}-env-help`} class="text-xs text-pretty text-muted-foreground">
-						{original.has_inline_key
+						{original?.has_inline_key
 							? 'Une clé est écrite dans le fichier : la variable ne peut pas être définie ici.'
 							: 'Nom de la variable d’environnement qui contient la clé.'}
 					</p>

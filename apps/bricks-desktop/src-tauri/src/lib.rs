@@ -84,6 +84,9 @@ pub fn run() {
             commands::providers::model_update,
             commands::providers::provider_delete,
             commands::providers::model_delete,
+            commands::providers::provider_create,
+            commands::providers::model_create,
+            commands::providers::providers_fill_missing_prices,
             // Skills catalogue for settings
             commands::skills::skills_catalog,
             // Read adapters over engine agent state

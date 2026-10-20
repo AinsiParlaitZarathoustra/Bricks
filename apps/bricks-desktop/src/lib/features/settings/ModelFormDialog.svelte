@@ -1,5 +1,6 @@
 <script lang="ts">
-	// Edit form of a model. Starts from the model as it was when opened; Cancel discards.
+	// Form of a model: a new one (`model` null) or an existing one, from its values when opened.
+	// Cancel discards.
 	// Only counts above zero are checked here; the engine checks the rest. The effort profiles are
 	// edited as a whole list and saved with the model.
 	import { untrack } from 'svelte';
@@ -14,16 +15,21 @@
 	import { MODALITY_LABELS } from './format';
 	import ReasoningProfileEditor from './ReasoningProfileEditor.svelte';
 	import {
+		DOCUMENT_TYPE_PRESETS,
 		MODALITY_OPTIONS,
+		buildModelCreatePatch,
 		buildModelPatch,
+		documentTypes,
 		displayName,
 		draftLabel,
 		hasFormErrors,
 		isEmptyModelPatch,
 		modelForm,
+		newModelForm,
 		newProfileDraft,
 		profilesPatch,
 		validateModelForm,
+		validateNewId,
 		type ModelForm,
 		type ProfileDraft,
 		type WriteOutcome
@@ -31,15 +37,19 @@
 
 	let {
 		model,
+		takenIds = [],
 		notice = null,
 		onSave,
 		onClose
 	}: {
-		model: ModelView;
+		/** `null`: a new model. */
+		model: ModelView | null;
+		/** Ids of the provider's models (a new model needs its own). */
+		takenIds?: readonly string[];
 		/** Set when the dialog was reopened after the file changed elsewhere. */
 		notice?: string | null;
-		/** Writes the patch (only the changed fields); resolves with the outcome. */
-		onSave: (patch: ModelPatch) => Promise<WriteOutcome>;
+		/** Writes the patch (every field for a new model, else only the changed ones). */
+		onSave: (patch: ModelPatch, id: string) => Promise<WriteOutcome>;
 		/** The dialog must go: closed by the user, or after a successful save. */
 		onClose: () => void;
 	} = $props();
@@ -50,7 +60,8 @@
 
 	const uid = $props.id();
 	const original = untrack(() => model);
-	let form = $state<ModelForm>(modelForm(original));
+	let form = $state<ModelForm>(original ? modelForm(original) : newModelForm());
+	let id = $state('');
 	let attempted = $state(false);
 	let saving = $state(false);
 	let error = $state<string | null>(null);
@@ -58,6 +69,13 @@
 	let editing = $state<{ index: number | null; draft: ProfileDraft } | null>(null);
 
 	const errors = $derived(validateModelForm(form));
+	const idError = $derived(original ? undefined : validateNewId(id, takenIds));
+
+	function togglePreset(value: string) {
+		const types = documentTypes(form.documentTypes);
+		const next = types.includes(value) ? types.filter((t) => t !== value) : [...types, value];
+		form.documentTypes = next.join(', ');
+	}
 	/** Field errors show once the user tried to save. */
 	const shown = $derived(attempted ? errors : {});
 
@@ -123,20 +141,22 @@
 			error = 'Validez ou annulez le profil en cours d’édition avant d’enregistrer.';
 			return;
 		}
-		if (hasFormErrors(errors)) return;
-		const profiles = profilesPatch(original.profiles, form.profiles);
+		if (hasFormErrors(errors) || idError) return;
+		const profiles = profilesPatch(original?.profiles ?? [], form.profiles);
 		if (!profiles.ok) {
 			error = profiles.message;
 			return;
 		}
-		const patch = buildModelPatch(original, form, profiles.edits);
-		if (isEmptyModelPatch(patch)) {
+		const patch = original
+			? buildModelPatch(original, form, profiles.edits)
+			: buildModelCreatePatch(form, profiles.edits);
+		if (original && isEmptyModelPatch(patch)) {
 			onClose();
 			return;
 		}
 		saving = true;
 		error = null;
-		const outcome = await onSave(patch);
+		const outcome = await onSave(patch, original ? original.id : id.trim());
 		saving = false;
 		if (outcome.ok) onClose();
 		else error = outcome.message;
@@ -147,11 +167,32 @@
 	<Dialog.Content class="max-h-[min(46rem,calc(100dvh-2rem))] overflow-y-auto sm:max-w-lg">
 		<form onsubmit={submit} class="flex flex-col gap-5" novalidate>
 			<Dialog.Header>
-				<Dialog.Title>Modifier le modèle {displayName(original.name, original.id)}</Dialog.Title>
+				<Dialog.Title>
+					{original ? `Modifier le modèle ${displayName(original.name, original.id)}` : 'Ajouter un modèle'}
+				</Dialog.Title>
 			</Dialog.Header>
 
 			{#if notice}
 				<p role="alert" class="text-sm text-pretty text-destructive">{notice}</p>
+			{/if}
+
+			{#if !original}
+				<div class="flex flex-col gap-2">
+					<Label for={`${uid}-id`}>Identifiant</Label>
+					<Input
+						id={`${uid}-id`}
+						bind:value={id}
+						maxlength={64}
+						autocomplete="off"
+						spellcheck={false}
+						class="font-mono text-sm"
+						aria-invalid={attempted && idError ? 'true' : undefined}
+						aria-describedby={attempted && idError ? `${uid}-id-error` : undefined}
+					/>
+					{#if attempted && idError}
+						<p id={`${uid}-id-error`} role="alert" class="text-xs text-pretty text-destructive">{idError}</p>
+					{/if}
+				</div>
 			{/if}
 
 			<div class="flex flex-col gap-2">
@@ -230,6 +271,64 @@
 							/>
 							{MODALITY_LABELS[modality] ?? modality}
 						</label>
+					{/each}
+				</div>
+				{#if shown.modalities}
+					<p role="alert" class="text-xs text-destructive">{shown.modalities}</p>
+				{/if}
+			</fieldset>
+
+			{#if form.modalities.includes('document')}
+				<div class="flex flex-col gap-2">
+					<Label for={`${uid}-documents`}>Types de fichiers acceptés</Label>
+					<div class="flex flex-wrap items-center gap-1.5">
+						{#each DOCUMENT_TYPE_PRESETS as preset (preset.value)}
+							{@const active = documentTypes(form.documentTypes).includes(preset.value)}
+							<button
+								type="button"
+								aria-pressed={active}
+								class="inline-flex h-7 items-center rounded-full border px-2.5 text-xs hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none {active ? 'border-ring bg-muted text-foreground' : 'border-border text-muted-foreground'}"
+								onclick={() => togglePreset(preset.value)}
+							>
+								{preset.label}
+							</button>
+						{/each}
+					</div>
+					<Input
+						id={`${uid}-documents`}
+						bind:value={form.documentTypes}
+						autocomplete="off"
+						spellcheck={false}
+						placeholder="application/pdf, text/*"
+						class="font-mono text-sm"
+						aria-invalid={shown.documentTypes ? 'true' : undefined}
+						aria-describedby={shown.documentTypes ? `${uid}-documents-error` : undefined}
+					/>
+					{#if shown.documentTypes}
+						<p id={`${uid}-documents-error`} role="alert" class="text-xs text-pretty text-destructive">{shown.documentTypes}</p>
+					{/if}
+				</div>
+			{/if}
+
+			<fieldset class="flex flex-col gap-2">
+				<legend class="mb-2 text-sm leading-none font-medium">Coûts (USD par million de tokens)</legend>
+				<div class="grid gap-4 sm:grid-cols-3">
+					{#each [{ key: 'priceInput', label: 'Entrée' }, { key: 'priceOutput', label: 'Sortie' }, { key: 'priceCache', label: 'Cache' }] as const as field (field.key)}
+						<div class="flex flex-col gap-2">
+							<Label for={`${uid}-${field.key}`}>{field.label}</Label>
+							<Input
+								id={`${uid}-${field.key}`}
+								bind:value={form[field.key]}
+								inputmode="decimal"
+								autocomplete="off"
+								class="tabular-nums"
+								aria-invalid={shown[field.key] ? 'true' : undefined}
+								aria-describedby={shown[field.key] ? `${uid}-${field.key}-error` : undefined}
+							/>
+							{#if shown[field.key]}
+								<p id={`${uid}-${field.key}-error`} role="alert" class="text-xs text-pretty text-destructive">{shown[field.key]}</p>
+							{/if}
+						</div>
 					{/each}
 				</div>
 			</fieldset>

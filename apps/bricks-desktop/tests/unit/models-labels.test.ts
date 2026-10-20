@@ -39,7 +39,9 @@ function providerWith(names: string[]): ProviderView {
 			context_window_tokens: null,
 			reasoning_default: null,
 			profiles: [],
-			priced: false
+			priced: false,
+			document_mime_types: [],
+			pricing: null
 		}))
 	};
 }

@@ -5,7 +5,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import type { ModelView } from '$lib/ipc/bindings/ModelView';
-	import { formatModalities, formatTokens } from './format';
+	import { formatModalities, formatPrice, formatTokens } from './format';
 	import { displayName, profileLabel } from './models';
 
 	let {
@@ -81,9 +81,6 @@
 			<dt class="text-muted-foreground">Nom API</dt>
 			<dd class="font-mono break-all text-foreground">{model.api_model}</dd>
 
-			<dt class="text-muted-foreground">Fenêtre de contexte</dt>
-			<dd class="tabular-nums text-foreground">{formatTokens(model.context_window_tokens)}</dd>
-
 			<dt class="text-muted-foreground">Entrée maximale</dt>
 			<dd class="tabular-nums text-foreground">{formatTokens(model.max_input_tokens)}</dd>
 
@@ -111,8 +108,14 @@
 				{/if}
 			</dd>
 
-			<dt class="text-muted-foreground">Tarif</dt>
-			<dd class="text-foreground">{model.priced ? 'Renseigné' : 'Non renseigné'}</dd>
+			<dt class="text-muted-foreground">Coûts / M tokens</dt>
+			<dd class="tabular-nums text-foreground">
+				{#if model.pricing}
+					Entrée {formatPrice(model.pricing.input)} · Sortie {formatPrice(model.pricing.output)} · Cache {formatPrice(model.pricing.cache_read)}
+				{:else}
+					Non renseignés
+				{/if}
+			</dd>
 		</dl>
 	{/if}
 </li>

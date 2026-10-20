@@ -48,7 +48,9 @@ const model: ModelView = {
 	context_window_tokens: null,
 	reasoning_default: null,
 	profiles: [],
-	priced: false
+	priced: false,
+	document_mime_types: [],
+	pricing: null
 };
 
 describe('model required texts', () => {

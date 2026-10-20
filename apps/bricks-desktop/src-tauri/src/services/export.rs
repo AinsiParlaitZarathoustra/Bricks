@@ -82,6 +82,8 @@ fn export_bindings() {
         ThemeColors,
         ColorSet,
         ReasoningProfileEdit,
+        PricingView,
+        PricingEdit,
         SkillsCatalog,
         SkillSourceView,
     );

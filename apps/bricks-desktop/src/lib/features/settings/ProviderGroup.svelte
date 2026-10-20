@@ -1,6 +1,7 @@
 <script lang="ts">
 	// One provider and its models, in a single discreet container: a header row, then one line per model.
 	import Pencil from '@lucide/svelte/icons/pencil';
+	import Plus from '@lucide/svelte/icons/plus';
 	import Trash from '@lucide/svelte/icons/trash';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import { Button } from '$lib/components/ui/button';
@@ -15,13 +16,15 @@
 		onEditProvider,
 		onDeleteProvider,
 		onEditModel,
-		onDeleteModel
+		onDeleteModel,
+		onAddModel
 	}: {
 		provider: ProviderView;
 		onEditProvider: () => void;
 		onDeleteProvider: () => void;
 		onEditModel: (model: ModelView) => void;
 		onDeleteModel: (model: ModelView) => void;
+		onAddModel: () => void;
 	} = $props();
 
 	const uid = $props.id();
@@ -42,6 +45,24 @@
 				{/if}
 			</p>
 		</div>
+
+		<Tooltip.Root>
+			<Tooltip.Trigger>
+				{#snippet child({ props })}
+					<Button
+						{...props}
+						variant="ghost"
+						size="icon-sm"
+						class="shrink-0 text-muted-foreground"
+						aria-label={`Ajouter un modèle à ${title}`}
+						onclick={onAddModel}
+					>
+						<Plus aria-hidden="true" />
+					</Button>
+				{/snippet}
+			</Tooltip.Trigger>
+			<Tooltip.Content>Ajouter un modèle</Tooltip.Content>
+		</Tooltip.Root>
 
 		<Tooltip.Root>
 			<Tooltip.Trigger>
