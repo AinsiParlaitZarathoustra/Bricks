@@ -1,11 +1,11 @@
 ---
-title: Types (cersei-types)
+title: Types (bricks-types)
 description: Provider-agnostic core types — messages, content blocks, usage, errors, stream events.
 ---
 
-# cersei-types
+# bricks-types
 
-Provider-agnostic types shared across all Cersei crates.
+Provider-agnostic types shared across all Bricks crates.
 
 ## Message
 
@@ -32,10 +32,10 @@ pub enum MessageContent {
 Construct messages with helpers:
 
 ```rust
-Message::user("Hello")
-Message::assistant("Hi there!")
-Message::system("You are helpful.")
-message.get_text()  // -> Option<&str>
+Message::user("Hello");
+Message::assistant("Hi there!");
+Message::system("You are helpful.");
+message.get_text();  // -> Option<&str>
 
 // Multimodal: text + files (images, video, audio, PDFs) in one call.
 Message::user_with_files("Describe these", &["diagram.png", "clip.mp4"])?;
@@ -47,6 +47,7 @@ See [Multimodal Input](/docs/multimodal) for the full file-passing API.
 ## ContentBlock
 
 ```rust
+use bricks::types::{CitationsConfig, MediaSource, ToolResultContent};
 pub enum ContentBlock {
     Text { text: String },
     Image { source: ImageSource },
@@ -87,6 +88,7 @@ A block a provider cannot carry is refused before the request is sent, with `Cer
 ## Usage
 
 ```rust
+use bricks::types::CostEstimate;
 pub struct Usage {
     pub input_tokens: u64,                      // uncached prompt tokens
     pub output_tokens: u64,                     // includes reasoning tokens
@@ -120,7 +122,7 @@ pub enum StopReason {
 }
 ```
 
-The result of a whole run is `Termination` in `cersei-agent` (`Completed`, `OutputTruncated`, `NoProgress`, `ContentFiltered`, `EmptyResponse`; `MaxTurns` exists only to read results stored before 0.4.8, `crates/cersei-agent/src/lib.rs:78-96`).
+The result of a whole run is `Termination` in `bricks-agent` (`Completed`, `OutputTruncated`, `NoProgress`, `ContentFiltered`, `EmptyResponse`; `MaxTurns` exists only to read results stored before 0.4.8, `crates/bricks-agent/src/lib.rs:78-96`).
 
 ## StreamEvent
 

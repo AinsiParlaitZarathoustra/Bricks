@@ -13,7 +13,7 @@
 use crate::config::LspSettings;
 use crate::position::PositionEncoding;
 use crate::view::Document;
-use cersei_lsp::{LspClient, LspError, LspResult, LspServerConfig};
+use bricks_lsp::{LspClient, LspError, LspResult, LspServerConfig};
 use dashmap::DashMap;
 use futures::future::BoxFuture;
 use parking_lot::Mutex;
@@ -66,10 +66,10 @@ impl Launcher for ProcessLauncher {
                 Ok(Err(e)) => e,
                 Err(_) => LspError::Timeout(timeout),
             };
-            // Let the last stderr lines arrive, then explain the failure.
-            tokio::time::sleep(Duration::from_millis(50)).await;
-            let stderr = client.stderr_tail();
+            // Shutdown reads the stderr to its end (bounded), then the last
+            // lines explain the failure.
             let _ = client.shutdown().await;
+            let stderr = client.stderr_tail();
             let last = stderr.trim().lines().last().unwrap_or("").to_string();
             Err(if last.is_empty() {
                 outcome
@@ -150,7 +150,7 @@ impl Instance {
             .lock()
             .iter()
             .filter(|(_, l)| l.try_read().map(|s| s.hash.is_some()).unwrap_or(true))
-            .map(|(u, _)| PathBuf::from(cersei_lsp::uri_to_path(u)))
+            .map(|(u, _)| PathBuf::from(bricks_lsp::uri_to_path(u)))
             .collect();
         v.sort();
         v
@@ -203,7 +203,7 @@ pub struct LspPool {
 impl LspPool {
     pub fn new(settings: LspSettings, launcher: Arc<dyn Launcher>) -> Self {
         let mut configs: Vec<LspServerConfig> = settings.servers.clone();
-        for b in cersei_lsp::config::builtin_servers() {
+        for b in bricks_lsp::config::builtin_servers() {
             if !configs.iter().any(|c| c.name == b.name) {
                 configs.push(b);
             }
@@ -345,7 +345,7 @@ impl LspPool {
     /// Make the server's copy of `doc` this exact version, and keep it so
     /// until the returned guard is dropped.
     pub async fn sync(&self, inst: &Instance, doc: &Document) -> LspResult<Synced> {
-        let uri = cersei_lsp::path_to_uri(&doc.path);
+        let uri = bricks_lsp::path_to_uri(&doc.path);
         let lock = {
             let mut docs = inst.docs.lock();
             Arc::clone(docs.entry(uri.clone()).or_insert_with(|| {
@@ -549,4 +549,29 @@ pub fn project_root(path: &Path, workspace_root: &Path, server: &str) -> PathBuf
     rust_workspace
         .or(nearest)
         .unwrap_or_else(|| workspace_root.to_path_buf())
+}
+
+#[cfg(test)]
+mod launch_tests {
+    use super::*;
+
+    /// A server that dies at start explains itself with its last stderr line,
+    /// at once, without a fixed wait before reading it.
+    #[tokio::test]
+    async fn a_server_that_dies_at_start_says_why_at_once() {
+        let mut cfg = LspServerConfig::new("dying", "sh", &["*.rs"], &[(".rs", "rust")]);
+        cfg.args = vec!["-c".into(), "echo 'boom: no workspace' >&2; exit 3".into()];
+        let started = Instant::now();
+        let err = ProcessLauncher
+            .launch(cfg, PathBuf::from("/"), Duration::from_secs(10))
+            .await
+            .err()
+            .expect("the launch fails");
+        assert!(err.to_string().contains("boom: no workspace"), "{err}");
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "{:?}",
+            started.elapsed()
+        );
+    }
 }

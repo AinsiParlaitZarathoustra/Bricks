@@ -10,8 +10,8 @@
 
 use crate::dataset::{Question, QuestionType};
 use anyhow::{Context, Result};
-use cersei_provider::{CompletionRequest, Provider};
-use cersei_types::Message;
+use bricks_provider::{CompletionRequest, Provider};
+use bricks_types::Message;
 
 /// Build the judge prompt for a given question. Mirrors Mastra's
 /// `getEvalPrompt(taskType, question, answer, response, isAbstention)`.

@@ -1,5 +1,5 @@
 ---
-title: Memory (cersei-memory)
+title: Memory (bricks-memory)
 description: Session persistence, flat memory files, CLAUDE.md hierarchy, optional graph index, and structured long-term memory.
 ---
 
@@ -7,12 +7,12 @@ import { Callout } from 'fumadocs-ui/components/callout';
 import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
 import { TypeTable } from 'fumadocs-ui/components/type-table';
 
-# cersei-memory
+# bricks-memory
 
 Memory backends for sessions and for knowledge that outlives a session. The `Memory` trait stores session transcripts; `MemoryManager` composes flat memory files, the CLAUDE.md hierarchy and an optional graph index (Grafeo); and the `LongTermMemory` trait, implemented by the structured store, gives an agent recall across sessions.
 
 <Callout type="info">
-Two features are compile-time options, both off by default in `cersei-memory` (`default = []`). `graph` enables the Grafeo graph index (`cersei-memory = { features = ["graph"] }`). `structured` enables the structured long-term memory (episodes, entities, temporal facts), which the `bricks` CLI turns on. The `cersei` facade declares neither feature, so enable them on `cersei-memory` directly.
+Two features are compile-time options, both off by default in `bricks-memory` (`default = []`). `graph` enables the Grafeo graph index (`bricks-memory = { features = ["graph"] }`). `structured` enables the structured long-term memory (episodes, entities, temporal facts), which the `bricks` CLI turns on. The `bricks` facade declares neither feature, so enable them on `bricks-memory` directly.
 </Callout>
 
 ---
@@ -34,6 +34,9 @@ When you call `MemoryManager::recall()`, the graph is queried first if it is ena
 ## Memory and LongTermMemory Traits
 
 ```rust
+use bricks_types::{MemoryEntry, SessionInfo};
+use bricks_memory::{MaintenanceReport, MemoryTurn, RecalledContext};
+use tokio_util::sync::CancellationToken;
 #[async_trait]
 pub trait Memory: Send + Sync {
     async fn store(&self, session_id: &str, messages: &[Message]) -> Result<()>;
@@ -62,7 +65,7 @@ The unified interface that composes the flat files, the CLAUDE.md hierarchy and 
 
 ```rust
 use std::path::Path;
-use cersei::memory::manager::MemoryManager;
+use bricks::memory::manager::MemoryManager;
 
 let mm = MemoryManager::new(Path::new("."))
     .with_graph(Path::new("./memory.grafeo"))?;
@@ -125,6 +128,7 @@ for meta in mm.scan() {
 | `by_topic(topic)` | `Vec<String>` | Filter by topic tag (graph only) |
 
 ```rust
+use bricks_memory::memdir::MemoryType;
 // Recall: graph lookup when enabled, otherwise a text scan of the flat files
 let results = mm.recall("testing preferences", 5);
 
@@ -148,6 +152,7 @@ These only work when graph is enabled. They're no-ops otherwise.
 | `graph_stats()` | `GraphStats` | Counts: `memory_count`, `topic_count`, `relationship_count`, `session_count`. |
 
 ```rust
+use bricks_memory::memdir::MemoryType;
 // Store a memory
 let id = mm.store_memory(
     "User prefers functional patterns over OOP",
@@ -310,7 +315,7 @@ Each file part is at most 50 MB, and a session's parts total at most 200 MB. Mal
 
 ## Auto-Dream (Background Consolidation)
 
-`AutoDream` lives in `cersei_agent::auto_dream`. It decides whether memory consolidation is due, using three gates. Nothing in the agent runner calls it in this version; only an example does (`cersei/examples/stress_memory.rs`):
+`AutoDream` lives in `bricks_agent::auto_dream`. It decides whether memory consolidation is due, using three gates. Nothing in the agent runner calls it in this version; only an example does (`crates/bricks/examples/stress_memory.rs`):
 
 | Gate | Condition | Default |
 |------|-----------|---------|
@@ -318,10 +323,10 @@ Each file part is at most 50 MB, and a session's parts total at most 200 MB. Mal
 | Session | New sessions since last run | 5 sessions (`AutoDreamConfig::min_sessions`) |
 | Lock | No concurrent consolidation | Stale after 1 hour |
 
-All three gates must pass before consolidation is due. `AutoDream` starts nothing: the caller runs the consolidation, between `acquire_lock()` and `release_lock()`, with the prompt from `consolidation_prompt()` (`crates/cersei-agent/src/auto_dream.rs`).
+All three gates must pass before consolidation is due. `AutoDream` starts nothing: the caller runs the consolidation, between `acquire_lock()` and `release_lock()`, with the prompt from `consolidation_prompt()` (`crates/bricks-agent/src/auto_dream.rs`).
 
 ```rust
-use cersei_agent::auto_dream::AutoDream;
+use bricks_agent::auto_dream::AutoDream;
 
 let dreamer = AutoDream::new(memory_dir, conversations_dir);  // PathBuf, PathBuf
 
@@ -337,7 +342,7 @@ if dreamer.should_consolidate() {
 
 ## Session Memory Extraction
 
-Extraction of memories from conversations, in `cersei_agent::session_memory`. The functions are available to callers; the agent runner does not call them in this version. Extraction is due after at least 20 messages and 3 tool calls since the last extraction (`crates/cersei-agent/src/session_memory.rs:13-14`).
+Extraction of memories from conversations, in `bricks_agent::session_memory`. The functions are available to callers; the agent runner does not call them in this version. Extraction is due after at least 20 messages and 3 tool calls since the last extraction (`crates/bricks-agent/src/session_memory.rs:13-14`).
 
 **Categories extracted** (`MemoryCategory`):
 
@@ -350,7 +355,7 @@ Extraction of memories from conversations, in `cersei_agent::session_memory`. Th
 | `Constraint` | "Must support Python 3.8+" |
 
 ```rust
-use cersei_agent::session_memory;
+use bricks_agent::session_memory;
 
 // Check if extraction should run
 if session_memory::should_extract(&messages, &state) {
@@ -372,7 +377,7 @@ Ingestion is resumable. An episode is stored first; extraction (by an `Extractor
 
 ```rust
 use std::sync::Arc;
-use cersei_memory::structured::StructuredMemory;
+use bricks_memory::structured::StructuredMemory;
 
 let memory = StructuredMemory::builder(embedder)   // Arc<dyn EmbeddingProvider>
     .path("./memory.grafeo")

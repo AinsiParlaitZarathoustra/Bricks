@@ -13,7 +13,7 @@ The 34 built-in tools are thin wrappers over a set of async primitives. These pr
 Use them directly when building custom tools, data pipelines, DevOps automation, or anything that needs fine-grained control over I/O.
 
 ```rust
-use cersei_tools::tool_primitives::{fs, diff, process, http, search, git};
+use bricks_tools::tool_primitives::{fs, diff, process, http, search, git};
 ```
 
 <Callout>
@@ -52,7 +52,7 @@ Tool primitives are pure async functions and structs. No Tool trait, no JSON ser
 ### Read a file with line numbers
 
 ```rust
-use cersei_tools::tool_primitives::fs;
+use bricks_tools::tool_primitives::fs;
 
 let content = fs::read_file(Path::new("src/main.rs"), 0, 50).await?;
 println!("Lines: {}, returned: {}", content.total_lines, content.lines_returned);
@@ -62,7 +62,7 @@ println!("{}", content.content); // 1-based line numbers, cat -n style
 ### Produce a unified diff
 
 ```rust
-use cersei_tools::tool_primitives::diff;
+use bricks_tools::tool_primitives::diff;
 
 let old = "fn main() {\n    println!(\"hello\");\n}\n";
 let new = "fn main() {\n    println!(\"world\");\n}\n";
@@ -78,7 +78,7 @@ let patch = diff::unified_diff(old, new, 3);
 ### Execute a command
 
 ```rust
-use cersei_tools::tool_primitives::process::{exec, ExecOptions, Shell};
+use bricks_tools::tool_primitives::process::{exec, ExecOptions, Shell};
 
 let output = exec("cargo test", ExecOptions {
     cwd: Some("/my/project".into()),
@@ -97,7 +97,7 @@ if output.exit_code == 0 {
 ### Search files with grep
 
 ```rust
-use cersei_tools::tool_primitives::search;
+use bricks_tools::tool_primitives::search;
 
 let matches = search::grep("TODO", Path::new("src/"), search::GrepOptions {
     glob_filter: Some("*.rs".into()),
@@ -113,7 +113,7 @@ for m in &matches {
 ### Check git status
 
 ```rust
-use cersei_tools::tool_primitives::git;
+use bricks_tools::tool_primitives::git;
 
 if git::is_repo(Path::new(".")).await {
     let status = git::status(Path::new(".")).await?;
@@ -127,10 +127,10 @@ if git::is_repo(Path::new(".")).await {
 ### Fetch a URL
 
 ```rust
-use cersei_tools::tool_primitives::http;
+use bricks_tools::tool_primitives::http;
 
-let text = http::fetch_html("https://example.com", 50_000, Default::default()).await?;
-println!("{}", text); // HTML converted to readable plain text
+let response = http::get("https://example.com", Default::default()).await?;
+println!("{} {}", response.status, response.body); // the body as text, unchanged
 ```
 
 ---

@@ -19,7 +19,8 @@ The system prompt is split at a cache boundary. Everything before the boundary i
 ## How It's Built
 
 ```rust
-use cersei_agent::system_prompt::{build_system_prompt, SystemPromptOptions};
+use bricks_agent::system_prompt::GitSnapshot;
+use bricks_agent::system_prompt::{build_system_prompt, SystemPromptOptions};
 
 let opts = SystemPromptOptions {
     working_directory: Some("/my/project".into()),
@@ -56,7 +57,7 @@ Two bullets depend on the tools announced to the model (`tools_available`):
 | Bullet | Kept when |
 |--------|-----------|
 | CodeScout | `CodeScout` is announced |
-| Delegation to sub-agents | a tool that starts a sub-agent is announced: `Agent`, `Agents` or `delegate` (`system_prompt::SPAWNING_TOOLS`) |
+| Delegation to sub-agents | a tool that starts a sub-agent is announced: `Agent` or `Agents` (`system_prompt::SPAWNING_TOOLS`) |
 
 `AgentProfiles`, `AgentControl` or `TaskCreate` alone do not count. An
 excluded bullet disappears entirely; nothing else in the text changes. The
@@ -193,13 +194,14 @@ This keeps all default components and adds your text at the end.
 ### Fine-grained control
 
 ```rust
+use bricks_agent::system_prompt::{OutputStyle, SystemPromptOptions};
 let opts = SystemPromptOptions {
     output_style: OutputStyle::Concise,
     coordinator_mode: true,
     language: Some("Spanish".into()),
     has_memory: true,
     has_auto_compact: true,
-    tools_available: cersei_tools::all().iter().map(|t| t.name().into()).collect(),
+    tools_available: bricks_tools::all().iter().map(|t| t.name().into()).collect(),
     git_status: Some(git_snapshot),
     extra_cached_sections: vec![
         ("project_rules".into(), "Always use async/await. No unwrap().".into()),

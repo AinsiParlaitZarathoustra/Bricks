@@ -9,7 +9,7 @@ A single closure attached at build time. Good for logging or simple TUI updates.
 ```rust
 let agent = Agent::builder()
     .provider(provider_from_config(None, "my-provider/my-model")?)
-    .tools(cersei::tools::coding())
+    .tools(bricks::tools::coding())
     .on_event(|event: &AgentEvent| {
         match event {
             AgentEvent::TextDelta(t) => print!("{}", t),
@@ -73,7 +73,7 @@ use std::sync::Arc;
 let agent = Arc::new(
     Agent::builder()
         .provider(provider_from_config(None, "my-provider/my-model")?)
-        .tools(cersei::tools::coding())
+        .tools(bricks::tools::coding())
         .build()?,
 );
 
@@ -143,7 +143,7 @@ pub trait Reporter: Send + Sync {
 
 ```rust
 use std::{fs::File, time::Duration};
-use cersei::reporters::*;
+use bricks::reporters::*;
 
 let agent = Agent::builder()
     .provider(provider_from_config(None, "my-provider/my-model")?)
@@ -208,7 +208,7 @@ Agent::builder()
 
 ## Full AgentEvent enum
 
-The enum is defined in [`crates/cersei-agent/src/events.rs`](../crates/cersei-agent/src/events.rs). Its variants, grouped by theme:
+The enum is defined in [`crates/bricks-agent/src/events.rs`](../crates/bricks-agent/src/events.rs). Its variants, grouped by theme:
 
 - **Streaming:** `TextDelta`, `ThinkingDelta`
 - **Tools:** `ToolStart`, `ToolProgress`, `ToolPermissionCheck`, `ToolEnd` (with `duration` and compression stats)

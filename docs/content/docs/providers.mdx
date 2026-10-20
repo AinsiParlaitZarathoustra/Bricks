@@ -1,436 +1,249 @@
 ---
 title: Providers
-description: How Bricks selects LLM providers and models from providers.toml (provider_id/model_id), plus the historical Cersei-era catalogue of 13 built-in providers.
+description: How Bricks selects providers and models from one providers.toml file, selected as provider_id/model_id, with three wire protocols and no key read implicitly.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
-import { TypeTable } from 'fumadocs-ui/components/type-table';
-
-> **Historical (Cersei era).** This page describes the old provider system
-> (`from_model_string`, `--model` aliases, provider-specific environment
-> variables) and the `abstract` CLI. None of it exists in Bricks: models are
-> declared in `providers.toml` and chosen as `provider_id/model_id`. The
-> current contract is `docs/providers.md` in the repository; do not follow
-> the commands below.
-
 
 # Providers
 
-Bricks has no built-in providers. Which providers and models exist is decided by one configuration file, `~/.bricks/providers.toml` (or any explicit `.toml` or `.json` path), and a model is always selected explicitly as `provider_id/model_id`. Adding a provider, or a model that speaks one of the three supported wire protocols (`chat_completions`, `responses`, `anthropic_messages`), is a configuration change: no code and no recompilation.
+Which providers and models Bricks can use is decided by **one file**:
+`~/.bricks/providers.toml`, or any `.toml` or `.json` path you pass. Adding a
+provider, or a model that speaks one of the three supported wire protocols, is a
+configuration change: no code, no recompilation. Environment variables serve one
+purpose only: resolving the secrets that the file names.
+
+The authoritative reference is `docs/providers.md` in the repository. A
+secret-free annotated example is `docs/providers.example.toml`; a unit test
+loads it, so it cannot drift from the schema.
 
 <Callout type="info">
-Beyond text, messages can carry **images, video, audio, and PDFs**. See [Multimodal Input](/docs/multimodal) for the file-passing API and which media each provider accepts.
+Models are never inferred from a name. Every model is selected as
+`provider_id/model_id`, and the provider is never guessed from the model.
 </Callout>
 
-## Selecting a Model
-
-```
-provider_id/model_id
-```
-
-The string is split at the first `/`, so model ids may contain `/`. The provider is never inferred from the model name: a bare model name is an error. Pass the selection to the agent with `provider_from_config`:
-
-```rust
-use cersei::prelude::*;
-
-let provider = cersei::provider_from_config(None, "my-provider/my-model")?; // ~/.bricks/providers.toml
-let agent = Agent::builder()
-    .provider(provider)
-    .tools(cersei::tools::coding())
-    .build()?;
-```
-
-`None` reads `~/.bricks/providers.toml`; an explicit path replaces it. In the `bricks` CLI the same selection is given with `--model`, and the file with `--providers`:
-
-```bash
-bricks --model my-provider/my-model run "fix the tests"
-bricks --providers ./providers.toml --model my-provider/my-model run "fix the tests"
-```
-
-## Reading the Configuration
-
-```rust
-use cersei::provider::ProviderRegistry;
-
-let registry = ProviderRegistry::load(None)?;             // ~/.bricks/providers.toml
-for model in registry.models() {
-    println!("{}", model.selection());                    // every provider_id/model_id, in file order
-}
-
-let resolved = registry.resolve("my-provider/my-model")?;
-let provider = resolved.build_provider()?;                 // reads api_key_env now
-```
-
-<TypeTable
-  type={{
-    'ProviderRegistry::load(explicit)': {
-      type: 'Result<ProviderRegistry, ConfigError>',
-      description: 'Load the file at the explicit path, or ~/.bricks/providers.toml when None. A missing or invalid file is an error; there is no fallback catalogue.',
-      required: true,
-    },
-    'registry.models()': {
-      type: 'Vec<ModelRef>',
-      description: 'Every configured model, in file order. No cap is applied.',
-    },
-    'registry.resolve(selection)': {
-      type: 'Result<ResolvedModel, ConfigError>',
-      description: 'Resolve a provider_id/model_id selection. An unknown provider or model is an error.',
-    },
-  }}
-/>
-
----
-
-## Historical Catalogue (Cersei era)
-
-<Callout type="warn">
-The sections from here to [Adding Custom Providers](#adding-custom-providers) describe the built-in providers of the Cersei SDK: their default endpoints, the environment variables the old system read, and `abstract --model` commands. Bricks reads none of this, and the commands are not Bricks commands. To use one of these services today, write a `providers.toml` entry as shown in [Adding Custom Providers](#adding-custom-providers), with its `endpoint`, its `protocol` and an `api_key_env` naming the variable that holds the key.
-</Callout>
-
-## Anthropic
-
-Claude models. Uses Anthropic's native API format (different from OpenAI).
-
-| | |
-|---|---|
-| API Base | `https://api.anthropic.com` |
-| Env Var | `ANTHROPIC_API_KEY` or `ANTHROPIC_KEY` |
-| Format | Anthropic (native) |
-| Default Model | `claude-sonnet-4-6` |
-
-**Models:**
-
-| Model | Context Window | Vision | Thinking | Tool Use |
-|-------|---------------|--------|----------|----------|
-| `claude-opus-4-6` | 200K | Yes | Yes | Yes |
-| `claude-sonnet-4-6` | 200K | Yes | Yes | Yes |
-| `claude-haiku-4-5` | 200K | Yes | No | Yes |
-
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-abstract "fix the tests" --model anthropic/claude-sonnet-4-6
-abstract "fix the tests" --model sonnet   # alias
-```
-
-```rust
-let (provider, model) = from_model_string("anthropic/claude-sonnet-4-6")?;
-```
-
----
-
-## OpenAI
-
-GPT and o-series models.
-
-| | |
-|---|---|
-| API Base | `https://api.openai.com/v1` |
-| Env Var | `OPENAI_API_KEY` |
-| Format | OpenAI-compatible |
-| Default Model | `gpt-4o` |
-
-**Models:**
-
-| Model | Context Window |
-|-------|---------------|
-| `gpt-4o` | 128K |
-| `gpt-4-turbo` | 128K |
-| `o1` | 200K |
-| `o3` | 200K |
-
-```bash
-export OPENAI_API_KEY=sk-...
-abstract "fix the tests" --model openai/gpt-4o
-abstract "fix the tests" --model 4o   # alias
-```
-
----
-
-## Google
-
-Gemini models via the OpenAI-compatible endpoint.
-
-| | |
-|---|---|
-| API Base | `https://generativelanguage.googleapis.com/v1beta/openai` |
-| Env Var | `GOOGLE_API_KEY` or `GEMINI_API_KEY` |
-| Format | OpenAI-compatible |
-| Default Model | `gemini-3.1-pro-preview` |
-
-**Models:**
-
-| Model | Context Window |
-|-------|---------------|
-| `gemini-3.1-pro-preview` | 2M |
-| `gemini-3.0-flash` | 1M |
-| `gemini-2.0-flash` | 1M |
-| `gemini-2.0-pro` | 1M |
-| `gemini-1.5-pro` | 2M |
-
-```bash
-export GOOGLE_API_KEY=AIza...
-abstract "fix the tests" --model google/gemini-2.0-flash
-abstract "fix the tests" --model gemini   # alias
-```
-
----
-
-## Mistral
-
-Mistral and Codestral models.
-
-| | |
-|---|---|
-| API Base | `https://api.mistral.ai/v1` |
-| Env Var | `MISTRAL_API_KEY` |
-| Format | OpenAI-compatible |
-| Default Model | `mistral-large-latest` |
-
-**Models:**
-
-| Model | Context Window |
-|-------|---------------|
-| `mistral-large-latest` | 128K |
-| `codestral-latest` | 256K |
-
-```bash
-export MISTRAL_API_KEY=...
-abstract "fix the tests" --model mistral/mistral-large-latest
-abstract "fix the tests" --model mistral   # alias
-```
-
----
-
-## Groq
-
-Llama, Mixtral, and other open models on Groq's inference hardware.
-
-| | |
-|---|---|
-| API Base | `https://api.groq.com/openai/v1` |
-| Env Var | `GROQ_API_KEY` |
-| Format | OpenAI-compatible |
-| Default Model | `llama-3.1-70b-versatile` |
-
-**Models:**
-
-| Model | Context Window |
-|-------|---------------|
-| `llama-3.1-70b-versatile` | 128K |
-| `llama-3.1-8b-instant` | 128K |
-| `mixtral-8x7b-32768` | 32K |
-
-```bash
-export GROQ_API_KEY=gsk_...
-abstract "fix the tests" --model groq/llama-3.1-70b-versatile
-abstract "fix the tests" --model llama   # alias
-```
-
----
-
-## DeepSeek
-
-DeepSeek Chat, Reasoner, and Coder models via DeepSeek's native endpoint.
-
-| | |
-|---|---|
-| API Base | `https://api.deepseek.com/v1` |
-| Env Var | `DEEPSEEK_API_KEY` (the only variable required) |
-| Format | OpenAI-compatible |
-| Default Model | `deepseek-chat` |
-
-**Models:**
-
-| Model | Context Window |
-|-------|---------------|
-| `deepseek-chat` | 64K |
-| `deepseek-reasoner` | 64K |
-| `deepseek-coder` | 64K |
-
-Minimal working example:
-
-```bash
-export DEEPSEEK_API_KEY=sk-...
-abstract --provider deepseek --model deepseek-chat
-abstract --provider deepseek --model deepseek-reasoner
-
-# Equivalent model-string forms:
-abstract "fix the tests" --model deepseek/deepseek-chat
-abstract "fix the tests" --model deepseek            # alias → deepseek/deepseek-chat
-```
-
-Selecting `--provider deepseek` (or any `deepseek-*` model name) always resolves
-`DEEPSEEK_API_KEY` and the native DeepSeek base URL — it never falls back to the
-OpenAI endpoint. To point DeepSeek at a proxy/gateway instead, set
-`DEEPSEEK_BASE_URL` (see [Custom Endpoints](#adding-custom-providers)).
-
----
-
-## xAI
-
-Grok models.
-
-| | |
-|---|---|
-| API Base | `https://api.x.ai/v1` |
-| Env Var | `XAI_API_KEY` |
-| Format | OpenAI-compatible |
-| Default Model | `grok-2` |
-
-```bash
-export XAI_API_KEY=xai-...
-abstract "fix the tests" --model xai/grok-2
-abstract "fix the tests" --model grok   # alias
-```
-
----
-
-## Together
-
-Open-source models hosted by Together AI.
-
-| | |
-|---|---|
-| API Base | `https://api.together.xyz/v1` |
-| Env Var | `TOGETHER_API_KEY` |
-| Format | OpenAI-compatible |
-| Default Model | `meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo` |
-
-```bash
-export TOGETHER_API_KEY=...
-abstract "fix the tests" --model together/meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo
-```
-
----
-
-## Fireworks
-
-Fast inference for open models.
-
-| | |
-|---|---|
-| API Base | `https://api.fireworks.ai/inference/v1` |
-| Env Var | `FIREWORKS_API_KEY` |
-| Format | OpenAI-compatible |
-| Default Model | `accounts/fireworks/models/llama-v3p1-70b-instruct` |
-
-```bash
-export FIREWORKS_API_KEY=fw_...
-abstract "fix the tests" --model fireworks/accounts/fireworks/models/llama-v3p1-70b-instruct
-```
-
----
-
-## Perplexity
-
-Search-augmented models.
-
-| | |
-|---|---|
-| API Base | `https://api.perplexity.ai` |
-| Env Var | `PERPLEXITY_API_KEY` |
-| Format | OpenAI-compatible |
-| Default Model | `llama-3.1-sonar-large-128k-online` |
-
-```bash
-export PERPLEXITY_API_KEY=pplx-...
-abstract "fix the tests" --model perplexity/llama-3.1-sonar-large-128k-online
-```
-
----
-
-## Cerebras
-
-Wafer-scale inference.
-
-| | |
-|---|---|
-| API Base | `https://api.cerebras.ai/v1` |
-| Env Var | `CEREBRAS_API_KEY` |
-| Format | OpenAI-compatible |
-| Default Model | `llama3.1-70b` |
-
-```bash
-export CEREBRAS_API_KEY=csk-...
-abstract "fix the tests" --model cerebras/llama3.1-70b
-```
-
----
-
-## Ollama
-
-Local models. No API key needed.
-
-| | |
-|---|---|
-| API Base | `http://localhost:11434/v1` |
-| Env Var | (none) |
-| Format | OpenAI-compatible |
-| Default Model | `llama3.1` |
-
-```bash
-ollama pull llama3.1
-abstract "fix the tests" --model ollama/llama3.1
-```
-
-<Callout>
-Ollama must be running locally on port 11434. No API key is required.
-</Callout>
-
----
-
-## OpenRouter
-
-Aggregator that proxies to multiple providers with a single key.
-
-| | |
-|---|---|
-| API Base | `https://openrouter.ai/api/v1` |
-| Env Var | `OPENROUTER_API_KEY` |
-| Format | OpenAI-compatible |
-| Default Model | `anthropic/claude-3.5-sonnet` |
-
-```bash
-export OPENROUTER_API_KEY=sk-or-...
-abstract "fix the tests" --model openrouter/anthropic/claude-3.5-sonnet
-```
-
----
-
-## Auto-Detection and Aliases (removed)
-
-Bricks does not detect a provider from a model name and has no model aliases. The prefix table and the alias table of the Cersei CLI no longer apply: every model is selected as `provider_id/model_id`.
-
----
-
-## Adding Custom Providers
-
-Any service that speaks one of the three protocols is added in `~/.bricks/providers.toml`, not in code. This example registers a local Ollama server, which needs no key:
+## Quick start
 
 ```toml
+# ~/.bricks/providers.toml
 schema_version = 1
 
 [[providers]]
-id = "ollama"
-name = "Ollama"
-endpoint = "http://localhost:11434/v1"
+id = "my-provider"
+name = "My provider"
+endpoint = "https://api.example.com/v1"
 protocol = "chat_completions"
-auth = "none"
+auth = "bearer"
+api_key_env = "MY_PROVIDER_API_KEY"   # the name of a variable, never the key
 
 [[providers.models]]
-id = "llama"
-name = "Llama 3.1 70B"
-api_model = "llama3.1:70b"
+id = "my-model"
+name = "My model"
+api_model = "vendor-model-id"          # sent to the server exactly as written
 streaming = true
 tool_calls = true
 
 [providers.models.limits]
-max_input_tokens = 32000
+max_input_tokens = 96000
 max_output_tokens = 8000
 ```
 
+The Rust side loads one configured model and gives it to the agent:
+
 ```rust
-let provider = cersei::provider_from_config(None, "ollama/llama")?;
+use bricks::prelude::*;
+
+let provider = bricks::provider_from_config(None, "my-provider/my-model")?;
+// Some(path) instead of None reads that file, which replaces the default one.
+
+let agent = Agent::builder()
+    .provider(provider)
+    .tools(bricks::tools::coding())
+    .build()?;
 ```
 
-For a hosted service, use `auth = "bearer"` and `api_key_env = "MY_SERVICE_API_KEY"`: the value of `api_key_env` is the name of the environment variable, never the key itself. The base URL belongs in `endpoint`. The `<PROVIDER>_BASE_URL` and `<PROVIDER>_API_KEY` variables that the old system read implicitly are no longer used. Every field is described in `docs/providers.md` in the repository, and an annotated example is in `docs/providers.example.toml`.
+The command line selects the same way:
+
+```bash
+bricks --model my-provider/my-model
+bricks --providers ./providers.toml --model my-provider/my-model
+```
+
+## The file
+
+* **Location.** `~/.bricks/providers.toml`, or the path given explicitly. An
+  explicit path **replaces** the default; the two are never merged. A missing
+  file is an error: there is no built-in catalogue.
+* **Format.** TOML or JSON, with the same structures, defaults and validation.
+  Any other extension is rejected.
+* **`schema_version = 1`** is required.
+* **No cap** on the number of providers or of models per provider.
+* **Selection** is `provider_id/model_id`, split at the first `/` (model ids may
+  contain `/`). Provider ids are unique; model ids are unique within a provider.
+* **Errors are located and secret-free**, for example
+  `providers.toml: provider "custom", model "flash", field limits.max_input_tokens: must be greater than 0`.
+  A type error never echoes the offending value.
+
+## Provider and model fields
+
+| Field | Required | Meaning |
+|---|---|---|
+| `id` | yes | Stable identifier: non-empty, no whitespace, no `/`. |
+| `name` | yes | Display name. |
+| `endpoint` | yes | Base URL, possibly with a version (`/v1`), a gateway prefix or a query string. `http` or `https`, no embedded credentials. |
+| `protocol` | yes | Default protocol of the provider's models: `chat_completions`, `responses` or `anthropic_messages`. |
+| `auth` | yes | `bearer`, `api_key_header` or `none` (local servers). |
+| `auth_header` | no | Header that carries the key with `api_key_header` (default `x-api-key`). |
+| `api_key_env` or `api_key` | one of | The name of the environment variable that holds the key (recommended), or an inline key for a purely local setup. Neither is allowed with `auth = "none"`. |
+| `path` | no | Replaces the protocol's relative path for models that use the provider's default protocol. |
+| `headers` | no | Extra static request headers. Their values are secrets and are never printed. |
+| `compat` | no | Protocol quirks (see below). |
+| `models` | no | The provider's models. |
+
+A model takes `id` (local, unique in the provider), `name`, `api_model` (the
+identifier the server receives), and optionally its own `protocol`, `endpoint`,
+`path`, `auth`, `headers` and `compat`. It declares its capabilities and limits:
+
+| Model field | Meaning |
+|---|---|
+| `input_modalities`, `output_modalities` | Subsets of `text`, `image`, `audio`, `video`, `document`. Default `["text"]`. |
+| `document_mime_types` | Accepted MIME types when `document` is an input. |
+| `streaming`, `tool_calls` | Capability flags. **Default `false`**: an undeclared capability is unsupported. |
+| `limits` | `max_input_tokens`, `max_output_tokens` and optionally `context_window_tokens`, a window shared by input and output. |
+| `pricing` | USD per million tokens (see *Prices and usage*). |
+| `reasoning` | Reasoning profiles (see *Reasoning profiles*). |
+| `parameters` | Request parameters sent with every request. |
+| `remove_parameters` | JSON Pointers removed from the request before `parameters` are merged. |
+| `token_counting` | Opt-in pre-flight counting endpoint (see *Limits and counting*). |
+
+Limits are declarative. They never change the server's own limits: Bricks uses
+them to cap `max_tokens` and to budget the prompt. Local token counts are
+estimates; only a usage reported by the server, or a configured counting
+endpoint, measures tokens.
+
+## Protocols and authentication
+
+A protocol defines the request, the response and the streaming format.
+
+| Protocol | Relative path | Conventional auth | Required headers |
+|---|---|---|---|
+| `chat_completions` | `chat/completions` | `bearer` | none |
+| `responses` | `responses` | `bearer` | none |
+| `anthropic_messages` | `messages` | `api_key_header` (`x-api-key`) | `anthropic-version: 2023-06-01` |
+
+The request URL is the `endpoint` plus the relative path. A version segment at
+the end of the endpoint is not repeated, and an absolute `path` URL is used as
+it is. A model can override the protocol; it then takes that protocol's path,
+authentication style and headers, and explicit `headers` override by name.
+
+`compat` adjusts the protocol for servers that differ:
+
+| `compat` field | Default | Meaning |
+|---|---|---|
+| `max_tokens_field` | `max_tokens` | `chat_completions`: name of the output-limit field, for example `max_completion_tokens`. |
+| `reasoning_field` | none | `chat_completions`: also send reasoning back under this field on assistant turns with tool calls. |
+| `stream_usage` | `true` | `chat_completions`: ask for usage in the stream. |
+| `prompt_cache_markers` | `true` | `anthropic_messages`: place cache breakpoints on the stable prefix. |
+
+Keys are held in a type whose `Debug` output is redacted, and they are removed
+from every error Bricks produces, including an API error body that echoes them.
+
+## Reasoning profiles
+
+A reasoning profile is an **id**, a **label** and **parameters**. Bricks keeps
+no list of levels: the ids are yours, and the server decides whether a value is
+valid.
+
+```toml
+[providers.models.reasoning]
+default = "approfondi"
+
+[[providers.models.reasoning.profiles]]
+id = "approfondi"
+label = "Approfondi"
+parameters = { reasoning = { effort = "high" } }
+remove = ["/temperature"]
+```
+
+* The id is never sent under its local name: only `parameters` reach the server.
+* `profiles = []` exposes no choice for that model.
+* A profile is selected with `Agent::builder().reasoning_profile(id)`, with a
+  per-request option, or with `provider().reasoning_profile(id)`. Without a
+  choice, the model's `default` applies. An unknown id is an error that lists
+  the available ids; it is never replaced silently.
+* Protected fields (model, messages, system prompt, tools, tool choice,
+  streaming control) cannot be set or removed by `parameters`.
+
+## Capabilities
+
+The capabilities of a request are the ones the model declares **and** the
+adapter can transport. A request that needs anything else fails with
+`Unsupported`, naming the model and the block, before anything is sent. No
+attachment is dropped or converted silently.
+
+| Input | `chat_completions` | `responses` | `anthropic_messages` |
+|---|---|---|---|
+| text | yes | yes | yes |
+| image | data, URL | data, URL, file id | data, URL, file id |
+| audio | data (`wav`, `mp3`) | no | no |
+| video | no | no | no |
+| document | data, file id | data, URL, file id | data (`application/pdf`, `text/plain`), URL, file id |
+
+Model-native output is text only. Tool calls are carried by every adapter.
+
+## Limits and counting
+
+A request is checked against the prompt budget before it is sent. When a model
+has no `context_window_tokens`, the input and output limits apply separately,
+and the status says so. A server counting endpoint is used only when the model
+configures it:
+
+```toml
+[providers.models.token_counting]   # opt-in
+# path = "messages/count_tokens"    # default: the protocol's documented route
+```
+
+It is accepted for `anthropic_messages` and `responses`, which document a
+counting route, and refused at load time for `chat_completions`.
+
+## Retry-After budget
+
+The runner retries a retryable error up to five times, waiting the local backoff
+(1, 2, 4, 8, 16 s, with jitter) or the server's `Retry-After` when that is
+longer. A `Retry-After` longer than `[agent] retry_after_max_wait_ms` (default
+`60000`; `0` never waits for one) is not waited for: no retry is sent, and the
+run fails at once with a message that names that key.
+
+This budget belongs to the agent. It is not `[web.search] max_retry_wait_ms`,
+which bounds only the single rate-limit wait of a web-search provider.
+
+## Prices and usage
+
+* Prices are exact decimals in **USD per 1,000,000 tokens**: `input` (uncached),
+  `output`, `cache_read`, and optionally `cache_write`. Named alternative tariffs
+  live under `pricing.variants.<name>`, and each one is complete.
+* An absent price means **unknown, never free**. A cost is estimated only for the
+  categories whose counter and price are both known; otherwise the estimate says
+  it is partial and lists what it could not price. With no known price there is
+  no estimate at all.
+* `input_tokens` is always the uncached prompt; cache reads and writes are
+  counted apart. `output_tokens` includes reasoning tokens.
+* No price list or catalogue is ever downloaded.
+
+## Verification status
+
+The adapters are tested against scripted servers, with no paid call: endpoint
+assembly, the three request formats, streamed and non-streaming responses,
+errors, reasoning merge and protected fields, refused modalities, limits and
+costs.
+
+They are **not** verified against the real vendor APIs, with their quirks and
+rate limits. Run your own configuration against your own account before relying
+on it.
+
+## Migrating from the Cersei-era providers
+
+The old provider clients (`Anthropic`, `OpenAi`, `Gemini`, their `from_env`
+constructors, `Auth`, `from_model_string`, the `--model` aliases and the implicit
+`*_API_KEY` and `*_BASE_URL` variables) are removed. The migration table, with
+the new calls, is in [Migration to Bricks ADK](/docs/migration).

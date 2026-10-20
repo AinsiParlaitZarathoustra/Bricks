@@ -1,6 +1,6 @@
 ---
 title: "Compression Benchmarks"
-description: Real-provider token savings for cersei-compression — commands you can run locally plus the numbers we got on OpenAI and Google Gemini.
+description: Real-provider token savings for bricks-compression — commands you can run locally plus the numbers we got on OpenAI and Google Gemini.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -8,7 +8,7 @@ import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
 
 # Compression Benchmarks
 
-A live-LLM integration test ships with the SDK (`crates/cersei-agent/tests/e2e_live_compression.rs`). It runs the **same prompt, same tool, same fixture** twice — once with `CompressionLevel::Off`, once with `CompressionLevel::Aggressive` — and compares the provider-reported `input_tokens`. Off is a verified byte-for-byte passthrough, so the delta is the measured savings.
+A live-LLM integration test ships with the SDK (`crates/bricks-agent/tests/e2e_live_compression.rs`). It runs the **same prompt, same tool, same fixture** twice — once with `CompressionLevel::Off`, once with `CompressionLevel::Aggressive` — and compares the provider-reported `input_tokens`. Off is a verified byte-for-byte passthrough, so the delta is the measured savings.
 
 ## TL;DR
 
@@ -19,6 +19,10 @@ A live-LLM integration test ships with the SDK (`crates/cersei-agent/tests/e2e_l
 
 The test asserts `aggressive < off` and `savings ≥ 10%` on real provider bills. The numbers above were captured on 2026-04-20 with an earlier harness (`e2e_openai_compression`), which is no longer in the repository.
 
+<Callout type="warn">
+These figures were measured on 2026-04-20, before each `Bash` call ran in its own process (commit `4263cd9`). The tool output that reaches the compressor now comes through that path, so rerun the live test before quoting these numbers as current.
+</Callout>
+
 <Callout type="info">
 Savings ratios are **not fixed** — they depend on how much of the turn's context is tool output versus system prompt + tool schemas + assistant turns. OpenAI's `gpt-4o-mini` happened to loop on 13–15 tool calls (each re-paying schema tax), Gemini's `gemini-2.5-flash` made a single clean tool call, so Gemini's ratio is closer to the raw byte-level win.
 </Callout>
@@ -28,12 +32,12 @@ Savings ratios are **not fixed** — they depend on how much of the turn's conte
 Fast, deterministic, no API key needed. Run:
 
 ```bash
-cargo test -p cersei-compression
+cargo test -p bricks-compression
 ```
 
 The corpus tests check these properties:
 
-| Check | Test (`crates/cersei-compression/tests/corpus.rs`) |
+| Check | Test (`crates/bricks-compression/tests/corpus.rs`) |
 |---|---|
 | Every captured and reconstructed fixture keeps the lines a reader needs, names its saved original, and does not grow | `every_fixture_keeps_what_matters_and_names_its_original` |
 | `Off` returns ordinary outputs byte for byte | `off_level_is_exact_passthrough_for_ordinary_outputs` |
@@ -49,7 +53,7 @@ The live test is `#[ignore]` by default, so `cargo test --workspace` makes no pa
 <Tab value="OpenAI">
 ```bash
 BRICKS_LIVE_MODEL=<provider_id>/gpt-4o-mini \
-  cargo test -p cersei-agent --test e2e_live_compression \
+  cargo test -p bricks-agent --test e2e_live_compression \
     compression_reduces_the_real_token_bill \
     -- --ignored --nocapture
 ```
@@ -69,7 +73,7 @@ BRICKS_LIVE_MODEL=<provider_id>/gpt-4o-mini \
 <Tab value="Gemini">
 ```bash
 BRICKS_LIVE_MODEL=<provider_id>/gemini-2.5-flash \
-  cargo test -p cersei-agent --test e2e_live_compression \
+  cargo test -p bricks-agent --test e2e_live_compression \
     compression_reduces_the_real_token_bill \
     -- --ignored --nocapture
 ```
@@ -86,8 +90,8 @@ BRICKS_LIVE_MODEL=<provider_id>/gemini-2.5-flash \
 ── gemini compression saved 62.1% of input tokens (4490 → 1700) ──
 ```
 
-<Callout type="warn">
-`gemini-1.5-flash` has been removed from the `generateContent` v1beta endpoint. The recorded run used `gemini-2.5-flash`; if you reuse the harness, make sure the model in your `providers.toml` is a current Gemini flash model.
+<Callout type="info">
+The recorded run used `gemini-2.5-flash`. Use a model that your provider currently serves in `providers.toml`.
 </Callout>
 </Tab>
 </Tabs>
@@ -96,18 +100,12 @@ The test runs one configured model per invocation, so run it once per provider.
 
 ## Intercept per-call compression logs
 
-Every compression call emits a `tracing::info!` event on the `cersei_compression` target. The live test installs a subscriber itself, so `--nocapture` surfaces the events. In your own binary:
-
-install a `tracing` subscriber filtered on `cersei_compression=info` (see
-the [overview](/docs/compression-overview)). The `bricks` binary installs no
-subscriber, so `RUST_LOG` has no effect on it. (The `abstract` CLI of the
-Cersei era had a `--compress` flag; Bricks sets the level with `[compression]
-level` in `bricks.toml`.)
+Every compression call emits a `tracing::info!` event on the `bricks_compression` target. In your own program, install a `tracing` subscriber filtered on `bricks_compression=info` (see the [overview](/docs/compression-overview)). The `bricks` binary installs no subscriber, so `RUST_LOG` has no effect on it. Bricks sets the level with `[compression] level` in `bricks.toml`.
 
 Sample line from the Gemini run:
 
 ```
-INFO cersei_compression: tool-output compressed
+INFO bricks_compression: tool-output compressed
   tool="Bash" level=aggressive strategy="shell" detail="cargo-test"
   before_bytes=2893 after_bytes=1565
   before_lines=76 after_lines=30
@@ -132,7 +130,7 @@ For the OpenAI run:
 
 ## Regression guard
 
-`cersei-compression/tests/corpus.rs::off_level_is_exact_passthrough_for_ordinary_outputs` checks **byte-for-byte identity** when the level is `Off`. This makes the feature opt-in: users who don't change their builder chain, their CLI flags, or their config file see no difference.
+`bricks-compression/tests/corpus.rs::off_level_is_exact_passthrough_for_ordinary_outputs` checks **byte-for-byte identity** when the level is `Off`. This makes the feature opt-in: users who don't change their builder chain, their CLI flags, or their config file see no difference.
 
 ## Hardware + reproducibility caveats
 
@@ -142,7 +140,7 @@ For the OpenAI run:
 
 ## Reference
 
-- Source: `crates/cersei-compression/`
-- Live test: `crates/cersei-agent/tests/e2e_live_compression.rs`
-- Rule files: `crates/cersei-compression/src/rules/*.toml`
-- Integration point: `crates/cersei-agent/src/runner.rs`, where each tool result goes through `agent.compressor.process` before the tool-result budget (`apply_tool_result_budget`) is applied.
+- Source: `crates/bricks-compression/`
+- Live test: `crates/bricks-agent/tests/e2e_live_compression.rs`
+- Rule files: `crates/bricks-compression/src/rules/*.toml`
+- Integration point: `crates/bricks-agent/src/runner.rs`, where each tool result goes through `agent.compressor.process` before the tool-result budget (`apply_tool_result_budget`) is applied.

@@ -1,17 +1,17 @@
-//! The engine against the scripted catalog of `cersei_agent`: a real
+//! The engine against the scripted catalog of `bricks_agent`: a real
 //! controller, real stores, no provider.
 
 use super::AppState;
 use super::live::{OpenSession, files_dir, ingest, spawn_consumer};
 use crate::contract::{DesktopEvent, IpcErrorCode, OpenedSession, RunLabel, SearchMatch};
-use cersei_agent::BricksConfig;
-use cersei_agent::control::scripted::{Reply, Script, ScriptedCatalog};
-use cersei_agent::control::{
-    ApprovalRequest, Command, Controller, EngineConfig, Envelope, Event, OpenOptions, Prompt,
+use bricks_agent::BricksConfig;
+use bricks_agent::control::scripted::{Reply, Script, ScriptedCatalog};
+use bricks_agent::control::{
+    Command, Controller, EngineConfig, Envelope, Event, OpenOptions, Prompt,
     SCHEMA_VERSION, SessionChoice, SessionMeta, SkillsSetup, WrittenFile,
 };
-use cersei_tools::preview::{ChangeKind, ChangePreview, FileChange};
-use cersei_types::{Message, Role};
+use bricks_tools::preview::ChangeKind;
+use bricks_types::{Message, Role};
 use crate::services::conversations::message_text;
 use std::path::Path;
 use std::sync::Arc;
@@ -80,6 +80,7 @@ async fn open_scripted_full(
         0,
         0,
         Arc::clone(&state.run_labels),
+        Arc::clone(&state.run_records),
     );
     while let Some(env) = stream.try_next() {
         ingest(&state.hub, &entry, env);
@@ -230,7 +231,7 @@ async fn search_finds_titles_and_message_text_of_stored_sessions() {
 }
 
 #[tokio::test]
-async fn an_applied_edit_is_journaled_once_with_the_patch_it_was_previewed_with() {
+async fn an_applied_edit_is_journaled_once_with_the_patch_the_engine_wrote() {
     let home = tempfile::tempdir().unwrap();
     let wd_dir = tempfile::tempdir().unwrap();
     let wd = std::fs::canonicalize(wd_dir.path()).unwrap();
@@ -246,28 +247,8 @@ async fn an_applied_edit_is_journaled_once_with_the_patch_it_was_previewed_with(
         at: 1_000 + seq as i64,
         event,
     };
-    let preview = ChangePreview {
-        files: vec![FileChange {
-            path: "a.txt".into(),
-            absolute: wd.join("a.txt"),
-            kind: ChangeKind::Modify,
-            before_sha256: None,
-            diff: "@@ -1 +1 @@\n-a\n+b\n".into(),
-            added: 1,
-            removed: 1,
-        }],
-        refusal: None,
-    };
-    let approval = ApprovalRequest {
-        approval_id: "ap_1".into(),
-        tool_call_id: "call_1".into(),
-        tool: "Write".into(),
-        level: "write".into(),
-        description: "écrire a.txt".into(),
-        input: serde_json::json!({ "file_path": "a.txt" }),
-        preview: Some(preview),
-        agent_id: None,
-    };
+    // No approval was shown for this edit (an auto-approved tool): the patch
+    // the engine wrote is the only one there is.
     let applied = Event::EditApplied {
         tool_call_id: "call_1".into(),
         tool: "Write".into(),
@@ -277,11 +258,13 @@ async fn an_applied_edit_is_journaled_once_with_the_patch_it_was_previewed_with(
             added: 1,
             removed: 1,
             binary: false,
+            absolute: Some(wd.join("a.txt").display().to_string()),
+            patch: Some("@@ -1 +1 @@\n-a\n+b\n".into()),
+            patch_truncated: false,
         }],
         agent_id: None,
         changeset_id: None,
     };
-    ingest(&state.hub, &entry, envelope(1, Event::ApprovalRequested { approval }));
     ingest(&state.hub, &entry, envelope(2, applied.clone()));
     // The same change reported again (a replayed event) is not a second entry.
     ingest(&state.hub, &entry, envelope(3, applied));
@@ -347,7 +330,7 @@ async fn a_run_after_its_model_was_removed_is_refused_with_the_reason() {
     use crate::commands::providers::{apply_edit, current_file};
     use crate::engine::catalog::DesktopCatalog;
     use crate::services::providers_toml::{Edit, fixtures::PROVIDERS};
-    use cersei_agent::control::{Activity, ModelCatalog, Prompt};
+    use bricks_agent::control::{Activity, ModelCatalog, Prompt};
 
     let dir = tempfile::tempdir().unwrap();
     let providers = dir.path().join("providers.toml");
@@ -681,6 +664,38 @@ async fn deleting_a_session_removes_its_labels() {
         user_index: None,
     };
     assert!(!state.run_labels.append(&id, &late).unwrap(), "a late label is not kept");
+    assert!(!file.exists(), "and does not recreate the file");
+}
+
+/// A finished run is kept with its answer and the place of its message; it is
+/// listed with the session when it is opened again, and removed with it.
+#[tokio::test]
+async fn a_finished_run_keeps_its_answer_and_goes_with_its_session() {
+    let home = tempfile::tempdir().unwrap();
+    let wd_dir = tempfile::tempdir().unwrap();
+    let wd = std::fs::canonicalize(wd_dir.path()).unwrap();
+    let (state, project) = state_with_project(home.path(), &wd);
+    let entry = open_scripted(&state, &project, &wd, Script::new(vec![Reply::text("Réponse finale")])).await;
+    let id = entry.session_id.clone();
+    state.send_command(&id, submit_json("bonjour"), None).await.expect("submit");
+    run_consumed(&entry, None).await;
+    let records = Arc::clone(&state.run_records);
+    let key = id.clone();
+    eventually("the run record", || records.list(&key).map(|l| l.len() == 1).unwrap_or(false)).await;
+
+    let stored = state.run_records.list(&id).unwrap();
+    assert_eq!(stored[0].assistant_text, "Réponse finale");
+    assert_eq!(stored[0].user_index, Some(0), "the run added the first user message");
+    assert_eq!(stored[0].outcome.as_deref(), Some("succeeded"));
+    assert!(stored[0].finished_at.is_some());
+    assert_eq!(entry.opened().await.run_records, stored, "the view of the session carries it");
+
+    let file = home.path().join("desktop").join("run-records").join(format!("{id}.jsonl"));
+    assert!(file.exists(), "stored where the desktop keeps it");
+    state.delete_session(&id).await.expect("delete");
+    assert!(!file.exists(), "removed with the session");
+    let late = state.run_records.append(&id, &stored[0]).unwrap();
+    assert!(!late, "a late record is not kept");
     assert!(!file.exists(), "and does not recreate the file");
 }
 

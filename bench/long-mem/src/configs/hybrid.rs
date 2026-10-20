@@ -16,13 +16,13 @@ use crate::configs::{Config, DEFAULT_TOP_K};
 use crate::dataset::Question;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use cersei_embeddings::{EmbeddingProvider, Metric};
-use cersei_memory::Memory;
-use cersei_memory::embedding_memory::EmbeddingMemory;
-use cersei_memory::graph::GraphMemory;
-use cersei_memory::memdir::MemoryType;
-use cersei_provider::{CompletionRequest, Provider};
-use cersei_types::Message;
+use bricks_embeddings::{EmbeddingProvider, Metric};
+use bricks_memory::Memory;
+use bricks_memory::embedding_memory::EmbeddingMemory;
+use bricks_memory::graph::GraphMemory;
+use bricks_memory::memdir::MemoryType;
+use bricks_provider::{CompletionRequest, Provider};
+use bricks_types::Message;
 use std::collections::HashMap;
 
 /// RRF constant. 60 is the Elasticsearch/pyserini default; robust across a

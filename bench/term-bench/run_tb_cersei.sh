@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ─── cersei-tbench (purpose-built AgentRL agent) on Terminal-Bench 4.0 ─────
+# ─── bricks-tbench (purpose-built AgentRL agent) on Terminal-Bench 4.0 ─────
 #
 # Usage:
 #   ./run_tb_cersei.sh                       # full dataset, default model vertex/claude-opus-4-8, Daytona
@@ -19,7 +19,7 @@ MODEL="${MODEL:-vertex/claude-opus-4-8}"
 CONCURRENT="${CONCURRENT:-12}"
 DATASET="terminal-bench@4.0.0"
 OUTPUT_DIR="$SCRIPT_DIR/tb-results"
-JOB_NAME="cersei-tbench-$(date +%Y%m%d-%H%M%S)"
+JOB_NAME="bricks-tbench-$(date +%Y%m%d-%H%M%S)"
 TIMEOUT_MULT="${TIMEOUT_MULT:-2.0}"
 ATTEMPTS="${ATTEMPTS:-1}"
 USE_DAYTONA=true
@@ -47,7 +47,7 @@ done
 CYAN='\033[0;36m'; GREEN='\033[0;32m'; RED='\033[0;31m'; DIM='\033[0;90m'; BOLD='\033[1m'; RESET='\033[0m'
 info(){ echo -e "${CYAN}▸${RESET} $*"; }; pass(){ echo -e "${GREEN}✓${RESET} $*"; }; fail(){ echo -e "${RED}✗${RESET} $*"; }
 
-echo ""; echo -e "${BOLD}cersei-tbench × Terminal-Bench 4.0${RESET}"
+echo ""; echo -e "${BOLD}bricks-tbench × Terminal-Bench 4.0${RESET}"
 command -v uv &>/dev/null && pass "uv" || { fail "'uv' not found"; exit 1; }
 [[ -f "$SCRIPT_DIR/tbench_agent.py" ]] && pass "Adapter" || { fail "tbench_agent.py missing"; exit 1; }
 [[ -f "${TBENCH_AGENT_BINARY_AMD64:-$SCRIPT_DIR/tbench-agent-linux-amd64}" || -f "${TBENCH_AGENT_BINARY_ARM64:-$SCRIPT_DIR/tbench-agent-linux-arm64}" ]] \

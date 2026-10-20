@@ -1,94 +1,66 @@
-# Cersei Benchmark Suite
+# Bricks Benchmark Suite
 
-Measures raw tool I/O performance, memory operations, and token consumption for the Cersei SDK. Compares against native Claude Code CLI.
+Measures raw tool I/O performance and memory operations of the Bricks ADK. The
+standalone suite is a separate package, so its build settings can differ from the
+workspace's.
 
 ## Run
 
 ```bash
-# Standalone benchmark (100 iterations, Markdown output)
+# Standalone suite (100 iterations per tool, Markdown output), from this folder
 cd examples/benchmark
 cargo run --release
 
-# Quick benchmark via example (50 iterations)
-cd src-cersei
-cargo run --example benchmark_io --release
+# Quick version as an example of the bricks package (50 iterations), from the repository root
+cargo run -p bricks --example benchmark_io --release
 
-# Token/cost usage tracking
-cargo run --example usage_report --release
+# Token and cost usage report, from the repository root
+cargo run -p bricks --example usage_report --release
 ```
 
-## What It Measures
+## What it measures
 
 ### Tool I/O (per-tool dispatch speed)
 
 | Test | Description |
 |------|-------------|
-| **Read** | Read a 50KB file with line-number formatting |
-| **Write** | Write a 1KB file to disk |
-| **Edit** | String replacement in a file (read + find + replace + write) |
+| **Read** | Read a 50 KB file with line-number formatting |
+| **Write** | Write a 1 KB file to disk |
+| **Edit** | Replace repeated text in a file (read, find, replace, write) |
 | **Glob** | Find `**/*.rs` files across 20 files |
-| **Grep** | Regex search across 20 files via `rg` or `grep` |
-| **Bash** | Spawn `sh -c "echo hello && ls -la"` and capture output |
+| **Grep** | Regex search across 20 files, through `rg` or `grep` |
+| **Bash** | Run `sh -c "echo hello && ls -la"` and capture the output |
 
 ### Memory I/O
 
 | Test | Description |
 |------|-------------|
 | **MEMORY.md load** | Load and parse the memory index file |
-| **Scan 100 files** | Recursive .md scan with frontmatter parsing |
-| **Session write** | Append one JSONL entry to transcript |
-| **Session load** | Two-pass load of 100 entries with tombstone filtering |
+| **Scan 100 files** | Recursive scan of `.md` files with frontmatter parsing |
+| **Session write** | Append one JSONL entry to a transcript |
+| **Session load** | Two-pass load of 100 entries, with tombstone filtering |
 | **Recall** | Text-match search across 100 memory files |
 
 ### Baselines
 
 | Test | Description |
 |------|-------------|
-| **std::fs::read** | Raw stdlib file read (no JSON, no formatting) |
-| **std::fs::write** | Raw stdlib file write |
-| **claude --help** | Claude Code CLI startup overhead |
+| **std::fs::read** | Raw standard-library file read |
+| **std::fs::write** | Raw standard-library file write |
 
-## Latest Results
+## Results
 
-**Machine:** Apple Silicon (macOS), release build
+The figures are from the benchmark report of **8 October 2026**, which is kept in the repository as `docs/benchmarks-bricks-2026-10-08.md`. They were measured on Bricks 0.4.6 at commit `dee981e`, on Apple A18 Pro with macOS 27.2, in release mode.
 
-### Tool I/O
+| Tool | Mean | Min | Max |
+|------|-----:|----:|----:|
+| Read | 0.118 ms | 0.111 ms | 0.378 ms |
+| Write | 0.050 ms | 0.037 ms | 0.290 ms |
+| Edit | 0.759 ms | 0.700 ms | 1.830 ms |
+| Glob | 0.066 ms | 0.046 ms | 0.230 ms |
+| Grep | 2.017 ms | 1.365 ms | 4.765 ms |
+| Bash | 39.695 ms | 35.799 ms | 84.883 ms |
 
-| Tool | Avg | Min | Max |
-|------|-----|-----|-----|
-| Edit | 0.04ms | 0.02ms | 0.05ms |
-| Glob | 0.05ms | 0.05ms | 0.07ms |
-| Write | 0.09ms | 0.07ms | 0.11ms |
-| Read | 0.09ms | 0.08ms | 0.11ms |
-| Grep | 5.85ms | 5.34ms | 8.51ms |
-| Bash | 15.64ms | 14.50ms | 16.19ms |
+The report predates the change that runs each `Bash` call in its own process (commit `4263cd9`), so the Bash figure does not describe the current code. For the memory operations, see the same report.
 
-### Memory I/O
-
-| Operation | Speed |
-|-----------|-------|
-| MEMORY.md load | 12μs |
-| Session write | 51μs/entry |
-| Session load (100 entries) | 155μs |
-| Scan 100 files | 1,378μs |
-| Recall from 100 files | 1,482μs |
-
-### vs Claude Code CLI
-
-| | Cersei | Claude CLI | Ratio |
-|---|--------|------------|-------|
-| Tool dispatch | 0.09ms | — | — |
-| CLI startup | — | 323ms | — |
-| **Comparison** | **0.09ms** | **323ms** | **3,589x faster** |
-
-### Token Consumption (simulated 4-turn session)
-
-| Model | Input | Output | Cost |
-|-------|-------|--------|------|
-| Sonnet 4.6 | 11,901 | 2,110 | $0.067 |
-| Opus 4.6 | 11,901 | 2,110 | $0.337 |
-| Haiku 4.5 | 11,901 | 2,110 | $0.018 |
-
-## Output
-
-The benchmark outputs both human-readable tables and a copy-pasteable Markdown table section for documentation.
+Results depend on the machine, the file system and the other programs running. Compare runs made the same way.

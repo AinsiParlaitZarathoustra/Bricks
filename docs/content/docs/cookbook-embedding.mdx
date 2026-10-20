@@ -1,21 +1,30 @@
 ---
 title: "Cookbook: Embedding in Apps"
-description: Embed Cersei agents inside existing Rust applications.
+description: Embed Bricks ADK agents inside existing Rust applications — a Tauri command, an Actix-web endpoint, streamed events over a WebSocket, a custom memory backend, and the extension points.
 ---
+
+import { Callout } from 'fumadocs-ui/components/callout';
 
 # Cookbook: Embedding Agents
 
-## In a Tauri Desktop App
+These recipes call the `bricks` facade. The provider is named by a `provider_id/model_id` selection in `~/.bricks/providers.toml`; `my-provider/my-model` below stands for one of yours.
+
+## In a Tauri desktop app
+
+A Tauri command that answers a prompt with read-only filesystem tools:
 
 ```rust
-use cersei::prelude::*;
-use tauri::Manager;
+use bricks::prelude::*;
+use bricks::tools::filesystem;
 
 #[tauri::command]
-async fn ask_agent(prompt: String) -> Result<String, String> {
+async fn ask_agent(prompt: String) -> std::result::Result<String, String> {
+    let provider = bricks::provider_from_config(None, "my-provider/my-model")
+        .map_err(|e| e.to_string())?;
+
     let output = Agent::builder()
-        .provider(Anthropic::from_env().map_err(|e| e.to_string())?)
-        .tools(cersei::tools::filesystem())
+        .provider(provider)
+        .tools(filesystem())
         .permission_policy(AllowReadOnly)
         .run_with(&prompt)
         .await
@@ -25,15 +34,16 @@ async fn ask_agent(prompt: String) -> Result<String, String> {
 }
 ```
 
-## In an Actix-web Server
+## In an Actix-web server
+
+The state keeps the selection, not a provider: each request builds its own provider, so no state is shared between requests.
 
 ```rust
 use actix_web::{web, App, HttpResponse, HttpServer};
-use cersei::prelude::*;
-use std::sync::Arc;
+use bricks::prelude::*;
 
 struct AppState {
-    provider: Arc<dyn Provider>,
+    selection: String,   // "provider_id/model_id"
 }
 
 async fn agent_endpoint(
@@ -41,9 +51,14 @@ async fn agent_endpoint(
     state: web::Data<AppState>,
 ) -> HttpResponse {
     let prompt = body["prompt"].as_str().unwrap_or("");
+    let provider = match bricks::provider_from_config(None, &state.selection) {
+        Ok(p) => p,
+        Err(e) => return HttpResponse::InternalServerError().json(serde_json::json!({ "error": e.to_string() })),
+    };
+
     let output = Agent::builder()
-        .provider(Arc::clone(&state.provider))
-        .tools(cersei::tools::coding())
+        .provider(provider)
+        .tools(bricks::tools::coding())
         .permission_policy(AllowReadOnly)
         .run_with(prompt)
         .await;
@@ -55,18 +70,20 @@ async fn agent_endpoint(
 }
 ```
 
-## Streaming to WebSocket
+## Streaming events to a WebSocket
+
+`enable_broadcast(capacity)` before `build()` makes the agent publish its events. `subscribe()` returns a receiver, or `None` when broadcast is not enabled.
 
 ```rust
 let agent = Agent::builder()
-    .provider(Anthropic::from_env()?)
-    .tools(cersei::tools::coding())
+    .provider(bricks::provider_from_config(None, "my-provider/my-model")?)
+    .tools(bricks::tools::coding())
     .enable_broadcast(256)
     .build()?;
 
-let mut rx = agent.subscribe().unwrap();
+let mut rx = agent.subscribe().expect("broadcast is enabled");
 
-// Forward events to WebSocket
+// Forward events to the client. `ws_send` stands for your WebSocket write.
 tokio::spawn(async move {
     while let Ok(event) = rx.recv().await {
         match event {
@@ -81,10 +98,16 @@ tokio::spawn(async move {
 agent.run("Fix the tests").await?;
 ```
 
-## With Custom Memory Backend
+## A custom memory backend
+
+`Memory` is the trait behind conversation storage. Five methods are required: `store`, `load`, `search`, `sessions` and `delete`. The others have defaults. The sketch below stores each session as one JSON document in PostgreSQL (`sqlx`), and leaves `search` and `sessions` to you.
 
 ```rust
-struct PostgresMemory { pool: PgPool }
+use async_trait::async_trait;
+use bricks::memory::Memory;
+use bricks::types::{Message, Result};
+
+struct PostgresMemory { pool: sqlx::PgPool }
 
 #[async_trait]
 impl Memory for PostgresMemory {
@@ -109,20 +132,25 @@ impl Memory for PostgresMemory {
         }
     }
 
-    // ... implement search, sessions, delete
+    // `search`, `sessions` and `delete` are required too; see the Memory trait
+    // for their signatures and what they must return.
 }
 ```
 
-## Extension Points
+<Callout type="info">
+This is a sketch: the `?` conversions from `sqlx` and `serde_json` errors into the crate's error type, and the three remaining methods, are yours to write. The trait is in `bricks-memory`.
+</Callout>
+
+## Extension points
 
 | What | How |
 |------|-----|
 | Custom provider | `impl Provider` |
 | Custom tool | `#[derive(Tool)]` or `impl Tool` |
 | Custom permissions | `impl PermissionPolicy` |
-| Custom memory | `impl Memory` |
+| Custom memory | `impl Memory` (see above) |
 | Custom hooks | `impl Hook` |
 | Custom reporters | `impl Reporter` |
-| MCP servers | `McpServerConfig` |
-| Skills | `SKILL.md` in `.agents/skills/` or `.claude/skills/` (`AgentBuilder::skills`) |
-| Graph memory | `features = ["graph"]` |
+| MCP servers | `bricks::mcp::McpServerConfig`, in the agent's configuration |
+| Skills | `SKILL.md` folders read by the skill loader, and `AgentBuilder::skills` |
+| Graph memory | the `graph` feature of `bricks-memory` (not forwarded by the `bricks` facade) |

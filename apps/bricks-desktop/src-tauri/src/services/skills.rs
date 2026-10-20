@@ -10,10 +10,10 @@
 
 use crate::contract::{IpcErrorCode, IpcResult, SkillSourceView, SkillsCatalog};
 use crate::services::error;
+use bricks_agent::control::{SkillListing, SkillsListing};
 use bricks_skills::{
     CandidateState, Registry, Scope, SkillAccess, SkillRoot, SkillsService, Trust, standard_roots,
 };
-use cersei_agent::control::{SkillListing, SkillsListing};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

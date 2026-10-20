@@ -2,7 +2,7 @@
 
 /**
  * One entry of the shared `/` command registry
- * (`cersei_agent::control::slash`).
+ * (`bricks_agent::control::slash`).
  */
 export type SlashCommandInfo = { name: string, aliases: Array<string>, 
 /**

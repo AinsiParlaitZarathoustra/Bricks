@@ -1,9 +1,9 @@
-// Engine protocol types, mirroring `cersei_agent::control::protocol`
+// Engine protocol types, mirroring `bricks_agent::control::protocol`
 // (schema 5, see docs/cli.md). These are the JSON shapes the engine
 // serializes; the desktop bridge forwards them unchanged.
 // Owner: orchestrator. Keep in sync with protocol.rs.
 
-export const SCHEMA_VERSION = 5
+export const SCHEMA_VERSION = 6
 
 export type RunOutcome = 'succeeded' | 'incomplete' | 'failed' | 'cancelled'
 export type FailureKind = 'approval_required' | 'error'
@@ -136,11 +136,19 @@ export interface AttachmentInfo {
 }
 
 export interface WrittenFile {
+  /** The path as the change names it. */
   path: string
   kind: ChangeKind
+  /** Line counts of the patch; zero for a binary file. */
   added: number
   removed: number
   binary?: boolean
+  /** The file written, absolute (absent for a ChangeSet, or an older event). */
+  absolute?: string
+  /** Unified diff of the entry approved and written; absent for a binary file. */
+  patch?: string
+  /** The patch is cut at 512 KiB. */
+  patch_truncated?: boolean
 }
 
 export interface Choice {
@@ -309,6 +317,10 @@ export type Event =
       is_error: boolean
       duration_ms: number
       output: string
+      /** `false`: the call never ran (refused, denied, blocked). Absent: it ran. */
+      executed?: boolean
+      /** `success`, `failure`, `timed_out`, `cancelled` or `running`. */
+      status?: string
     }
   | { type: 'approval_requested'; approval: ApprovalRequest }
   | {
@@ -393,6 +405,11 @@ export type Event =
       name: string
       is_error: boolean
       duration_ms: number
+      executed?: boolean
+      status?: string
+      /** The output, cut to 64 KiB (`output_truncated`). Absent for older events. */
+      output?: string
+      output_truncated?: boolean
     }
   | { type: 'agent_finished'; result: AgentResult }
   | { type: 'changes_ready'; changeset: ChangeSet }

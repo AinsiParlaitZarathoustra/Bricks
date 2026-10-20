@@ -1,179 +1,55 @@
 ---
-title: Cersei vs Other Agent SDKs
-description: How Cersei compares to other agent SDKs for building coding agents.
+title: Comparisons
+description: Where Bricks ADK fits, what it provides, and what it does not provide yet.
 ---
 
-# Cersei vs Other Agent SDKs
+# Comparisons
 
-Looking for the **general-purpose agent framework** comparison (Agno, LangGraph, CrewAI, PydanticAI)? The five-axis showdown — instantiation, per-agent memory, max concurrent agents, graph memory recall under load, semantic search under load — is at **[Cersei vs Agno / LangGraph / CrewAI / PydanticAI](/docs/bench-vs-agents)**. This page covers the coding-agent-focused comparison against Claude Code and Codex.
+This page describes Bricks as it is. It does not compare Bricks with other
+products. The measurements recorded so far, in `docs/benchmarks-bricks-2026-10-08.md`
+in the repository, cover local tools and engine overhead on one machine. They
+do not measure coding quality with a live model, and they are not a comparison
+with other products.
 
-## Cersei vs Claude Code SDK
+## What Bricks provides
 
-Claude Code's Agent SDK (part of the `@anthropic-ai/claude-code` package) provides a way to embed Claude Code's agent capabilities in your application. Here's how it compares to Cersei:
+- **Rust crates to embed.** An agent loop, providers, tools, approvals, context
+  management, sessions, memory, skills and MCP, as crates you can depend on
+  (see [Crate map](/docs/crate-map)).
+- **Providers from a file.** A model is `provider_id/model_id` in
+  `providers.toml`. There is no built-in catalogue, and no model is chosen by
+  name. Three wire protocols are supported.
+- **Tools you select.** The library lets an agent use any subset of the
+  built-in tools, or your own tools. The frontends give a session a fixed set,
+  described in the `docs/cli.md` of the repository.
+- **One approval policy.** The `[permissions]` section of `bricks.toml` applies
+  to every frontend. File changes are shown as a diff before they are written.
+- **A command for scripts and CI.** `bricks run --json` writes versioned JSONL
+  events, and each outcome has an exit code.
+- **A desktop application** on the same engine contract, for interactive work.
+- **Local sessions** under `~/.bricks/sessions`, resumable in their own folder
+  and with their own model.
 
-| Dimension | Cersei SDK | Claude Code SDK |
-|-----------|-----------|----------------|
-| **Language** | Rust (native binary) | TypeScript/Node.js |
-| **Provider Lock-in** | 15+ providers (Anthropic, OpenAI, Google, Groq, etc.) | Anthropic only |
-| **Tool System** | 35 built-in + custom `Tool` trait + MCP | Inherited from Claude Code |
-| **Memory** | Graph DB (Grafeo) + flat files + CLAUDE.md | Flat file CLAUDE.md only |
-| **Control** | Full: custom system prompt, tools, hooks, everything | Limited: prompt injection, some config |
-| **Streaming** | 26-variant event system with broadcast channels | Callback-based events |
-| **Binary Size** | Single static binary (~15MB) | Requires Node.js runtime (~100MB+) |
-| **Startup Time** | ~50ms | ~2s (Node.js cold start) |
-| **Tool Dispatch** | 0.02ms (Edit) to 17ms (Bash) | Depends on Node.js event loop |
-| **Memory Recall** | 98us (graph indexed) | File scan (varies) |
-| **LSP Integration** | Built-in cersei-lsp crate (13 servers) | Via MCP servers |
-| **Tree-sitter** | Built-in (5 languages + bash safety) | Not available |
-| **Sub-agents** | AgentTool with independent loops | Task tool |
-| **Auto-compact** | LLM summarization + snip fallback | Automatic |
-| **Session Persistence** | JSONL with auto-fork at 50MB | Managed internally |
-| **Hooks** | Pre/Post ToolUse, ModelTurn, Stop, Error | Limited lifecycle hooks |
-| **Permission System** | 6 levels + 5 TUI modes | Interactive/auto |
-| **Cost Tracking** | Per-message with model pricing | Basic token counting |
-| **TUI** | ratatui with side panel, themes, graph viz | Built-in (not customizable) |
+## When Bricks fits
 
-### When to Choose Cersei
+- You want an agent loop inside your own Rust application, with your own tools,
+  providers and event consumers.
+- You want one command for prompts in scripts and CI, with documented output.
+- You want the agent's model, limits and approvals to be files you review and
+  keep in the project.
 
-- You need **provider flexibility** (switch between GPT-5, Claude, Gemini, local models)
-- You want **full control** over every aspect: system prompt, tools, memory, permissions
-- You're building a **Rust application** and want native performance
-- You need **graph-based memory** with relationship tracking and confidence decay
-- You want **tree-sitter code intelligence** built into your agent
-- You're building a **custom CLI tool** or **embedding an agent** in a desktop app
+## What Bricks does not provide yet
 
-### When to Choose Claude Code SDK
+- **Validated platforms.** The tests have been run on macOS (arm64) only. Linux
+  and Windows have not been validated.
+- **MCP servers in the frontends.** The `bricks.toml` file does not configure
+  MCP servers yet, and `/mcp` says so. The library can add them with
+  `mcp_server`.
+- **A full tool set in the frontends.** A `bricks` session gets the coding
+  tools, the skill tool and the sub-agent tools. Planning, scheduling and the
+  task tools are available to a library user only.
+- **A model catalogue.** You declare each model and its limits yourself, and
+  the file is the only source of them.
 
-- You're already using **Claude Code** and want to extend it
-- You want the **quickest path** to a working agent with minimal configuration
-- Your application is **TypeScript/Node.js** based
-- You only need **Anthropic models**
-- You want Claude Code's existing **UX and polish** out of the box
-
-### Code Comparison
-
-**Cersei — Full control:**
-```rust
-let agent = Agent::builder()
-    .provider(cersei_provider::from_model_string("openai/gpt-5.3-chat-latest")?.0)
-    .tools(cersei_tools::all())
-    .system_prompt("You are a Rust expert. Focus on performance.")
-    .thinking_budget(8000)
-    .temperature(0.3)
-    .auto_compact(true)
-    .hook(MyCustomHook)
-    .mcp_server(McpServerConfig::stdio("db", "my-db-server", &[]))
-    .memory(MemoryManager::new(".").with_graph(&graph_path)?)
-    .permission_policy(MyCustomPolicy)
-    .working_dir(".")
-    .build()?;
-```
-
-**Claude Code SDK — Quick start:**
-```typescript
-import { createAgent } from "@anthropic-ai/claude-code";
-
-const agent = createAgent({
-  prompt: "You are a Rust expert",
-  allowedTools: ["read", "write", "bash"],
-});
-```
-
-Cersei requires more setup but gives you control over every aspect. Claude Code SDK is simpler but constrains you to its architecture.
-
----
-
-## Cersei vs Pydantic AI / LangChain
-
-| Dimension | Cersei | Pydantic AI | LangChain |
-|-----------|--------|-------------|-----------|
-| **Language** | Rust | Python | Python/JS |
-| **Focus** | Coding agents | Structured AI apps | General AI chains |
-| **Tool System** | Trait-based, async, permission levels | Function decorators | Tool classes |
-| **Memory** | Graph DB + flat files | External (Redis, etc.) | VectorStore abstractions |
-| **Performance** | Native binary, sub-ms dispatch | Python overhead | Python overhead |
-| **Type Safety** | Compile-time (Rust) | Runtime (Pydantic) | Runtime |
-| **Agent Loop** | Built-in agentic loop with events | Manual or via agents | AgentExecutor |
-| **Streaming** | Native SSE parsing, 26 event types | Via callbacks | Via callbacks |
-| **Code Intelligence** | LSP + tree-sitter built-in | Not available | Not available |
-| **Binary Distribution** | Single static binary | Requires Python + deps | Requires Python + deps |
-
-### When to Choose Cersei
-
-- Performance matters (sub-millisecond tool dispatch)
-- You want a single binary with no runtime dependencies
-- You need built-in code intelligence (LSP, tree-sitter)
-- You're building a CLI tool or desktop application
-- Type safety and compile-time guarantees are important
-
-### When to Choose Python SDKs
-
-- Your team is Python-first
-- You need access to Python ML libraries (numpy, pandas, transformers)
-- You're prototyping and want maximum iteration speed
-- You need the Python ecosystem (thousands of LangChain integrations)
-
----
-
-## Feature Matrix
-
-| Feature | Cersei | Claude Code SDK | Pydantic AI | LangChain |
-|---------|--------|----------------|-------------|-----------|
-| Multi-provider | 15+ | 1 (Anthropic) | Multiple | Multiple |
-| Native binary | Yes | No | No | No |
-| Graph memory | Yes | No | No | No |
-| Tree-sitter | Yes | No | No | No |
-| LSP integration | Yes | Via MCP | No | No |
-| Sub-agents | Yes | Yes | No | Yes |
-| Auto-compact | Yes | Yes | No | No |
-| Hooks/middleware | Yes | Limited | Yes | Yes |
-| MCP support | Yes | Yes | No | No |
-| Permission system | 6 levels | 2 levels | No | No |
-| Session persistence | JSONL + auto-fork | Internal | External | External |
-| TUI framework | ratatui | Built-in | No | No |
-| Cost tracking | Per-model pricing | Basic | No | Via callbacks |
-| Bash safety | tree-sitter AST | No | No | No |
-| File undo/snapshots | Yes | Yes | No | No |
-
----
-
-## Cersei vs General Agent Frameworks (Agno, PydanticAI, LangGraph, CrewAI)
-
-Every number here is measured end-to-end on Apple M1 Pro via [`bench/general-agents/`](https://github.com/pacifio/cersei/tree/main/bench/general-agents). See [bench-vs-agents](/docs/bench-vs-agents) for methodology, caveats, and reproduction steps.
-
-### Instantiation — μs per Agent.build()
-
-<AgentInstantiationChart />
-
-### Per-Agent Memory
-
-<PerAgentMemoryChart />
-
-### Capacity — RSS vs concurrent live agents
-
-<MaxConcurrentChart />
-
-### At a glance
-
-| | Cersei | Agno | PydanticAI | LangGraph | CrewAI |
-|---|------:|-----:|-----------:|----------:|-------:|
-| Version | 0.1.6-patch.2 | 2.5.17 | 1.22.0 | 1.1.8 | 1.14.2 |
-| Instantiation p50 | **7.12 μs** | 6.50 μs | 219 μs | 5 536 μs | 28 509 μs |
-| Per-agent memory | **704 B** | 5.8 KiB | 8.7 KiB | 30.2 KiB | 17.7 KiB |
-| Wall to build 500 | **4.4 ms** | 13.5 ms | 125 ms | 2 246 ms | 50 697 ms |
-| RSS @ 500 agents | **8.5 MB** | 82 MB | 123 MB | 193 MB | 1 739 MB |
-| Graph memory in-process | **Yes** (Grafeo) | No | No | No | No |
-| Semantic search in-process | **Yes** (usearch) | No | No | No | No |
-
-### When to choose Cersei over the Python stack
-
-- **You need to run thousands of concurrent agents on one host.** Memory per agent decides your ceiling. Cersei is 8–44× tighter than anything in Python.
-- **You want graph memory or semantic search in-process.** The Python frameworks do not ship either. Bolting on a vector DB means network hops, serialization, and a second runtime to operate.
-- **You are paying for the GIL**. Any real concurrency story in Python either runs multiple processes (big memory tax) or wraps blocking work in asyncio (CPU-bound sections still serialize). Cersei + tokio uses every core natively.
-- **You want a single static binary at the edge.** Abstract is a 15 MB Rust binary. Agno/PydanticAI/LangGraph/CrewAI ship ~50+ Python deps and a runtime.
-
-### When to prefer Agno or PydanticAI
-
-- **You're already deep in a Python ML stack** and the 8–12× memory hit is acceptable for your fleet size.
-- **You need type-driven structured output with Pydantic validators at the core** — PydanticAI is purpose-built for that.
-- **Your team can't take on Rust.** Cersei exposes a C-ABI-free SDK that must be linked from Rust or called via a bin; there is no first-class Python binding yet.
+For changes since the Cersei names and behaviour, see the
+[migration guide](/docs/migration).

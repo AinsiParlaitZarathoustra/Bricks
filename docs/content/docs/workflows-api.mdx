@@ -1,6 +1,6 @@
 ---
 title: "Workflows API"
-description: API reference for cersei-workflows — the Step trait, the WorkflowDef IR, conditions, the registry, the builder, execution, events, and results.
+description: API reference for bricks-workflows — the Step trait, the WorkflowDef IR, conditions, the registry, the builder, execution, events, and results.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -8,11 +8,11 @@ import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
 
 # Workflows API
 
-Everything in `cersei-workflows`, grouped by module. Import the common types from the prelude:
+Everything in `bricks-workflows`, grouped by module. Import the common types from the prelude:
 
 ```rust
-use cersei::workflows::prelude::*;
-// or: use cersei_workflows::prelude::*;
+use bricks::workflows::prelude::*;
+// or: use bricks_workflows::prelude::*;
 ```
 
 ---
@@ -54,7 +54,7 @@ pub struct StepContext {
     pub run_id: String,
     pub state: Arc<Mutex<Value>>,        // shared, mutable workflow state
     pub events: mpsc::Sender<WorkflowEvent>,
-    pub extensions: Extensions,          // cersei_tools type-map for runtime injection
+    pub extensions: Extensions,          // bricks_tools type-map for runtime injection
     pub resume_data: Option<Value>,      // Some(_) only on a resumed step
 }
 
@@ -89,8 +89,8 @@ pub trait StepRun: Send + Sync {
 | Type | Wraps | Output shape |
 | --- | --- | --- |
 | `FnStep` | an async closure | whatever the closure returns |
-| `AgentStep` | a `cersei_agent::Agent` | `{ text, turns, stop_reason }` |
-| `ToolStep` | any `cersei_tools::Tool` | `{ content, is_error, metadata }` |
+| `AgentStep` | a `bricks_agent::Agent` | `{ text, turns, stop_reason }` |
+| `ToolStep` | any `bricks_tools::Tool` | `{ content, is_error, metadata }` |
 | `WorkflowStep` | a nested `Workflow` | the nested workflow's final `result` |
 
 ### `FnStep`
@@ -199,7 +199,7 @@ pub struct UiHints { pub x, y: Option<f64>, pub label, color: Option<String> }
 
 ### How the IR maps to xyflow
 
-| Builder / Mastra | IR | xyflow |
+| Builder method | IR | React Flow (xyflow) |
 | --- | --- | --- |
 | `.then(step)` | `Step` node + `Then` edge | default node + default edge |
 | `.parallel([...])` | `Parallel` → `Fork` edges → `Join` ← `Merge` edges | one source → N targets, join node |
@@ -285,6 +285,8 @@ let def = WorkflowBuilder::new("my-flow")
     .commit();                                // -> WorkflowDef
 ```
 
+The builder has no `foreach` method. `LoopMode::ForEach` exists in the IR, so a `Loop` node with that mode can be written as JSON or built by hand.
+
 ---
 
 ## `Workflow`
@@ -339,7 +341,7 @@ impl WorkflowStream {
 
 ## Results — `WorkflowResult` / `RunStatus`
 
-Shaped to match Mastra's JSON output so a UI can render it directly.
+Shaped so that a UI can render it directly.
 
 ```rust
 pub enum RunStatus { Running, Success, Failed, Suspended, Paused } // serde: lowercase
@@ -370,7 +372,7 @@ pub struct SuspendPoint { pub node_id: NodeId, pub resume_schema: Value, pub pay
 
 ## Persistence — `RunStore`
 
-Backs suspend/resume. The MVP is an in-memory store keyed by `run_id`; the same API is intended to gain a durable JSONL / `cersei-memory` backend so suspended runs survive a restart.
+Backs suspend/resume. The MVP is an in-memory store keyed by `run_id`; the same API is intended to gain a durable JSONL / `bricks-memory` backend so suspended runs survive a restart.
 
 ```rust
 pub struct RunSnapshot { pub run_id, pub input, pub state: Value, pub outputs: HashMap<NodeId, Value> }

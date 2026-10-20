@@ -16,8 +16,8 @@ Practical examples of building agent tools using `tool_primitives` directly inst
 An agent tool that shows the unified diff before applying changes, giving the model (or user) a chance to review.
 
 ```rust
-use cersei::prelude::*;
-use cersei_tools::tool_primitives::{fs, diff};
+use bricks::prelude::*;
+use bricks_tools::tool_primitives::{fs, diff};
 use std::path::Path;
 
 #[derive(Tool)]
@@ -35,8 +35,10 @@ impl ToolExecute for DiffPreviewTool {
             return ToolResult::error(format!("File not found: {}", input.file_path));
         }
 
-        let diff_output = fs::diff_file(path, &input.new_content, 3).await
-            .map_err(|e| format!("Diff failed: {e}"))?;
+        let diff_output = match fs::diff_file(path, &input.new_content, 3).await {
+            Ok(diff) => diff,
+            Err(e) => return ToolResult::error(format!("Diff failed: {e}")),
+        };
 
         if diff_output.is_empty() {
             ToolResult::success("No changes — file content is identical.")
@@ -63,7 +65,7 @@ struct DiffInput {
 A tool that runs a deploy script, waits, then checks a health endpoint. Combines `process` and `http` primitives.
 
 ```rust
-use cersei_tools::tool_primitives::{process, http};
+use bricks_tools::tool_primitives::{process, http};
 use std::time::Duration;
 
 async fn deploy_and_verify(
@@ -113,7 +115,7 @@ async fn deploy_and_verify(
 Combine `http` and `search` to build a tool that fetches documentation and searches local files for related code.
 
 ```rust
-use cersei_tools::tool_primitives::{http, search};
+use bricks_tools::tool_primitives::{http, search};
 use std::path::Path;
 
 async fn research(topic: &str, project_dir: &Path) -> String {
@@ -141,9 +143,10 @@ async fn research(topic: &str, project_dir: &Path) -> String {
     ];
 
     for url in &urls {
-        match http::fetch_html(url, 10_000, Default::default()).await {
-            Ok(text) => {
-                report.push_str(&format!("## {url}\n\n{}\n\n", &text[..text.len().min(2000)]));
+        match http::get(url, Default::default()).await {
+            Ok(response) => {
+                let excerpt: String = response.body.chars().take(2000).collect();
+                report.push_str(&format!("## {url}\n\n{excerpt}\n\n"));
             }
             Err(_) => {
                 report.push_str(&format!("## {url}\n\n(fetch failed)\n\n"));
@@ -162,7 +165,7 @@ async fn research(topic: &str, project_dir: &Path) -> String {
 A tool that reads the current diff, finds the modified files, and checks each one for common issues.
 
 ```rust
-use cersei_tools::tool_primitives::{git, fs, search};
+use bricks_tools::tool_primitives::{git, fs, search};
 use std::path::Path;
 
 async fn review_changes(repo: &Path) -> Result<String, String> {
@@ -217,7 +220,7 @@ async fn review_changes(repo: &Path) -> Result<String, String> {
 Combine `fs` and `diff` to build a function that analyzes how a file has changed between two versions.
 
 ```rust
-use cersei_tools::tool_primitives::{fs, diff};
+use bricks_tools::tool_primitives::{fs, diff};
 use std::path::Path;
 
 async fn analyze_change(path: &Path, proposed: &str) -> String {
@@ -273,8 +276,8 @@ Register it alongside built-in tools:
 
 ```rust
 let agent = Agent::builder()
-    .provider(Anthropic::from_env()?)
-    .tools(cersei::tools::coding())
+    .provider(bricks::provider_from_config(None, "my-provider/my-model")?)
+    .tools(bricks::tools::coding())
     .tool(CodeReviewTool)
     .build()?;
 ```

@@ -4,8 +4,8 @@
 //! sessions at their next run (their running provider is never replaced
 //! mid-run).
 
-use cersei_agent::control::{ModelCatalog, ModelChoice};
-use cersei_provider::{Provider, ProviderRegistry};
+use bricks_agent::control::{ModelCatalog, ModelChoice};
+use bricks_provider::{Provider, ProviderRegistry};
 use parking_lot::RwLock;
 use std::sync::Arc;
 

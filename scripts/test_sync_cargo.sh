@@ -49,9 +49,9 @@ grep '^cargo publish' "$LOG" | grep -qv -- '--dry-run' && fail "dry-run publishe
 # 2. Publication: crates already on crates.io are skipped, the others are
 #    published in order, nothing else.
 : >"$LOG"
-ALREADY="cersei-types cersei-lsp" PATH="$TMP:$PATH" "$BASH" ./sync_cargo.sh >/dev/null
+ALREADY="bricks-types bricks-lsp" PATH="$TMP:$PATH" "$BASH" ./sync_cargo.sh >/dev/null
 got="$(sed -n 's/^cargo publish -p \([^ ]*\)$/\1/p' "$LOG")"
-want="$(echo "$expected" | grep -vx 'cersei-types' | grep -vx 'cersei-lsp')"
+want="$(echo "$expected" | grep -vx 'bricks-types' | grep -vx 'bricks-lsp')"
 [ "$got" = "$want" ] || fail "publish order or skip: $got"
 
 # 3. --allow-dirty is passed on.
@@ -61,11 +61,11 @@ grep -q -- '--dry-run --allow-dirty' "$LOG" || fail "--allow-dirty not passed"
 
 # 4. The checker refuses an incoherent list.
 for bad in \
-  "cersei-tools cersei-types" \
-  "cersei-types cersei-agent" \
-  "cersei-types no-such-crate" \
-  "cersei-types cersei-testkit" \
-  "cersei-types cersei-types"; do
+  "bricks-tools bricks-types" \
+  "bricks-types bricks-agent" \
+  "bricks-types no-such-crate" \
+  "bricks-types bricks-testkit" \
+  "bricks-types bricks-types"; do
   # shellcheck disable=SC2086
   if python3 scripts/check_publish_order.py $bad 2>/dev/null; then
     fail "accepted: $bad"

@@ -1,6 +1,6 @@
 //! Correspondence matrix for the `/` commands.
 //!
-//! The registry is `cersei_agent::control::slash::COMMANDS`; the desktop reaches it
+//! The registry is `bricks_agent::control::slash::COMMANDS`; the desktop reaches it
 //! only through the public `slash_parse` / `slash_commands` commands. Each row
 //! below gives the expected wire value (`SlashAction` as the frontend receives it)
 //! for one line, following `apps/bricks-desktop/docs/tui-inventory.md`.
@@ -9,10 +9,10 @@
 
 use std::collections::BTreeSet;
 
+use bricks_agent::control::Command;
+use bricks_agent::control::slash::COMMANDS;
 use bricks_desktop_lib::commands::slash::{slash_commands, slash_parse};
 use bricks_desktop_lib::contract::{IpcError, IpcErrorCode};
-use cersei_agent::control::Command;
-use cersei_agent::control::slash::COMMANDS;
 use serde_json::{Value, json};
 
 /// What one line must produce.

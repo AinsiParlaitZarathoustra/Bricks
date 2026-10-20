@@ -1,7 +1,13 @@
 # MCP client
 
-`cersei-mcp` connects Bricks to Model Context Protocol servers. Each
+`bricks-mcp` connects Bricks to Model Context Protocol servers. Each
 server's tools become agent tools named `mcp__<server>__<tool>`.
+
+The package was named `cersei-mcp` before the Bricks ADK rename of 14.6. The
+rename changes the crate name and its import path (`bricks_mcp`) only: the
+protocol revisions, transports, limits and runtime described below are
+unchanged. Names of the old crates are listed in
+`docs/content/docs/migration.mdx`.
 
 * **Protocol.** It is built on the official Rust SDK (`rmcp` 3.5.0, MSRV
   1.88) behind Bricks' types. The hand-written JSON-RPC client it replaces
@@ -15,6 +21,7 @@ server's tools become agent tools named `mcp__<server>__<tool>`.
 ## Configuration
 
 ```rust
+use bricks::mcp::McpServerConfig;
 Agent::builder()
     .mcp_server(McpServerConfig::stdio("files", "mcp-files", &["--root", "."]))
     .mcp_server(McpServerConfig::http("docs", "https://mcp.example.com/mcp"))
@@ -125,7 +132,7 @@ and headers. Values are never logged.
 | real stdio process | bash script server: stderr logs, death during a call, restart without replay, oversized line |
 | progress, idle and total timeouts, another call's token, cancellation | SDK server |
 | MRTR (state rounds, bound, refused elicitation), malformed answer, lost connection | scripted servers |
-| agent wiring | `crates/cersei-agent/tests/web_mcp_e2e.rs` |
+| agent wiring | `crates/bricks-agent/tests/web_mcp_e2e.rs` |
 
 * **Not verified.** Windows. Authorization flows (OAuth) are not
   implemented: static headers only. `subscriptions/listen` is not used.

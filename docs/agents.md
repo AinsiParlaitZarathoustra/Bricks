@@ -133,7 +133,7 @@ Instructions (the Markdown body, kept verbatim).
 
 ### Built-in profiles
 
-`crates/cersei-agent/agents/*.md`, parsed by the same parser. All use
+`crates/bricks-agent/agents/*.md`, parsed by the same parser. All use
 `model`, `permissions` and `tools: inherit`, `isolation: auto`,
 `background: false`, with no business quota (files, tools, delegations).
 
@@ -202,6 +202,12 @@ nothing.
   approval broker; approvals reach the parent's frontend with the
   sub-agent's `agent_id`. A session-wide approval applies to the session, as
   it does for the parent. `forbidden` stays forbidden.
+* A change to a file (`Edit`, `Write`, `NotebookEdit`, `ApplyPatch`) is
+  written under the process-wide lock of that file, so a parent and its
+  children never overwrite each other's edits of one file. The approval
+  is checked again under that lock: a file that moved on since it was
+  approved is not written, and the call is decided again on its current
+  state (see `docs/content/docs/built-in-tools.mdx`, *Edit*).
 * A profile cannot widen anything.
 
 ## Project of a session
@@ -221,11 +227,10 @@ tools), its role (a sub-agent with a fresh context), the profile's instructions,
 message made of the task and the explicit `context`. It does **not** receive
 the parent's conversation, recalled long-term memory, tasks or anything not
 passed explicitly. Its tools are rebuilt from the parent's tool factory
-(never `cersei_tools::all()` as a fallback), with `Agent`, `Agents`,
-`AgentControl` and `AgentProfiles` (within the depth limit) and never the
-legacy `delegate`; its
-shell is its own; it shares the workspace's CodeScout engine, the web
-context and the MCP connections (not closed with it). Its system prompt and
+(never `bricks_tools::all()` as a fallback), with `Agent`, `Agents`,
+`AgentControl` and `AgentProfiles` (within the depth limit); its shell is its
+own; it shares the workspace's CodeScout engine, the web context and the MCP
+connections (not closed with it). Its system prompt and
 tools are not in its history: no compaction removes them.
 
 ## Several at once: `Agents`
@@ -250,7 +255,8 @@ tools are not in its history: no compaction removes them.
 * A child that cannot get a slot within `admission_timeout_ms`, or finds the
   queue full (`max_queued`), gets its own `failed` result
   (`AgentQueueFull`, `AgentAdmissionTimeout`); the others go on.
-* The legacy `delegate` / `run_batch` paths count against the same slots.
+* The library type `AgentTool` (for embedders) takes one slot of the same
+  scheduler when it runs in a session (see *Compatibility*).
 
 ## Recursion and limits
 
@@ -404,7 +410,7 @@ An unknown price stays unknown (no cost invented).
   is restarted, no old pid is touched; its worktree and ChangeSet stay
   inspectable.
 
-## Events (JSONL schema 5)
+## Events (JSONL schema 6)
 
 `agent_spawned` (identity, parent, root run, profile and its revision,
 model and reasoning requested/applied, turns, workspace, task),
@@ -413,7 +419,18 @@ then one of `completed`, `incomplete`, `failed`, `cancelled`, with a reason),
 `agent_tool_started` / `agent_tool_finished` (the sub-agent's tool calls,
 `duration_ms`), `agent_finished` (the compact result, the sub-agent's own
 usage), `agent_profiles` (answer to `list_agent_profiles` and
-`reload_agent_profiles`). Schema 5 (0.4.8): `agent_spawned` no longer has
+`reload_agent_profiles`).
+
+Schema 6 is additive: an event written at schema 5 reads as before, and an
+absent `executed` means the call ran. `agent_tool_finished` gains `executed`
+(`false` for a call that never ran: refused, denied, or blocked by a hook),
+`status` (`success`, `failure`, `timed_out`, `cancelled`, or `running`) and
+`output`, cut to 64 KiB (`output_truncated` says when). `edit_applied` files
+gain `absolute` and `patch` (the unified diff actually written, cut to 512 KiB,
+`patch_truncated`). `binary` is now set for a binary file, which has no patch
+(it was always false before).
+
+Schema 5 (0.4.8): `agent_spawned` no longer has
 `max_turns`; `edit_applied` gains `agent_id` (a child's change in the
 session's workspace) and `changeset_id` (a ChangeSet applied). Since 10.5
 (additive, then schema 4):
@@ -452,8 +469,8 @@ max_depth = 2               # generations below the session's agent
 max_total_per_run = 32      # descendants per top-level run
 max_batch = 8               # entries per Agents call
 max_queued = 32             # children waiting for a slot
-admission_timeout_ms = 600000
-background_drain_ms = 600000   # headless wait for background children
+admission_timeout_ms = 30000   # a child waits this long for a slot, then AgentAdmissionTimeout
+background_drain_ms = 0        # headless: background children get this long after the main run (exit 6 if cut)
 default_isolation = "auto"  # auto | shared | worktree
 skills_max_bytes = 24000
 
@@ -479,8 +496,20 @@ on process groups (Unix); Windows is not verified.
 
 ## Compatibility
 
-The library type `AgentTool` (old `Agent` tool built from provider and tool
-factories) and `delegate` / `run_batch` stay available for embedders, with
-their Sprint 8 guarantees. Bricks' CLI and controller register only the
-native tools, never two tools named `Agent`. The legacy paths go through
-the same scheduler (slots and per-run totals), not a third architecture.
+The library type `AgentTool` (built from a provider factory and a toolset
+factory; `ToolsetFactory` is in `bricks_agent::agent_tool`) stays available
+for embedders, with its Sprint 8 guarantees: an empty task is refused before
+anything is built, its children get the parent's permissions and at most its
+tools, and never a delegation tool. When it runs in a session with a
+scheduler, a child holds one slot and counts against the per-run total; the
+library without a runtime is unchanged.
+
+The CLI and the controller register only the native tools (`Agent`,
+`Agents`, `AgentControl`, `AgentProfiles`), never two tools named `Agent`.
+
+Removed in 14.6: the `delegate` tool, `DelegateTool`, the `delegate` module
+(`run_batch`, `DelegateConfig`, `DelegateTask`, `DelegateResult`,
+`DELEGATE_BLOCKED_TOOLS`, `DEFAULT_MAX_CONCURRENT`, `ProviderFactory`). A
+call named `delegate` is now an unknown tool. The native `Agent` and `Agents`
+tools have other parameters, and no equivalence is promised. Migration:
+`docs/content/docs/migration.mdx`.

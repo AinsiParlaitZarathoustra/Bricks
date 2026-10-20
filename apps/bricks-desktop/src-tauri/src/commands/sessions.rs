@@ -54,7 +54,7 @@ pub async fn session_command(
     state.send_command(&session_id, command, display).await
 }
 
-/// `cersei_agent::control::Snapshot`.
+/// `bricks_agent::control::Snapshot`.
 #[tauri::command]
 pub async fn session_snapshot(state: State<'_, AppState>, session_id: String) -> IpcResult<serde_json::Value> {
     state.snapshot(&session_id)

@@ -1,45 +1,41 @@
-# docs
+# Bricks documentation site
 
-This is a Next.js application generated with
-[Create Fumadocs](https://github.com/fuma-nama/fumadocs).
+The documentation site of Bricks is a Next.js application built with
+[Fumadocs](https://fumadocs.dev). Its pages are MDX files in
+`content/docs/`, and the sidebar order is set by `content/docs/meta.json`.
 
-The site uses **npm** and its lock file `package-lock.json` (the one
-Dependabot updates); no other package manager or lock file is kept.
+The site uses **npm** and its lock file `package-lock.json`; no other package
+manager or lock file is kept. Run these commands in this folder:
 
 ```bash
-npm ci                 # install exactly the locked versions
+npm ci                 # install exactly the locked versions (runs fumadocs-mdx)
 npm run types:check    # MDX, Next type generation, TypeScript
 npm run build          # production build
-npm run dev            # development server
+npm run dev            # development server, http://localhost:3000
 ```
 
-Open http://localhost:3000 with your browser to see the result.
+The Markdown guides in the parent folder (`docs/*.md`) are the reference
+documents of the repository. The site presents the same subjects as pages.
 
-## Explore
+## Layout
 
-In the project, you can see:
+| Path | Contents |
+|---|---|
+| `content/docs/` | the pages (MDX) and `meta.json`, the navigation |
+| `source.config.ts` | the Fumadocs collection: page and `meta.json` schemas |
+| `lib/source.ts` | the content source adapter; its `loader()` gives access to the pages |
+| `lib/layout.shared.tsx` | the options shared by the layouts |
+| `app/(home)` | the landing page and its route group |
+| `app/docs` | the documentation layout and the page route |
+| `app/api/search/route.ts` | the route handler of the search |
 
-- `lib/source.ts`: Code for content source adapter, [`loader()`](https://fumadocs.dev/docs/headless/source-api) provides the interface to access your content.
-- `lib/layout.shared.tsx`: Shared options for layouts, optional but preferred to keep.
+## Navigation
 
-| Route                     | Description                                            |
-| ------------------------- | ------------------------------------------------------ |
-| `app/(home)`              | The route group for your landing page and other pages. |
-| `app/docs`                | The documentation layout and pages.                    |
-| `app/api/search/route.ts` | The Route Handler for search.                          |
+`content/docs/meta.json` lists the pages in order, grouped by section headings
+(`---Section---`). A page that is not listed is still served at its URL; it
+does not appear in the sidebar.
 
-### Fumadocs MDX
+## Learn more
 
-A `source.config.ts` config file has been included, you can customise different options like frontmatter schema.
-
-Read the [Introduction](https://fumadocs.dev/docs/mdx) for further details.
-
-## Learn More
-
-To learn more about Next.js and Fumadocs, take a look at the following
-resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js
-  features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-- [Fumadocs](https://fumadocs.dev) - learn about Fumadocs
+- [Next.js documentation](https://nextjs.org/docs)
+- [Fumadocs](https://fumadocs.dev), with its [MDX introduction](https://fumadocs.dev/docs/mdx)

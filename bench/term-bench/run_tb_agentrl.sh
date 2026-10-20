@@ -2,7 +2,7 @@
 # ─── AgentRL run: Abstract (AgentRL mode) on Terminal-Bench 4.0 ───────────
 #
 # Thin wrapper over run_tb_full.sh that passes --agentrl (AgentRL self-evolving
-# mode; the pipeline is implemented in crates/cersei-agentrl, whether the historical
+# mode; the pipeline is implemented in crates/bricks-agentrl, whether the historical
 # abstract binary runs it is not verifiable here) and pins Gemini 3.1 Pro.
 # All run_tb_full.sh flags pass through.
 #

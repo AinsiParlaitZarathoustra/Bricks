@@ -1,0 +1,39 @@
+[package]
+name = "bricks-agentrl"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "AgentRL — self-evolving orchestration (ExecutionGraph, PlannerAgent, dynamic tool registry) for Bricks"
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+bricks-types = { workspace = true }
+bricks-provider = { workspace = true }
+bricks-tools = { workspace = true }
+bricks-agent = { workspace = true }
+bricks-memory = { workspace = true }
+bricks-embeddings = { workspace = true }
+bricks-vms = { workspace = true }
+bricks-compression = { workspace = true }
+bricks-agentlang = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+anyhow = { workspace = true }
+futures = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+once_cell = { workspace = true }
+parking_lot = { workspace = true }
+dashmap = { workspace = true }
+dirs = { workspace = true }
+regex = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+tempfile = { workspace = true }

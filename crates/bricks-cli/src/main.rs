@@ -1,5 +1,5 @@
 //! `bricks`: loads the configuration, starts the engine and presents it.
-//! The engine (cersei-agent) runs everything; this binary only translates
+//! The engine (bricks-agent) runs everything; this binary only translates
 //! arguments into commands and events into output.
 
 mod args;

@@ -13,7 +13,7 @@
 use super::conversations::message_text;
 use super::{error, invalid, io_error};
 use crate::contract::{IpcErrorCode, IpcResult, RunLabel};
-use cersei_types::{Message, Role};
+use bricks_types::{Message, Role};
 use parking_lot::Mutex;
 use std::collections::HashSet;
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -159,7 +159,7 @@ pub fn normalize_label(raw: &str) -> Option<String> {
 
 /// A session id becomes a file name: letters, digits, `-`, `_` and `.`, not
 /// starting with a dot (the same rule as the engine's session ids).
-fn check_session_id(id: &str) -> IpcResult<()> {
+pub(crate) fn check_session_id(id: &str) -> IpcResult<()> {
     let ok = !id.is_empty()
         && id.len() <= 128
         && !id.starts_with('.')
@@ -175,7 +175,7 @@ fn check_session_id(id: &str) -> IpcResult<()> {
 
 /// Appends one line, starting a new line first when the file does not end
 /// with one (a write cut short by a crash must not spoil the next label).
-fn append_line(path: &Path, line: &str) -> std::io::Result<()> {
+pub(crate) fn append_line(path: &Path, line: &str) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }

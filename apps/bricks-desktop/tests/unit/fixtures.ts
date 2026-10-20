@@ -98,6 +98,7 @@ export function openedSession(overrides: Partial<OpenedSession> = {}): OpenedSes
 		recent_events: [],
 		last_seq: 0,
 		run_labels: [],
+		run_records: [],
 		...overrides
 	};
 }
@@ -119,7 +120,7 @@ export class EnvelopeFeed {
 		const runId = options.runId === null ? undefined : (options.runId ?? this.#runId);
 		return {
 			...event,
-			schema: 5,
+			schema: 6,
 			session_id: SESSION_ID,
 			run_id: runId,
 			seq: this.#seq,

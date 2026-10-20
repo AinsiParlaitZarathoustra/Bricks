@@ -2,7 +2,11 @@
 
 ## [Unreleased]
 
-### Changed — file edits (Sprint 14.6)
+### Changed — crates renamed
+
+- The SDK is the **Bricks ADK**. The facade is `bricks` (was `cersei`) and the crates use the `bricks-` prefix (`bricks-agent`, `bricks-tools`, …; `bricks_*` imports). Unchanged: `CerseiError`, `CERSEI_*` variables, `.cersei`, `cersei-envd`, `tbench-agent`, Docker names. The table of names, imports and every behaviour change of this release are in `docs/content/docs/migration.mdx`.
+
+### Changed — file edits
 
 - **No read is required before a change.** The runtime no longer refuses `Edit`, `Write`, `NotebookEdit` or `ApplyPatch` on a file the model has not read in the session (the read-before-edit guard is removed). A change is still decided on what it would do to the file, and the tool descriptions and error messages recommend reading the code when a change needs it; none of them requires it.
 - **`Edit` takes several replacements.** `Edit` accepts `{file_path, edits: [{old_string, new_string?, replace_all?}, …]}` next to the one-replacement form `{file_path, old_string, new_string?, replace_all?}`; the two forms cannot be mixed. The replacements are applied in order, each against the result of the previous one, and the file is written once, only if all of them apply. `file_path` is the only required parameter. An omitted `new_string` deletes the match, as before.
@@ -15,6 +19,21 @@
 
 - The `MultiEdit` tool is removed: `cersei_tools::multi_edit` (`MultiEditTool`), its registration in `cersei_tools::filesystem()`, its schema and tests. A call named `MultiEdit` is now an unknown tool. Recorded history that contains `MultiEdit` calls still reads and displays.
 - Migration for SDK users: replace `MultiEditTool` with `cersei_tools::file_edit::FileEditTool` and send the same arguments under the name `Edit`: `{"file_path": "…", "edits": [{"old_string": "…", "new_string": "…", "replace_all": false}]}`.
+
+### Removed — `delegate` (SDK breaking change)
+
+- The `delegate` tool is removed: `cersei_agent::delegate_tool::DelegateTool`, the batch module `cersei_agent::delegate` (`run_batch`, `DelegateConfig`, `DelegateTask`, `DelegateResult`, `DELEGATE_BLOCKED_TOOLS`, `DEFAULT_MAX_CONCURRENT`, `ProviderFactory`) and their registration. A call named `delegate` is now an unknown tool. Recorded history that contains a `delegate` call and its result stays readable.
+- `ToolsetFactory` moves to `cersei_agent::agent_tool` (same type). `MAX_DEPTH` is private there; the sub-agent depth rule is unchanged.
+- `subagent::legacy_admission` takes no count any more: an `AgentTool` sub-agent holds one slot.
+- Migration for SDK users: start one sub-task with the native `Agent` tool (`task`, `background`, optional profile) or several with `Agents` (`agents`, `fail_fast`). Their parameters are not those of `delegate` (`goal`, `tasks`, `context`, `workspace`) and no equivalence is promised: rewrite each task as a self-contained `task`.
+
+### Changed — waits, limits and retries
+
+- **Process stops are notified, not polled.** Stopping a tree waits for the kernel's report of each exit (`kqueue` `NOTE_EXIT` on macOS, `pidfd` in an `epoll` set on Linux) through a watcher thread, with the same grace, forced stop and bounds. Where no notification is available, a bounded `kill(pid, 0)` poll remains. Background tasks announce readiness to their waiter instead of being polled every 20 ms.
+- **Workspace snapshots** take one copy pass and two state reads. Each copied file is hashed as it is written and checked before and after the copy (size, modification and change time, inode, link target). The retry sleep is removed; three attempts and the refusal stay.
+- **LSP start failures and shutdown** read the server's stderr to its end (at most 500 ms more), instead of a fixed 50 ms wait.
+- **Defaults.** `[agents] background_drain_ms` is `0` (was 600000): background sub-agents still running when the main run ends are cancelled at once (`bricks run` exits with code 6). `[agents] admission_timeout_ms` is `30000` (was 600000).
+- **`[agent] retry_after_max_wait_ms`** (default `60000`, new): a provider's `Retry-After` longer than this is not waited for. No retry is sent; the error says so.
 
 ### Added — SDK
 

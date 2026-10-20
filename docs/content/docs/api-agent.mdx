@@ -1,5 +1,5 @@
 ---
-title: Agent (cersei-agent)
+title: Agent (bricks-agent)
 description: Agent builder, agentic loop, streaming events, auto-compact, reasoning profiles, system prompt caching.
 ---
 
@@ -7,12 +7,12 @@ import { Callout } from 'fumadocs-ui/components/callout';
 import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
 import { TypeTable } from 'fumadocs-ui/components/type-table';
 
-# cersei-agent
+# bricks-agent
 
 The high-level Agent API. Builder pattern for configuration, an agentic loop that handles tool dispatch and multi-turn conversations, a set of 36 event variants for observation, and automatic context management.
 
 <Callout type="info">
-Most users interact with Cersei through this crate. The `cersei` facade re-exports `Agent`, `AgentBuilder`, `AgentOutput`, `AgentEvent`, and `AgentStream` directly.
+Most users interact with Bricks through this crate. The `bricks` facade re-exports `Agent`, `AgentBuilder`, `AgentOutput`, `AgentEvent`, and `AgentStream` directly.
 </Callout>
 
 ---
@@ -23,8 +23,8 @@ Every agent starts with a builder. The only required field is `.provider()` — 
 
 ```rust
 let agent = Agent::builder()
-    .provider(cersei::provider_from_config(None, "my-provider/my-model")?)
-    .tools(cersei::tools::coding())
+    .provider(bricks::provider_from_config(None, "my-provider/my-model")?)
+    .tools(bricks::tools::coding())
     .system_prompt("You are a coding assistant.")
     .max_tokens(16384)
     .permission_policy(AllowAll)
@@ -37,7 +37,7 @@ let agent = Agent::builder()
   type={{
     '.provider(p)': {
       type: 'impl Provider',
-      description: 'The LLM backend: a ConfiguredProvider from cersei::provider_from_config, or a custom implementation.',
+      description: 'The LLM backend: a ConfiguredProvider from bricks::provider_from_config, or a custom implementation.',
       required: true,
     },
     '.tool(t)': {
@@ -46,7 +46,7 @@ let agent = Agent::builder()
     },
     '.tools(vec)': {
       type: 'Vec<Box<dyn Tool>>',
-      description: 'Add multiple tools at once. Use cersei::tools::coding() for the standard set.',
+      description: 'Add multiple tools at once. Use bricks::tools::coding() for the standard set.',
     },
     '.system_prompt(s)': {
       type: 'impl Into<String>',
@@ -117,12 +117,12 @@ let agent = Agent::builder()
     },
     '.compact_threshold(f)': {
       type: 'f64',
-      description: 'Trigger compaction at this fraction of the prompt budget (crates/cersei-agent/src/lib.rs:883). Overrides the context policy.',
+      description: 'Trigger compaction at this fraction of the prompt budget (crates/bricks-agent/src/lib.rs:883). Overrides the context policy.',
       default: '0.85 (context policy)',
     },
     '.tool_result_budget(n)': {
       type: 'usize',
-      description: 'Tool results beyond this many characters are replaced by a placeholder; it names the saved original when the original could be saved (crates/cersei-agent/src/runner.rs:816-843).',
+      description: 'Tool results beyond this many characters are replaced by a placeholder; it names the saved original when the original could be saved (crates/bricks-agent/src/runner.rs:816-843).',
       default: '50000',
     },
     '.cancel_token(t)': {
@@ -151,8 +151,8 @@ The simplest way to run an agent — builds, executes, and returns in one call:
 
 ```rust
 let output = Agent::builder()
-    .provider(cersei::provider_from_config(None, "my-provider/my-model")?)
-    .tools(cersei::tools::coding())
+    .provider(bricks::provider_from_config(None, "my-provider/my-model")?)
+    .tools(bricks::tools::coding())
     .run_with("Fix the failing tests")
     .await?;
 
@@ -166,8 +166,8 @@ println!("Turns: {}, Tool calls: {}", output.turns, output.tool_calls.len());
 
 ```rust
 let agent = Agent::builder()
-    .provider(cersei::provider_from_config(None, "my-provider/my-model")?)
-    .tools(cersei::tools::coding())
+    .provider(bricks::provider_from_config(None, "my-provider/my-model")?)
+    .tools(bricks::tools::coding())
     .build()?;
 
 // First turn
@@ -179,7 +179,7 @@ let output2 = agent.run("Now fix the bug in main.rs").await?;
 
 ### Streaming (events in real-time)
 
-`run_stream` takes the agent behind an `Arc`, so the run can outlive the caller's stack frame. It returns an `AgentStream` that yields events as they happen. `AgentStream::cancel()` is applied to the run. `respond_permission()` and `inject_message()` are accepted by `AgentStream`, but `run_stream_input` ignores their control messages (`crates/cersei-agent/src/lib.rs:286-287`), so they have no effect in this version.
+`run_stream` takes the agent behind an `Arc`, so the run can outlive the caller's stack frame. It returns an `AgentStream` that yields events as they happen. `AgentStream::cancel()` is applied to the run. `respond_permission()` and `inject_message()` are accepted by `AgentStream`, but `run_stream_input` ignores their control messages (`crates/bricks-agent/src/lib.rs:286-287`), so they have no effect in this version.
 
 ```rust
 use std::sync::Arc;
@@ -222,6 +222,7 @@ while let Some(event) = stream.next().await {
 Returned by `run()`, `run_with()`, and `AgentStream::collect()`.
 
 ```rust
+use bricks_agent::{Termination, ToolCallRecord};
 pub struct AgentOutput {
     pub message: Message,
     pub usage: Usage,
@@ -241,7 +242,7 @@ pub struct AgentOutput {
     },
     usage: {
       type: 'Usage',
-      description: 'Cumulative usage of this agent, all runs so far, including a seed from with_cumulative_usage (crates/cersei-agent/src/runner.rs:1769).',
+      description: 'Cumulative usage of this agent, all runs so far, including a seed from with_cumulative_usage (crates/bricks-agent/src/runner.rs:1769).',
       required: true,
     },
     stop_reason: {
@@ -281,7 +282,7 @@ for call in &output.tool_calls {
 
 ## AgentEvent
 
-36 variants covering every observable moment in the agentic loop. The most useful are listed below; the enum in `cersei_agent::events` is the reference.
+36 variants covering every observable moment in the agentic loop. The most useful are listed below; the enum in `bricks_agent::events` is the reference.
 
 ### Content Events
 
@@ -349,15 +350,15 @@ Bidirectional control channel. Receive events and send commands back.
     },
     'respond_permission()': {
       type: 'fn(request_id: String, decision: PermissionDecision)',
-      description: 'Sends a PermissionResponse, but run_stream_input ignores it (crates/cersei-agent/src/lib.rs:286-287): no effect in this version. PermissionDecision: Allow, Deny(reason), AllowOnce, AllowForSession.',
+      description: 'Sends a PermissionResponse, but run_stream_input ignores it (crates/bricks-agent/src/lib.rs:286-287): no effect in this version. PermissionDecision: Allow, Deny(reason), AllowOnce, AllowForSession.',
     },
     'cancel()': {
       type: 'fn()',
-      description: 'Cancels the current run: the in-flight provider request and the wait for tool results are interrupted (crates/cersei-agent/src/runner.rs:968-970, 1469-1471).',
+      description: 'Cancels the current run: the in-flight provider request and the wait for tool results are interrupted (crates/bricks-agent/src/runner.rs:968-970, 1469-1471).',
     },
     'inject_message()': {
       type: 'fn(message: String)',
-      description: 'Sends an InjectMessage, but run_stream_input ignores it (crates/cersei-agent/src/lib.rs:286-287): no effect in this version.',
+      description: 'Sends an InjectMessage, but run_stream_input ignores it (crates/bricks-agent/src/lib.rs:286-287): no effect in this version.',
     },
     'collect()': {
       type: 'async fn -> Result<AgentOutput>',
@@ -385,7 +386,7 @@ parameters = { reasoning_effort = "high" }
 
 ```rust
 let agent = Agent::builder()
-    .provider(cersei::provider_from_config(None, "my-provider/my-model")?)
+    .provider(bricks::provider_from_config(None, "my-provider/my-model")?)
     .reasoning_profile("approfondi")   // must be a profile of this model
     .build()?;
 
@@ -393,7 +394,7 @@ println!("{:?}", agent.reasoning_profile());   // the effective profile id, if a
 agent.set_reasoning(None);                     // back to the model's declared default
 ```
 
-Passing an id the model does not declare is an error that lists the available ones. See [cersei-provider](/docs/api-provider) for the protocol side.
+Passing an id the model does not declare is an error that lists the available ones. See [bricks-provider](/docs/api-provider) for the protocol side.
 
 ---
 
@@ -413,7 +414,7 @@ The compaction pipeline:
 2. Above the threshold, ask the model for a budgeted summary with fixed headings: objective, constraints, decisions, files, actions, open problems, key facts
 3. Keep the user's messages verbatim
 4. Replace the old messages only if the summary gains enough space; otherwise the outcome is `InsufficientGain`, and nothing is replaced
-5. Keep the original history in memory (`raw_history()`, `compaction_snapshots()`). When a session memory is configured, the raw history and each snapshot are also stored (`<id>.raw`, `<id>.compaction-<n>`), see `crates/cersei-agent/src/runner.rs:1958-1975`
+5. Keep the original history in memory (`raw_history()`, `compaction_snapshots()`). When a session memory is configured, the raw history and each snapshot are also stored (`<id>.raw`, `<id>.compaction-<n>`), see `crates/bricks-agent/src/runner.rs:1958-1975`
 
 Events emitted: `CompactStart`, `CompactEnd` (with `messages_after` and `tokens_freed`), and `CompactionResult` with the explicit outcome.
 

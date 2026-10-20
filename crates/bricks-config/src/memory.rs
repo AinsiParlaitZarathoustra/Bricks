@@ -2,10 +2,10 @@
 //! configuration.
 
 use crate::paths::bricks_home;
-use cersei_embeddings::{EmbeddingProvider, GeminiEmbeddings, HashingEmbeddings, OpenAiEmbeddings};
-use cersei_memory::structured::extract::LlmExtractor;
-use cersei_memory::structured::{MemoryConfig, StructuredMemory};
-use cersei_provider::ProviderRegistry;
+use bricks_embeddings::{EmbeddingProvider, GeminiEmbeddings, HashingEmbeddings, OpenAiEmbeddings};
+use bricks_memory::structured::extract::LlmExtractor;
+use bricks_memory::structured::{MemoryConfig, StructuredMemory};
+use bricks_provider::ProviderRegistry;
 use std::path::Path;
 use std::sync::Arc;
 

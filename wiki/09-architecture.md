@@ -6,10 +6,10 @@
 bricks-cli            the `bricks` binary: arguments, configuration, headless / JSONL
 bricks-config         engine assembly shared by the CLI and the desktop
 apps/bricks-desktop   desktop application (Tauri 2 + Svelte 5) over the controller
-cersei-agent          engine: agent loop, controller (commands/events), approvals, compaction
-  cersei-provider, cersei-tools, cersei-memory, cersei-compression, cersei-web,
-  bricks-semantic, bricks-skills, cersei-lsp, cersei-mcp, cersei-embeddings, …
-cersei-types          shared types and the shared HTTP client
+bricks-agent          engine: agent loop, controller (commands/events), approvals, compaction
+  bricks-provider, bricks-tools, bricks-memory, bricks-compression, bricks-web,
+  bricks-semantic, bricks-skills, bricks-lsp, bricks-mcp, bricks-embeddings, …
+bricks-types          shared types and the shared HTTP client
 ```
 
 The complete list is in the README (Architecture) and in
@@ -79,33 +79,40 @@ src-cersei/
 
 ## Dependency Flow
 
+The internal dependencies, as declared in each `Cargo.toml`. Optional dependencies (behind a feature) are listed where they apply.
+
 ```
-cersei-types          shared types, CerseiError, shared HTTP client
+bricks-types          shared types, the error type, the shared HTTP client
     ↑                 (no internal dependency)
     │
-cersei-provider       LLM communication: depends on cersei-types only
-cersei-hooks          lifecycle interception: depends on cersei-types only
-cersei-mcp            MCP client: depends on cersei-types only
-cersei-compression, cersei-web, cersei-embeddings
-                      depend on cersei-types only
-cersei-lsp, bricks-semantic
-                      bricks-semantic depends on cersei-lsp and cersei-types
+bricks-provider       LLM communication: depends on bricks-types only
+bricks-hooks          lifecycle interception: depends on bricks-types only
+bricks-mcp            MCP client: depends on bricks-types only
+bricks-compression, bricks-web, bricks-embeddings, bricks-memory
+                      depend on bricks-types only (bricks-memory's `structured`
+                      and `embed` features add bricks-provider and bricks-embeddings)
+bricks-lsp            no internal dependency
+bricks-semantic       depends on bricks-lsp and bricks-types
+bricks-skills         no internal dependency
+bricks-vms            depends on bricks-types only
     ↑
-cersei-tools          tool system: depends on cersei-mcp, cersei-web,
-                      cersei-compression, cersei-embeddings, bricks-semantic,
-                      bricks-skills, cersei-lsp, cersei-vms
-cersei-memory         sessions: depends on cersei-types, and on cersei-provider
-                      and cersei-embeddings only with the `structured` / `embed`
-                      features
+bricks-tools          tool system: depends on bricks-mcp, bricks-web, bricks-compression,
+                      bricks-embeddings, bricks-semantic, bricks-skills, bricks-lsp,
+                      bricks-types, and bricks-vms with the `vms` feature
     ↑
-cersei-agent          the runtime: depends on cersei-hooks, cersei-memory,
-                      cersei-provider, cersei-tools, cersei-mcp, cersei-compression,
-                      cersei-web, bricks-semantic, bricks-skills
+bricks-agent          the runtime: depends on bricks-hooks, bricks-memory, bricks-provider,
+                      bricks-tools, bricks-mcp, bricks-compression, bricks-web,
+                      bricks-semantic, bricks-skills, bricks-types
+bricks-agentlang      AgentTemplate: depends on bricks-tools, bricks-types, bricks-vms
+bricks-agentrl        self-evolving loop: depends on bricks-agent, bricks-agentlang, bricks-tools,
+                      bricks-memory, bricks-embeddings, bricks-vms, bricks-provider, bricks-compression, bricks-types
+bricks-workflows      depends on bricks-agent, bricks-tools, bricks-types
     ↑
-cersei                facade + prelude: re-exports the crates above
+bricks                facade + prelude: re-exports the crates above, with the features
+                      `vms` (default), `agentlang`, `agentrl` and `workflows`
 ```
 
-The lists are the internal dependencies declared in each `Cargo.toml`. The `cersei` facade re-exports the crates as modules (for example `cersei::hooks`, `cersei::memory`, `cersei::tools`).
+The `bricks` facade re-exports the crates as modules (for example `bricks::hooks`, `bricks::memory`, `bricks::tools`).
 
 ## Data Flow
 
@@ -187,10 +194,10 @@ Agent loop emits AgentEvent
 
 2. **Builder pattern** — `AgentBuilder` with `self -> Self` chaining. Validates at `build()` time, not at method call time.
 
-3. **Few process-wide registries** — `cersei-tools` keeps some global registries (for example for shell sessions, tasks, todos, cron jobs and inboxes). `ShellSessions` holds one entry per tool-context session id, and its entry is removed by the cleanup functions. Agent configuration flows through the builder.
+3. **Few process-wide registries** — `bricks-tools` keeps some global registries (for example for shell sessions, tasks, todos, cron jobs and inboxes). `ShellSessions` holds one entry per tool-context session id, and its entry is removed by the cleanup functions. Agent configuration flows through the builder.
 
 4. **Streaming-first** — providers emit `StreamEvent`s. The accumulator is a separate concern. Consumers (callback, broadcast, stream) get events as they arrive.
 
-5. **Headless-first** — no TUI dependency in the SDK. The TUI is an application-layer concern that consumes Cersei via events.
+5. **Headless-first** — no TUI dependency in the SDK. The TUI is an application-layer concern that consumes the engine via events.
 
 6. **Zero-cost defaults** — `AllowAll` permission policy, no hooks, no memory, no broadcast. You only pay for what you configure.

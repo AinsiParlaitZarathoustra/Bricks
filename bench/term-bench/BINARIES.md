@@ -15,14 +15,14 @@ variable.
 
 ## Build `tbench-agent` (current harness)
 
-`tbench-agent` is the `[[bin]]` of `crates/cersei-tbench`. It must be a static
+`tbench-agent` is the `[[bin]]` of `crates/bricks-tbench`. It must be a static
 (musl) build, as the install error message of `tbench_agent.py` asks. From the
 repository root, with the lockfile:
 
 ```bash
 rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
-cargo build --release --locked -p cersei-tbench --target x86_64-unknown-linux-musl
-cargo build --release --locked -p cersei-tbench --target aarch64-unknown-linux-musl
+cargo build --release --locked -p bricks-tbench --target x86_64-unknown-linux-musl
+cargo build --release --locked -p bricks-tbench --target aarch64-unknown-linux-musl
 cp target/x86_64-unknown-linux-musl/release/tbench-agent bench/term-bench/tbench-agent-linux-amd64
 cp target/aarch64-unknown-linux-musl/release/tbench-agent bench/term-bench/tbench-agent-linux-arm64
 ```

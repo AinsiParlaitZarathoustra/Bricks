@@ -1,0 +1,29 @@
+[package]
+name = "bricks-tbench"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "A purpose-built Terminal-Bench coding agent on the Bricks SDK + AgentRL"
+repository.workspace = true
+homepage.workspace = true
+
+[[bin]]
+name = "tbench-agent"
+path = "src/main.rs"
+
+[dependencies]
+bricks-agent = { workspace = true }
+bricks-agentrl = { workspace = true }
+bricks-provider = { workspace = true }
+bricks-tools = { workspace = true }
+bricks-types = { workspace = true }
+bricks-compression = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+serde_json = { workspace = true }
+dirs = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

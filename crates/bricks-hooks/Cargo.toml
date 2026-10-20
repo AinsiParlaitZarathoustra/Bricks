@@ -1,0 +1,16 @@
+[package]
+name = "bricks-hooks"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Hook/middleware system for the Bricks SDK"
+readme = "../../README.md"
+
+[dependencies]
+bricks-types = { workspace = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }

@@ -25,12 +25,14 @@
 	const shown = $derived(lines.slice(0, limit));
 	const hidden = $derived(lines.length - shown.length);
 
+	// Both markers are on the left: a coloured gutter edge, then the old and
+	// new line numbers; the line keeps its own `+` / `-` (not colour only).
 	const ROW: Record<PatchLineKind, string> = {
-		add: 'bg-diff-add-bg',
-		del: 'bg-diff-del-bg',
-		context: '',
-		hunk: 'bg-muted text-muted-foreground',
-		meta: 'text-muted-foreground'
+		add: 'bg-diff-add-bg border-l-diff-add',
+		del: 'bg-diff-del-bg border-l-diff-del',
+		context: 'border-l-transparent',
+		hunk: 'bg-muted text-muted-foreground border-l-transparent',
+		meta: 'text-muted-foreground border-l-transparent'
 	};
 </script>
 
@@ -62,7 +64,7 @@
 		>
 			<div class="min-w-max py-1">
 				{#each shown as line, i (i)}
-					<div class={cn('grid grid-cols-[3rem_3rem_minmax(0,1fr)]', ROW[line.kind])}>
+					<div class={cn('grid grid-cols-[3rem_3rem_minmax(0,1fr)] border-l-[3px]', ROW[line.kind])}>
 						<span class="px-1 text-right text-muted-foreground tabular-nums select-none">{line.oldNo ?? ''}</span>
 						<span class="px-1 text-right text-muted-foreground tabular-nums select-none">{line.newNo ?? ''}</span>
 						<span class="px-2 whitespace-pre">{line.text}</span>

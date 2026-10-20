@@ -14,7 +14,7 @@ It does not claim to understand the whole program.
 |---|---|---|
 | lexical | ripgrep's `ignore` (walker) and `grep` (matcher, searcher); no `rg` binary | text and regex search, candidate files |
 | syntax | Tree-sitter (Rust, TypeScript, TSX, JavaScript via the TSX grammar, Python, Go) | definitions by name, enclosing function/type/block, signatures |
-| LSP | `cersei-lsp` (optional; servers started on demand, shared) | definition, references, hover, diagnostics |
+| LSP | `bricks-lsp` (optional; servers started on demand, shared) | definition, references, hover, diagnostics |
 
 Routing is deterministic (`planner.rs`) and reported in every response
 (`plan.intent`, `plan.reason`, `plan.steps`, `plan.fallbacks`):
@@ -40,6 +40,7 @@ references become **text mentions, not confirmed references** (`partial`).
 ## The contract
 
 ```rust
+use bricks_semantic::SemanticRegistry;
 let engine = SemanticRegistry::global().engine_for(workspace, &config);
 let response = engine.query(query, &requester).await;
 ```
@@ -107,7 +108,7 @@ document gets syntax and text results, with the reason.
 
 The budget counts everything an item costs once rendered (path, relation,
 provenance, signature, snippet), estimated with the Context Manager's local
-heuristic (`cersei_types::tokens`); the selection keeps the estimate's upper
+heuristic (`bricks_types::tokens`); the selection keeps the estimate's upper
 bound under the budget: a margin, not the provider's exact count
 (`budget.method` says so). Snippets are verbatim with their ranges; a scope
 larger than the detail level allows (12 / 40 / 120 lines) becomes an explicit
@@ -129,6 +130,11 @@ permissions, time or memory ceilings. The same scope is never sent twice.
   lock across documents or servers); open documents are re-synchronized after
   a workspace change; at most `max_open_documents` stay open (LRU,
   `didClose`).
+* **Server stderr** is kept as a tail (the last 2 KiB). A server that fails at
+  start is shut down at once, and that shutdown reads its stderr to the end
+  (at most 500 ms more, not a fixed wait); the failure names the last line.
+  A process left behind that holds the pipe open does not delay shutdown
+  beyond that bound, and what was read is kept.
 * URIs are percent-encoded and normalized (a folder with spaces works);
   `Location`, `Location[]`, `LocationLink[]` and `null` are all accepted.
 * Features: document symbols, workspace symbols (only on a running
@@ -150,7 +156,7 @@ permissions, time or memory ceilings. The same scope is never sent twice.
 
 **Installation is manual**: Bricks never downloads or installs a server.
 Built-in configurations: rust-analyzer, typescript-language-server, pyright,
-gopls and others (`cersei-lsp/src/config.rs`); `[[semantic.lsp.servers]]`
+gopls and others (`bricks-lsp/src/config.rs`); `[[semantic.lsp.servers]]`
 adds or overrides one. For Rust: `rustup component add rust-analyzer`. A
 server that is missing or fails to start is reported with its reason (for the
 rustup proxy without the component: "Unknown binary 'rust-analyzer'…"), and
@@ -168,7 +174,7 @@ Only responses that used a language server are cached (lexical searches
 re-read the disk each time). A semantic answer can depend on other files
 than its own, so **any** change notification drops all cached responses.
 Notifications come from the agent runner after every non-read-only tool
-call (Write, Edit, Bash…), through `cersei_tools::code_scout::notify_workspace_changed`
+call (Write, Edit, Bash…), through `bricks_tools::code_scout::notify_workspace_changed`
 (which calls `notify_any_change`). `SemanticEngine::notify_changed(paths)`
 drops the same cached responses; the tests and the bench call it. Edits made
 outside Bricks are not observed. A cached response is bounded only by its TTL
@@ -207,7 +213,7 @@ See `docs/bricks.example.toml`. Every value is a ceiling.
 ## Benchmark
 
 ```sh
-cargo run --release -p cersei-tools --example semantic_bench -- \
+cargo run --release -p bricks-tools --example semantic_bench -- \
     --root . --runs 7 --out target/semantic-bench.json        # add --lsp to allow servers
 ```
 
@@ -281,4 +287,4 @@ Reading these numbers:
 |---|---|
 | platform | macOS 27 (Apple silicon) |
 | servers, real | rust-analyzer 1.98.1 (rustup component), negotiated UTF-8: `tests/rust_analyzer.rs` (homonyms resolved, references, edit then re-query; ignored by default, run with `--ignored`) and the `--lsp` benchmark on this repository. Other servers not tested |
-| servers, scripted | `cersei_lsp::mock` (UTF-8 and UTF-16, versioned sync, all response shapes, pending/old diagnostics, timeout, cancellation, crash) |
+| servers, scripted | `bricks_lsp::mock` (UTF-8 and UTF-16, versioned sync, all response shapes, pending/old diagnostics, timeout, cancellation, crash) |

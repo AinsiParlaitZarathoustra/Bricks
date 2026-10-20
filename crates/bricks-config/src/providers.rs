@@ -1,6 +1,6 @@
 //! The provider registry (`providers.toml`), loaded from plain paths.
 
-use cersei_provider::ProviderRegistry;
+use bricks_provider::ProviderRegistry;
 use std::path::Path;
 
 /// Loads the registry from `explicit`, or from the default location when

@@ -37,6 +37,19 @@ pub struct Model {
 
 /// Answers `replies` in order, then `text("ok")`.
 pub fn model(replies: Vec<String>) -> Model {
+    serve(replies, None)
+}
+
+/// As [`model`], but a request from a sub-agent (its system prompt says so)
+/// is answered with `child`, and does not take the next reply of `replies`.
+pub fn model_with_children(replies: Vec<String>, child: String) -> Model {
+    serve(replies, Some(child))
+}
+
+/// What a sub-agent's system prompt says (and the main run's never does).
+const SUB_AGENT_MARK: &str = "You are a sub-agent working on one task given by another agent";
+
+fn serve(replies: Vec<String>, child: Option<String>) -> Model {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     let seen = Arc::new(Mutex::new(Vec::new()));
@@ -46,6 +59,7 @@ pub fn model(replies: Vec<String>) -> Model {
         while let Ok((mut sock, _)) = listener.accept() {
             let replies = replies.clone();
             let s2 = s2.clone();
+            let child = child.clone();
             std::thread::spawn(move || {
                 let mut buf = Vec::new();
                 let mut tmp = [0u8; 8192];
@@ -77,7 +91,11 @@ pub fn model(replies: Vec<String>) -> Model {
                 if let Ok(v) = serde_json::from_slice::<Value>(&buf[start..]) {
                     s2.lock().unwrap().push(v);
                 }
-                let body = replies.lock().unwrap().next().unwrap_or_else(|| text("ok"));
+                let raw = String::from_utf8_lossy(&buf[start..]);
+                let body = match &child {
+                    Some(c) if raw.contains(SUB_AGENT_MARK) => c.clone(),
+                    _ => replies.lock().unwrap().next().unwrap_or_else(|| text("ok")),
+                };
                 if body == HANG {
                     std::thread::sleep(std::time::Duration::from_secs(60));
                     return;

@@ -1,42 +1,38 @@
 ---
 title: "Cookbook: Research Agent"
-description: Build an autonomous research agent that aggregates information from web, papers, and codebases.
+description: Build a research agent that combines web search and page reading with local code search and code intelligence, and keeps its findings in graph memory across sessions.
 ---
+
+import { Callout } from 'fumadocs-ui/components/callout';
 
 # Cookbook: Research Agent
 
-Build an agent that autonomously researches topics by searching the web, reading papers, analyzing codebases, and synthesizing findings — with persistent memory across sessions.
+This recipe builds an agent that researches a question by searching the web, reading pages, searching local code, and recording what it finds. The web tools are described in `docs/web.md` in the repository. The search provider is set in `bricks.toml` under `[web.search]`.
 
-## Architecture
-
-```
-User Query → Research Agent
-  ├── WebSearch (Brave API) → top results
-  ├── WebFetch → read full pages
-  ├── Grep/Glob → search local codebases
-  ├── LSP → understand code semantics
-  └── Graph Memory → store + recall findings
+```text
+User query → research agent
+  ├── WebSearch / WebFetch   → results and page passages
+  ├── Read / Glob / Grep     → local code and documents
+  ├── LspTool                → code symbols and references
+  └── GraphMemory            → store and recall findings
 ```
 
-## The Agent
+## The agent
 
 ```rust
-use cersei::prelude::*;
+use bricks::prelude::*;
+use bricks::tools::{lsp_tool::LspTool, filesystem, web};
+use std::path::Path;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let provider = cersei_provider::from_model_string("auto")?.0;
+    let provider = bricks::provider_from_config(None, "my-provider/my-model")?;
 
-    // Research agent: web + filesystem + memory tools
+    // Read, Write, Edit, Glob, Grep, … ; WebFetch and WebSearch; the LSP tool.
     let mut tools: Vec<Box<dyn Tool>> = Vec::new();
-    tools.extend(cersei_tools::filesystem()); // Read, Glob, Grep
-    tools.extend(cersei_tools::web());        // WebFetch, WebSearch
-    tools.push(Box::new(cersei_tools::lsp_tool::LspTool::new(
-        std::path::Path::new("."),
-    )));
-
-    // Memory manager for persistent findings
-    let memory = cersei_memory::manager::MemoryManager::new(".");
+    tools.extend(filesystem());
+    tools.extend(web());
+    tools.push(Box::new(LspTool::new(Path::new("."))));
 
     let agent = Agent::builder()
         .provider(provider)
@@ -44,139 +40,117 @@ async fn main() -> anyhow::Result<()> {
         .system_prompt(RESEARCH_PROMPT)
         .auto_compact(true)
         .session_id("research-session-1")
-        .memory(memory)
+        .working_dir(".")
         .build()?;
 
     let output = agent.run(
-        "Research the current state of Rust async runtimes. \
-         Compare tokio, async-std, smol, and glommio. \
-         Focus on performance benchmarks, API ergonomics, and ecosystem maturity. \
-         Write a comprehensive report to research-output.md"
+        "Research the current state of Rust async runtimes. Compare tokio, async-std, smol \
+         and glommio on performance evidence, API ergonomics and ecosystem maturity. Cite each \
+         source by URL. Write the report to research-output.md.",
     ).await?;
 
-    println!("Research complete in {} turns, {} tool calls",
-        output.turns, output.tool_calls.len());
-
+    println!("Research complete in {} turns, {} tool calls", output.turns, output.tool_calls.len());
     Ok(())
 }
 
 const RESEARCH_PROMPT: &str = "You are a research agent. Your job is to:
-1. Break research questions into sub-topics
-2. Search the web for each sub-topic using WebSearch
-3. Read promising URLs with WebFetch
-4. Cross-reference findings with local codebases using Grep/Glob
-5. Use LSP for semantic code understanding when analyzing libraries
-6. Synthesize findings into structured reports with citations
-7. Store key findings in memory for future reference
+1. Break the question into sub-topics
+2. Search the web for each sub-topic with WebSearch
+3. Read the promising pages with WebFetch
+4. Cross-check the claims against local code with Grep and Glob
+5. Use the LSP tool to understand library code when it matters
+6. Write a report with a comparison table and a source list
 
-Always cite your sources with URLs. Use tables for comparisons.
-Search for multiple perspectives before drawing conclusions.";
+Cite every source by URL. Give the strongest evidence for each claim, and say when the evidence is weak.";
 ```
 
-## Multi-Source Research Pattern
+`filesystem()` and `web()` are the tool sets of the same names in `bricks::tools`. The `session_id` makes the conversation resumable when a memory is attached; see [Agent Deployment](/docs/cookbook-agent-deployment#with-session-persistence).
 
-The key to quality research is combining multiple sources:
+## Several questions in parallel
+
+A research question with independent parts can be split in code, with one agent per part, run concurrently. Each agent gets its own history:
 
 ```rust
-// Step 1: Web search for overview
-let search_results = agent.run(
-    "WebSearch for 'Rust async runtime benchmarks 2025'"
-).await?;
+let parts = [
+    "Performance evidence for tokio, smol and glommio",
+    "Current maintenance status of async-std",
+    "Ecosystem size and the crates that depend on each runtime",
+];
 
-// Step 2: Fetch top results
-let fetched = agent.run(
-    "WebFetch the top 3 URLs from the search results"
-).await?;
+let runs = parts.iter().map(|question| {
+    let agent = Agent::builder()
+        .provider(bricks::provider_from_config(None, "my-provider/my-model").unwrap())
+        .tools(web())
+        .system_prompt(RESEARCH_PROMPT)
+        .build()
+        .unwrap();
+    let question = question.to_string();
+    async move { agent.run(&question).await }
+});
 
-// Step 3: Cross-reference with actual code
-let code_analysis = agent.run(
-    "Grep the tokio source code for benchmark results and performance notes"
-).await?;
-
-// Step 4: Synthesize
-let report = agent.run(
-    "Synthesize all findings into a comparison table"
-).await?;
+let answers = futures::future::join_all(runs).await;
 ```
 
-## Persistent Research with Graph Memory
+`join_all` comes from the `futures` crate. Then ask a final agent to combine the answers. This keeps the coordination in your code, where you can see it, instead of in the model's choice of tools.
 
-Store research findings across sessions:
+## Persistent findings with graph memory
+
+Store findings in a graph store and recall them in later sessions. This needs the `graph` feature of `bricks-memory` (see [Graph Memory](/docs/cookbook-graph-memory)):
 
 ```rust
-use cersei_memory::graph::GraphMemory;
-use cersei_memory::memdir::MemoryType;
+use bricks::memory::graph::GraphMemory;
+use bricks::memory::memdir::MemoryType;
+use std::path::Path;
 
-let graph = GraphMemory::open(std::path::Path::new("~/.abstract/graph.db"))?;
+let graph = GraphMemory::open(Path::new("./research.db"))?;
 
-// Store a finding
 let id = graph.store_memory(
-    "tokio 1.x: 2.3M req/s on HTTP benchmarks (source: tokio blog 2025)",
+    "tokio: <throughput figure and source URL, as found>",
     MemoryType::Reference,
     0.9,
 )?;
 graph.tag_memory(&id, "rust-async")?;
 graph.tag_memory(&id, "benchmarks")?;
 
-// Link related findings
 let id2 = graph.store_memory(
-    "async-std deprecated in favor of smol ecosystem (source: GitHub announcement)",
+    "async-std: <status statement and source URL, as found>",
     MemoryType::Reference,
     0.85,
 )?;
 graph.link_memories(&id, &id2, "COMPARES_TO")?;
 
-// Later: recall all findings about async runtimes
-let findings = graph.by_topic("rust-async");
-for finding in findings {
+// In a later session:
+for finding in graph.by_topic("rust-async") {
     println!("{finding}");
 }
 ```
 
-## Sub-Agent Pattern for Parallel Research
+Store the text of a finding, with its source, and not only a conclusion, so that a later session can check it.
 
-Use sub-agents to research multiple topics concurrently:
+<Callout type="info">
+Put recalled findings into the prompt of the next session yourself. [Graph Memory](/docs/cookbook-graph-memory#using-it-with-an-agent) shows how to combine `MemoryManager::recall` with `build_context()`. The graph store is not a conversation memory.
+</Callout>
 
-```rust
-let agent = Agent::builder()
-    .provider(provider)
-    .tools(tools)
-    .system_prompt(
-        "You are a research coordinator. Use the Agent tool to spawn \
-         parallel research sub-agents for each sub-topic. Each sub-agent \
-         should search, read, and summarize independently. Synthesize \
-         all sub-agent results into a final report."
-    )
-    .build()?;
+## The report format
 
-// The agent will spawn sub-agents like:
-// Agent("Research tokio performance benchmarks")
-// Agent("Research async-std current status")
-// Agent("Research smol ecosystem maturity")
-// Then synthesize all results
-```
-
-## Output Format
-
-The agent produces structured markdown reports:
+The agent's report is Markdown. A typical layout is a summary, a comparison table, and a source list. The table below is a **template**: the cells are placeholders for what the research finds, not measured results.
 
 ```markdown
 # Rust Async Runtimes: Comparative Analysis
 
-## Executive Summary
-...
+## Summary
+…
 
-## Detailed Comparison
+## Comparison
 
-| Runtime | Throughput | API Ergonomics | Ecosystem | Status |
-|---------|-----------|----------------|-----------|--------|
-| tokio | 2.3M req/s | Good | Extensive | Active |
-| smol | 1.8M req/s | Excellent | Growing | Active |
-| glommio | 3.1M req/s | Complex | Niche | Active |
-| async-std | N/A | Good | Declining | Deprecated |
+| Runtime | Performance evidence | API ergonomics | Ecosystem | Status |
+|---------|----------------------|----------------|-----------|--------|
+| tokio   | …                    | …              | …         | …      |
+| smol    | …                    | …              | …         | …      |
+| glommio | …                    | …              | …         | …      |
+| async-std | …                  | …              | …         | …      |
 
 ## Sources
-1. [tokio blog](https://tokio.rs/blog/...) — performance benchmarks
-2. [GitHub announcement](https://github.com/...) — async-std deprecation
-...
+1. [title](URL): what it supports
+…
 ```

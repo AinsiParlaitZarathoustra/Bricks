@@ -2,27 +2,27 @@
 resolver = "2"
 exclude = ["examples/benchmark"]
 members = [
-    "crates/cersei",
-    "crates/cersei-types",
-    "crates/cersei-provider",
-    "crates/cersei-tools",
-    "crates/cersei-tools-derive",
-    "crates/cersei-agent",
-    "crates/cersei-memory",
-    "crates/cersei-hooks",
-    "crates/cersei-mcp",
-    "crates/cersei-lsp",
+    "crates/bricks",
+    "crates/bricks-types",
+    "crates/bricks-provider",
+    "crates/bricks-tools",
+    "crates/bricks-tools-derive",
+    "crates/bricks-agent",
+    "crates/bricks-memory",
+    "crates/bricks-hooks",
+    "crates/bricks-mcp",
+    "crates/bricks-lsp",
     "crates/bricks-semantic",
-    "crates/cersei-embeddings",
-    "crates/cersei-compression",
+    "crates/bricks-embeddings",
+    "crates/bricks-compression",
     "crates/bricks-skills",
-    "crates/cersei-vms",
-    "crates/cersei-agentlang",
-    "crates/cersei-agentrl",
-    "crates/cersei-workflows",
-    "crates/cersei-tbench",
-    "crates/cersei-web",
-    "crates/cersei-testkit",
+    "crates/bricks-vms",
+    "crates/bricks-agentlang",
+    "crates/bricks-agentrl",
+    "crates/bricks-workflows",
+    "crates/bricks-tbench",
+    "crates/bricks-web",
+    "crates/bricks-testkit",
     "bench/long-mem",
     "crates/bricks-cli",
     "crates/bricks-config",
@@ -50,7 +50,7 @@ async-trait = "0.1"
 
 # HTTP
 # DNS: every client resolves through hickory (pure Rust), set by
-# `cersei_types::http` — static musl binaries have no NSS for getaddrinfo.
+# `bricks_types::http` — static musl binaries have no NSS for getaddrinfo.
 # reqwest's own `hickory-dns` feature is not used: it pins hickory 0.25
 # (RUSTSEC-2026-0118/0119); the shared resolver uses 0.26.
 reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls", "rustls-tls-webpki-roots"], default-features = false }
@@ -104,26 +104,26 @@ quote = "1"
 proc-macro2 = "1"
 
 # Workspace crates
-cersei = { path = "crates/cersei", version = "0.6.1" }
-cersei-types = { path = "crates/cersei-types", version = "0.6.1" }
-cersei-provider = { path = "crates/cersei-provider", version = "0.6.1" }
-cersei-tools = { path = "crates/cersei-tools", version = "0.6.1" }
-cersei-tools-derive = { path = "crates/cersei-tools-derive", version = "0.6.1" }
-cersei-agent = { path = "crates/cersei-agent", version = "0.6.1" }
-cersei-memory = { path = "crates/cersei-memory", version = "0.6.1" }
-cersei-hooks = { path = "crates/cersei-hooks", version = "0.6.1" }
-cersei-mcp = { path = "crates/cersei-mcp", version = "0.6.1" }
-cersei-lsp = { path = "crates/cersei-lsp", version = "0.6.1" }
+bricks = { path = "crates/bricks", version = "0.6.1" }
+bricks-types = { path = "crates/bricks-types", version = "0.6.1" }
+bricks-provider = { path = "crates/bricks-provider", version = "0.6.1" }
+bricks-tools = { path = "crates/bricks-tools", version = "0.6.1" }
+bricks-tools-derive = { path = "crates/bricks-tools-derive", version = "0.6.1" }
+bricks-agent = { path = "crates/bricks-agent", version = "0.6.1" }
+bricks-memory = { path = "crates/bricks-memory", version = "0.6.1" }
+bricks-hooks = { path = "crates/bricks-hooks", version = "0.6.1" }
+bricks-mcp = { path = "crates/bricks-mcp", version = "0.6.1" }
+bricks-lsp = { path = "crates/bricks-lsp", version = "0.6.1" }
 bricks-semantic = { path = "crates/bricks-semantic", version = "0.6.1" }
-cersei-embeddings = { path = "crates/cersei-embeddings", version = "0.6.1" }
-cersei-compression = { path = "crates/cersei-compression", version = "0.6.1" }
+bricks-embeddings = { path = "crates/bricks-embeddings", version = "0.6.1" }
+bricks-compression = { path = "crates/bricks-compression", version = "0.6.1" }
 bricks-skills = { path = "crates/bricks-skills", version = "0.6.1" }
-cersei-vms = { path = "crates/cersei-vms", version = "0.6.1" }
-cersei-agentlang = { path = "crates/cersei-agentlang", version = "0.6.1" }
-cersei-agentrl = { path = "crates/cersei-agentrl", version = "0.6.1" }
-cersei-workflows = { path = "crates/cersei-workflows", version = "0.6.1" }
-cersei-web = { path = "crates/cersei-web", version = "0.6.1" }
-cersei-testkit = { path = "crates/cersei-testkit" }
+bricks-vms = { path = "crates/bricks-vms", version = "0.6.1" }
+bricks-agentlang = { path = "crates/bricks-agentlang", version = "0.6.1" }
+bricks-agentrl = { path = "crates/bricks-agentrl", version = "0.6.1" }
+bricks-workflows = { path = "crates/bricks-workflows", version = "0.6.1" }
+bricks-web = { path = "crates/bricks-web", version = "0.6.1" }
+bricks-testkit = { path = "crates/bricks-testkit" }
 bricks-config = { path = "crates/bricks-config", version = "0.6.1" }
 clap = { version = "4.5", features = ["derive"] }
 nucleo-matcher = "0.3"

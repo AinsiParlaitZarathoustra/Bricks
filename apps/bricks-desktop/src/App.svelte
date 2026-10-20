@@ -17,6 +17,8 @@
   import Composer from '$lib/features/composer/Composer.svelte'
   import ContextPanel from '$lib/features/context/ContextPanel.svelte'
   import ChangesPanel from '$lib/features/changes/ChangesPanel.svelte'
+  import ReaderPanel from '$lib/features/reader/ReaderPanel.svelte'
+  import { reader } from '$lib/state/reader.svelte'
   import TerminalPanel from '$lib/features/terminal/TerminalPanel.svelte'
   import SettingsDialog from '$lib/features/settings/SettingsDialog.svelte'
   import InspectorHost from '$lib/features/commands/InspectorHost.svelte'
@@ -71,8 +73,26 @@
 
   // `/diff` (or any caller) sets app.rightView = 'changes': show the panel.
   $effect(() => {
-    if (app.rightView === 'changes') rightOpen = true
+    if (app.rightView === 'changes' || app.rightView === 'reader') rightOpen = true
   })
+
+  // Opening a file (from a summary or an edit) shows the reader, even when
+  // it already was the right view of a closed column.
+  $effect(() => {
+    if (reader.openRequests > 0) {
+      app.rightView = 'reader'
+      rightOpen = true
+    }
+  })
+
+  function toggleReader() {
+    if (app.rightView === 'reader' && rightOpen) {
+      app.rightView = 'context'
+    } else {
+      app.rightView = 'reader'
+      rightOpen = true
+    }
+  }
 
   function toggleChanges() {
     if (app.rightView === 'changes' && rightOpen) {
@@ -103,7 +123,7 @@
       {onLayoutChange}
     >
       {#snippet topbar(controls)}
-        <TopBar {...controls} changesPressed={app.rightView === 'changes' && rightOpen} onToggleChanges={toggleChanges}>
+        <TopBar {...controls} changesPressed={app.rightView === 'changes' && rightOpen} onToggleChanges={toggleChanges} readerPressed={app.rightView === 'reader' && rightOpen} onToggleReader={toggleReader}>
           {#snippet title()}
             <ConversationTitle conversation={app.current} />
           {/snippet}
@@ -137,6 +157,8 @@
       {#snippet right()}
         {#if app.rightView === 'changes'}
           <ChangesPanel />
+        {:else if app.rightView === 'reader'}
+          <ReaderPanel conversation={app.current} />
         {:else}
           <ContextPanel />
         {/if}

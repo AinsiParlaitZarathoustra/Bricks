@@ -8,15 +8,18 @@ description = "The `bricks` command: a thin layer that loads the configuration, 
 [[bin]]
 name = "bricks"
 path = "src/main.rs"
+# Same doc output directory as the `bricks` facade library (target/doc/bricks):
+# documenting this binary too makes `cargo doc --workspace` report a filename collision.
+doc = false
 
 [dependencies]
-cersei-agent = { workspace = true }
+bricks-agent = { workspace = true }
 bricks-config = { workspace = true }
-cersei-types = { workspace = true }
-cersei-provider = { workspace = true }
-cersei-tools = { workspace = true }
-cersei-memory = { workspace = true, features = ["structured"] }
-cersei-embeddings = { workspace = true }
+bricks-types = { workspace = true }
+bricks-provider = { workspace = true }
+bricks-tools = { workspace = true }
+bricks-memory = { workspace = true, features = ["structured"] }
+bricks-embeddings = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }

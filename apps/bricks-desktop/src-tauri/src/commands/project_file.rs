@@ -13,7 +13,7 @@ use crate::git::{is_binary_content, validate_relative_path};
 use crate::services::{invalid, io_error, join_error, not_found};
 use std::fs::File;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tauri::State;
 use tauri_plugin_dialog::DialogExt;
 
@@ -36,28 +36,65 @@ pub fn read_window(
     end_line: Option<u32>,
 ) -> IpcResult<ProjectFileWindow> {
     validate_relative_path(rel)?;
-    let root = std::fs::canonicalize(root).map_err(|e| IpcError {
-        code: IpcErrorCode::FolderMissing,
-        message: format!("le dossier du projet n'est plus accessible : {e}"),
-    })?;
-    let target = std::fs::canonicalize(root.join(rel)).map_err(|e| match e.kind() {
-        std::io::ErrorKind::NotFound => not_found(format!("`{rel}` n'existe pas dans le projet")),
-        _ => io_error(&format!("lecture de `{rel}`"), e),
-    })?;
+    let root = canonical_root(root, "le dossier du projet")?;
+    let target = canonical_or_missing(&root.join(rel), rel)?
+        .ok_or_else(|| not_found(format!("`{rel}` n'existe pas dans le projet")))?;
     if !target.starts_with(&root) {
         return Err(invalid(format!(
             "`{rel}` sort du projet : le lien symbolique est refusé"
         )));
     }
-    let meta = std::fs::metadata(&target).map_err(|e| io_error(&format!("lecture de `{rel}`"), e))?;
+    read_target(&target, rel, line, end_line)
+}
+
+/// The canonical form of the folder `root`, every link followed. `what` names
+/// the folder in the error when it cannot be read any more.
+pub(crate) fn canonical_root(root: &Path, what: &str) -> IpcResult<PathBuf> {
+    std::fs::canonicalize(root).map_err(|e| IpcError {
+        code: IpcErrorCode::FolderMissing,
+        message: format!("{what} n'est plus accessible : {e}"),
+    })
+}
+
+/// The canonical form of `candidate` (every link followed), `None` when nothing
+/// is there: a missing entry, a parent that is not a folder, a broken link.
+/// `shown` names the file in the error of any other failure.
+pub(crate) fn canonical_or_missing(candidate: &Path, shown: &str) -> IpcResult<Option<PathBuf>> {
+    match std::fs::canonicalize(candidate) {
+        Ok(path) => Ok(Some(path)),
+        Err(e) if is_missing_entry(&e) => Ok(None),
+        Err(e) => Err(io_error(&format!("lecture de `{shown}`"), e)),
+    }
+}
+
+/// Whether an I/O error says that nothing is at the path (missing entry, or a
+/// parent that is a file).
+fn is_missing_entry(e: &std::io::Error) -> bool {
+    matches!(
+        e.kind(),
+        std::io::ErrorKind::NotFound | std::io::ErrorKind::NotADirectory
+    )
+}
+
+/// The window of `target`, a canonical path of a regular file, asked by `line`
+/// and `end_line` (see `read_window`). `shown` is the path the caller knows the
+/// file by: it is the name in the messages and in the window.
+pub(crate) fn read_target(
+    target: &Path,
+    shown: &str,
+    line: Option<u32>,
+    end_line: Option<u32>,
+) -> IpcResult<ProjectFileWindow> {
+    let meta =
+        std::fs::metadata(target).map_err(|e| io_error(&format!("lecture de `{shown}`"), e))?;
     if !meta.is_file() {
-        return Err(invalid(format!("`{rel}` n'est pas un fichier")));
+        return Err(invalid(format!("`{shown}` n'est pas un fichier")));
     }
 
     let mut bytes = Vec::new();
-    File::open(&target)
+    File::open(target)
         .and_then(|file| file.take(READ_LIMIT + 1).read_to_end(&mut bytes))
-        .map_err(|e| io_error(&format!("lecture de `{rel}`"), e))?;
+        .map_err(|e| io_error(&format!("lecture de `{shown}`"), e))?;
     let mut truncated = bytes.len() as u64 > READ_LIMIT;
     if truncated {
         // Cut after the last newline: no half line, no half UTF-8 character.
@@ -69,11 +106,11 @@ pub fn read_window(
     }
     if is_binary_content(&bytes) {
         return Err(invalid(format!(
-            "`{rel}` est un fichier binaire : aperçu indisponible"
+            "`{shown}` est un fichier binaire : aperçu indisponible"
         )));
     }
     let text = std::str::from_utf8(&bytes)
-        .map_err(|_| invalid(format!("`{rel}` n'est pas du texte UTF-8")))?;
+        .map_err(|_| invalid(format!("`{shown}` n'est pas du texte UTF-8")))?;
 
     let mut lines: Vec<String> = text
         .split('\n')
@@ -94,12 +131,12 @@ pub fn read_window(
     truncated |= total > WINDOW_LINES;
 
     Ok(ProjectFileWindow {
-        path: rel.to_string(),
+        path: shown.to_string(),
         start: first,
         lines: window,
         total_lines: total,
         truncated,
-        language: language_of(rel),
+        language: language_of(shown),
     })
 }
 

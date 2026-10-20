@@ -3,8 +3,8 @@
 //! (`crate::engine`) does the reading.
 
 use crate::contract::{HistoryBlock, HistoryMessage, HistoryRole, SessionItem};
-use cersei_agent::control::SessionSummary;
-use cersei_types::{ContentBlock, Message, MessageContent, Role, ToolResultContent};
+use bricks_agent::control::SessionSummary;
+use bricks_types::{ContentBlock, Message, MessageContent, Role, ToolResultContent};
 use std::path::Path;
 
 /// How many characters of context a snippet keeps on each side of a match.
@@ -148,7 +148,7 @@ pub fn path_text(p: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cersei_types::ImageSource;
+    use bricks_types::ImageSource;
 
     #[test]
     fn snippets_keep_the_match_and_its_context_on_character_boundaries() {

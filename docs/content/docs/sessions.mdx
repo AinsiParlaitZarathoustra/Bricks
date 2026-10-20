@@ -8,7 +8,7 @@ import { TypeTable } from 'fumadocs-ui/components/type-table';
 
 # Sessions
 
-Every conversation in Cersei is a session. Messages are persisted as append-only JSONL, compacted when the context window fills up, and consolidated into long-term memory overnight. Sessions survive agent restarts, provider switches, and schema migrations.
+Every conversation in Bricks is a session. Messages are persisted as append-only JSONL, compacted when the context window fills up, and consolidated into long-term memory overnight. Sessions survive agent restarts, provider switches, and schema migrations.
 
 ---
 
@@ -100,7 +100,7 @@ Sessions are stored as `.jsonl` files — one JSON object per line, append-only.
 ### Writing
 
 ```rust
-use cersei::memory::manager::MemoryManager;
+use bricks::memory::manager::MemoryManager;
 
 let mm = MemoryManager::new(project_root);
 
@@ -145,9 +145,10 @@ for session in &sessions {
 Pass the same `session_id` to the agent builder. The runner loads history from the session file on startup.
 
 ```rust
+use bricks_memory::JsonlMemory;
 let agent = Agent::builder()
-    .provider(Anthropic::from_env()?)
-    .tools(cersei::tools::coding())
+    .provider(bricks::provider_from_config(None, "my-provider/my-model")?)
+    .tools(bricks::tools::coding())
     .memory(JsonlMemory::new("./sessions"))
     .session_id("my-session")
     .build()?;
@@ -173,12 +174,19 @@ In the desktop application, pick a conversation in the sidebar or use
 `/resume abc12345`. See `docs/cli.md` in the repository. (The `abstract sessions show/rm` commands
 of the Cersei era do not exist in Bricks.)
 
+The desktop application also keeps one record per run in
+`<bricks_home>/desktop/run-records/<session_id>.jsonl`: the run's answer text,
+its shell commands and its file changes, which the message history does not
+hold. A record is written again when a run changes after it ended (a
+background job or a sub-agent finishing later). Deleting a session removes
+its file.
+
 ### Soft Delete (Tombstones)
 
 Individual messages can be soft-deleted without removing the session file:
 
 ```rust
-use cersei_memory::session_storage;
+use bricks_memory::session_storage;
 
 session_storage::tombstone_entry(&session_path, "message-uuid-to-delete")?;
 ```
@@ -212,7 +220,7 @@ When a session file grows past 50MB, writes automatically fork to a new part fil
 ### Inspecting Parts
 
 ```rust
-use cersei_memory::session_storage::{all_part_paths, total_session_size};
+use bricks_memory::session_storage::{all_part_paths, total_session_size};
 
 let base = Path::new("~/.claude/projects/-my-project/abc12345.jsonl");
 
@@ -358,7 +366,7 @@ Consolidation state is stored in `.consolidation_state.json`:
 The lock file (`.consolidation_lock`) contains a Unix timestamp. It's considered stale after 1 hour — if a consolidation process crashes, the next one can proceed after the stale period.
 
 ```rust
-use cersei_agent::auto_dream::AutoDream;
+use bricks_agent::auto_dream::AutoDream;
 
 let dreamer = AutoDream::new(memory_dir, conversations_dir);
 

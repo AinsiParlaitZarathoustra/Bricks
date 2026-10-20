@@ -1,62 +1,46 @@
 ---
 title: "Benchmarks: Library"
-description: Cersei SDK tool dispatch and I/O performance.
+description: In-process cost of the Bricks ADK tools, from the dated benchmark report of 2026-10-08.
 ---
+
+import { Callout } from 'fumadocs-ui/components/callout';
 
 # Library Benchmarks
 
-Cersei SDK in-process performance. Apple Silicon, release build, 50 iterations with warmup.
+These are measurements of the in-process tools, from the benchmark report of **8 October 2026** (`docs/benchmarks-bricks-2026-10-08.md` in the repository). They were taken on Bricks 0.4.6 at commit `dee981e`, on Apple A18 Pro, macOS 27.2, release build, with a standalone suite of 100 iterations after warm-up, on temporary files.
 
-## Tool Dispatch
+<Callout type="warn">
+The report predates the change that runs each `Bash` call in its own process (commit `4263cd9`). The `Bash` row below is therefore not a measure of the current code, and the other tools are not affected by that change. Run the suite again before you compare.
+</Callout>
 
-| Tool | Avg | Min | Max |
-|------|-----|-----|-----|
-| Edit | 0.02ms | 0.02ms | 0.04ms |
-| Glob | 0.05ms | 0.05ms | 0.13ms |
-| Write | 0.06ms | 0.05ms | 0.19ms |
-| Read | 0.09ms | 0.08ms | 0.12ms |
-| Grep | 6.04ms | 4.88ms | 6.82ms |
-| Bash | 16.67ms | 16.39ms | 17.00ms |
+## Tool dispatch
 
-Grep latency is dominated by `rg` process spawn. Bash latency is shell execution. Everything else is pure in-process I/O.
+| Tool | Mean | Min | Max |
+|------|-----:|----:|----:|
+| Read | 0.118 ms | 0.111 ms | 0.378 ms |
+| Write | 0.050 ms | 0.037 ms | 0.290 ms |
+| Edit | 0.759 ms | 0.700 ms | 1.830 ms |
+| Glob | 0.066 ms | 0.046 ms | 0.230 ms |
+| Grep | 2.017 ms | 1.365 ms | 4.765 ms |
+| Bash (before the per-process change) | 39.695 ms | 35.799 ms | 84.883 ms |
+| `std::fs::read` (reference) | 0.010 ms | 0.010 ms | 0.012 ms |
+| `std::fs::write` (reference) | 0.045 ms | 0.028 ms | 0.165 ms |
 
-## Session I/O
+The report notes that `Edit` replaces every occurrence of a repeated text in the file, and that earlier figures timed an ambiguous call whose error was ignored. They are not comparable with these.
 
-| Operation | Speed |
-|-----------|-------|
-| Session write (single) | 27 us/entry |
-| Session write (100 burst) | 26.5 us/entry |
-| Session load (100 entries) | 268 us |
-| Session load (1000 entries) | 2633 us |
+## Reproduce
 
-Write throughput: ~36000 entries/sec. Load scales linearly at ~2.6 us/entry.
-
-## Context Building
-
-| Operation | Speed |
-|-----------|-------|
-| Full context (CLAUDE.md + MEMORY.md) | 45 us |
-| Load MEMORY.md (200 lines) | 14.6 us |
-
-## Auto-Dream Gates
-
-| Operation | Speed |
-|-----------|-------|
-| `should_consolidate()` | 10 us |
-| `should_extract()` | sub-1 us |
-| `parse_extraction_output()` | 0.7 us |
-
-Per-turn overhead for memory gates: under 12 microseconds.
-
-## Run
+From the repository root:
 
 ```bash
-# Tool I/O
-cargo run -p cersei --example benchmark_io --release
-
-# Memory + sessions
-cargo run -p cersei --example stress_memory --release
-
-# Full standalone suite
-cd examples/benchmark && cargo run --release
+cargo run --release -p bricks --example benchmark_io
 ```
+
+The other examples of the `bricks` package are `stress_tools`, `stress_memory`, `stress_skills`, `stress_orchestration` and `stress_core_infrastructure`, run the same way with `--example NAME`. The standalone suite is in `examples/benchmark`:
+
+```bash
+CARGO_PROFILE_RELEASE_OPT_LEVEL=z CARGO_PROFILE_RELEASE_LTO=thin \
+  cargo run --release --manifest-path examples/benchmark/Cargo.toml
+```
+
+Results depend on the machine, the file system and what else is running. Compare runs made the same way, on the same machine.

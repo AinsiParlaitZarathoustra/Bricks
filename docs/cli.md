@@ -1,6 +1,6 @@
 # The `bricks` command
 
-`bricks` is a thin layer over the engine (`cersei-agent`): it parses
+`bricks` is a thin layer over the engine (`bricks-agent`): it parses
 arguments, loads the configuration, runs one prompt or lists the stored
 sessions, and presents the engine's events. The engine runs everything
 else — the agentic loop, providers, tools, approvals, compaction,
@@ -10,7 +10,7 @@ long-term memory recall and maintenance.
 bricks-cli (binary `bricks`)
   ├── arguments, configuration (existing loaders)
   └── headless mode: human output or versioned JSONL (run, sessions)
-            │  commands ↓   ↑ events      (cersei_agent::control)
+            │  commands ↓   ↑ events      (bricks_agent::control)
        engine: Controller → Agent
             │
   providers · context · tools · approvals · memory · sessions
@@ -19,7 +19,7 @@ apps/bricks-desktop: the interactive interface, on the same contract
 ```
 
 The engine never depends on `bricks-cli` or on any interface. The two
-frontends use the same contract (`cersei_agent::control`): typed
+frontends use the same contract (`bricks_agent::control`): typed
 `Command`s in, versioned `Envelope`s out.
 
 ## Installation
@@ -41,8 +41,10 @@ Two files are read, both through the existing loaders. Nothing is built in.
   `docs/providers.md`). A model is named `provider_id/model_id`; its
   reasoning profiles, capabilities and prices come from this file.
 * **Project**: `bricks.toml` in the project folder (the current folder, or
-  `--workspace <dir>`; see *Projects* below). Sections: `[agent]`, `[permissions]`, `[memory]`,
-  `[context]`, `[compression]`, `[web]` (see `docs/bricks.example.toml`).
+  `--workspace <dir>`; see *Projects* below). Sections: `[agent]`,
+  `[permissions]`, `[agents]`, `[bash]`, `[background]`, `[semantic]`,
+  `[memory]`, `[context]`, `[compression]` and `[web]` (see
+  `docs/bricks.example.toml`, which lists every key with its default).
   An invalid section falls back to its defaults with a diagnostic, shown
   as a warning when the session opens.
 
@@ -101,6 +103,34 @@ bricks --workspace ./my-project run "Describe this project."
   the other tools follow the approval policy, as everywhere. A workspace
   is a folder; a worktree (`docs/agents.md`) is another folder, hence
   another workspace; neither is an isolation of the system.
+
+## Tools of a session
+
+The ADK has a larger built-in tool set than a `bricks` session gets. The
+difference matters when you read the catalogue or build an agent with the
+library. A session of the `bricks` command or of Bricks Desktop has:
+
+* **In every session** (`bricks_tools::coding()`): `Read`, `Write`, `Edit`,
+  `ApplyPatch`, `Glob`, `Grep`, `CodeSearch`, `CodeScout`, `NotebookEdit`,
+  `Bash`, `BashTaskStatus`, `BashTaskOutput`, `BashTaskStop`, `Job`,
+  `PowerShell`, `WebFetch` and `WebSearch`.
+* **With skills** (both frontends enable them): `Skill`.
+* **When `[agents] enabled` is true, the default**: `Agent`, `Agents`,
+  `AgentControl` and `AgentProfiles`.
+
+The rest of `bricks_tools::all()` is not given to a session: planning
+(`TodoWrite`, `EnterPlanMode`, `ExitPlanMode`), scheduling (`CronCreate`,
+`CronList`, `CronDelete`, `Sleep`, `RemoteTrigger`), orchestration
+(`SendMessage`, the `Task*` tools, `EnterWorktree`, `ExitWorktree`),
+`AskUserQuestion`, `SyntheticOutput`, `Config` and `ToolSearch`. An agent you
+build with the library chooses its own tools.
+
+Every tool, whatever its set, goes through the approval policy of
+`[permissions]`: each tool has a permission level (`read_only`, `write`,
+`execute`, `dangerous` or `none`), and the policy maps the level, or the tool
+name, to `allow`, `ask` or `deny`. The defaults are in the `[permissions]`
+section of `docs/bricks.example.toml`. The built-in tools page of the site
+(`docs/content/docs/built-in-tools.mdx`) describes each tool.
 
 ## Commands
 
@@ -177,7 +207,7 @@ run.
 | 3 | a step needed an approval and nobody could give it |
 | 4 | the answer was delivered, but the long-term memory maintenance failed |
 | 5 | the run stopped at a limit before a final answer (`outcome = incomplete`); the partial answer was printed |
-| 6 | the answer was delivered, but background sub-agents did not complete: still running after `[agents] background_drain_ms` (then cancelled), failed or cancelled; in text mode one line per agent is printed on stderr, with `--json` the `agent_finished` and `run_usage` events say it |
+| 6 | the answer was delivered, but background sub-agents did not complete: still running when `[agents] background_drain_ms` runs out (then cancelled), failed or cancelled; in text mode one line per agent is printed on stderr, with `--json` the `agent_finished` and `run_usage` events say it. The default is `background_drain_ms = 0`: background sub-agents still running at the end of the main run are cancelled at once |
 | 130 | cancelled (Ctrl+C) |
 
 ### When a run stops
@@ -205,28 +235,35 @@ When the run stops at a limit, the history, partial answer and tool results are
 kept, every tool call has a result, and no tool is started afterwards. The
 memory maintenance that follows `run_finished` never restarts the task.
 
-Sub-agents (the native `Agent` tool, registered in the session agent unless
-`[agents] enabled = false`; see `docs/agents.md`) refuse an invalid request
-before anything is built, get their parent's permissions and at most its
-tools (never a delegation tool), are cancelled with the parent's run (which
+Sub-agents (the native tools `Agent`, `Agents`, `AgentControl` and
+`AgentProfiles`, registered in the session agent unless `[agents] enabled =
+false`; see `docs/agents.md`) refuse an invalid request before anything is
+built, get their parent's permissions and at most its tools (never the
+sub-agent tools themselves), are cancelled with the parent's run (which
 waits for their cleanup), and report `completed`, `incomplete`, `cancelled`
-or `failed` with their partial answer. In headless mode, delegating needs
-`Agent` / `Agents` allowed in `[permissions]` (`execute` tools); allowing
-them allows none of the children's own tools. Background sub-agents are
-drained after the answer (bounded by `[agents] background_drain_ms`), then
-cancelled: exit code 6 if any did not complete.
+or `failed` with their partial answer. In headless mode, starting sub-agents
+needs `Agent` / `Agents` allowed in `[permissions]` (`execute` tools);
+allowing them allows none of the children's own tools. Background sub-agents
+are drained after the answer, for at most `[agents] background_drain_ms`
+(`0` by default, so they are cancelled at once), then cancelled: exit code 6
+if any did not complete.
 
-## The JSONL schema (version 5)
+When a provider's `Retry-After` is longer than `[agent] retry_after_max_wait_ms`
+(`60000` by default), the run does not wait for it: no retry is sent, and the
+run fails at once with an error that names the setting. Shorter waits are
+taken, and each one is shown by a `Retrying in …` notice.
+
+## The JSONL schema (version 6)
 
 Every line is one envelope:
 
 ```json
-{"schema":5,"session_id":"20261006-141502-a1b2c3","run_id":"run_5f…","seq":7,"at":1791300902123,"type":"tool_started","tool_call_id":"call_1","name":"Glob","input":{"pattern":"*.md"}}
+{"schema":6,"session_id":"20261006-141502-a1b2c3","run_id":"run_5f…","seq":7,"at":1791300902123,"type":"tool_started","tool_call_id":"call_1","name":"Glob","input":{"pattern":"*.md"}}
 ```
 
 | field | |
 |---|---|
-| `schema` | `5`; incremented on any change a consumer could notice (2: `run_finished` gained `incomplete` and `termination`; 3: the `search` command and its `search_results` event; 4: sub-agents — `agent_*` events, `agent_id` in `approval_requested`, `list_agent_profiles` and `reload_agent_profiles`; 5: turn limits removed — `agent_spawned` no longer has `max_turns`, `edit_applied` gains `agent_id` and `changeset_id`, `binary` in its files). Additions a consumer can ignore — new event types, new optional fields, new commands, new states — keep the version (Sprint 10.5's runtime, Sprint 12's skills events and commands, Sprint 12.5's `set_reasoning`, `reasoning_changed` and `effective_reasoning` are such additions); a removed or renamed field or event, or a changed meaning, increments it. Consumers ignore unknown types and fields |
+| `schema` | `6`; incremented on any change a consumer could notice (2: `run_finished` gained `incomplete` and `termination`; 3: the `search` command and its `search_results` event; 4: sub-agents — `agent_*` events, `agent_id` in `approval_requested`, `list_agent_profiles` and `reload_agent_profiles`; 5: turn limits removed — `agent_spawned` no longer has `max_turns`, `edit_applied` gains `agent_id` and `changeset_id`, `binary` in its files; 6: `edit_applied` files gain `absolute`, `patch` and `patch_truncated`, `tool_finished` gains `executed` and `status`, `agent_tool_finished` gains `executed`, `status`, `output` and `output_truncated`). Additions a consumer can ignore — new event types, new optional fields, new commands, new states such as `set_reasoning`, `reasoning_changed`, `effective_reasoning` or the skills events — keep the version; a removed or renamed field or event, or a changed meaning, increments it. Consumers ignore unknown types and fields |
 | `session_id` | the session |
 | `run_id` | the run (absent for session-level events) |
 | `seq` | 1, 2, 3, … contiguous: a gap never happens silently |
@@ -243,10 +280,10 @@ Events (`type`):
 | `thinking_delta` | `text` | only reasoning the provider exposed; never reconstructed |
 | `tool_started` | `tool_call_id, name, input` | concurrent calls have distinct ids |
 | `tool_progress` | `tool_call_id?, name, message` | long calls (shell) |
-| `tool_finished` | `tool_call_id, name, is_error, duration_ms, output` | sent as soon as the call is done, without waiting for the other calls of its round: several calls finish in the order they end. The history sent to the model keeps the order of the calls |
+| `tool_finished` | `tool_call_id, name, is_error, duration_ms, output, executed?, status?` | sent as soon as the call is done, without waiting for the other calls of its round: several calls finish in the order they end. The history sent to the model keeps the order of the calls. `executed: false` for a call refused, denied or blocked before it ran; `status` is `success`, `failure`, `timed_out`, `cancelled` or `running` (a background command still going) |
 | `approval_requested` | `approval{approval_id, tool_call_id, tool, level, description, input, preview?, agent_id?}` | `preview.files[{path, kind, before_sha256, diff, added, removed}]` |
 | `approval_resolved` | `approval_id, tool_call_id, decision, by` | `decision`: `allow`, `allow_for_session`, `deny`; `by`: `user`, `session`, `non_interactive`, `cancelled` |
-| `edit_applied` | `tool_call_id, tool, files[{path, kind, added, removed, binary?}], agent_id?, changeset_id?` | a change was applied to the session's workspace: a successful `Write`, `Edit` or `ApplyPatch` of the session agent, or of a sub-agent working in that workspace (`agent_id`), or a ChangeSet applied (`changeset_id`); never for a denial, a refusal or a failure. Counts are those of the complete diff; one event per change |
+| `edit_applied` | `tool_call_id, tool, files[{path, kind, added, removed, binary?, absolute?, patch?, patch_truncated?}], agent_id?, changeset_id?` | a change was applied to the session's workspace: a successful `Write`, `Edit` or `ApplyPatch` of the session agent, or of a sub-agent working in that workspace (`agent_id`), or a ChangeSet applied (`changeset_id`); never for a denial, a refusal or a failure. Counts are those of the complete diff; one event per change |
 | `memory_recalled` | `items, tokens, omitted, budget` | what went into the system prompt |
 | `context` | `status{context_used{tokens, provenance, …}, context_window, input_limit, totals, …}` | `provenance`: `measured`, `counted`, `mixed`, `estimated` |
 | `usage` | `turn{…}, total{…}` | observed token usage; `cost_usd` absent = unknown, not zero |
@@ -262,7 +299,7 @@ Events (`type`):
 | `search_results` | `query, status, hits[{path, line, column, text}], omitted, notes?, elapsed_ms` | answer to `search`; `line`/`column` 1-based, column in characters; `status`: `complete`, `partial` (a limit was reached: absence proves nothing), `cancelled`, `error` |
 | `agent_spawned` | `agent{agent_id, parent_id?, root_run_id, tool_call_id?, batch_index?, background, depth, profile, profile_source, profile_revision, model{requested, applied, reason?}, reasoning{…}, workspace, isolation, branch?, task, created_at}` | a sub-agent was created (see `docs/agents.md`); `tool_call_id` is the parent's call |
 | `agent_state` | `agent_id, state, reason?` | `queued`, `waiting_admission`, `starting`, `running`, `cancelling`, then one of `completed`, `incomplete`, `failed`, `cancelled`, `interrupted` (found unfinished when the session reopened) |
-| `agent_tool_started` / `agent_tool_finished` | `agent_id, tool_call_id, name, input` / `…, is_error, duration_ms` | the sub-agent's tool calls (its text is never streamed) |
+| `agent_tool_started` / `agent_tool_finished` | `agent_id, tool_call_id, name, input` / `…, is_error, duration_ms, executed?, status?, output?, output_truncated?` | the sub-agent's tool calls (its text is never streamed); `output` is cut to 64 KiB |
 | `agent_finished` | `result{agent_id, profile, status, termination?, error?, summary, files_changed, commands, warnings, turns, usage, duration_ms, model, reasoning?, workspace, transcript?, changeset?, branch?, skills?}` | the compact result; its usage is not in the run's `usage` events (see `run_usage`) |
 | `agent_profiles` | `profiles[{name, description, scope, source, valid, error?, shadows}], total, page, diagnostics?` | answer to `list_agent_profiles` / `reload_agent_profiles` |
 | `changes_ready` | `changeset{id, agent_id, task, workspace, branch, base_sha, snapshot_id, baseline_tree, final_tree, files[{path, status, from?, added?, removed?, binary}], patch, patch_bytes, state, validations, note?}` | an isolated sub-agent ended with changes; nothing applied |
@@ -280,12 +317,12 @@ Events (`type`):
 A short run:
 
 ```text
-{"schema":5,"session_id":"…","seq":1,"at":…,"type":"session_opened","working_dir":"/p","model":"demo/scripted","resumed":false,"message_count":0,"warnings":[]}
-{"schema":5,"session_id":"…","run_id":"run_…","seq":2,"at":…,"type":"run_started","prompt":"Find the README","attachments":[],"model":"demo/scripted"}
-{"schema":5,…,"seq":3,"type":"tool_started","tool_call_id":"call_0","name":"Glob","input":{"pattern":"*.md"}}
-{"schema":5,…,"seq":4,"type":"tool_finished","tool_call_id":"call_0","name":"Glob","is_error":false,"duration_ms":3,"output":"README.md"}
-{"schema":5,…,"seq":9,"type":"text_delta","text":"I listed the Markdown files. …"}
-{"schema":5,…,"seq":14,"type":"run_finished","outcome":"succeeded","termination":{"kind":"completed"},"text":"…","turns":3}
+{"schema":6,"session_id":"…","seq":1,"at":…,"type":"session_opened","working_dir":"/p","model":"demo/scripted","resumed":false,"message_count":0,"warnings":[]}
+{"schema":6,"session_id":"…","run_id":"run_…","seq":2,"at":…,"type":"run_started","prompt":"Find the README","attachments":[],"model":"demo/scripted"}
+{"schema":6,…,"seq":3,"type":"tool_started","tool_call_id":"call_0","name":"Glob","input":{"pattern":"*.md"}}
+{"schema":6,…,"seq":4,"type":"tool_finished","tool_call_id":"call_0","name":"Glob","is_error":false,"duration_ms":3,"output":"README.md","executed":true,"status":"success"}
+{"schema":6,…,"seq":9,"type":"text_delta","text":"I listed the Markdown files. …"}
+{"schema":6,…,"seq":14,"type":"run_finished","outcome":"succeeded","termination":{"kind":"completed"},"text":"…","turns":3}
 ```
 
 No API key, authentication header or secret appears in any event. The
@@ -396,7 +433,7 @@ When a call must be asked about:
 The interactive interface is the desktop application, `apps/bricks-desktop`.
 It drives the same engine contract as `bricks run`. The `/` commands below
 have the same names in its command palette, which is built from the shared
-registry (`cersei_agent::control::slash`).
+registry (`bricks_agent::control::slash`).
 
 * **Projects and conversations.** A project is a folder. The sidebar lists
   its conversations: choosing one opens it, and a new one starts in the
@@ -407,6 +444,13 @@ registry (`cersei_agent::control::slash`).
   its compaction snapshots. See [Sessions and resume](#sessions-and-resume).
 * **Approvals.** A pending approval shows the change before anything is
   written. The policy is the one of [Approvals](#approvals).
+* **Runs and files.** Each run ends with a card: its duration, the files it
+  changed (the sum of the applied edit operations, not a Git diff) and its
+  commands, both closed by default. « Copier » copies the whole answer of a
+  run. The « Lecteur » toggle opens a read-only reader in the right column,
+  with one tab per file: Source, Aperçu for Markdown files, and Modifications
+  (each recorded patch, never merged). A file name in the conversation opens
+  it there; paths stay in the project folder or the agent workspace.
 
 ### Commands
 
@@ -483,9 +527,8 @@ registry (`cersei_agent::control::slash`).
 **History by project.** `bricks sessions` lists the sessions of the
 project (the current folder, or `--workspace`); `--all` lists every one.
 `--json` writes the same selection as one `SessionSummary` object per line
-and nothing else (no session: no line, exit code 0). Before Sprint 11,
-`sessions --json` listed every session: scripts that want that keep it
-with `sessions --all --json`. A project's sessions are those whose
+and nothing else (no session: no line, exit code 0). Scripts that need every session use
+`sessions --all --json`. A project's sessions are those whose
 recorded folder is the same folder (canonical path: a symbolic alias
 matches; `atlas` is not `atlas-old`; a sub-folder or another worktree is
 another project). Older sessions without a recorded folder, and sessions

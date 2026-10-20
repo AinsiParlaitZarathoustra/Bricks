@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Cersei — Run all tests
+# Bricks — Run all tests
 # Usage: ./run_tests.sh [--stress] [--graph] [--verbose]
 
 set -e
@@ -9,7 +9,7 @@ GREEN='\033[32m'
 CYAN='\033[36m'
 RESET='\033[0m'
 
-echo -e "${CYAN}Cersei — Test Suite${RESET}"
+echo -e "${CYAN}Bricks — Test Suite${RESET}"
 echo "================================"
 
 # Parse flags

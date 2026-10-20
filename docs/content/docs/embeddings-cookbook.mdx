@@ -1,6 +1,6 @@
 ---
 title: "Embeddings Cookbook"
-description: Recipes for building semantic search, RAG, and custom providers on top of cersei-embeddings.
+description: Recipes for building semantic search, RAG, and custom providers on top of bricks-embeddings.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -8,7 +8,7 @@ import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
 
 # Embeddings Cookbook
 
-Practical patterns built on `cersei-embeddings`.
+Practical patterns built on `bricks-embeddings`. The examples assume the `OPENAI_API_KEY` or `GOOGLE_API_KEY` variable, or a provider in `~/.bricks/providers.toml` for the agent parts.
 
 ---
 
@@ -17,7 +17,7 @@ Practical patterns built on `cersei-embeddings`.
 A self-contained program that indexes every `.md` file in a directory and answers queries semantically.
 
 ```rust
-use cersei_embeddings::{EmbeddingStore, Metric, OpenAiEmbeddings};
+use bricks_embeddings::{EmbeddingStore, Metric, OpenAiEmbeddings};
 use walkdir::WalkDir;
 
 #[tokio::main]
@@ -53,11 +53,11 @@ async fn main() -> anyhow::Result<()> {
 
 ## Minimal RAG agent
 
-Combine `cersei-embeddings` (retrieval) with `cersei` (LLM) to ground the model's answer in the most relevant snippets.
+Combine `bricks-embeddings` (retrieval) with `bricks` (LLM) to ground the model's answer in the most relevant snippets.
 
 ```rust
-use cersei::prelude::*;
-use cersei_embeddings::{EmbeddingStore, Metric, OpenAiEmbeddings};
+use bricks::prelude::*;
+use bricks_embeddings::{EmbeddingStore, Metric, OpenAiEmbeddings};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -81,7 +81,7 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let output = Agent::builder()
-        .provider(OpenAi::from_env()?)
+        .provider(bricks::provider_from_config(None, "my-provider/my-model")?)
         .system_prompt("You are a precise technical assistant.")
         .run_with(&prompt)
         .await?;
@@ -104,12 +104,12 @@ For a production RAG setup you'll want: (a) chunk your documents into ~200–500
 
 ## Wrapping retrieval in a custom `Tool`
 
-If you want the agent itself to decide when to retrieve, expose the store as a Cersei `Tool`.
+If you want the agent itself to decide when to retrieve, expose the store as a `Tool`.
 
 ```rust
 use async_trait::async_trait;
-use cersei::prelude::*;
-use cersei_embeddings::{EmbeddingStore, OpenAiEmbeddings};
+use bricks::prelude::*;
+use bricks_embeddings::{EmbeddingStore, OpenAiEmbeddings};
 use std::sync::Arc;
 
 pub struct RetrieverTool {
@@ -155,11 +155,11 @@ Plug it into your agent:
 
 ```rust
 let retriever = RetrieverTool { store: store.clone(), docs: docs.clone() };
-let mut tools = cersei::tools::all();
+let mut tools = bricks::tools::all();
 tools.push(Box::new(retriever));
 
 let agent = Agent::builder()
-    .provider(OpenAi::from_env()?)
+    .provider(bricks::provider_from_config(None, "my-provider/my-model")?)
     .tools(tools)
     .build()?;
 ```
@@ -172,7 +172,7 @@ Implement the trait for any other API — here is Cohere as an example.
 
 ```rust
 use async_trait::async_trait;
-use cersei_embeddings::{EmbeddingError, EmbeddingProvider};
+use bricks_embeddings::{EmbeddingError, EmbeddingProvider};
 use serde::Deserialize;
 
 pub struct CohereEmbeddings {
@@ -227,7 +227,7 @@ The moment your type implements `EmbeddingProvider`, it composes with `VectorInd
 
 ## Tuning tips
 
-- **Metric choice.** Use `Cosine` for text (length-invariant) — the default in Abstract's `CodeSearch`. Use `L2` when magnitude matters. Use `InnerProduct` when you need raw dot-product scoring (e.g., your embeddings are already normalized and you want speed).
-- **Batch size.** Gemini caps at 100 per request (handled automatically). OpenAI has no hard per-request cap but accepts far more throughput when you keep each request under ~2048 inputs.
+- **Metric choice.** Use `Cosine` for text, since it ignores vector length. Use `L2` when magnitude matters. Use `InnerProduct` when you need raw dot-product scoring (e.g., your embeddings are already normalized and you want speed).
+- **Batch size.** `OpenAiEmbeddings` sends a batch as one request. `GeminiEmbeddings` sends one request per text, with up to 20 in flight, so a very large batch takes time. Split large corpora into several `add_batch` calls.
 - **Truncation.** The built-in providers truncate each text to 2000 chars by default. If your content is long, chunk before embedding rather than letting truncation silently drop material.
-- **Index reuse.** `VectorIndex` is cheap to query but expensive to build. For Abstract's `CodeSearch` this is handled by an in-memory cache keyed on working directory. For your own app, save the vectors to disk (e.g., via `bincode`) and reload on startup.
+- **Index reuse.** Building a `VectorIndex` costs more than querying it. `CodeSearch` keeps its index in an in-process cache. This crate does not save indexes to disk: keep the vectors yourself (for example in a file or a database) and rebuild with `VectorIndex::from_vectors` at startup.

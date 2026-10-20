@@ -1,77 +1,61 @@
 ---
 title: "Cookbook: General Agent"
-description: Build a full-featured agent with automatic memory, skills, and MCP integration.
+description: Assemble a general-purpose agent from Bricks ADK parts — provider selection, built-in and LSP tools, MCP servers, streaming events, memory context, sessions, and a lifecycle hook.
 ---
+
+import { Callout } from 'fumadocs-ui/components/callout';
 
 # Cookbook: General Agent
 
-Build a production-ready agent that automatically handles memory persistence, skill discovery, MCP server connections, and multi-turn conversations — the full Cersei stack in one setup.
+This recipe assembles a general-purpose agent from the parts of the SDK. Each part is optional, and the library does not add them for you: the `bricks` command-line tool and the desktop app do that wiring in their own session setup. Here it is written out, so you can see each piece.
 
-## The Complete Setup
+## The complete setup
 
 ```rust
-use cersei::prelude::*;
-use cersei_memory::manager::MemoryManager;
-use cersei_mcp::McpServerConfig;
+use async_trait::async_trait;
+use bricks::prelude::*;
+use bricks::mcp::McpServerConfig;
+use bricks::memory::manager::MemoryManager;
+use bricks::tools::lsp_tool::LspTool;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let working_dir = std::env::current_dir()?;
+    let selection = "my-provider/my-model";   // provider_id/model_id from ~/.bricks/providers.toml
 
-    // 1. Provider: auto-detect from environment
-    let (provider, model) = cersei_provider::from_model_string("auto")?;
-    println!("Using: {model}");
+    // 1. Provider
+    let provider = bricks::provider_from_config(None, selection)?;
 
-    // 2. Memory: graph + flat files + CLAUDE.md hierarchy
-    let mut memory = MemoryManager::new(&working_dir);
+    // 2. Tools: every built-in tool, plus the LSP tool
+    let mut tools = bricks::tools::all();
+    tools.push(Box::new(LspTool::new(&working_dir)));
 
-    #[cfg(feature = "graph")]
-    {
-        let graph_path = dirs::home_dir()
-            .unwrap_or_default()
-            .join(".abstract/graph.db");
-        if let Some(parent) = graph_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        memory = memory.with_graph(&graph_path)?;
-    }
+    // 3. Memory context for the system prompt: CLAUDE.md instructions and the MEMORY.md index
+    let memory = MemoryManager::new(&working_dir);
+    let memory_context = memory.build_context();
 
-    // 3. Tools: all built-ins + LSP
-    let mut tools = cersei_tools::all(); // 35 tools
-    tools.push(Box::new(cersei_tools::lsp_tool::LspTool::new(&working_dir)));
+    // 4. MCP servers, started by the agent
+    let filesystem = McpServerConfig::stdio("filesystem", "npx", &["-y", "@modelcontextprotocol/server-filesystem", "."]);
 
-    // 4. MCP servers (if configured)
-    let mcp_configs = vec![
-        McpServerConfig::stdio("filesystem", "npx", &["-y", "@anthropic/mcp-server-filesystem", "."]),
-        McpServerConfig::stdio("github", "npx", &["-y", "@anthropic/mcp-server-github"]),
-    ];
-
-    // 5. Skills: give the builder a skills service (see "Skills" below)
-    //    .skills(SkillAccess::new(Arc::new(SkillsService::standard(&working_dir, home))))
-
-    // 6. Build the agent
-    let mut builder = Agent::builder()
+    // 5. The agent
+    let agent = Agent::builder()
         .provider(provider)
         .tools(tools)
-        .model(&model)
+        .system_prompt(format!("You are a general coding agent.\n\n{memory_context}"))
         .max_tokens(16384)
         .auto_compact(true)
         .enable_broadcast(512)
         .working_dir(&working_dir)
         .session_id("general-session")
-        .memory(memory);
+        .mcp_server(filesystem)
+        .hook(LoggingHook)
+        .build()?;
 
-    // Add MCP servers
-    for config in mcp_configs {
-        builder = builder.mcp_server(config);
-    }
+    let agent = Arc::new(agent);
 
-    let agent = builder.build()?;
-    let agent = std::sync::Arc::new(agent);
-
-    // 7. Run with streaming
-    let mut stream = agent.run_stream("What files have changed since last session?");
-
+    // 6. Run with streaming
+    let mut stream = agent.run_stream("What files have changed since the last session?");
     while let Some(event) = stream.next().await {
         match event {
             AgentEvent::TextDelta(t) => print!("{t}"),
@@ -89,131 +73,113 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-## What You Get Automatically
+`bricks::tools::all()` includes the shell, file, web, planning, scheduling and orchestration tools.
 
-### Memory
+<Callout type="warn">
+An agent built without `.permission_policy(...)` allows every tool call: the builder's default is `AllowAll`. Set a policy that fits the task, for example `AllowReadOnly`, or a policy that asks before it acts.
+</Callout>
 
-The `MemoryManager` composes three layers:
+<Callout type="warn">
+The MCP server above is started with `npx`, and the package names are examples. Use servers you have checked, and give each one only the access it needs.
+</Callout>
 
-```
-Graph DB (Grafeo)     ← 98us recall, relationship tracking
-├── Memory nodes      ← User preferences, project decisions
-├── Topic nodes       ← Tags for categorization
-└── Session nodes     ← History tracking
+## Memory
 
-Flat Files (memdir)   ← ~/.abstract/memory/*.md
-├── user_role.md      ← "Senior Rust developer"
-├── feedback_*.md     ← Corrections and preferences
-└── project_*.md      ← Project-specific context
+`MemoryManager::build_context()` returns two parts, which the example puts into the system prompt:
 
-CLAUDE.md Hierarchy   ← Walk up from working dir
-├── ./AGENTS.md       ← Project instructions
-├── ../AGENTS.md      ← Parent directory instructions
-└── ~/.abstract/AGENTS.md ← Global instructions
-```
+- the **CLAUDE.md instruction files** of the working directory hierarchy;
+- the **`MEMORY.md` index** of the memory files (the `memdir` folder).
 
-All three layers are composed into a single context string injected into every system prompt.
+The graph store is separate. Add graph results with `MemoryManager::recall` or `GraphMemory::recall`, as shown in [Graph Memory](/docs/cookbook-graph-memory#using-it-with-an-agent).
 
-### Skills
-
-Skills are standard `SKILL.md` directories in `.agents/skills/` or `.claude/skills/` (project, approved per session), `~/.agents/skills/` or `~/.claude/skills/` (personal), or built in:
-
-```
-.agents/skills/deploy/SKILL.md   → `deploy` in the catalog (name + description)
-```
-
-The agent activates one with the Skill tool and gets its instructions; the request stays separate:
-```
-Agent: [Skill] action="activate", skill="deploy", args="production"
-→ the instructions of deploy/SKILL.md, then "Request to apply it to: production"
-```
-Nothing runs by activation; the agent then uses its normal tools. See `docs/skills.md`.
-
-### MCP Servers
-
-External tool servers connected via JSON-RPC:
+For a conversation that survives restarts, give the agent a conversation memory such as `JsonlMemory` and the same `session_id` on each start:
 
 ```rust
-// Filesystem MCP server — gives agent sandboxed file access
-McpServerConfig::stdio("fs", "npx", &["-y", "@anthropic/mcp-server-filesystem", "."]);
+use bricks::memory::JsonlMemory;
 
-// GitHub MCP server — issues, PRs, repos
-McpServerConfig::stdio("github", "npx", &["-y", "@anthropic/mcp-server-github"]);
-
-// Custom MCP server
-McpServerConfig::stdio("my-server", "./my-mcp-server", &["--port", "8080"]);
-```
-
-MCP tools appear alongside built-in tools — the agent doesn't know the difference.
-
-## Multi-Turn Conversation
-
-```rust
-// First message
-let output1 = agent.run("Read the README and summarize the project").await?;
-
-// Follow-up (same conversation, memory persists)
-let output2 = agent.run("Now look at the test coverage").await?;
-
-// Session is auto-saved to JSONL
-// Resume later:
 let agent = Agent::builder()
-    .session_id("general-session") // Same ID
-    .memory(memory)
-    // ... other config
+    .provider(bricks::provider_from_config(None, selection)?)
+    .tools(bricks::tools::coding())
+    .memory(JsonlMemory::new("./sessions"))
+    .session_id("general-session")
     .build()?;
-// History is loaded automatically from session storage
 ```
 
-## Hooks for Lifecycle Control
+With a memory attached and the same `session_id`, the history is loaded when the agent is built.
+
+## Skills
+
+A skill is a folder with a `SKILL.md` file. The skill loader finds skills in the project's `.agents/skills/` or `.claude/skills/` folders and in your home folder (`~/.agents/skills/`, `~/.claude/skills/`), plus the skills built into the SDK. The agent sees each skill's name and description in a catalog, and activates one with the `Skill` tool to get its instructions. Activating a skill does not run anything by itself. For how the catalog is built and trusted, see `docs/skills.md` in the repository.
+
+To give a library agent skills, pass a skill access to the builder with `skills(...)`. The `bricks` command-line tool does this from its configuration.
+
+## MCP servers
+
+`McpServerConfig::stdio(name, command, args)` starts a server that speaks MCP over standard input and output. The tools of each server are added next to the built-in tools:
 
 ```rust
-use cersei_hooks::{Hook, HookEvent, HookContext, HookAction};
+use bricks::mcp::McpServerConfig;
+
+let fs = McpServerConfig::stdio("fs", "npx", &["-y", "@modelcontextprotocol/server-filesystem", "."]);
+let custom = McpServerConfig::stdio("my-server", "./my-mcp-server", &["--port", "8080"]);
+```
+
+Pass each one to the builder with `.mcp_server(config)`.
+
+## Multi-turn conversation
+
+```rust
+let first = agent.run("Read the README and summarize the project").await?;
+let second = agent.run("Now look at the test coverage").await?;
+println!("{}", second.text());
+```
+
+The second call continues the first conversation. Without a memory attached, that history is kept only in the agent, so it is lost when the process ends.
+
+## Lifecycle hooks
+
+A hook runs at lifecycle events. Implement `events` (the events it wants) and `on_event`:
+
+```rust
+use bricks::hooks::{Hook, HookAction, HookContext, HookEvent};
 
 struct LoggingHook;
 
 #[async_trait]
 impl Hook for LoggingHook {
-    fn event(&self) -> HookEvent { HookEvent::PostToolUse }
+    fn name(&self) -> &str { "logging" }
 
-    async fn run(&self, ctx: &HookContext) -> HookAction {
+    fn events(&self) -> &[HookEvent] {
+        &[HookEvent::PostToolUse]
+    }
+
+    async fn on_event(&self, ctx: &HookContext) -> HookAction {
         if let Some(tool) = &ctx.tool_name {
-            println!("[hook] Tool used: {tool}");
+            println!("[hook] tool used: {tool}");
         }
         HookAction::Continue
     }
 }
-
-// Add to agent
-let agent = Agent::builder()
-    .hook(LoggingHook)
-    // ...
-    .build()?;
 ```
 
-## Event-Driven Architecture
+Add it with `.hook(LoggingHook)`. The hook sees the context of each event, and returns `HookAction::Continue` to let the agent proceed.
 
-Subscribe to all agent events for custom UIs:
+## Events for a custom interface
+
+`enable_broadcast(capacity)` makes the agent publish its events, and `subscribe()` returns a receiver. It returns `None` when broadcast is not enabled, so unwrap it only after `enable_broadcast`:
 
 ```rust
-let agent = Agent::builder()
-    .enable_broadcast(512) // Enable broadcast channel
-    .build()?;
-
-// Subscribe from multiple listeners
-let mut rx = agent.subscribe();
+let mut rx = agent.subscribe().expect("broadcast is enabled");
 
 tokio::spawn(async move {
     while let Ok(event) = rx.recv().await {
         match event {
-            AgentEvent::CostUpdate { cumulative_cost, .. } => {
-                update_cost_display(cumulative_cost);
-            }
-            AgentEvent::TokenWarning { pct_used, .. } => {
-                show_context_warning(pct_used);
-            }
+            AgentEvent::CostUpdate { cumulative_cost, .. } => update_cost_display(cumulative_cost),
+            AgentEvent::TokenWarning { pct_used, .. } => show_context_warning(pct_used),
             _ => {}
         }
     }
 });
 ```
+
+`update_cost_display` and `show_context_warning` stand for your interface code.

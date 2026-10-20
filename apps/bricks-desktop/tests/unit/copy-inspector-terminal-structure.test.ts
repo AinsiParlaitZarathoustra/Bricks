@@ -1,40 +1,14 @@
-// Static checks (sources read, not rendered) of three surfaces of Sprint 14.6: the copy button of an
-// assistant answer copies its Markdown source only, the agent inspector shows no identifier or
-// parent label and renders its texts through MarkdownView, and the terminal panel offers « Masquer
-// le terminal » after « Nouveau terminal ».
+// Static checks (sources read, not rendered) of two surfaces of Sprint 14.6: the agent inspector
+// shows no identifier or parent label and renders its texts through MarkdownView, and the terminal
+// panel offers « Masquer le terminal » after « Nouveau terminal ». The copy of an answer is tested
+// on its logic (tests/unit/responses.test.ts).
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const src = (path: string) => readFileSync(new URL(`../../src/${path}`, import.meta.url), 'utf8');
 
-const ASSISTANT = 'lib/features/conversation/timeline/AssistantMessage.svelte';
 const INSPECTOR = 'lib/features/agents/AgentInspector.svelte';
 const TERMINAL = 'lib/features/terminal/TerminalPanel.svelte';
-
-describe('copy button of an assistant answer', () => {
-	const text = src(ASSISTANT);
-
-	it('copies the Markdown source of the item, and nothing else', () => {
-		expect(text).toContain('await navigator.clipboard.writeText(item.text)');
-		// The copy never takes the rendered text, the throttled stream copy or a DOM node.
-		expect(text).not.toMatch(/writeText\((?!item\.text\))/);
-		expect(text).not.toMatch(/writeText\([^)]*throttled/);
-		expect(text).not.toContain('innerText');
-		expect(text).not.toContain('textContent');
-	});
-
-	it('is shown only once the answer is complete, with its accessible name', () => {
-		const button = text.indexOf('onclick={copyAnswer}');
-		expect(button).toBeGreaterThan(0);
-		expect(text.slice(0, button)).toContain('{#if !item.streaming}');
-		expect(text).toContain('aria-label="Copier"');
-	});
-
-	it('reports a failed copy in French, without losing the answer', () => {
-		expect(text).toContain('Copie impossible : {copyError}');
-		expect(text).toContain("copied = false");
-	});
-});
 
 describe('agent inspector', () => {
 	const text = src(INSPECTOR);

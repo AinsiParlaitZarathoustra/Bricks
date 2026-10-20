@@ -457,16 +457,143 @@ dependencies = [
 ]
 
 [[package]]
+name = "bricks"
+version = "0.6.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "bricks-agent",
+ "bricks-agentlang",
+ "bricks-agentrl",
+ "bricks-hooks",
+ "bricks-mcp",
+ "bricks-memory",
+ "bricks-provider",
+ "bricks-skills",
+ "bricks-tools",
+ "bricks-tools-derive",
+ "bricks-types",
+ "bricks-vms",
+ "bricks-workflows",
+ "chrono",
+ "dirs 5.0.1",
+ "futures",
+ "parking_lot",
+ "reqwest 0.12.28",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "tokio",
+ "tracing-subscriber",
+ "url",
+ "uuid",
+ "which",
+]
+
+[[package]]
+name = "bricks-agent"
+version = "0.6.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "bricks-compression",
+ "bricks-embeddings",
+ "bricks-hooks",
+ "bricks-mcp",
+ "bricks-memory",
+ "bricks-provider",
+ "bricks-semantic",
+ "bricks-skills",
+ "bricks-testkit",
+ "bricks-tools",
+ "bricks-types",
+ "bricks-web",
+ "chrono",
+ "dirs 5.0.1",
+ "futures",
+ "ignore",
+ "parking_lot",
+ "regex",
+ "serde",
+ "serde-saphyr",
+ "serde_json",
+ "serde_path_to_error",
+ "sha2",
+ "tempfile",
+ "tikv-jemalloc-ctl",
+ "tikv-jemallocator",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "toml 0.8.23",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "bricks-agentlang"
+version = "0.6.1"
+dependencies = [
+ "async-trait",
+ "bricks-tools",
+ "bricks-types",
+ "bricks-vms",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "bricks-agentrl"
+version = "0.6.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "bricks-agent",
+ "bricks-agentlang",
+ "bricks-compression",
+ "bricks-embeddings",
+ "bricks-memory",
+ "bricks-provider",
+ "bricks-tools",
+ "bricks-types",
+ "bricks-vms",
+ "chrono",
+ "dashmap",
+ "dirs 5.0.1",
+ "futures",
+ "once_cell",
+ "parking_lot",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "bricks-cli"
 version = "0.6.1"
 dependencies = [
+ "bricks-agent",
  "bricks-config",
- "cersei-agent",
- "cersei-embeddings",
- "cersei-memory",
- "cersei-provider",
- "cersei-tools",
- "cersei-types",
+ "bricks-embeddings",
+ "bricks-memory",
+ "bricks-provider",
+ "bricks-tools",
+ "bricks-types",
  "chrono",
  "clap",
  "dirs 5.0.1",
@@ -481,14 +608,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "bricks-compression"
+version = "0.6.1"
+dependencies = [
+ "anyhow",
+ "bricks-types",
+ "dirs 5.0.1",
+ "once_cell",
+ "regex",
+ "serde",
+ "serde_json",
+ "serde_path_to_error",
+ "tempfile",
+ "toml 0.8.23",
+ "tracing",
+ "tree-sitter",
+ "tree-sitter-go",
+ "tree-sitter-python",
+ "tree-sitter-rust",
+ "tree-sitter-typescript",
+]
+
+[[package]]
 name = "bricks-config"
 version = "0.6.1"
 dependencies = [
- "cersei-agent",
- "cersei-embeddings",
- "cersei-memory",
- "cersei-provider",
- "cersei-tools",
+ "bricks-agent",
+ "bricks-embeddings",
+ "bricks-memory",
+ "bricks-provider",
+ "bricks-tools",
  "dirs 5.0.1",
  "parking_lot",
 ]
@@ -498,13 +647,13 @@ name = "bricks-desktop"
 version = "0.6.1"
 dependencies = [
  "base64 0.22.1",
+ "bricks-agent",
  "bricks-config",
+ "bricks-memory",
+ "bricks-provider",
  "bricks-skills",
- "cersei-agent",
- "cersei-memory",
- "cersei-provider",
- "cersei-tools",
- "cersei-types",
+ "bricks-tools",
+ "bricks-types",
  "chrono",
  "dirs 5.0.1",
  "ignore",
@@ -526,11 +675,126 @@ dependencies = [
 ]
 
 [[package]]
+name = "bricks-embeddings"
+version = "0.6.1"
+dependencies = [
+ "async-trait",
+ "bricks-types",
+ "futures",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "usearch",
+]
+
+[[package]]
+name = "bricks-hooks"
+version = "0.6.1"
+dependencies = [
+ "async-trait",
+ "bricks-types",
+ "serde",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "bricks-lsp"
+version = "0.6.1"
+dependencies = [
+ "bricks-lsp",
+ "dashmap",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "which",
+]
+
+[[package]]
+name = "bricks-mcp"
+version = "0.6.1"
+dependencies = [
+ "bricks-testkit",
+ "bricks-types",
+ "bytes",
+ "futures",
+ "http",
+ "hyper",
+ "hyper-util",
+ "libc",
+ "parking_lot",
+ "reqwest 0.12.28",
+ "rmcp",
+ "schemars 1.2.2",
+ "serde",
+ "serde_json",
+ "sse-stream",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "bricks-memory"
+version = "0.6.1"
+dependencies = [
+ "async-trait",
+ "bricks-embeddings",
+ "bricks-provider",
+ "bricks-types",
+ "chrono",
+ "dirs 5.0.1",
+ "grafeo",
+ "grafeo-core",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-util",
+ "toml 0.8.23",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "bricks-provider"
+version = "0.6.1"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "bricks-types",
+ "dirs 5.0.1",
+ "futures",
+ "httpdate",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "serde_path_to_error",
+ "tempfile",
+ "tokio",
+ "toml 0.8.23",
+ "tracing",
+ "url",
+]
+
+[[package]]
 name = "bricks-semantic"
 version = "0.6.1"
 dependencies = [
- "cersei-lsp",
- "cersei-types",
+ "bricks-lsp",
+ "bricks-types",
  "dashmap",
  "futures",
  "grep",
@@ -562,6 +826,179 @@ dependencies = [
  "sha2",
  "tempfile",
  "unicode-normalization",
+ "uuid",
+]
+
+[[package]]
+name = "bricks-tbench"
+version = "0.6.1"
+dependencies = [
+ "anyhow",
+ "bricks-agent",
+ "bricks-agentrl",
+ "bricks-compression",
+ "bricks-provider",
+ "bricks-tools",
+ "bricks-types",
+ "clap",
+ "dirs 5.0.1",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "bricks-testkit"
+version = "0.6.1"
+dependencies = [
+ "futures",
+ "tokio",
+]
+
+[[package]]
+name = "bricks-tools"
+version = "0.6.1"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "bricks-compression",
+ "bricks-embeddings",
+ "bricks-lsp",
+ "bricks-mcp",
+ "bricks-semantic",
+ "bricks-skills",
+ "bricks-types",
+ "bricks-vms",
+ "bricks-web",
+ "chrono",
+ "dashmap",
+ "dirs 5.0.1",
+ "glob",
+ "grep",
+ "ignore",
+ "libc",
+ "nix 0.29.0",
+ "notify",
+ "once_cell",
+ "parking_lot",
+ "portable-pty",
+ "regex",
+ "reqwest 0.12.28",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "sha2",
+ "similar",
+ "tantivy",
+ "tempfile",
+ "tokio",
+ "tracing",
+ "tree-sitter",
+ "tree-sitter-bash",
+ "tree-sitter-go",
+ "tree-sitter-python",
+ "tree-sitter-rust",
+ "tree-sitter-typescript",
+ "uuid",
+ "walkdir",
+ "which",
+]
+
+[[package]]
+name = "bricks-tools-derive"
+version = "0.6.1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "bricks-types"
+version = "0.6.1"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "chrono",
+ "hickory-resolver",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "bricks-vms"
+version = "0.6.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "bricks-types",
+ "bytes",
+ "chrono",
+ "dashmap",
+ "dirs 5.0.1",
+ "futures",
+ "nix 0.29.0",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "tokio-stream",
+ "tokio-util",
+ "tracing",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "bricks-web"
+version = "0.6.1"
+dependencies = [
+ "bm25",
+ "bricks-testkit",
+ "bricks-types",
+ "dom_query",
+ "dom_smoothie",
+ "encoding_rs",
+ "flate2",
+ "futures",
+ "parking_lot",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "toml 0.8.23",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "bricks-workflows"
+version = "0.6.1"
+dependencies = [
+ "async-trait",
+ "bricks-agent",
+ "bricks-tools",
+ "bricks-types",
+ "chrono",
+ "dashmap",
+ "futures",
+ "parking_lot",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
  "uuid",
 ]
 
@@ -718,443 +1155,6 @@ name = "census"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f4c707c6a209cbe82d10abd08e1ea8995e9ea937d2550646e02798948992be0"
-
-[[package]]
-name = "cersei"
-version = "0.6.1"
-dependencies = [
- "anyhow",
- "async-trait",
- "base64 0.22.1",
- "bricks-skills",
- "cersei-agent",
- "cersei-agentlang",
- "cersei-agentrl",
- "cersei-hooks",
- "cersei-mcp",
- "cersei-memory",
- "cersei-provider",
- "cersei-tools",
- "cersei-tools-derive",
- "cersei-types",
- "cersei-vms",
- "cersei-workflows",
- "chrono",
- "dirs 5.0.1",
- "futures",
- "parking_lot",
- "reqwest 0.12.28",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "tokio",
- "tracing-subscriber",
- "url",
- "uuid",
- "which",
-]
-
-[[package]]
-name = "cersei-agent"
-version = "0.6.1"
-dependencies = [
- "anyhow",
- "async-trait",
- "base64 0.22.1",
- "bricks-semantic",
- "bricks-skills",
- "cersei-compression",
- "cersei-embeddings",
- "cersei-hooks",
- "cersei-mcp",
- "cersei-memory",
- "cersei-provider",
- "cersei-testkit",
- "cersei-tools",
- "cersei-types",
- "cersei-web",
- "chrono",
- "dirs 5.0.1",
- "futures",
- "ignore",
- "parking_lot",
- "regex",
- "serde",
- "serde-saphyr",
- "serde_json",
- "serde_path_to_error",
- "sha2",
- "tempfile",
- "tikv-jemalloc-ctl",
- "tikv-jemallocator",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "toml 0.8.23",
- "tracing",
- "tracing-subscriber",
- "url",
- "uuid",
-]
-
-[[package]]
-name = "cersei-agentlang"
-version = "0.6.1"
-dependencies = [
- "async-trait",
- "cersei-tools",
- "cersei-types",
- "cersei-vms",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "cersei-agentrl"
-version = "0.6.1"
-dependencies = [
- "anyhow",
- "async-trait",
- "cersei-agent",
- "cersei-agentlang",
- "cersei-compression",
- "cersei-embeddings",
- "cersei-memory",
- "cersei-provider",
- "cersei-tools",
- "cersei-types",
- "cersei-vms",
- "chrono",
- "dashmap",
- "dirs 5.0.1",
- "futures",
- "once_cell",
- "parking_lot",
- "regex",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "cersei-compression"
-version = "0.6.1"
-dependencies = [
- "anyhow",
- "cersei-types",
- "dirs 5.0.1",
- "once_cell",
- "regex",
- "serde",
- "serde_json",
- "serde_path_to_error",
- "tempfile",
- "toml 0.8.23",
- "tracing",
- "tree-sitter",
- "tree-sitter-go",
- "tree-sitter-python",
- "tree-sitter-rust",
- "tree-sitter-typescript",
-]
-
-[[package]]
-name = "cersei-embeddings"
-version = "0.6.1"
-dependencies = [
- "async-trait",
- "cersei-types",
- "futures",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
- "usearch",
-]
-
-[[package]]
-name = "cersei-hooks"
-version = "0.6.1"
-dependencies = [
- "async-trait",
- "cersei-types",
- "serde",
- "serde_json",
- "tracing",
-]
-
-[[package]]
-name = "cersei-lsp"
-version = "0.6.1"
-dependencies = [
- "cersei-lsp",
- "dashmap",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "tokio-util",
- "tracing",
- "which",
-]
-
-[[package]]
-name = "cersei-mcp"
-version = "0.6.1"
-dependencies = [
- "bytes",
- "cersei-testkit",
- "cersei-types",
- "futures",
- "http",
- "hyper",
- "hyper-util",
- "libc",
- "parking_lot",
- "reqwest 0.12.28",
- "rmcp",
- "schemars 1.2.2",
- "serde",
- "serde_json",
- "sse-stream",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "cersei-memory"
-version = "0.6.1"
-dependencies = [
- "async-trait",
- "cersei-embeddings",
- "cersei-provider",
- "cersei-types",
- "chrono",
- "dirs 5.0.1",
- "grafeo",
- "grafeo-core",
- "parking_lot",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "tokio-util",
- "toml 0.8.23",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "cersei-provider"
-version = "0.6.1"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "cersei-types",
- "dirs 5.0.1",
- "futures",
- "httpdate",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "serde_path_to_error",
- "tempfile",
- "tokio",
- "toml 0.8.23",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "cersei-tbench"
-version = "0.6.1"
-dependencies = [
- "anyhow",
- "cersei-agent",
- "cersei-agentrl",
- "cersei-compression",
- "cersei-provider",
- "cersei-tools",
- "cersei-types",
- "clap",
- "dirs 5.0.1",
- "serde_json",
- "tempfile",
- "tokio",
-]
-
-[[package]]
-name = "cersei-testkit"
-version = "0.6.1"
-dependencies = [
- "futures",
- "tokio",
-]
-
-[[package]]
-name = "cersei-tools"
-version = "0.6.1"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "bricks-semantic",
- "bricks-skills",
- "cersei-compression",
- "cersei-embeddings",
- "cersei-lsp",
- "cersei-mcp",
- "cersei-types",
- "cersei-vms",
- "cersei-web",
- "chrono",
- "dashmap",
- "dirs 5.0.1",
- "glob",
- "grep",
- "ignore",
- "libc",
- "nix 0.29.0",
- "notify",
- "once_cell",
- "parking_lot",
- "portable-pty",
- "regex",
- "reqwest 0.12.28",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "sha2",
- "similar",
- "tantivy",
- "tempfile",
- "tokio",
- "tracing",
- "tree-sitter",
- "tree-sitter-bash",
- "tree-sitter-go",
- "tree-sitter-python",
- "tree-sitter-rust",
- "tree-sitter-typescript",
- "uuid",
- "walkdir",
- "which",
-]
-
-[[package]]
-name = "cersei-tools-derive"
-version = "0.6.1"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "cersei-types"
-version = "0.6.1"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "chrono",
- "hickory-resolver",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
- "tokio",
- "tracing",
- "uuid",
-]
-
-[[package]]
-name = "cersei-vms"
-version = "0.6.1"
-dependencies = [
- "anyhow",
- "async-trait",
- "base64 0.22.1",
- "bytes",
- "cersei-types",
- "chrono",
- "dashmap",
- "dirs 5.0.1",
- "futures",
- "nix 0.29.0",
- "parking_lot",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "tokio-stream",
- "tokio-util",
- "tracing",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
-name = "cersei-web"
-version = "0.6.1"
-dependencies = [
- "bm25",
- "cersei-testkit",
- "cersei-types",
- "dom_query",
- "dom_smoothie",
- "encoding_rs",
- "flate2",
- "futures",
- "parking_lot",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "thiserror 2.0.21",
- "tokio",
- "toml 0.8.23",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "cersei-workflows"
-version = "0.6.1"
-dependencies = [
- "async-trait",
- "cersei-agent",
- "cersei-tools",
- "cersei-types",
- "chrono",
- "dashmap",
- "futures",
- "parking_lot",
- "schemars 0.8.22",
- "serde",
- "serde_json",
- "tokio",
- "tokio-stream",
- "uuid",
-]
 
 [[package]]
 name = "cesu8"
@@ -3693,10 +3693,10 @@ version = "0.6.1"
 dependencies = [
  "anyhow",
  "async-trait",
- "cersei-embeddings",
- "cersei-memory",
- "cersei-provider",
- "cersei-types",
+ "bricks-embeddings",
+ "bricks-memory",
+ "bricks-provider",
+ "bricks-types",
  "chrono",
  "clap",
  "serde",

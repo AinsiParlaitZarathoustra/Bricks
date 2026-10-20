@@ -1,0 +1,142 @@
+//! # Custom Provider
+//!
+//! Shows how to create a custom provider (e.g., for a local LLM like Ollama)
+//! and also how to use the OpenAI provider with a custom base URL.
+//!
+//! ```bash
+//! # With Ollama running locally:
+//! cargo run --example custom_provider
+//!
+//! # With OpenAI:
+//! OPENAI_API_KEY=sk-... cargo run --example custom_provider
+//! ```
+
+use bricks::prelude::*;
+use bricks::provider::CompletionStream;
+use tokio::sync::mpsc;
+
+// ─── Echo Provider (for testing without an API key) ──────────────────────────
+
+/// A mock provider that echoes back the prompt. Useful for testing tool wiring.
+struct EchoProvider;
+
+#[async_trait]
+impl Provider for EchoProvider {
+    fn name(&self) -> &str {
+        "echo"
+    }
+    fn context_window(&self, _model: &str) -> u64 {
+        4096
+    }
+
+    async fn complete(&self, request: CompletionRequest) -> bricks_types::Result<CompletionStream> {
+        let last_msg = request
+            .messages
+            .last()
+            .and_then(|m| m.get_text())
+            .unwrap_or("(empty)")
+            .to_string();
+
+        let response_text = format!(
+            "[Echo] Received: \"{}\"\nModel: {}\nSystem: {}\nTools available: {}",
+            last_msg,
+            request.model,
+            request.system.as_deref().unwrap_or("(none)"),
+            request.tools.len()
+        );
+
+        // Emit as a streaming response
+        let (tx, rx) = mpsc::channel(16);
+        tokio::spawn(async move {
+            let _ = tx
+                .send(StreamEvent::MessageStart {
+                    id: "echo-1".into(),
+                    model: "echo".into(),
+                    usage: None,
+                })
+                .await;
+            let _ = tx
+                .send(StreamEvent::ContentBlockStart {
+                    index: 0,
+                    block_type: "text".into(),
+                    id: None,
+                    name: None,
+                })
+                .await;
+
+            // Stream word by word for demonstration
+            for word in response_text.split_inclusive(' ') {
+                let _ = tx
+                    .send(StreamEvent::TextDelta {
+                        index: 0,
+                        text: word.to_string(),
+                    })
+                    .await;
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+
+            let _ = tx.send(StreamEvent::ContentBlockStop { index: 0 }).await;
+            let _ = tx
+                .send(StreamEvent::MessageDelta {
+                    stop_reason: Some(StopReason::EndTurn),
+                    usage: Some(Usage {
+                        input_tokens: last_msg.len() as u64 / 4,
+                        output_tokens: response_text.len() as u64 / 4,
+                        ..Default::default()
+                    }),
+                })
+                .await;
+            let _ = tx.send(StreamEvent::MessageStop).await;
+        });
+
+        Ok(CompletionStream::new(rx))
+    }
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    // ── Echo provider (no API key needed) ─────────────────────────────
+    println!("\x1b[36m── Echo Provider (mock) ──\x1b[0m\n");
+
+    let output = Agent::builder()
+        .provider(EchoProvider)
+        .tools(bricks::tools::filesystem())
+        .system_prompt("You are a test assistant.")
+        .permission_policy(AllowAll)
+        .run_with("Hello from the custom provider example!")
+        .await?;
+
+    println!("{}", output.text());
+    println!(
+        "\nTurns: {}, Tokens: {}in/{}out",
+        output.turns, output.usage.input_tokens, output.usage.output_tokens
+    );
+
+    // ── OpenAI-compatible provider (Ollama, etc.) ─────────────────────
+    println!("\n\x1b[36m── OpenAI-Compatible Provider ──\x1b[0m\n");
+
+    // This works with Ollama, LM Studio, vLLM, etc. — no code needed, only a
+    // provider entry in ~/.bricks/providers.toml:
+    //
+    //   [[providers]]
+    //   id = "ollama"
+    //   name = "Ollama"
+    //   endpoint = "http://localhost:11434/v1"
+    //   protocol = "chat_completions"
+    //   auth = "none"
+    //   ... models ...
+    //
+    // let provider = bricks::provider_from_config(None, "ollama/llama3")?;
+    //
+    // let output = Agent::builder()
+    //     .provider(provider)
+    //     .tools(bricks::tools::coding())
+    //     .run_with("Hello from Ollama!")
+    //     .await?;
+
+    println!(
+        "(Add a provider entry to ~/.bricks/providers.toml and uncomment the section above to test with a local LLM)"
+    );
+
+    Ok(())
+}

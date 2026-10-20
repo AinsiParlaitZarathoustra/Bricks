@@ -7,26 +7,29 @@
 ![Version](https://img.shields.io/badge/version-0.6.1-blue)
 ![Rust](https://img.shields.io/badge/built_with-Rust-orange)
 
-[Quick start](#quick-start) · [What it does](#what-it-does) · [Configuration](#configuration) · [Documentation](#documentation) · [License](#license)
+[Quick start](#quick-start) · [What it does](#what-it-does) · [Configuration](#configuration) · [The engine as a library](#the-engine-as-a-library) · [Documentation](#documentation) · [License](#license)
 
 </div>
 
-Bricks is a new tool for coding with AI. Built on the technology behind
-[Cersei](https://github.com/pacifio/cersei), it brings new capabilities and
-a redesigned, more robust architecture to the terminal, with one goal:
-give AI agents the means to do their best work.
+Bricks is a tool for coding with AI agents. It has three parts:
 
-It combines a desktop application, a headless command for scripts and CI, and
-an embeddable Rust engine for building your own applications.
+- **Bricks ADK** (Agentic Development Kit): the Rust crates (`bricks` and the
+  `bricks-*` crates) that you use to build agent applications. It provides the
+  agent loop, providers configured by file, tools, approvals, context
+  management, sessions, memory, skills and MCP.
+- **`bricks`**, the command-line frontend for one prompt, scripts and CI, with
+  text output or versioned JSONL events.
+- **Bricks Desktop** (`apps/bricks-desktop`), the interactive application. It
+  runs on the same engine contract as the command line.
 
 ### Two ideas behind Bricks
 
 Bricks brings together two concepts developed by AinsiParlaitZarathoustra:
 
-- **ADK — Agentic Development Kit.** A broad set of purpose-built, optimised
-  tools that help AI agents inspect code, make changes, run commands and
-  work effectively across a project.
-- **ADE — Agentic Development Engine.** An engine designed to enhance the
+- **ADK, the Agentic Development Kit (Bricks ADK).** A broad set of
+  purpose-built, optimised tools that help AI agents inspect code, make
+  changes, run commands and work effectively across a project.
+- **ADE, the Agentic Development Engine.** An engine designed to enhance the
   capabilities of any agent by providing the tools, context and execution
   infrastructure it needs to perform well.
 
@@ -37,23 +40,30 @@ make its work more effective.
 
 ### Project status
 
-**Bricks 0.6.1** has a substantial, stable foundation. Development continues,
-with further features and code optimisations still ahead.
+**Bricks 0.6.1** (the workspace version) has a substantial foundation.
+Development continues, with further features and code optimisations still
+ahead.
 
-Bricks is a fork of Cersei, created by **Adib Mohsin (Pacifio)**. The inherited
-Rust crates retain their `cersei-*` names; Bricks extends that foundation
-with its own architecture and capabilities.
+Bricks is a fork of Cersei, created by **Adib Mohsin (Pacifio)**. Its crates
+are named `bricks-*`. A few identifiers keep their Cersei names because other
+code depends on them, for example the error type `CerseiError`. See the
+[migration guide](docs/content/docs/migration.mdx) for the changes since the
+Cersei names and behaviour.
 
 ## Quick start
 
-From a checkout of this repository:
+Build the `bricks` command from a checkout of this repository. You need a
+recent stable Rust (1.88 or later) and a C++17 toolchain, because the vector
+index (USearch) is compiled with the engine:
 
 ```bash
 cargo install --path crates/bricks-cli
 ```
 
-Configure a provider and model using the [configuration example](#configuration),
-then choose how to work:
+Declare a provider and a model. Copy [`docs/providers.example.toml`](docs/providers.example.toml)
+to `~/.bricks/providers.toml` and adapt it (the example's endpoints, limits and
+prices are illustrative). Then select the model in the project's `bricks.toml`,
+as shown in [Configuration](#configuration):
 
 ```bash
 bricks run "Explain the failing test in src/parser.rs"          # one prompt, answer on stdout
@@ -62,15 +72,23 @@ bricks sessions                                                 # the project's 
 bricks run --session <id> "Continue where we stopped"           # continue one, headless
 ```
 
-The interactive interface is the desktop application in `apps/bricks-desktop`:
-open a project, then pick a conversation in the sidebar or use `/resume`.
+The interactive interface is Bricks Desktop. From a checkout, with Node.js and
+npm installed:
+
+```bash
+cd apps/bricks-desktop
+npm ci
+npm run tauri dev
+```
+
+Open a project, then pick a conversation in the sidebar or use `/resume`.
 
 ## What it does
 
-* **Models are configuration.** `~/.bricks/providers.toml` lists
-  providers, models, limits, capabilities, reasoning profiles and prices.
-  * A model is selected explicitly as `provider_id/model_id`; nothing is
-    guessed from a name and no catalogue is built in.
+* **Models are configuration.** `~/.bricks/providers.toml` lists providers,
+  models, limits, capabilities, reasoning profiles and prices. Nothing is built
+  in and nothing is guessed from a model name.
+  * A model is selected explicitly as `provider_id/model_id`.
   * Three wire protocols are supported: `chat_completions`, `responses` and
     `anthropic_messages`. Any compatible server (a hosted API, a gateway,
     Ollama, vLLM, llama.cpp) is added by editing the file. See
@@ -87,14 +105,20 @@ open a project, then pick a conversation in the sidebar or use `/resume`.
   * Every reduced output names its saved original. See
     [docs/compression.md](docs/compression.md).
 * **Shell and files.**
-  * Each command is its own process, started from the session's state:
-    directory, exported variables, aliases and functions carry over to the
-    next command when it ends normally. Commands run side by side.
+  * Each `Bash` call is its own process. The session's state (working
+    directory, exported variables, aliases and functions) carries over to the
+    next call when a call ends normally. Calls can run side by side, and a
+    long command can be handed over as a background task.
   * Execution is supervised: timeouts, process-tree termination,
     cancellation and background tasks.
-  * Edits are tolerant but safe: they are re-validated before an atomic
-    write, and a patch tool rolls back on failure. See
-    [docs/shell.md](docs/shell.md).
+  * `Edit` is one tool: a single replacement, or several in `edits`. Edits are
+    re-validated before an atomic write. See [docs/shell.md](docs/shell.md).
+* **Sub-agents and jobs.** The native `Agent`, `Agents`, `AgentControl` and
+  `AgentProfiles` tools run sub-agents with a fresh context. They get the
+  parent's permissions and at most its tools. Parallel writers each get their
+  own git worktree, and their changes come back as ChangeSets to inspect and
+  apply. Background commands are supervised jobs. See
+  [docs/agents.md](docs/agents.md).
 * **Web.** Web search with ordered provider fallback, page reading in
   Markdown, citable passages, and a private-network policy. See
   [docs/web.md](docs/web.md).
@@ -117,7 +141,8 @@ open a project, then pick a conversation in the sidebar or use `/resume`.
   * Hybrid recall combines vector, BM25 and a bounded graph expansion,
     fused with weighted RRF.
   * Maintenance (extraction, embeddings) runs after the answer: it is
-    resumable and cancellable. See [docs/memory.md](docs/memory.md).
+    resumable and cancellable. Memory is off until `[memory] enabled = true`.
+    See [docs/memory.md](docs/memory.md).
 * **Approvals.** `[permissions]` in `bricks.toml` sets the policy; the
   engine applies it to every frontend.
   * File changes are shown as a diff before anything is written.
@@ -127,12 +152,15 @@ open a project, then pick a conversation in the sidebar or use `/resume`.
   contract, for scripts and CI. JSONL events are versioned, with documented
   exit codes. Sessions can be listed and continued (`bricks sessions`,
   `bricks run --session <id>`). See [docs/cli.md](docs/cli.md).
-* **The desktop application** (`apps/bricks-desktop`). The interactive
-  interface: projects and conversations in a sidebar, `@` file mentions,
-  `/` commands, approvals with the diff, inspectors and session resume. See
+* **Bricks Desktop** (`apps/bricks-desktop`). The interactive interface:
+  projects and conversations in a sidebar, `@` file mentions, `/` commands,
+  approvals with the diff, inspectors and session resume. See
   [the desktop section of docs/cli.md](docs/cli.md#the-desktop-application).
 
 ## Configuration
+
+Two files configure a run. Neither is optional for a model: `bricks` never
+chooses a model silently.
 
 ```toml
 # ~/.bricks/providers.toml — see docs/providers.example.toml
@@ -158,25 +186,46 @@ max_output_tokens = 4096
 ```
 
 ```toml
-# ./bricks.toml — see docs/bricks.example.toml
+# ./bricks.toml — see docs/bricks.example.toml for every section
 [agent]
-model = "local/coder"
+model = "local/coder"            # provider_id/model_id
 
 [permissions]
-write = "ask"      # file changes: shown as a diff, then asked
-execute = "ask"    # shell commands
+write = "ask"                    # file changes: shown as a diff, then asked
+execute = "ask"                  # shell commands
 ```
+
+Bricks keeps its files in `~/.bricks`: the providers file, the sessions
+(`~/.bricks/sessions`) and the memory. Set `BRICKS_HOME` to move that folder,
+and pass `--providers <file>` to read another providers file.
 
 ## The engine as a library
 
+Add the facade crate from a checkout, by path:
+
+```toml
+[dependencies]
+bricks = { path = "/path/to/bricks/crates/bricks" }
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+```
+
+or from the Git repository, replacing the revision with the one you want to
+build against:
+
+```toml
+[dependencies]
+bricks = { git = "https://github.com/AinsiParlaitZarathoustra/Bricks", rev = "<revision>" }
+```
+
 ```rust
-use cersei::prelude::*;
+use bricks::prelude::*;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let output = Agent::builder()
         .provider(provider_from_config(None, "local/coder")?) // ~/.bricks/providers.toml
-        .tools(cersei::tools::coding())                        // files, shell, web
+        .tools(bricks::tools::coding())                        // files, shell, web
         .permission_policy(AllowReadOnly)
         .run_with("Explain what src/main.rs does")
         .await?;
@@ -185,202 +234,44 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-Frontends use the command/event contract (`cersei_agent::control`). It
-offers typed commands (submit, cancel, set_model, compact, resume,
-approve…) and versioned events with one `run_finished` per run. Delivery is
-bounded and never silently drops an event. See [docs/cli.md](docs/cli.md).
+`bricks::tools::coding()` is a set of tools, not a default for every session:
+see [the tools of a session](docs/cli.md#tools-of-a-session) for what the
+`bricks` command and Bricks Desktop give the model.
+
+Frontends use the command/event contract (`bricks_agent::control`). It offers
+typed commands (submit, cancel, set_model, compact, resume, approve…) and
+versioned events with one `run_finished` per run. Delivery is bounded and never
+silently drops an event. See [docs/cli.md](docs/cli.md).
 
 ## Architecture
 
 ```text
 bricks-cli            the `bricks` binary: arguments, configuration, headless / JSONL
-apps/bricks-desktop   the desktop application (Tauri): the interactive interface
-cersei                facade crate — use cersei::prelude::*
-  cersei-agent        agent builder, agentic loop, context manager, compaction,
-                      command/event contract (control), approvals
-  cersei-provider     provider registry from configuration, 3 protocol adapters
-  cersei-tools        file, shell, web, planning, orchestration tools; permissions; previews
-  cersei-compression  tool-output reduction, rules, tree-sitter skeletons
-  cersei-memory       sessions, memdir, graph memory, structured long-term memory
-  cersei-embeddings   embedding providers, USearch vector index
+apps/bricks-desktop   Bricks Desktop (Tauri): the interactive interface
+bricks                facade crate — use bricks::prelude::*
+  bricks-agent        agent builder, agentic loop, context manager, compaction,
+                      command/event contract (control), approvals, sub-agents
+  bricks-provider     provider registry from configuration, 3 protocol adapters
+  bricks-tools        file, shell, web, planning, orchestration tools; permissions; previews
+  bricks-compression  tool-output reduction, rules, tree-sitter skeletons
+  bricks-memory       sessions, memdir, graph memory, structured long-term memory
+  bricks-embeddings   embedding providers, USearch vector index
   bricks-semantic     shared code understanding engine: lexical, syntax, LSP
-  cersei-web          search, fetching, extraction, passages
-  cersei-mcp          MCP client (rmcp)
+  bricks-web          search, fetching, extraction, passages
+  bricks-mcp          MCP client (rmcp)
   bricks-skills       Agent Skills (SKILL.md): sources, trust, activation
-  cersei-types, cersei-hooks, cersei-lsp, cersei-workflows, …
+  bricks-config       engine assembly shared by the frontends: home, providers, projects
+  bricks-types, bricks-hooks, bricks-lsp, bricks-workflows, …
 ```
 
----
+## Measurements
 
-## Benchmarks
-
-**Bricks 0.4.6, measured on 2026-10-08** (commit `dee981e`), compared with
-the previous run of 2026-10-06 (commit `7315d82`, the code that became
-0.3.6 — the sub-agent and code-engine work landed after it) and with
-Pacifio's published figures for Cersei 0.1.6.
-
-The machine is an Apple A18 Pro (6 cores, 8 GiB) running macOS 27.2,
-Rust 1.98.1, workspace release profile (`opt-level = "z"`, thin LTO). No
-model is called by any benchmark below. Pacifio's figures come from a
-different Apple Silicon machine: that column shows orders of magnitude and
-regressions, not a controlled A/B test. Full report, raw notes and harness
-fixes: [docs/benchmarks-bricks-2026-10-08.md](docs/benchmarks-bricks-2026-10-08.md).
-
-### Tool I/O
-
-```bash
-cargo run --release -p cersei --example benchmark_io
-```
-
-50 iterations per tool after warm-up, in-process dispatch, mean. Every call
-is now checked for success.
-
-| Tool | 0.4.6 | 0.3.6 cycle | Cersei 0.1.6 (Pacifio) |
-|---|---|---|---|
-| Read | 0.11 ms | 0.25 ms | 0.09 ms |
-| Write | 0.05 ms | 0.14 ms | 0.09 ms |
-| Edit | 0.81 ms | *(0.05 ms)* | *(0.04 ms)* |
-| Glob | 0.05 ms | 0.07 ms | 0.05 ms |
-| Grep | 1.86 ms | 2.42 ms | 5.85 ms |
-| Bash | 39.8 ms | 37.6 ms | 15.64 ms |
-
-* **Edit.** The earlier harness timed an ambiguous call (the text appears
-  several times) whose error was ignored: it measured a refusal. The
-  harness now uses `replace_all` and checks the result, so 0.81 ms is the
-  first real figure for a repeated edit; the figures in brackets are not
-  comparable.
-* **Read** detects binary and non-UTF-8 files, handles BOMs, counts the
-  exact total and checks that the file did not change during the read.
-* **Bash** runs each command as its own process, supervises the whole
-  process tree and spills large outputs to disk. The Bash figure above
-  predates this design (one persistent shell, a request/response round-trip
-  and a 15 ms output-settling window per command) and has not been measured
-  again.
-
-The standalone suite (`examples/benchmark`, 100 iterations) gives the same
-picture: Read 0.118 ms, Write 0.050 ms, Edit 0.759 ms, Glob 0.066 ms,
-Grep 2.017 ms, Bash 39.7 ms.
-
-### Memory I/O
-
-```bash
-cargo run --release -p cersei-memory --features graph --example memory_bench
-```
-
-| Operation (mean) | 0.4.6 | 0.3.6 cycle | Cersei 0.1.6 (Pacifio) |
-|---|---|---|---|
-| Scan 100 memory files (frontmatter) | 1.84 ms | 1.71 ms | 1.2 ms |
-| Load MEMORY.md | 15.4 µs | 16.4 µs | 9.6 µs |
-| Memory recall, text (100 files) | 2.03 ms | 1.88 ms | 1.3 ms |
-| Memory recall, graph (1 000 nodes) | 1.36 ms | 1.34 ms | 98 µs (graph size not stated) |
-| Graph store | 76.2 µs per node | 114 µs per node | 30 µs per node |
-| Topic query (graph) | 114.5 µs | 118 µs | 77 µs |
-| Session write | 35.9 µs per entry | 37 µs per entry | 27 µs per entry |
-| Session load (100 entries) | 279 µs | 279 µs | 268 µs |
-
-* **Recall.** Graph recall matches the query as a substring of every stored
-  memory, so it grows with the graph size; Pacifio's figure gives no size.
-* **Writes.** Every graph query and write is parameterised: nothing written
-  by a user or a model is spliced into a query.
-
-The structured long-term memory (hybrid recall) has its own measurements in
-[docs/memory.md](docs/memory.md#measurements): recall p50 2.0 / 3.5 / 6.8 ms
-at 500 / 2 000 / 10 000 episodes.
-
-### Agent framework overhead (`bench/general-agents`)
-
-```bash
-CERSEI_BENCH_AXES=1,2,3,4 cargo run --release -p cersei-agent --example general_agent_bench --features bench-full
-```
-
-A minimal agent with one tool is built, held and dropped; no model turn is
-run (parity with the Python harnesses).
-
-| Axis | 0.4.6 | 0.3.6 cycle | Cersei 0.1.6 (Pacifio) |
-|---|---|---|---|
-| Instantiation (mean) | 21.3 µs | 33.9 µs | 8.5 µs |
-| Memory per agent (jemalloc) | 71.7 KB | 71.8 KB | 704 B |
-| 10 000 agents built concurrently: per-agent p50 / p99 | 0.066 / 1.05 ms | 0.08 / 0.81 ms | 0.056 / 0.155 ms |
-| 10 000 agents built concurrently: total | 197 ms | — | — |
-| 10 000 agents held: peak RSS | 647 MiB | 695 MiB | 22 MB |
-| Graph recall under load, 10 000 nodes (p50) | 83.0 ms | 90.2 ms | 94.0 ms |
-| Semantic search under load, 10 000 chunks (p50) | not run | 65.6 µs | 50.7 µs |
-
-Each agent carries a context manager, a tool-output compressor with its
-store, a web context and an approval-ready permission path; these explain
-the higher footprint than Cersei 0.1.6. 10 000 is the largest step tested,
-not a limit found. Graph recall under load is 10 workers × 100 queries
-(p95 130 ms, p99 226 ms).
-
-**Python frameworks, re-run on the same machine** (Python 3.12.13, versions
-from `uv.lock`; Rust memory measured with jemalloc, Python with
-tracemalloc, which misses native allocations — the allocation column is not
-an equal comparison of total RAM):
-
-| Framework | Construction (mean) | Allocation per agent | 1 000 agents: total | 1 000 agents: peak RSS |
-|---|---|---|---|---|
-| **Bricks 0.4.6** | 21.3 µs | 71 703 B | 20.4 ms | 98.5 MiB |
-| Agno 2.5.17 | 6.0 µs | 5 394 B | 19.0 ms | 103.6 MiB |
-| PydanticAI 1.22.0 | 228.6 µs | 8 196 B | 262.1 ms | 107.2 MiB |
-| LangGraph 1.1.8 | 1 950.7 µs | 30 344 B | 2 101.1 ms | 168.7 MiB |
-| CrewAI 1.14.2 | 7 476.2 µs | 17 900 B | 3 024.0 ms | 1 526.2 MiB |
-
-### CLI startup
-
-```bash
-python3 scripts/bench_cli.py --bricks target/release/bricks --iterations 50
-```
-
-`--version`, no model call: 50 runs after 3 warm-up runs. Sizes and RSS in
-MiB.
-
-| CLI | Startup (mean) | min – max | Executed file | Peak RSS |
-|---|---|---|---|---|
-| **bricks 0.4.6** | 4.8 ms | 4.3 – 6.1 ms | 29.4 MiB | 7.5 MiB |
-| bricks, 0.3.6 cycle | 5.4 ms | — | 27.1 MiB | 7.4 MiB |
-| Claude Code 2.1.289 | 7.3 ms | 6.4 – 11.2 ms | 219.0 MiB | 24.6 MiB |
-| Codex CLI 0.150.1 | 8.6 ms | 7.5 – 11.9 ms | 218.4 MiB | 16.9 MiB |
-
-This measures startup, not the time to answer a prompt. Pacifio's earlier
-comparison (269 ms for Claude Code) measured the former Node.js Claude
-Code; the "Abstract CLI" it compared against no longer exists.
-
-### Stress suites and token accounting
-
-The five `stress_*` examples pass **256 checks, 0 failures**
-(infrastructure 46, tools 47, orchestration 33, skills 47, memory 83).
-`usage_report`, with a simulated provider, reports 5 017 input and 714
-output tokens for two successful tool calls, and its three consistency
-checks pass; these are simulator figures, not real consumption.
-
-### Not re-run yet
-
-The following evaluations have not yet been re-run for Bricks. The priority
-is reliable validation of real-model behaviour and reproducible results;
-API cost is not the reason these evaluations remain pending.
-
-| Evaluation | Requirements | Entry point |
-|---|---|---|
-| LongMemEval | Dataset, answerer, judge and embeddings | `bench/long-mem` |
-| Terminal-Bench 4.0 | Daytona sandboxes and a configured model | `./bench/term-bench/run_tb_cersei.sh` |
-| Compression savings with a real model | A configured live model | Command below |
-| Memory recall vs Claude Code / Codex | Each agent running with its configured model | Comparative evaluation pending |
-
-LongMemEval evidence recall can also run with local embeddings:
-
-```bash
-cargo run --release -p longmem-bench --bin longmem-recall -- --dataset oracle
-```
-
-To evaluate compression with a live model:
-
-```bash
-BRICKS_LIVE_MODEL=provider_id/model_id cargo test -p cersei-agent --test e2e_live_compression -- --ignored --nocapture
-```
-
-No results are claimed for these pending evaluations. The measurements above
-cover local tools and engine overhead; they do not measure coding quality
-with a live model.
+The measurements recorded so far (Bricks 0.4.6, 2026-10-08) are in
+[docs/benchmarks-bricks-2026-10-08.md](docs/benchmarks-bricks-2026-10-08.md).
+They predate the current architecture. They cover local tools and engine
+overhead, and no live model was called. They are not a performance promise.
+Evaluations that need a live model have not been re-run, and no result is
+claimed for them.
 
 ## Tests
 
@@ -390,27 +281,32 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
 ```
 
-The published validation snapshot covers 930+ workspace tests. The model-facing paths are tested against
-scripted models and local test servers. Live API tests are opt-in
-(`#[ignore]`). The reported test runs used macOS (arm64); Linux and Windows
-have not yet been validated in those runs.
+The model-facing paths are tested against scripted models and local test
+servers. Live API tests are opt-in (`#[ignore]`). The reported test runs used
+macOS (arm64); Linux and Windows have not yet been validated in those runs.
 
 ## Documentation
 
 | Guide | Contents |
 |---|---|
-| [docs/cli.md](docs/cli.md) | the `bricks` command, JSONL schema, approvals, sessions, the desktop application |
+| [docs/cli.md](docs/cli.md) | the `bricks` command, JSONL schema, approvals, sessions, tools of a session, the desktop application |
+| [docs/maintenance.md](docs/maintenance.md) | build, publishing, dependency advisories |
 | [docs/providers.md](docs/providers.md) | providers configuration |
+| [docs/providers.example.toml](docs/providers.example.toml) | every `providers.toml` section, annotated |
 | [docs/context.md](docs/context.md) | context management and compaction |
 | [docs/compression.md](docs/compression.md) | tool-output compression and rules |
 | [docs/shell.md](docs/shell.md) | shell, file tools, result format |
 | [docs/web.md](docs/web.md) | web search and reading |
-| [docs/semantic.md](docs/semantic.md) | code understanding engine, CodeScout, benchmark |
+| [docs/semantic.md](docs/semantic.md) | code understanding engine, CodeScout |
 | [docs/agents.md](docs/agents.md) | sub-agents, profiles, parallel and background runs, worktrees, jobs |
 | [docs/mcp.md](docs/mcp.md) | MCP client |
 | [docs/memory.md](docs/memory.md) | long-term memory and hybrid recall |
+| [docs/skills.md](docs/skills.md) | Agent Skills |
 | [docs/bricks.example.toml](docs/bricks.example.toml) | every `bricks.toml` section, annotated |
+| [docs/content/docs/migration.mdx](docs/content/docs/migration.mdx) | migration from the Cersei names and behaviour |
 | [CHANGELOG.md](CHANGELOG.md) | changes since the fork |
+
+The documentation site is in [`docs/`](docs/README.md).
 
 ## License
 

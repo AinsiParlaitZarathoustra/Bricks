@@ -1,7 +1,7 @@
 //! Engine configuration (`[semantic]` in `bricks.toml`). Every limit here is
 //! a ceiling: a query can lower it, never lift it.
 
-use cersei_lsp::LspServerConfig;
+use bricks_lsp::LspServerConfig;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

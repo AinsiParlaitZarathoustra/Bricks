@@ -8,7 +8,7 @@ import { TypeTable } from 'fumadocs-ui/components/type-table';
 
 # Background Tasks
 
-Cersei includes built-in tools for task orchestration, scheduled jobs, and isolated workspaces. These let the model manage long-running work, schedule recurring prompts, and work in parallel git branches — all through the standard tool system.
+Bricks includes built-in tools for task orchestration, scheduled jobs, and isolated workspaces. These let the model manage long-running work, schedule recurring prompts, and work in parallel git branches — all through the standard tool system.
 
 ---
 
@@ -201,7 +201,7 @@ Tasks are in-memory only — they don't persist across agent restarts. For durab
 The task registry is accessible directly from Rust — you don't have to go through the tool system:
 
 ```rust
-use cersei_tools::tasks::{get_task, list_tasks, clear_tasks, TaskStatus};
+use bricks_tools::tasks::{get_task, list_tasks, clear_tasks, TaskStatus};
 
 // Check a specific task
 if let Some(task) = get_task("abc12345") {
@@ -318,7 +318,7 @@ Cron jobs are in-memory. They run within the current agent session and stop when
 ### Programmatic Access
 
 ```rust
-use cersei_tools::cron::{list_crons, clear_crons};
+use bricks_tools::cron::{list_crons, clear_crons};
 
 // List all scheduled jobs
 for job in list_crons() {
@@ -350,7 +350,7 @@ Create isolated git worktrees for parallel branch work. The agent can work in a 
     path: {
       type: 'Option<String>',
       description: 'Directory for the worktree.',
-      default: '/tmp/cersei-wt-{branch}',
+      default: '<temp dir>/bricks-wt-{branch}',
     },
   }}
 />
@@ -383,11 +383,11 @@ Agent receives: "Try two approaches to fixing the bug"
 1. EnterWorktree { branch: "fix-approach-a" }
 2. ... (implements approach A) ...
 3. Bash { command: "cargo test" }
-4. ExitWorktree { path: "/tmp/cersei-wt-fix-approach-a" }
+4. ExitWorktree { path: "/tmp/bricks-wt-fix-approach-a" }
 5. EnterWorktree { branch: "fix-approach-b" }
 6. ... (implements approach B) ...
 7. Bash { command: "cargo test" }
-8. ExitWorktree { path: "/tmp/cersei-wt-fix-approach-b" }
+8. ExitWorktree { path: "/tmp/bricks-wt-fix-approach-b" }
 9. Report which approach passed tests
 ```
 
@@ -400,7 +400,7 @@ Agent receives: "Try two approaches to fixing the bug"
 Tasks are scoped to the current session's memory. When you resume a session, the in-memory registry is empty — but the task creation and completion events are preserved in the session JSONL transcript. The model can read its own history to understand what was done previously.
 
 ```rust
-use cersei_tools::tasks::{get_task, list_tasks, TaskStatus};
+use bricks_tools::tasks::{get_task, list_tasks, TaskStatus};
 
 // After agent completes, inspect what it did
 let tasks = list_tasks();
@@ -422,8 +422,8 @@ Use the event system to observe task activity in real time:
 
 ```rust
 let agent = Agent::builder()
-    .provider(Anthropic::from_env()?)
-    .tools(cersei::tools::all())
+    .provider(bricks::provider_from_config(None, "my-provider/my-model")?)
+    .tools(bricks::tools::all())
     .on_event(|e| match e {
         AgentEvent::ToolStart { name, input, .. } if name == "TaskCreate" => {
             let desc = input["description"].as_str().unwrap_or("?");
@@ -444,14 +444,14 @@ let agent = Agent::builder()
 A scheduled agent that periodically scans the project and updates memory:
 
 ```rust
-use cersei::prelude::*;
+use bricks::prelude::*;
 use std::time::Duration;
 
 // Run an agent every hour to scan for changes
 loop {
     let output = Agent::builder()
-        .provider(Anthropic::from_env()?)
-        .tools(cersei::tools::coding())
+        .provider(bricks::provider_from_config(None, "my-provider/my-model")?)
+        .tools(bricks::tools::coding())
         .system_prompt("You maintain project memory. Scan for new files and patterns.")
         .permission_policy(AllowReadOnly)
         .run_with("Check src/ for new files since last scan. Update memory if needed.")
@@ -468,8 +468,8 @@ Use the event stream to implement a deploy-and-poll pattern:
 
 ```rust
 let agent = Agent::builder()
-    .provider(OpenAi::from_env()?)
-    .tools(cersei::tools::coding())
+    .provider(bricks::provider_from_config(None, "my-provider/my-model")?)
+    .tools(bricks::tools::coding())
     .permission_policy(AllowAll)
     .run_with(
         "Run ./deploy.sh, then wait 10 seconds and check the health endpoint at \

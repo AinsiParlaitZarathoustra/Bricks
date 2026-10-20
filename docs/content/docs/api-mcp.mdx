@@ -1,15 +1,16 @@
 ---
-title: MCP (cersei-mcp)
+title: MCP (bricks-mcp)
 description: Model Context Protocol client, built on the official rmcp SDK — stdio and Streamable HTTP transports.
 ---
 
-# cersei-mcp
+# bricks-mcp
 
 MCP (Model Context Protocol) client for connecting to external tool servers. It is built on the official `rmcp` SDK and supports the stdio and Streamable HTTP transports.
 
 ## McpServerConfig
 
 ```rust
+use bricks::mcp::McpServerConfig;
 // Stdio transport (the default)
 let config = McpServerConfig::stdio("db", "npx", &["-y", "@my/db-mcp"]);
 
@@ -26,6 +27,7 @@ Other fields: `headers` (HTTP), `cwd` (working directory of a stdio server), `pr
 ## McpManager
 
 ```rust
+use bricks::mcp::{McpManager, McpServerConfig};
 let mcp = McpManager::connect(&[
     McpServerConfig::stdio("db", "npx", &["-y", "@my/db-mcp"]),
     McpServerConfig::stdio("docs", "npx", &["-y", "@my/docs-mcp"]),
@@ -57,13 +59,14 @@ let tools = mcp.tool_definitions().await;
 ## Integration with Agent
 
 ```rust
+use bricks::mcp::McpServerConfig;
 let agent = Agent::builder()
-    .provider(cersei::provider_from_config(None, "my-provider/my-model")?)
-    .tools(cersei::tools::coding())
+    .provider(bricks::provider_from_config(None, "my-provider/my-model")?)
+    .tools(bricks::tools::coding())
     .mcp_server(McpServerConfig::stdio("db", "npx", &["-y", "@my/db-mcp"]))
     .build()?;
 ```
 
-MCP servers given to `mcp_server` are connected at the first run. Their tools are offered to the model as `mcp__<server>__<tool>`, alongside the built-in tools (`crates/cersei-tools/src/mcp_tool.rs:61`).
+MCP servers given to `mcp_server` are connected at the first run. Their tools are offered to the model as `mcp__<server>__<tool>`, alongside the built-in tools (`crates/bricks-tools/src/mcp_tool.rs:61`).
 
-`agent.close().await` is async: it stops the agent's shells and closes its MCP connections, unless they were adopted. `agent.adopt_mcp(manager).await` is async and takes an `Arc<McpManager>`: it offers another agent's connections without closing them. It has no effect once this agent's connections exist (`crates/cersei-agent/src/lib.rs:518-545`).
+`agent.close().await` is async: it stops the agent's shells and closes its MCP connections, unless they were adopted. `agent.adopt_mcp(manager).await` is async and takes an `Arc<McpManager>`: it offers another agent's connections without closing them. It has no effect once this agent's connections exist (`crates/bricks-agent/src/lib.rs:518-545`).

@@ -1,13 +1,14 @@
 # Long-term memory
 
-`cersei-memory` with the `structured` feature keeps a durable, sourced,
+`bricks-memory` with the `structured` feature keeps a durable, sourced,
 temporal memory and recalls from it with a hybrid of vector search, lexical
 search and a bounded relational expansion. An agent uses it through the
 `LongTermMemory` trait: what it recalls is added to the system prompt of
 each run (within a token budget), and each finished exchange is recorded.
 
 ```rust
-use cersei_memory::structured::{LlmExtractor, MemoryConfig, StructuredMemory};
+use bricks_embeddings::OpenAiEmbeddings;
+use bricks_memory::structured::{LlmExtractor, MemoryConfig, StructuredMemory};
 
 let config = MemoryConfig::from_bricks_toml(&std::fs::read_to_string("bricks.toml")?)?;
 let memory = Arc::new(
@@ -303,7 +304,7 @@ prompt template is not measured in this file, so the retrieved context cannot
 be sized from it.
 `GraphMemory::recall_top_k` pulled its candidates with
 `m.content CONTAINS '<the whole question>'`
-(`crates/cersei-memory/src/graph.rs`, `RECALL` at line 72, `recall` at line 247):
+(`crates/bricks-memory/src/graph.rs`, `RECALL` at line 72, `recall` at line 247):
 a turn had to contain the entire question text to be found. No `legacy`
 recall result is recorded in this repository. Reading the empty retrieval as
 the cause is therefore an inference, not a measurement; the `legacy` mode of
@@ -339,7 +340,7 @@ published here. The latencies below are from `measure_memory` (synthetic
 corpus, local hashing embeddings, release build).
 
 ```text
-cargo run --release -p cersei-memory --features structured --example measure_memory
+cargo run --release -p bricks-memory --features structured --example measure_memory
 ```
 
 * **Machine.** Apple A18 Pro, 8 GB, macOS (arm64).

@@ -265,3 +265,6 @@ export const sessionChangesets = (sessionId: string) =>
   call<import('./engine').ChangeSet[]>('session_changesets', { sessionId })
 
 export type * from './bindings/RunLabel'
+export type * from './bindings/RunRecord'
+export type * from './bindings/RunFile'
+export type * from './bindings/RunCommand'

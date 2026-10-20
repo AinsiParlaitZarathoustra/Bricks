@@ -3,8 +3,8 @@
 
 mod common;
 
+use bricks_lsp::mock::MockConfig;
 use bricks_semantic::*;
-use cersei_lsp::mock::MockConfig;
 use common::*;
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -251,7 +251,7 @@ async fn versioned_sync_after_an_edit_and_cache_invalidation() {
     assert!(!r3.metrics.result_cache_hit);
     assert_eq!(r3.items[0].path, "src/beta.rs");
     let srv = l.last();
-    let uri = cersei_lsp::path_to_uri(&std::fs::canonicalize(&main).unwrap());
+    let uri = bricks_lsp::path_to_uri(&std::fs::canonicalize(&main).unwrap());
     let (version, text) = srv.doc(&uri).unwrap();
     assert_eq!(version, 2, "didChange with the next version");
     assert!(text.contains("beta::run(); "));

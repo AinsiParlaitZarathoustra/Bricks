@@ -2,7 +2,7 @@
 //!
 //! Every item costs what its rendering costs (path, relation, provenance,
 //! signature, snippet): the budget counts all of it. Tokens are *estimated*
-//! with the Context Manager's local heuristic (`cersei_types::tokens`); the
+//! with the Context Manager's local heuristic (`bricks_types::tokens`); the
 //! selection keeps the estimate's upper bound under the budget, a margin,
 //! not a guarantee of the provider's count.
 //!
@@ -17,7 +17,7 @@ use crate::render;
 use crate::result::*;
 use crate::syntax::{self, Lang, ScopeClass, TreeCache};
 use crate::view::Document;
-use cersei_types::tokens::{ESTIMATION_METHOD, estimate_text};
+use bricks_types::tokens::{ESTIMATION_METHOD, estimate_text};
 use std::collections::HashSet;
 use std::path::Path;
 use std::time::Instant;
@@ -332,7 +332,7 @@ pub fn build(
         let path = rel_path(root, &c.doc.path);
         let mut item = CodeItem {
             id: item_id(&path, &range, &c.doc.revision),
-            uri: cersei_lsp::path_to_uri(&c.doc.path),
+            uri: bricks_lsp::path_to_uri(&c.doc.path),
             path,
             range,
             revision: c.doc.revision.clone(),

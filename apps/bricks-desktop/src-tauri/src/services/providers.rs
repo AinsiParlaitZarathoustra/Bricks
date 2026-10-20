@@ -8,7 +8,7 @@ use super::{error, io_error, not_found};
 use crate::contract::{
     IpcErrorCode, IpcResult, ModelProfileView, ModelView, ProviderView, ProvidersFile,
 };
-use cersei_provider::config::{ProviderConfig, ProvidersConfig};
+use bricks_provider::config::{ProviderConfig, ProvidersConfig};
 use sha2::{Digest, Sha256};
 use std::io::Write;
 use std::path::Path;

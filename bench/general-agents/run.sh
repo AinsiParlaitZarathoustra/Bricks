@@ -3,7 +3,7 @@
 #
 # Usage:
 #   ./run.sh                         # All frameworks, host process via uv
-#   ./run.sh --only cersei           # Just Cersei
+#   ./run.sh --only cersei           # Just the Bricks harness (framework id: cersei)
 #   ./run.sh --only agno             # Just one Python framework
 #   ./run.sh --docker                # Run Python frameworks in Docker with
 #                                    # a memory cap (for max-concurrent enforcement)
@@ -11,7 +11,7 @@
 #   BENCH_STEPS=100,500,1000,5000 ./run.sh  # Override axis-3 ramp
 #
 # Requirements:
-#   - Rust toolchain (for Cersei)
+#   - Rust toolchain (for Bricks)
 #   - uv  — `curl -LsSf https://astral.sh/uv/install.sh | sh`
 #   - Docker is optional — only needed for --docker mode
 
@@ -41,11 +41,11 @@ run_if_matching() {
     [ -z "$ONLY" ] || [ "$ONLY" = "$1" ]
 }
 
-# ── Cersei (native, on the host) ──────────────────────────────────────────
+# ── Bricks (native, on the host) ──────────────────────────────────────────
 
 if run_if_matching cersei; then
     echo "━━━ cersei ━━━"
-    (cd ../.. && cargo run --release -p cersei-agent --example general_agent_bench --features bench-full)
+    (cd ../.. && cargo run --release -p bricks-agent --example general_agent_bench --features bench-full)
 fi
 
 # ── Python frameworks ─────────────────────────────────────────────────────

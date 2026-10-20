@@ -117,7 +117,7 @@ pub fn resolve_reveal_target(root: &Path, path: &str) -> IpcResult<PathBuf> {
 
 /// The path to resolve, not yet canonical: `path` itself when absolute, or
 /// `path` joined to `root` when relative (checked by the shared path rules).
-fn candidate_of(root: &Path, path: &str) -> IpcResult<PathBuf> {
+pub(crate) fn candidate_of(root: &Path, path: &str) -> IpcResult<PathBuf> {
     if Path::new(path).is_absolute() {
         if path.is_empty() || path.len() > PATH_LIMIT || path.contains('\0') {
             return Err(invalid("chemin invalide"));

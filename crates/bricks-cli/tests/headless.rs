@@ -5,6 +5,7 @@ mod common;
 
 use common::*;
 use serde_json::json;
+use std::time::{Duration, Instant};
 
 fn kinds(evs: &[serde_json::Value]) -> Vec<String> {
     evs.iter()
@@ -390,4 +391,218 @@ fn a_session_without_skills_works_and_lists_only_built_ins() {
     let body = m.seen.lock().unwrap()[0].to_string();
     assert!(body.contains("<name>verify</name>") && body.contains("<name>debug</name>"));
     assert!(!body.contains("$ARGUMENTS"));
+}
+
+/// A background sub-agent still running when the main run ends is cancelled
+/// at once (`[agents] background_drain_ms` defaults to 0): the run exits with
+/// code 6 and reports the sub-agent as cancelled, without waiting out a drain.
+#[test]
+fn a_background_child_still_running_at_the_end_is_cancelled_at_once() {
+    let m = model_with_children(
+        vec![
+            tool(
+                "a1",
+                "Agent",
+                json!({"description": "fond", "prompt": "Travail de fond", "background": true, "isolation": "shared"}),
+            ),
+            text("Lancé."),
+        ],
+        HANG.into(),
+    );
+    let p = Project::new(&m.url, "[permissions.tools]\nAgent = \"allow\"\n");
+    let started = Instant::now();
+    let out = p.run(
+        &["run", "--non-interactive", "Lance un travail de fond"],
+        None,
+    );
+    let err = String::from_utf8_lossy(&out.stderr).to_string();
+    assert_eq!(out.status.code(), Some(6), "{err}");
+    assert!(
+        started.elapsed() < Duration::from_secs(60),
+        "{:?}",
+        started.elapsed()
+    );
+    assert!(err.contains("background sub-agents:"), "{err}");
+    assert!(err.contains("cancelled"), "{err}");
+}
+
+/// A background sub-agent that finishes within `background_drain_ms` after
+/// the main run is waited for, and the run succeeds.
+#[test]
+fn a_background_child_that_finishes_in_the_drain_completes_the_run() {
+    let m = model_with_children(
+        vec![
+            tool(
+                "a1",
+                "Agent",
+                json!({"description": "fond", "prompt": "Travail rapide", "background": true, "isolation": "shared"}),
+            ),
+            text("Lancé."),
+        ],
+        text("Fait."),
+    );
+    let p = Project::new(
+        &m.url,
+        "[permissions.tools]\nAgent = \"allow\"\n\n[agents]\nbackground_drain_ms = 10000\n",
+    );
+    let out = p.run(
+        &["run", "--non-interactive", "Lance un travail rapide"],
+        None,
+    );
+    let err = String::from_utf8_lossy(&out.stderr).to_string();
+    assert_eq!(out.status.code(), Some(0), "{err}");
+}
+
+/// The drain says what it does before it does it: with the default `0`, the
+/// stderr line announces the cancellation (no wait is announced), and the
+/// cancelled sub-agent's usage and the final run usage are still reported.
+#[test]
+fn the_default_drain_cancels_at_once_and_still_reports_the_final_usage() {
+    let m = model_with_children(
+        vec![
+            tool(
+                "a1",
+                "Agent",
+                json!({"description": "fond", "prompt": "Travail de fond", "background": true, "isolation": "shared"}),
+            ),
+            text("Lancé."),
+        ],
+        HANG.into(),
+    );
+    let p = Project::new(&m.url, "[permissions.tools]\nAgent = \"allow\"\n");
+    let started = Instant::now();
+    let out = p.run(
+        &[
+            "run",
+            "--json",
+            "--non-interactive",
+            "Lance un travail de fond",
+        ],
+        None,
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(6),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(30),
+        "{:?}",
+        started.elapsed()
+    );
+    let evs = envelopes(&out.stdout);
+    let kinds = kinds(&evs);
+    let fin_at = kinds
+        .iter()
+        .position(|k| k == "run_finished")
+        .expect("run_finished");
+    // The run's last usage report comes after the drain (the child ended then).
+    let last_usage = evs
+        .iter()
+        .rposition(|e| e["type"] == "run_usage")
+        .expect("a run_usage event");
+    assert!(last_usage > fin_at, "{kinds:?}");
+    let last = &evs[last_usage];
+    assert_eq!(last["final_total"], true, "{last}");
+    assert_eq!(last["pending_agents"], 0, "{last}");
+    // The stream stays versioned and contiguous through the drain.
+    for (i, e) in evs.iter().enumerate() {
+        assert_eq!(e["seq"], i as u64 + 1);
+    }
+}
+
+/// `[agents] background_drain_ms` set explicitly is the value the run waits
+/// with: the stderr line of the drain names it, here 600 000 ms (a wait this
+/// test never makes: the run is stopped once the line is seen).
+#[test]
+fn an_explicit_drain_is_the_wait_the_run_announces() {
+    use std::io::BufRead;
+    let m = model_with_children(
+        vec![
+            tool(
+                "a1",
+                "Agent",
+                json!({"description": "fond", "prompt": "Travail de fond", "background": true, "isolation": "shared"}),
+            ),
+            text("Lancé."),
+        ],
+        HANG.into(),
+    );
+    let p = Project::new(
+        &m.url,
+        "[permissions.tools]\nAgent = \"allow\"\n\n[agents]\nbackground_drain_ms = 600000\n",
+    );
+    let mut c = p.command(&["run", "--non-interactive", "Lance un travail de fond"]);
+    c.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped());
+    let mut child = c.spawn().unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for line in std::io::BufReader::new(stderr)
+            .lines()
+            .map_while(Result::ok)
+        {
+            if tx.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let mut seen = Vec::new();
+    let mut found = None;
+    while Instant::now() < deadline {
+        match rx.recv_timeout(Duration::from_secs(1)) {
+            Ok(line) => {
+                let hit = line.contains("waiting for 1 background sub-agent(s)");
+                seen.push(line.clone());
+                if hit {
+                    found = Some(line);
+                    break;
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(_) => break,
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    let line = found.unwrap_or_else(|| panic!("no drain announced: {seen:?}"));
+    assert!(line.ends_with("(at most 600000 ms)"), "{line}");
+}
+
+/// What the model is offered: the native sub-agent tools, never the removed
+/// `delegate` tool, and no system prompt that names it.
+#[test]
+fn the_session_offers_the_native_agent_tools_and_never_delegate() {
+    let m = model(vec![text("ok")]);
+    let p = Project::new(&m.url, "");
+    let out = p.run(&["run", "--json", "--non-interactive", "Bonjour"], None);
+    assert_eq!(
+        out.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let body = m.seen.lock().unwrap()[0].clone();
+    let names: Vec<String> = body["tools"]
+        .as_array()
+        .expect("the request offers tools")
+        .iter()
+        .filter_map(|t| t["function"]["name"].as_str().map(str::to_string))
+        .collect();
+    for want in ["Agent", "Agents", "AgentControl", "AgentProfiles"] {
+        assert!(
+            names.iter().any(|n| n == want),
+            "{want} is offered: {names:?}"
+        );
+    }
+    assert!(!names.iter().any(|n| n == "delegate"), "{names:?}");
+    let text = body.to_string();
+    assert!(
+        !text.contains("\"delegate\""),
+        "no reference to the removed tool"
+    );
 }

@@ -2,8 +2,8 @@
 
 > **Two sources, read them separately.**
 >
-> - **Current:** Bricks 0.4.6, measured on 2026-10-08 (commit `dee981e`; Apple A18 Pro, 6 cores, 8 GiB, macOS 27.2, Rust 1.98.1). The full report is [`docs/benchmarks-bricks-2026-10-08.md`](../docs/benchmarks-bricks-2026-10-08.md), and the summary is in the [Benchmarks](../README.md#benchmarks) section of the README. There is no benchmark report for 0.6.0 in the repository.
-> - **Historical:** the tables below are the "Latest Results" of [`examples/benchmark/README.md`](../examples/benchmark/README.md), a file whose only commit is the first one (`53b7aee`, 2026-04-02). They describe an earlier Cersei build. Do not compare them with the current numbers: Bash averages 15.64 ms there, and 39.695 ms in the 2026-10-08 report.
+> - **Current:** Bricks 0.4.6, measured on 2026-10-08 (commit `dee981e`; Apple A18 Pro, 6 cores, 8 GiB, macOS 27.2, Rust 1.98.1). The full report is [`docs/benchmarks-bricks-2026-10-08.md`](../docs/benchmarks-bricks-2026-10-08.md), and the summary is in the [Measurements](../README.md#measurements) section of the README. There is no benchmark report for 0.6.0 in the repository.
+> - **Historical:** the tables below were copied from the former "Latest Results" of [`examples/benchmark/README.md`](../examples/benchmark/README.md), recorded on 2026-04-02 with an earlier Cersei build. That README now shows the 2026-10-08 figures; the older ones remain in its git history. Do not compare the historical tables with the current numbers: Bash averages 15.64 ms there, and 39.695 ms in the 2026-10-08 report.
 >
 > Anything marked **[unverified]** does not appear in any file of the repository.
 
@@ -13,20 +13,20 @@ From the repository root:
 
 ```bash
 # Tool I/O benchmark (quick)
-cargo run --release -p cersei --example benchmark_io
+cargo run --release -p bricks --example benchmark_io
 
 # Standalone suite, with its own manifest
 cargo run --release --manifest-path examples/benchmark/Cargo.toml
 
 # Stress tests (correctness + performance)
-cargo run --release -p cersei --example stress_core_infrastructure
-cargo run --release -p cersei --example stress_tools
-cargo run --release -p cersei --example stress_orchestration
-cargo run --release -p cersei --example stress_skills
-cargo run --release -p cersei --example stress_memory
+cargo run --release -p bricks --example stress_core_infrastructure
+cargo run --release -p bricks --example stress_tools
+cargo run --release -p bricks --example stress_orchestration
+cargo run --release -p bricks --example stress_skills
+cargo run --release -p bricks --example stress_memory
 
 # Usage and cost tracking
-cargo run --release -p cersei --example usage_report
+cargo run --release -p bricks --example usage_report
 ```
 
 The Python agent-framework comparisons are in `bench/general-agents`. LongMemEval (`bench/long-mem`) and Terminal-Bench (`bench/term-bench`) need a dataset or a live model; the README lists them under "Not re-run yet".
@@ -171,7 +171,7 @@ Computed from the Sonnet 4.6 total of $0.067 per session, 30 days a month:
 
 ### Auto-Compact Thresholds
 
-The thresholds are constants in `crates/cersei-agent/src/compact.rs`. Their names are shown below. The "Validated" column of the historical page is **[unverified]**: no file records how each threshold was tested.
+The thresholds are constants in `crates/bricks-agent/src/compact.rs`. Their names are shown below. The "Validated" column of the historical page is **[unverified]**: no file records how each threshold was tested.
 
 | Context used | Action | Constant |
 |-----------|--------|-----------|
@@ -193,7 +193,7 @@ No file in the repository holds these figures.
 
 ### Compact Circuit Breaker
 
-Verified in `crates/cersei-agent/src/compact.rs`:
+Verified in `crates/bricks-agent/src/compact.rs`:
 
 - 3 consecutive failures (`MAX_CONSECUTIVE_FAILURES = 3`) disable auto-compact (`AutoCompactState::on_failure`).
 - A successful compaction resets the counter (`AutoCompactState::on_success`).

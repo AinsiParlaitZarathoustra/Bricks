@@ -220,7 +220,7 @@ const ENGINE: { type: string; registry: boolean; command: Command }[] = [
 	{ type: 'approve', registry: false, command: { type: 'approve', approval_id: 'ap-1', decision: 'allow' } }
 ];
 
-/** Engine types a `/` line can produce (crates/cersei-agent/src/control/slash.rs). */
+/** Engine types a `/` line can produce (crates/bricks-agent/src/control/slash.rs). */
 const REGISTRY_ENGINE_TYPES = [
 	'agent_control',
 	'clear_context',

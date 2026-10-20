@@ -1,83 +1,95 @@
 ---
 title: Installation
-description: Adding Cersei to your Rust project.
+description: Requirements, and how to install the bricks command, Bricks Desktop, or the Bricks ADK crates into a Rust project.
 ---
 
-## From crates.io
+## Requirements
 
-The snippets below pin the workspace version, 0.6 (every crate inherits `version.workspace`, 0.6.1). If Cargo cannot resolve these versions from the registry, use the git source described under [Tracking `main`](#tracking-main).
+- A recent stable Rust toolchain: edition 2024 and 1.88 or later (the code uses let chains).
+- A C++17 compiler. The vector index (USearch) is compiled with the engine, and `bricks-tools` depends on it.
+- For Bricks Desktop: Node.js with npm, and the Tauri prerequisites for your platform.
+- A model: a hosted API key, or a local server that speaks one of the supported protocols.
+
+The last development builds were made on macOS (arm64). Linux and Windows have not been validated yet.
+
+## Get the source
+
+Bricks is built from a checkout of its repository. Bricks ADK is not published on crates.io under the name `bricks`, which another project uses, so depend on the crates by path or by Git, as described below.
+
+## The `bricks` command
+
+From a checkout:
+
+```bash
+cargo install --path crates/bricks-cli
+bricks --version
+```
+
+This installs the `bricks` binary. Run `bricks` with no argument to see its help. The configuration it reads and its options are described in `docs/cli.md` in the repository.
+
+## Bricks Desktop
+
+From a checkout, in the desktop application's folder:
+
+```bash
+cd apps/bricks-desktop
+npm ci
+npm run tauri dev
+```
+
+`npm ci` installs the locked versions from `package-lock.json`. `npm run tauri dev` starts the application, which runs the Vite development server first.
+
+## Bricks ADK in a Rust project
+
+Add the facade crate, `bricks`, with the Tokio runtime and `anyhow` for the examples.
+
+From a checkout, by path:
 
 ```toml
 [dependencies]
-cersei = "0.6"
+bricks = { path = "/path/to/bricks/crates/bricks" }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 ```
 
-Or via the CLI:
+From the Git repository, with the revision you want to build against:
+
+```toml
+[dependencies]
+bricks = { git = "https://github.com/AinsiParlaitZarathoustra/Bricks", rev = "<revision>" }
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+```
+
+Replace `<revision>` with a commit hash, a tag or a branch name of your choice. The repository URL is the `repository` field of the workspace `Cargo.toml`.
+
+### Optional features of the facade
+
+The `bricks` crate has these features:
+
+| Feature | Default | Adds |
+|---|---|---|
+| `vms` | yes | `bricks::vms`: sandbox and VM isolation (`bricks-vms`) |
+| `agentlang` | no | `bricks::agentlang`: the AgentTemplate language |
+| `agentrl` | no | `bricks::agentrl`: self-evolving orchestration; enables `agentlang` and `vms` |
+| `workflows` | no | `bricks::workflows`: the workflow engine |
+
+Enable one in the dependency, for example `bricks = { path = "…", features = ["workflows"] }`.
+
+### Individual crates
+
+You can depend on single crates instead of the facade. Each crate is named `bricks-*` and is in the workspace under `crates/`. The [crate map](/docs/crate-map) lists them with their roles.
+
+## Providers and keys
+
+No environment variable is read implicitly. Each provider entry in `~/.bricks/providers.toml` names the variable that holds its key, with `api_key_env`. The [quick start](/docs/quick-start) shows a complete file. An example file with every section, annotated, is `docs/providers.example.toml` in the repository.
+
+Bricks keeps its files in `~/.bricks`. Set `BRICKS_HOME` to use another folder, and pass `--providers <file>` to the `bricks` command to read another providers file.
+
+## Verify
 
 ```bash
-cargo add cersei
-cargo add tokio --features full
-cargo add anyhow
+cargo test --workspace --locked
 ```
 
-## Optional: Graph Memory
-
-Enable the Grafeo graph backend for relationship-aware recall:
-
-```toml
-cersei-memory = { version = "0.6", features = ["graph"] }
-```
-
-## Optional: Individual Crates
-
-Use specific crates if you only need parts of the SDK:
-
-```toml
-cersei-types       = "0.6"   # Core types only
-cersei-provider    = "0.6"   # LLM providers
-cersei-tools       = "0.6"   # Tool system
-cersei-tools-derive = "0.6"  # #[derive(Tool)] proc macro
-cersei-agent       = "0.6"   # Agent runtime
-cersei-memory      = "0.6"   # Memory backends
-cersei-hooks       = "0.6"   # Hooks / middleware
-cersei-mcp         = "0.6"   # MCP client
-cersei-lsp         = "0.6"   # LSP client
-cersei-embeddings  = "0.6"   # Embeddings + vector index
-cersei-compression = "0.6"   # Token-killer compression
-bricks-skills      = "0.6"   # Agent Skills (formerly cersei-skills)
-cersei-vms         = "0.6"   # Sandbox / VM isolation
-```
-
-`bricks-skills` can also be taken from this repository, by git or by path.
-
-## Bricks CLI
-
-The `bricks` command is built from a checkout of the Bricks repository:
-
-```bash
-cargo install --path crates/bricks-cli
-```
-
-It reads its models from `~/.bricks/providers.toml`; see `docs/cli.md` and
-`docs/providers.md` in the repository. The Cersei-era `abstract-cli` crate is no
-longer in this workspace, and `bricks` does not install it.
-
-## Tracking `main`
-
-If you need an unreleased fix, point at the GitHub repo instead:
-
-```toml
-cersei = { git = "https://github.com/pacifio/cersei" }
-```
-
-## Environment Variables
-
-No variable name is read implicitly. Each provider entry in `~/.bricks/providers.toml` names the environment variable that holds its key, with `api_key_env` (see `docs/providers.md` and `docs/providers.example.toml`).
-
-## System Requirements
-
-- A recent stable Rust: edition 2024, 1.88 or later (let chains); tested with 1.98
-- No external search tool is needed: the `Grep` tool is built in (it uses the `grep` and `ignore` crates)
-- macOS, Linux, or Windows
+The tests use scripted models and local test servers. Live API tests are opt-in (`#[ignore]`).

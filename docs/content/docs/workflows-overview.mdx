@@ -1,25 +1,24 @@
 ---
 title: "Workflows Overview"
-description: A first-party, serializable workflow engine for Cersei — author multi-step pipelines in Rust or draw them in a visual builder (React + xyflow). One IR, two front-ends.
+description: The Bricks ADK workflow engine — multi-step pipelines defined as an explicit graph of steps. The whole workflow is serializable data, so a visual builder can draw it and the Rust runtime can run it.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 import { Cards, Card } from 'fumadocs-ui/components/card';
-import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
 
 # Workflows
 
-Workflows let you define a multi-step pipeline as an explicit graph of **steps** instead of leaning on a single agent's reasoning to hold the whole plan. You decide what runs, in what order, how data flows between steps, and what happens on a branch or a failure. A workflow can call plain Rust functions, [agents](/docs/api-agent), [tools](/docs/api-tools), or other workflows.
+A workflow is a pipeline you define as a graph of **steps**, instead of leaving the order of work to one agent's reasoning. You decide what runs, in what order, how data moves between steps, and what happens on a branch or a failure. A step can call a Rust function, an [agent](/docs/api-agent), a [tool](/docs/api-tools), or another workflow.
 
-The defining property of `cersei-workflows` is that **the entire workflow is serializable data**. A workflow is a `WorkflowDef` — a flat list of nodes and edges — that round-trips losslessly to and from JSON. That is what lets a visual builder (React + [xyflow / React Flow](https://reactflow.dev)) draw a workflow, emit it as JSON, and have the Rust runtime execute it. It is the engine behind the **Atlas** workflow UI.
+The defining property of `bricks-workflows` is that **the whole workflow is data**. A workflow is a `WorkflowDef`, a list of nodes and edges, which round-trips to and from JSON without loss. A visual editor can therefore emit the same JSON that the programmatic builder produces, and the runtime executes both the same way.
 
-<Callout type="info">
-**One IR, two front-ends.** The programmatic `WorkflowBuilder` and the visual builder produce the *same* `WorkflowDef`. There is one compiler (`Workflow::compile`) and one executor. Anything you can draw, you can write — and vice versa — because they are the same data.
+<Callout type="warn">
+**Library only, for now.** `bricks-workflows` is enabled with `features = ["workflows"]` on the `bricks` facade. Neither the `bricks` command-line tool nor the desktop app runs workflows, and this repository contains no visual editor. The JSON format is designed for one, but the editor is not part of this codebase.
 </Callout>
 
 ## When to use a workflow
 
-Use a workflow when the steps are known up front and the order matters — you want fine-grained control over data flow and which primitive runs at each stage. Use a plain [`Agent`](/docs/api-agent) when the path is open-ended and you want the model to decide what to do next. The two compose: a workflow step can run an agent, and an agent can be handed a workflow as a tool.
+Use a workflow when the steps are known in advance and their order matters: you control the data flow and the primitive used at each stage. Use a plain [`Agent`](/docs/api-agent) when the path is open and the model should decide the next step. They combine: a workflow step can run an agent, and an agent can be given a workflow as a tool.
 
 ## The shape of a workflow
 
@@ -34,42 +33,42 @@ Use a workflow when the steps are known up front and the order matters — you w
                  └─▶ [fetch_b] ─┘
 ```
 
-Every box is a node in the `WorkflowDef`:
+The node kinds of a `WorkflowDef`:
 
-- **Step** — runs a registered `Step` by id (a function, agent, tool, or nested workflow).
-- **Parallel / Join** — fan out to several branches concurrently, then collect (`AllOrFail` or `AllSettled`).
-- **Branch** — evaluate conditions in order; the first match wins.
-- **Loop** — `dowhile` / `dountil` / `foreach`.
-- **Map** — a pure JSON reshape between steps.
+- **Step**: runs a registered step by id (a function, an agent, a tool or a nested workflow).
+- **Parallel and join**: runs branches concurrently, then collects them with `AllOrFail` or `AllSettled`.
+- **Branch**: tests conditions in order; the first match wins.
+- **Loop**: `DoWhile`, `DoUntil`, or `ForEach` with a concurrency limit.
+- **Map**: a pure JSON reshape between steps.
 
 ## Core pieces
 
 <Cards>
   <Card title="WorkflowDef (the IR)">
-    A serializable `{ nodes, edges, entry }` graph. The single source of truth, emitted identically by the builder and the UI. `UiHints` (x/y/label) ride along but are ignored at execution time, so the IR is lossless across the React Flow boundary.
+    A serializable `{ id, nodes, edges, entry }` graph. The builder and any editor produce it. `UiHints` (position, label, colour) are carried along and ignored when the workflow runs.
   </Card>
   <Card title="Step trait">
-    Shaped exactly like a [`Tool`](/docs/api-tools): an id, input/output JSON schemas, and an async `execute`. First-party impls: `FnStep`, `AgentStep`, `ToolStep`, `WorkflowStep`.
+    Shaped like a [`Tool`](/docs/api-tools): an id, input and output JSON schemas, and an async `execute`. The built-in steps are `FnStep`, `AgentStep`, `ToolStep` and `WorkflowStep`.
   </Card>
   <Card title="StepRegistry">
-    Maps step-ids to executable implementations. UI JSON carries only references; the host supplies the code. `catalog()` exposes the palette of available steps to the builder.
+    Maps step ids to implementations. The JSON names steps by id only, and the host supplies the code. `catalog()` lists the available steps with their schemas.
   </Card>
-  <Card title="WorkflowEvent / Stream">
-    A `Serialize`-able event stream (`StepStarted`, `StepCompleted`, `BranchTaken`, `StateUpdated`, …) for lighting up the live graph over SSE or WebSocket.
+  <Card title="WorkflowEvent and WorkflowStream">
+    Serializable events (`StepStarted`, `StepCompleted`, `BranchTaken`, `StateUpdated`, …) that a host can forward to a client.
   </Card>
 </Cards>
 
 ## A first workflow
 
-Register the steps, author the graph, compile, run.
+Register the steps, write the graph, compile it against the registry, and run it.
 
 ```rust
-use cersei::workflows::prelude::*;
+use bricks::workflows::prelude::*;
 use serde_json::json;
 use std::sync::Arc;
 
 #[tokio::main]
-async fn main() -> cersei::types::Result<()> {
+async fn main() -> bricks::types::Result<()> {
     // 1. Register executable steps by id.
     let registry = StepRegistry::new();
     registry.register(Arc::new(FnStep::new("upper", |input, _ctx| async move {
@@ -81,13 +80,13 @@ async fn main() -> cersei::types::Result<()> {
         Ok(json!({ "message": format!("{s}!!!") }))
     })));
 
-    // 2. Author the workflow (the UI emits this very same WorkflowDef as JSON).
+    // 2. Write the graph. The same WorkflowDef can be produced as JSON by an editor.
     let def = WorkflowBuilder::new("greet")
         .then("upper")
         .then("emphasize")
         .commit();
 
-    // 3. Compile against the registry and run.
+    // 3. Compile against the registry, then run.
     let wf = Workflow::compile(def, &registry)?;
     let result = wf.start(json!({ "message": "hello world" })).await?;
 
@@ -97,26 +96,27 @@ async fn main() -> cersei::types::Result<()> {
 }
 ```
 
-## Round-tripping through the UI
+## Round-tripping as JSON
 
-Because `WorkflowDef` is plain serde data, the same workflow is just JSON. The visual builder draws nodes/edges and serializes exactly this; the host deserializes it and calls `Workflow::compile`.
+The builder's output is plain serde data:
 
 ```rust
 let def = WorkflowBuilder::new("greet").then("upper").then("emphasize").commit();
 
-// Send to the UI / store it / receive it back — losslessly.
-let wire = serde_json::to_string(&def)?;
+let wire = serde_json::to_string(&def)?;     // store it, or send it to an editor
 let same: WorkflowDef = serde_json::from_str(&wire)?;
 assert_eq!(def, same);
 ```
+
+The JSON for the two-step workflow above looks like this (node kinds are externally tagged, and `config` is omitted when null):
 
 ```json
 {
   "id": "greet",
   "entry": "upper_1",
   "nodes": [
-    { "id": "upper_1", "kind": { "step": { "step_id": "upper", "config": null } } },
-    { "id": "emphasize_2", "kind": { "step": { "step_id": "emphasize", "config": null } } }
+    { "id": "upper_1",     "kind": { "step": { "step_id": "upper" } } },
+    { "id": "emphasize_2", "kind": { "step": { "step_id": "emphasize" } } }
   ],
   "edges": [
     { "from": "upper_1", "to": "emphasize_2", "kind": "then" }
@@ -125,46 +125,39 @@ assert_eq!(def, same);
 ```
 
 <Callout type="warn">
-The IR enums are **externally tagged** on purpose (`{ "step": { … } }`, `"then"`). Internally-tagged serde enums route through a content buffer that blows up `serde_json` serialization with an unbounded `recursion_limit` overflow — and that overflow surfaces in *your* crate, not ours. Keep these externally tagged.
+The IR enums are **externally tagged** on purpose (`{ "step": { … } }`, and `"then"` for a unit variant). Internally tagged serde enums go through a content buffer, which overflows the recursion limit of `serde_json` on serialization. Keep the tagging as it is.
 </Callout>
 
-## Live status for the builder
+## Live status
 
-`stream()` returns a `WorkflowStream` of `WorkflowEvent`s. Every event is `Serialize`, so you can forward them straight to a browser over SSE/WebSocket to animate the graph.
+`stream()` returns a `WorkflowStream` of `WorkflowEvent`s. Each event is `Serialize`, so a host can send it to a client over SSE or a WebSocket.
 
 ```rust
-let wf = Workflow::compile(def, &registry)?; // wf: Arc<Workflow>
+let wf = Workflow::compile(def, &registry)?;   // Arc<Workflow>
 let mut stream = wf.stream(json!({ "message": "hi" }));
 
 while let Some(event) = stream.next().await {
-    // Forward to the UI as JSON.
     let frame = serde_json::to_string(&event)?;
-    // ws.send(frame).await?;
+    // send `frame` to the client
 }
 ```
 
 ## Enable the feature
 
-`cersei-workflows` is opt-in on the facade:
-
 ```toml
 [dependencies]
-cersei = { version = "0.2.1", features = ["workflows"] }
+bricks = { version = "0.6", features = ["workflows"] }
 ```
 
-Then `use cersei::workflows::prelude::*;` (the common types are also re-exported from `cersei::prelude`). Or depend on the crate directly:
-
-```toml
-cersei-workflows = "0.2.1"
-```
+Then `use bricks::workflows::prelude::*;`. The main types are also re-exported at the top level of `bricks::workflows`.
 
 ## Where to go next
 
 <Cards>
   <Card title="API Reference" href="/docs/workflows-api">
-    Every type and method: `Step`, `WorkflowDef`, `Condition`, `StepRegistry`, `WorkflowBuilder`, `Workflow`, events, and results.
+    `Step`, `WorkflowDef`, `Condition`, `StepRegistry`, `WorkflowBuilder`, `Workflow`, events and results.
   </Card>
   <Card title="Cookbook" href="/docs/workflows-cookbook">
-    Complete, runnable examples — parallel fan-out, branching, agent steps, nested workflows, human-in-the-loop suspend/resume, and driving it all from a UI.
+    Runnable examples: parallel fan-out, branching, shared state, agent and tool steps, nesting, and suspend and resume.
   </Card>
 </Cards>

@@ -12,9 +12,9 @@ use crate::engine::{self, AppState};
 use crate::pty;
 use crate::services::conversations::{item_from_summary, path_text};
 use crate::services::{error, io_error, join_error, not_found};
-use cersei_agent::BricksConfig;
-use cersei_agent::control::{Action, ApprovalMode, Controller, Snapshot, list_sessions};
-use cersei_tools::PermissionLevel;
+use bricks_agent::BricksConfig;
+use bricks_agent::control::{Action, ApprovalMode, Controller, Snapshot, list_sessions};
+use bricks_tools::PermissionLevel;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -348,11 +348,11 @@ fn settings_of(snap: &Snapshot, bricks: &BricksConfig) -> Vec<ConfigEntry> {
 mod tests {
     use super::*;
     use crate::contract::OpenSessionRequest;
-    use cersei_agent::control::scripted::{Reply, Script, ScriptedCatalog};
-    use cersei_agent::control::{
+    use bricks_agent::control::scripted::{Reply, Script, ScriptedCatalog};
+    use bricks_agent::control::{
         ApprovalOverride, Command, Decision, EngineConfig, OpenOptions, Prompt, SessionChoice,
     };
-    use cersei_provider::ProviderRegistry;
+    use bricks_provider::ProviderRegistry;
     use std::time::Duration;
 
     /// A home folder, a project folder (canonical) and the sessions folder,

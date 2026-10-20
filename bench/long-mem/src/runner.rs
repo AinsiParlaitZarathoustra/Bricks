@@ -5,8 +5,8 @@ use crate::dataset::Question;
 use crate::judge;
 use crate::report::PerQuestion;
 use anyhow::{Context, Result};
-use cersei_provider::{CompletionRequest, Provider};
-use cersei_types::Message;
+use bricks_provider::{CompletionRequest, Provider};
+use bricks_types::Message;
 use std::sync::Arc;
 use std::time::Instant;
 

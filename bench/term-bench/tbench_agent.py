@@ -1,7 +1,7 @@
 """
-cersei-tbench agent adapter for terminal-bench 4.0 (harbor framework).
+bricks-tbench agent adapter for terminal-bench 4.0 (harbor framework).
 
-A purpose-built Terminal-Bench coding agent on the Cersei SDK + AgentRL —
+A purpose-built Terminal-Bench coding agent on the Bricks SDK + AgentRL —
 distinct from the general `abstract` CLI. Uploads a prebuilt static `tbench-agent`
 binary and runs it with a TB-tuned system prompt.
 
@@ -32,7 +32,7 @@ from harbor.models.agent.context import AgentContext  # type:ignore
 from harbor.models.trial.paths import EnvironmentPaths  # type:ignore
 
 _BENCH_DIR = Path(__file__).resolve().parent
-# Static Linux builds of `tbench-agent` (crate cersei-tbench), provided
+# Static Linux builds of `tbench-agent` (crate bricks-tbench), provided
 # locally — they are not versioned. Override with TBENCH_AGENT_BINARY_AMD64 /
 # TBENCH_AGENT_BINARY_ARM64. See BINARIES.md (build, checksums). Nothing is
 # ever downloaded.
@@ -46,7 +46,7 @@ _SA_CONTAINER_PATH = "/tmp/vertex-sa.json"
 
 
 class CerseiTBenchAgent(BaseInstalledAgent):
-    """Purpose-built Terminal-Bench agent on the Cersei SDK + AgentRL."""
+    """Purpose-built Terminal-Bench agent on the Bricks SDK + AgentRL."""
 
     ENV_VARS = [
         EnvVar("google_api_key", env="GOOGLE_API_KEY", env_fallback="GOOGLE_API_KEY"),
@@ -57,7 +57,7 @@ class CerseiTBenchAgent(BaseInstalledAgent):
 
     @staticmethod
     def name() -> str:
-        return "cersei-tbench"
+        return "bricks-tbench"
 
     def get_version_command(self) -> str | None:
         return "tbench-agent --version"

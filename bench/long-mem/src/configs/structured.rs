@@ -11,12 +11,12 @@ use crate::configs::{Config, DEFAULT_TOP_K};
 use crate::dataset::Question;
 use anyhow::{Result, anyhow};
 use async_trait::async_trait;
-use cersei_embeddings::EmbeddingProvider;
-use cersei_memory::structured::clock::parse_time;
-use cersei_memory::structured::{
+use bricks_embeddings::EmbeddingProvider;
+use bricks_memory::structured::clock::parse_time;
+use bricks_memory::structured::{
     EpisodeInput, Extractor, LlmExtractor, MemoryConfig, RecallQuery, StructuredMemory,
 };
-use cersei_provider::Provider;
+use bricks_provider::Provider;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 

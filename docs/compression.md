@@ -101,7 +101,7 @@ the generic rule with "no specific rule for `x`".
 | DevOps | `docker-compose` (`docker compose` and `docker-compose`), `docker-build`, `docker`, `kubectl-read` (exact), `kubectl-change`, `kubectl`, `terraform-plan`, `terraform-init`, `terraform-exact`, `terraform`, `gh-run-log`, `gh-pr-checks`, `gh-exact`, `gh` |
 | Other | `git-exact`, `git-log`, `git-status`, `git-transfer`, `git`, `exact-output`, `generic` (`program = "*"`) |
 
-Each is checked against a fixture in `crates/cersei-compression/tests/fixtures/`:
+Each is checked against a fixture in `crates/bricks-compression/tests/fixtures/`:
 `captured/` holds real outputs (cargo, go, pytest, python, uv, npm, pnpm, yarn,
 cargo-audit); `reconstructed/` reproduces the documented formats of tools that
 were not installed on the capturing machine (vitest, eslint, vite, next, turbo,
@@ -225,10 +225,10 @@ promise is made beyond what was actually kept.
 ## 8. Measuring
 
 ```
-cargo run --release -p cersei-compression --example measure -- --read path/to/file.rs --json data.json
+cargo run --release -p bricks-compression --example measure -- --read path/to/file.rs --json data.json
 ```
 
 prints, per fixture and file: lines, bytes, estimated tokens before → after
-(method: `cersei_types::tokens::ESTIMATION_METHOD`), time, and how many of the
+(method: `bricks_types::tokens::ESTIMATION_METHOD`), time, and how many of the
 fixture's must-keep lines survived. Percentages reported by other projects are
 references, not targets that justify losing information.

@@ -11,13 +11,13 @@
 //!
 //! Nothing touches `~/.bricks`: every file is in a temporary folder.
 
+use bricks_agent::control::ModelCatalog;
 use bricks_desktop_lib::contract::{IpcErrorCode, IpcResult, ModelPatch, ProvidersFile};
 use bricks_desktop_lib::engine::catalog::DesktopCatalog;
 use bricks_desktop_lib::services::providers::{commit, view};
 use bricks_desktop_lib::services::providers_toml::Edit;
-use cersei_agent::control::ModelCatalog;
-use cersei_provider::config::ProviderConfig;
-use serde_json::{json, Value as Json};
+use bricks_provider::config::ProviderConfig;
+use serde_json::{Value as Json, json};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 

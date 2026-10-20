@@ -3,7 +3,7 @@
 # sync_cargo.sh — publish the library crates of the workspace to crates.io.
 #
 # It publishes the crates listed in CRATES below — an explicit selection, not
-# every workspace member (`cersei-testkit` and `longmem-bench` are private;
+# every workspace member (`bricks-testkit` and `longmem-bench` are private;
 # `bricks-cli` is not published by this script) — at the
 # version declared in the workspace `Cargo.toml`, in dependency order (leaves
 # first), so crates.io always has a crate's dependencies before its dependents.
@@ -49,29 +49,29 @@ echo "Workspace version: $VERSION"
 
 # Library crates in dependency order (a crate appears after everything it
 # depends on: normal, build and optional dependencies; dev-dependencies are
-# path-only and stripped on publish). `cersei` is the umbrella facade and goes
+# path-only and stripped on publish). `bricks` is the umbrella facade and goes
 # last.
 CRATES=(
-  cersei-types
-  cersei-compression
-  cersei-embeddings
-  cersei-lsp
+  bricks-types
+  bricks-compression
+  bricks-embeddings
+  bricks-lsp
   bricks-semantic
-  cersei-tools-derive
-  cersei-hooks
-  cersei-mcp
-  cersei-provider
-  cersei-web
+  bricks-tools-derive
+  bricks-hooks
+  bricks-mcp
+  bricks-provider
+  bricks-web
   bricks-skills
-  cersei-memory
-  cersei-vms
-  cersei-tools
-  cersei-agentlang
-  cersei-agent
-  cersei-agentrl
-  cersei-workflows
-  cersei-tbench
-  cersei
+  bricks-memory
+  bricks-vms
+  bricks-tools
+  bricks-agentlang
+  bricks-agent
+  bricks-agentrl
+  bricks-workflows
+  bricks-tbench
+  bricks
 )
 
 # The list must match the workspace graph before anything is published.

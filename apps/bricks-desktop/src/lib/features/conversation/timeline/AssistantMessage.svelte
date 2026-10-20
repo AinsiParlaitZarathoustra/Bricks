@@ -1,8 +1,6 @@
 <script lang="ts">
   import Brain from '@lucide/svelte/icons/brain'
-  import Check from '@lucide/svelte/icons/check'
   import ChevronDown from '@lucide/svelte/icons/chevron-down'
-  import Copy from '@lucide/svelte/icons/copy'
   import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '$lib/components/ui/collapsible'
   import type { AssistantItem, Conversation } from '$lib/state/conversation.svelte'
   import { ui } from '$lib/state/ui.svelte'
@@ -50,25 +48,6 @@
     })
   }
 
-  // Copy of this answer's Markdown source only (no reasoning, tools or run summary).
-  let copied = $state(false)
-  let copyError = $state<string | null>(null)
-  let copiedTimer: ReturnType<typeof setTimeout> | undefined
-  $effect(() => () => clearTimeout(copiedTimer))
-
-  async function copyAnswer() {
-    try {
-      await navigator.clipboard.writeText(item.text)
-      copyError = null
-      copied = true
-      clearTimeout(copiedTimer)
-      copiedTimer = setTimeout(() => (copied = false), 1500)
-    } catch (e) {
-      copied = false
-      copyError = e instanceof Error ? e.message : String(e)
-    }
-  }
-
   function jumpTo(id: string) {
     const target = document.getElementById(id)
     if (!target) return
@@ -85,7 +64,7 @@
         class="group inline-flex w-fit items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
       >
         <Brain class="size-3.5" aria-hidden="true" />
-        Raisonnement exposé par le fournisseur
+        Réfléchit
         <ChevronDown class="size-3.5 transition-transform group-data-[state=open]:rotate-180" aria-hidden="true" />
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -137,26 +116,6 @@
       <p class="text-xs break-words text-destructive" role="alert">
         Le lien n’a pas pu être ouvert : {linkError}
       </p>
-    {/if}
-    {#if !item.streaming}
-      <div class="mt-1 flex items-center gap-2">
-        <button
-          type="button"
-          class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-          title="Copier"
-          aria-label="Copier"
-          onclick={copyAnswer}
-        >
-          {#if copied}
-            <Check class="size-3.5" aria-hidden="true" />
-          {:else}
-            <Copy class="size-3.5" aria-hidden="true" />
-          {/if}
-        </button>
-        {#if copyError}
-          <p class="text-xs text-destructive" role="alert">Copie impossible : {copyError}</p>
-        {/if}
-      </div>
     {/if}
   {:else if item.streaming}
     <span class="inline-block h-4 w-0.5 animate-pulse rounded-sm bg-muted-foreground" aria-hidden="true"></span>

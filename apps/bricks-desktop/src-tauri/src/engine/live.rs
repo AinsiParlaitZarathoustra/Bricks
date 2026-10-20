@@ -4,26 +4,30 @@
 
 use super::hub::Hub;
 use crate::contract::{
-    ChangeFile, ChangeRecord, DesktopEvent, HistoryMessage, OpenedSession, RunLabel, SessionItem,
+    ChangeFile, ChangeRecord, DesktopEvent, HistoryMessage, OpenedSession, RunLabel, RunRecord,
+    SessionItem,
 };
-use crate::services::changes::{NewChange, StoredPatch, cap_patch, new_record_id};
+use crate::services::changes::{NewChange, StoredPatch, new_record_id};
 use crate::services::conversations::{history_message, path_text};
 use crate::services::now_ms;
 use crate::services::run_labels::{self, RunLabelStore, user_index_of};
-use cersei_agent::control::{
+use crate::services::run_records::{Recorder, RunRecordStore};
+use bricks_agent::control::{
     Activity, Command, Controller, Envelope, Event, EventStream, SessionMeta, WrittenFile,
 };
-use cersei_memory::{JsonlMemory, Memory};
-use cersei_tools::preview::ChangeKind;
+use bricks_memory::{JsonlMemory, Memory};
+use bricks_tools::preview::ChangeKind;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::watch;
 
-/// Envelopes kept for redisplay: the current or last run, at most this many.
+/// Envelopes kept for redisplay of a finished run, at most this many.
 pub const RING_CAPACITY: usize = 4000;
-/// Approval previews kept until their change is applied.
-const PREVIEWS_KEPT: usize = 64;
+/// Envelopes kept while a run is running: all of it is needed to rebuild the
+/// run on screen, so only a run this long loses its oldest envelopes (its
+/// start is kept whatever happens).
+pub const RUNNING_RING_CAPACITY: usize = 50_000;
 
 pub struct OpenSession {
     /// The registry key. Fixed for the controller's life: a `resume` command
@@ -37,6 +41,11 @@ pub struct OpenSession {
     live: parking_lot::Mutex<Live>,
     /// The presentation labels of the session's runs.
     labels: Arc<RunLabelStore>,
+    /// What the desktop keeps of each finished run.
+    run_records: Arc<RunRecordStore>,
+    /// Completion of the last run record append: the next one waits for it,
+    /// so the versions of a run are written in the order they were made.
+    records_tail: parking_lot::Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
     /// Held while a submit is recorded and sent, so two submits never
     /// interleave their records (and the history is counted once per submit).
     submit_gate: tokio::sync::Mutex<()>,
@@ -47,17 +56,20 @@ pub struct OpenSession {
 
 struct Live {
     ring: VecDeque<serde_json::Value>,
+    /// The `run_started` envelope the ring lost (only ever the current run's).
+    ring_head: Option<serde_json::Value>,
     last_seq: u64,
     running: bool,
     /// Messages in the stored session, refreshed when a run ends.
     message_count: usize,
-    previews: VecDeque<Preview>,
     /// The accepted submits whose `run_started` has not come yet, oldest
     /// first.
     expected: VecDeque<Expected>,
     /// The label of the run in progress, kept until its end: its message
     /// index is only known once the run has added its messages.
     running_label: Option<PendingLabel>,
+    /// Builds the records of the runs (answer, commands, files).
+    recorder: Recorder,
 }
 
 /// A submit accepted by the controller, waiting for the run it starts. The
@@ -69,7 +81,7 @@ struct Expected {
     /// The label as typed (`None` for a submit typed as plain text).
     label: Option<String>,
     /// The user-role messages before the run, counted while it could not
-    /// yet run (only for a labelled submit).
+    /// yet run (`None` when the submit was not made while idle).
     base: Option<u32>,
 }
 
@@ -82,14 +94,6 @@ struct PendingLabel {
     base: u32,
 }
 
-/// The diffs an approval showed for one tool call, kept until it is applied.
-struct Preview {
-    agent_id: Option<String>,
-    tool_call_id: String,
-    /// Path and unified diff of each file.
-    files: Vec<(String, String)>,
-}
-
 impl OpenSession {
     /// The open session and the receiver its consumer watches for the stop.
     pub fn new(
@@ -99,6 +103,7 @@ impl OpenSession {
         created_at: i64,
         message_count: usize,
         labels: Arc<RunLabelStore>,
+        run_records: Arc<RunRecordStore>,
     ) -> (Arc<Self>, watch::Receiver<bool>) {
         let (stop, stop_rx) = watch::channel(false);
         let entry = Self {
@@ -110,14 +115,17 @@ impl OpenSession {
             stop,
             live: parking_lot::Mutex::new(Live {
                 ring: VecDeque::new(),
+                ring_head: None,
                 last_seq: 0,
                 running: false,
                 message_count,
-                previews: VecDeque::new(),
                 expected: VecDeque::new(),
                 running_label: None,
+                recorder: Recorder::default(),
             }),
             labels,
+            run_records,
+            records_tail: parking_lot::Mutex::new(None),
             submit_gate: tokio::sync::Mutex::new(()),
             journal_tail: parking_lot::Mutex::new(None),
         };
@@ -136,11 +144,10 @@ impl OpenSession {
         // A submit is accepted only while idle, and the run appends its
         // messages after the ones there are now: count them while nothing
         // changes them.
-        let base = match label {
-            Some(_) if !self.is_busy() => {
-                Some(run_labels::user_count(&self.controller.history().await))
-            }
-            _ => None,
+        let base = if self.is_busy() {
+            None
+        } else {
+            Some(run_labels::user_count(&self.controller.history().await))
         };
         self.live.lock().expected.push_back(Expected { label, base });
         let sent = self.controller.send(command);
@@ -179,10 +186,13 @@ impl OpenSession {
             .collect();
         let (recent_events, last_seq) = {
             let live = self.live.lock();
-            (live.ring.iter().cloned().collect(), live.last_seq)
+            let mut recent: Vec<serde_json::Value> = live.ring_head.iter().cloned().collect();
+            recent.extend(live.ring.iter().cloned());
+            (recent, live.last_seq)
         };
         let snapshot = serde_json::to_value(self.controller.snapshot()).unwrap_or(serde_json::Value::Null);
         let run_labels = self.load_run_labels().await;
+        let run_records = self.load_run_records().await;
         OpenedSession {
             session: session_item(self).await,
             snapshot,
@@ -190,6 +200,28 @@ impl OpenSession {
             recent_events,
             last_seq,
             run_labels,
+            run_records,
+        }
+    }
+
+    /// The records of the session's finished runs, oldest first. A file that
+    /// cannot be read is reported and gives none: the conversation still opens.
+    async fn load_run_records(&self) -> Vec<RunRecord> {
+        let records = Arc::clone(&self.run_records);
+        let session_id = self.session_id.clone();
+        match tauri::async_runtime::spawn_blocking(move || records.list(&session_id)).await {
+            Ok(Ok(list)) => list,
+            Ok(Err(e)) => {
+                eprintln!(
+                    "bricks-desktop: run records of {} : {}",
+                    self.session_id, e.message
+                );
+                Vec::new()
+            }
+            Err(e) => {
+                eprintln!("bricks-desktop: run records of {} : {e}", self.session_id);
+                Vec::new()
+            }
         }
     }
 
@@ -302,21 +334,28 @@ pub fn ingest(hub: &Arc<Hub>, entry: &Arc<OpenSession>, env: Envelope) {
     let mut count_messages = false;
     let mut change = None;
     let mut run_label = None;
+    let mut record = None;
     {
         let mut live = entry.live.lock();
         live.last_seq = env.seq;
         match &env.event {
             Event::RunStarted { prompt, .. } => {
                 live.ring.clear();
+                live.ring_head = None;
                 live.running = true;
                 running_changed = Some(true);
                 refresh = true;
                 // The run of the oldest accepted submit still unstarted; a
                 // typed command labels only the run its own submit started.
                 live.running_label = None;
-                if let Some(expected) = live.expected.pop_front()
+                let expected = live.expected.pop_front();
+                let base = expected.as_ref().and_then(|e| e.base);
+                if let Some(run_id) = env.run_id.as_deref() {
+                    live.recorder.start(run_id, base, prompt, env.at);
+                }
+                if let Some(expected) = expected
                     && let (Some(label), Some(base), Some(run_id)) =
-                        (expected.label, expected.base, env.run_id.clone())
+                        (expected.label, base, env.run_id.clone())
                 {
                     live.running_label = Some(PendingLabel {
                         run_id,
@@ -337,21 +376,6 @@ pub fn ingest(hub: &Arc<Hub>, entry: &Arc<OpenSession>, env: Envelope) {
                 run_label = live.running_label.take();
             }
             Event::ModelChanged { .. } | Event::ReasoningChanged { .. } => refresh = true,
-            Event::ApprovalRequested { approval } => {
-                if let Some(preview) = &approval.preview
-                    && !preview.files.is_empty()
-                {
-                    live.remember_preview(Preview {
-                        agent_id: approval.agent_id.clone(),
-                        tool_call_id: approval.tool_call_id.clone(),
-                        files: preview
-                            .files
-                            .iter()
-                            .map(|f| (f.path.clone(), f.diff.clone()))
-                            .collect(),
-                    });
-                }
-            }
             Event::EditApplied {
                 tool_call_id,
                 tool,
@@ -362,7 +386,6 @@ pub fn ingest(hub: &Arc<Hub>, entry: &Arc<OpenSession>, env: Envelope) {
                 // The `@` file index of the project is stale after a write.
                 crate::commands::files::invalidate(&entry.project_id);
                 change = Some(journal_entry(
-                    &mut live,
                     entry,
                     &env,
                     tool,
@@ -374,10 +397,14 @@ pub fn ingest(hub: &Arc<Hub>, entry: &Arc<OpenSession>, env: Envelope) {
             }
             _ => {}
         }
-        live.ring.push_back(value.clone());
-        while live.ring.len() > RING_CAPACITY {
-            live.ring.pop_front();
+        // A finished run's record is written again when a late event (a
+        // sub-agent or a job ending after the run) changes it.
+        if let Some(run_id) = live.recorder.observe(&env)
+            && let Some(run) = live.recorder.run(&run_id)
+        {
+            record = Some((run.to_record(None), run.base(), run.prompt().to_string()));
         }
+        push_ring(&mut live, value.clone());
         hub.publish(DesktopEvent::Engine {
             project_id: Some(entry.project_id.clone()),
             envelope: value,
@@ -396,8 +423,31 @@ pub fn ingest(hub: &Arc<Hub>, entry: &Arc<OpenSession>, env: Envelope) {
     if let Some(new_change) = change {
         spawn_journal(hub.clone(), entry, new_change);
     }
+    if let Some((record, base, prompt)) = record {
+        spawn_record(entry, record, base, prompt);
+    }
     if let Some(pending) = run_label {
         spawn_label(hub.clone(), entry.clone(), pending);
+    }
+}
+
+/// Keeps an envelope for redisplay. A finished run keeps `RING_CAPACITY`
+/// envelopes, a running one `RUNNING_RING_CAPACITY`. The run's own start is
+/// never lost: when it leaves the ring it is kept apart as the head.
+fn push_ring(live: &mut Live, value: serde_json::Value) {
+    live.ring.push_back(value);
+    let cap = if live.running {
+        RUNNING_RING_CAPACITY
+    } else {
+        RING_CAPACITY
+    };
+    while live.ring.len() > cap {
+        let Some(front) = live.ring.pop_front() else {
+            break;
+        };
+        if front.get("type").and_then(serde_json::Value::as_str) == Some("run_started") {
+            live.ring_head = Some(front);
+        }
     }
 }
 
@@ -438,11 +488,9 @@ fn spawn_label(hub: Arc<Hub>, entry: Arc<OpenSession>, pending: PendingLabel) {
     });
 }
 
-/// Builds the journal entry of an applied edit, with the patches an earlier
-/// approval previewed for the same tool call.
-#[allow(clippy::too_many_arguments)]
+/// Builds the journal entry of an applied edit. Its patches are the ones the
+/// engine wrote (`WrittenFile::patch`): a file without one (binary) has none.
 fn journal_entry(
-    live: &mut Live,
     entry: &OpenSession,
     env: &Envelope,
     tool: &str,
@@ -451,27 +499,18 @@ fn journal_entry(
     changeset_id: Option<&str>,
     files: &[WrittenFile],
 ) -> NewChange {
-    let previewed = live
-        .previews
+    let patches: Vec<StoredPatch> = files
         .iter()
-        .position(|p| p.tool_call_id == tool_call_id && p.agent_id.as_deref() == agent_id)
-        .and_then(|i| live.previews.remove(i));
-    let patches: Vec<StoredPatch> = match &previewed {
-        Some(p) => files
-            .iter()
-            .filter_map(|w| {
-                let (_, diff) = p.files.iter().find(|(path, _)| *path == w.path)?;
-                let (patch, truncated) = cap_patch(diff);
-                Some(StoredPatch {
-                    path: w.path.clone(),
-                    patch,
-                    binary: w.binary,
-                    truncated,
-                })
+        .filter_map(|w| {
+            let patch = w.patch.clone()?;
+            Some(StoredPatch {
+                path: w.path.clone(),
+                patch,
+                binary: w.binary,
+                truncated: w.patch_truncated,
             })
-            .collect(),
-        None => Vec::new(),
-    };
+        })
+        .collect();
     let record = ChangeRecord {
         id: new_record_id(&entry.project_id),
         project_id: entry.project_id.clone(),
@@ -486,6 +525,7 @@ fn journal_entry(
             .iter()
             .map(|w| ChangeFile {
                 path: w.path.clone(),
+                absolute: w.absolute.clone(),
                 kind: change_kind(w.kind).to_string(),
                 added: u32::try_from(w.added).unwrap_or(u32::MAX),
                 removed: u32::try_from(w.removed).unwrap_or(u32::MAX),
@@ -502,15 +542,6 @@ fn change_kind(kind: ChangeKind) -> &'static str {
         ChangeKind::Create => "created",
         ChangeKind::Modify => "modified",
         ChangeKind::Delete => "deleted",
-    }
-}
-
-impl Live {
-    fn remember_preview(&mut self, preview: Preview) {
-        self.previews.push_back(preview);
-        while self.previews.len() > PREVIEWS_KEPT {
-            self.previews.pop_front();
-        }
     }
 }
 
@@ -538,6 +569,40 @@ fn spawn_journal(hub: Arc<Hub>, entry: &OpenSession, change: NewChange) {
     });
 }
 
+/// Writes a version of a run's record off the event task, once the history
+/// tells which user message the run added (`user_index`). Versions are
+/// appended in the order they were made.
+fn spawn_record(
+    entry: &Arc<OpenSession>,
+    mut record: RunRecord,
+    base: Option<u32>,
+    prompt: String,
+) {
+    let (done_tx, done_rx) = tokio::sync::oneshot::channel::<()>();
+    let before = entry.records_tail.lock().replace(done_rx);
+    let entry = Arc::clone(entry);
+    tauri::async_runtime::spawn(async move {
+        if let Some(before) = before {
+            // A dropped sender (a failed append) also ends the wait.
+            let _ = before.await;
+        }
+        if let Some(base) = base {
+            let history = entry.controller.history().await;
+            record.user_index = user_index_of(&history, base, &prompt);
+        }
+        let store = Arc::clone(&entry.run_records);
+        let session_id = entry.session_id.clone();
+        let result =
+            tauri::async_runtime::spawn_blocking(move || store.append(&session_id, &record)).await;
+        let _ = done_tx.send(());
+        match result {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => eprintln!("bricks-desktop: run records : {}", e.message),
+            Err(e) => eprintln!("bricks-desktop: run records : {e}"),
+        }
+    });
+}
+
 /// Refreshes the session's item for the windows (and its message count after
 /// a run).
 fn spawn_refresh(hub: Arc<Hub>, entry: Arc<OpenSession>, count_messages: bool) {
@@ -554,6 +619,45 @@ fn spawn_refresh(hub: Arc<Hub>, entry: Arc<OpenSession>, count_messages: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn live_with(running: bool) -> Live {
+        Live {
+            ring: VecDeque::new(),
+            ring_head: None,
+            last_seq: 0,
+            running,
+            message_count: 0,
+            expected: VecDeque::new(),
+            running_label: None,
+            recorder: Recorder::default(),
+        }
+    }
+
+    fn event(kind: &str) -> serde_json::Value {
+        serde_json::json!({ "type": kind })
+    }
+
+    #[test]
+    fn a_running_run_keeps_its_start_when_its_oldest_envelopes_leave_the_ring() {
+        let mut live = live_with(true);
+        push_ring(&mut live, event("run_started"));
+        for _ in 0..RUNNING_RING_CAPACITY {
+            push_ring(&mut live, event("text_delta"));
+        }
+        assert_eq!(live.ring.len(), RUNNING_RING_CAPACITY);
+        assert_eq!(live.ring_head, Some(event("run_started")), "the start is kept apart");
+        assert_eq!(live.ring.front(), Some(&event("text_delta")));
+    }
+
+    #[test]
+    fn a_finished_run_keeps_the_shorter_tail_and_no_start_when_it_is_not_there() {
+        let mut live = live_with(false);
+        for _ in 0..(RING_CAPACITY + 5) {
+            push_ring(&mut live, event("text_delta"));
+        }
+        assert_eq!(live.ring.len(), RING_CAPACITY);
+        assert!(live.ring_head.is_none(), "only a run start is kept apart");
+    }
 
     #[test]
     fn the_change_kinds_use_the_contract_names() {

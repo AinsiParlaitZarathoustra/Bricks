@@ -3,10 +3,10 @@
 //! `standard`, and a value the file does not know never loosens the policy.
 //! Every file is in a temporary folder; nothing touches `~/.bricks`.
 
+use bricks_agent::control::ApprovalMode;
 use bricks_desktop_lib::contract::{Preferences, Theme, ToolApproval};
 use bricks_desktop_lib::engine::approval_mode;
 use bricks_desktop_lib::services::prefs::PrefsStore;
-use cersei_agent::control::ApprovalMode;
 
 fn file_in(dir: &tempfile::TempDir) -> std::path::PathBuf {
     dir.path().join("desktop").join("preferences.json")

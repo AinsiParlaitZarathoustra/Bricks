@@ -124,6 +124,7 @@ describe('text direction and links', () => {
 		expect(withHtml).toEqual([
 			'lib/features/conversation/markdown/MarkdownView.svelte',
 			'lib/features/conversation/markdown/MermaidBlock.svelte',
+			'lib/features/reader/ReaderPanel.svelte',
 		]);
 		expect(src('lib/features/conversation/markdown/MarkdownView.svelte')).toContain('MarkdownDocument');
 		expect(src('lib/features/conversation/timeline/AssistantMessage.svelte')).toContain('MarkdownView');

@@ -1,0 +1,23 @@
+[package]
+name = "bricks-agentlang"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "AgentTemplate — a small functional DSL executed on top of the Bricks runtime"
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+bricks-types = { workspace = true }
+bricks-tools = { workspace = true }
+bricks-vms = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+tempfile = { workspace = true }

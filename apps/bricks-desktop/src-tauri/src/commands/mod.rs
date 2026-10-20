@@ -7,6 +7,7 @@ pub mod inspect;
 pub mod project_file;
 pub mod projects;
 pub mod providers;
+pub mod reader_file;
 pub mod sessions;
 pub mod skills;
 pub mod slash;

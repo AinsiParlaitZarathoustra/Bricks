@@ -15,13 +15,13 @@ outside the workspace: it resolves its own lock locally (ignored by Git) and
 is built from its folder (`cargo build --release`).
 
 HTTP clients (providers, web, MCP, embeddings) come from
-`cersei_types::http`. They use rustls with the bundled WebPKI roots, and
+`bricks_types::http`. They use rustls with the bundled WebPKI roots, and
 the Hickory resolver in Rust, not the system's `getaddrinfo`, so a static
 musl binary resolves names without libc's NSS. The resolver reads the system
 configuration. On macOS, Hickory 0.26 refuses a scoped `fe80::…%en0` server
 in `/etc/resolv.conf`: those entries are skipped and the other servers kept
 (a warning is logged). No public DNS server is ever added silently. SSRF
-filtering (`cersei-web`) checks the addresses of the same resolution.
+filtering (`bricks-web`) checks the addresses of the same resolution.
 
 Linux musl builds were not checked on the development machine (no musl
 target installed). The command to run where the targets and a musl linker
@@ -52,10 +52,10 @@ A dry run of a crate whose internal dependencies are not on crates.io yet at
 that version fails at `cargo publish --dry-run` (the registry cannot resolve
 them). This is expected before the first real publication of a version.
 
-`bricks-cli`, `cersei-testkit` and `longmem-bench` are not published by the
-script. `bricks-skills` (formerly `cersei-skills`, renamed
-in Sprint 12) is published before `cersei-tools`, which depends on it; the
-former name stays on crates.io at its last version and is not updated.
+`bricks-cli`, `bricks-testkit` and `longmem-bench` are not published by the
+script. `bricks-skills` is published before `bricks-tools`, which depends on
+it. The former crate name `cersei-skills` stays on crates.io at its last
+version and is not updated.
 
 ## Pre-commit hook (optional)
 
@@ -92,19 +92,20 @@ carried out.
 
 ## Dependency advisories
 
-`cargo audit` on 2026-10-09 (Sprint 11.1), before and after:
+Snapshot of `cargo audit` on 2026-10-09, before and after the cleanup of that
+date:
 
 | advisory | package | kind | chain | before | after |
 |---|---|---|---|---|---|
-| RUSTSEC-2026-0118 | hickory-proto 0.25.2 | vulnerability (DNSSEC validation) | reqwest 0.12 `hickory-dns` feature; cersei-web | present | **removed**: Hickory 0.26.3 |
+| RUSTSEC-2026-0118 | hickory-proto 0.25.2 | vulnerability (DNSSEC validation) | reqwest 0.12 `hickory-dns` feature; bricks-web | present | **removed**: Hickory 0.26.3 |
 | RUSTSEC-2026-0119 | hickory-proto 0.25.2 | vulnerability (name compression cost when encoding) | same | present | **removed**: Hickory 0.26.3 |
-| RUSTSEC-2026-0002 | lru 0.12.5 | unsound | tantivy 0.22.1 → cersei-tools | present | **removed**: tantivy 0.26.2 uses lru 0.16.4 (patched ≥ 0.16.3) |
-| RUSTSEC-2026-0253 | lru 0.12.5 → 0.16.4 | unsound | tantivy → cersei-tools | present | **residual**, see below |
+| RUSTSEC-2026-0002 | lru 0.12.5 | unsound | tantivy 0.22.1 → bricks-tools | present | **removed**: tantivy 0.26.2 uses lru 0.16.4 (patched ≥ 0.16.3) |
+| RUSTSEC-2026-0253 | lru 0.12.5 → 0.16.4 | unsound | tantivy → bricks-tools | present | **residual**, see below |
 | RUSTSEC-2024-0384 | instant | unmaintained | notify 6 / measure_time 0.8 (tantivy 0.22) | present | **removed**: notify 8, tantivy 0.26 |
 | RUSTSEC-2017-0008 | serial | unmaintained | portable-pty 0.8 (optional `pty` feature) | present | **removed**: portable-pty 0.9 |
-| RUSTSEC-2025-0141 | bincode 2.0.1 | unmaintained | grafeo 0.5.44 → cersei-memory | present | **residual** |
-| RUSTSEC-2025-0057 | fxhash 0.2.1 | unmaintained | bm25 2.3.2 → cersei-web | present | **residual** |
-| RUSTSEC-2024-0436 | paste 1.0.15 | unmaintained | tikv-jemalloc-ctl 0.6 → cersei-agent, feature `jemalloc-bench` only | present | **residual** |
+| RUSTSEC-2025-0141 | bincode 2.0.1 | unmaintained | grafeo 0.5.44 → bricks-memory | present | **residual** |
+| RUSTSEC-2025-0057 | fxhash 0.2.1 | unmaintained | bm25 2.3.2 → bricks-web | present | **residual** |
+| RUSTSEC-2024-0436 | paste 1.0.15 | unmaintained | tikv-jemalloc-ctl 0.6 → bricks-agent, feature `jemalloc-bench` only | present | **residual** |
 
 Before: 9 advisories (2 vulnerabilities, 2 unsound, 5 unmaintained). After: 4
 (0 vulnerabilities, 1 unsound, 3 unmaintained).
@@ -115,7 +116,7 @@ injected through `reqwest::dns::Resolve`. reqwest 0.13 was not adopted: its
 `rustls` feature switches to aws-lc-rs and the platform verifier, without
 the WebPKI roots — a change of TLS contract beyond this cleanup.
 
-### Dependency update of Sprint 12.5 (2026-10-11)
+### Dependency update of 2026-10-11
 
 A simulation (`cargo update --dry-run`) proposed 22 changes. Applied, by
 `cargo update -p …`, in two groups, the lockfile diff inspected after each
@@ -134,7 +135,7 @@ A simulation (`cargo update --dry-run`) proposed 22 changes. Applied, by
 
 Left out on purpose:
 
-* `mac_address` 1.2.1 — pulls `nix` 0.30 → 0.31, a migration this sprint
+* `mac_address` 1.2.1 — pulls `nix` 0.30 → 0.31, a migration this update
   excludes.
 * `tree-sitter-language` 0.1.9 — Tree-sitter components stay together.
 * `syn` 3.0.7 — the version in place is kept.

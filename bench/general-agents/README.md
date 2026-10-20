@@ -2,7 +2,7 @@
 
 How many live agent instances can each framework handle on one host?
 
-This suite benchmarks **Cersei** (Rust) against four Python frameworks — **Agno**,
+This suite benchmarks **Bricks** (Rust) against four Python frameworks — **Agno**,
 **LangGraph**, **CrewAI**, **PydanticAI** — on five axes:
 
 | # | Axis | What it answers |
@@ -10,11 +10,11 @@ This suite benchmarks **Cersei** (Rust) against four Python frameworks — **Agn
 | 1 | Instantiation time | How fast can you construct an Agent? |
 | 2 | Per-agent memory | How much RAM does one agent cost at rest? |
 | 3 | **Max concurrent agents** | How many can you hold live + turn through before p99 > 100 ms? |
-| 4 | Graph memory recall under load | (Cersei-only) how fast is recall at 10k / 100k nodes under 100 concurrent agents? |
-| 5 | Semantic search under load | (Cersei-only) how fast is HNSW search at 10k / 100k chunks under 100 concurrent agents? |
+| 4 | Graph memory recall under load | (Bricks-only) how fast is recall at 10k / 100k nodes under 100 concurrent agents? |
+| 5 | Semantic search under load | (Bricks-only) how fast is HNSW search at 10k / 100k chunks under 100 concurrent agents? |
 
 The first three axes are measured for every framework. The last two are
-reported as Cersei-only reference points — the Python frameworks don't ship
+reported as Bricks-only reference points — the Python frameworks don't ship
 an in-process graph or vector index at all, which is itself the point.
 
 ## Ground rules (methodology honesty)
@@ -63,20 +63,20 @@ BENCH_STEPS=100,500,1000,5000 ./run.sh
 ### Why smaller scale for Python
 
 Python frameworks hit asyncio / GIL scaling walls around 1–5k concurrent
-coroutines, so axis-3 defaults cap there. Cersei's harness sweeps to 10k+
+coroutines, so axis-3 defaults cap there. Bricks' harness sweeps to 10k+
 because Rust + tokio actually gets there without thrashing. The difference
 *is* the story — the scale caps aren't "hiding" anything.
 
-## Re-running just Cersei
+## Re-running just Bricks
 
 From the repo root:
 
 ```bash
-cargo run --release -p cersei-agent --example general_agent_bench \
+cargo run --release -p bricks-agent --example general_agent_bench \
   --features bench-full
 ```
 
-Output: `bench/general-agents/results/cersei.json`.
+Output: `bench/general-agents/results/cersei.json` (the file keeps the framework id `cersei` of earlier runs).
 
 Axis selection via env var:
 
@@ -110,11 +110,9 @@ See `results/cersei.json` for the canonical shape. Every harness emits:
 3. Add a service in `docker-compose.yml` mirroring the others.
 4. Open a PR.
 
-## Why we don't publish "vendor numbers" as our own
+## Published numbers
 
-Our docs page cites Agno's published numbers until we re-run their harness
-in a matched environment ourselves. The `run.sh` script does exactly that;
-the results/summary.json produced by a reader should reproduce what we publish.
+The comparison page reports only figures that came from running these harnesses ourselves, with the versions locked in `uv.lock`, and it names the report and the date of each run. A reader who runs `run.sh` on the same kind of host should obtain figures of the same order; exact values depend on the host.
 
 See the [docs page](../../docs/content/docs/bench-vs-agents.mdx) for the rendered
 comparison and charts.

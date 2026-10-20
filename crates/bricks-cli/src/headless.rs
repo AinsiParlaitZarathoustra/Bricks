@@ -14,8 +14,30 @@
 use crate::args::{Global, RunArgs};
 use crate::exit;
 use crate::setup;
-use cersei_agent::control::*;
+use bricks_agent::control::*;
 use std::io::{IsTerminal, Read, Write};
+
+/// Starts the drain of the background sub-agents once the main run has
+/// finished: those still running at the deadline (`[agents]
+/// background_drain_ms` after that end, `0`: at once) are cancelled, whatever
+/// the memory maintenance does meanwhile. Returns the deadline.
+fn start_background_drain(ctl: &Controller) -> tokio::time::Instant {
+    let limit = ctl
+        .agent_runtime()
+        .map(|rt| rt.scheduler.limits.background_drain)
+        .unwrap_or_default();
+    if let Some(rt) = ctl.agent_runtime()
+        && !rt.pending(None).is_empty()
+    {
+        tokio::spawn(async move {
+            tokio::time::sleep(limit).await;
+            for r in rt.pending(None) {
+                rt.cancel(&r.info.agent_id);
+            }
+        });
+    }
+    tokio::time::Instant::now() + limit
+}
 
 fn read_stdin() -> Result<String, String> {
     let mut s = String::new();
@@ -174,7 +196,7 @@ impl Human {
                 duration_ms,
                 ..
             } => {
-                let took = cersei_types::duration::display_ms_u64(*duration_ms);
+                let took = bricks_types::duration::display_ms_u64(*duration_ms);
                 if *is_error {
                     let first = output.lines().next().unwrap_or("");
                     let _ = writeln!(err, "  ✗ {name}  {took}: {first}");
@@ -216,11 +238,11 @@ impl Human {
                 ..
             } => {
                 let mark = if *is_error { "✗" } else { "✓" };
-                let took = cersei_types::duration::display_ms_u64(*duration_ms);
+                let took = bricks_types::duration::display_ms_u64(*duration_ms);
                 let _ = writeln!(err, "  ⤷ {mark} {name}  {took}");
             }
             Event::AgentFinished { result } => {
-                let took = cersei_types::duration::display_ms_u64(result.duration_ms);
+                let took = bricks_types::duration::display_ms_u64(result.duration_ms);
                 let _ = writeln!(
                     err,
                     "⤷ agent {} {} in {took}, {} turn(s){}",
@@ -386,6 +408,9 @@ pub async fn run(global: &Global, launch: &std::path::Path, args: RunArgs) -> i3
 
     let mut code = exit::OK;
     let mut finished = false;
+    // Set at the end of the main run: the background sub-agents have until
+    // then (see `start_background_drain`).
+    let mut drain_deadline: Option<tokio::time::Instant> = None;
     while let Some(env) = events.next().await {
         if !emit(&env) {
             // stdout is gone (closed pipe): stop the run.
@@ -417,6 +442,9 @@ pub async fn run(global: &Global, launch: &std::path::Path, args: RunArgs) -> i3
                     (RunOutcome::Failed, Some(FailureKind::ApprovalRequired)) => exit::APPROVAL,
                     (RunOutcome::Failed, _) => exit::FAILED,
                 };
+                if drain_deadline.is_none() {
+                    drain_deadline = Some(start_background_drain(&ctl));
+                }
                 ctl.wait_idle().await;
                 if args.no_wait_memory || !ctl.snapshot().maintenance_running {
                     break;
@@ -432,19 +460,30 @@ pub async fn run(global: &Global, launch: &std::path::Path, args: RunArgs) -> i3
         }
     }
     // Background sub-agents admitted during the run: no daemon. Wait for
-    // them (bounded), cancel what is left, report, then exit.
+    // them up to the drain deadline, cancel what is left, report, then exit.
+    // A child that finished early and did not complete counts as well.
     if let Some(rt) = ctl.agent_runtime()
-        && !rt.pending(None).is_empty()
+        && rt
+            .records()
+            .iter()
+            .any(|r| r.background && r.result.as_ref().is_none_or(|x| x.status != "completed"))
     {
         let limit = rt.scheduler.limits.background_drain;
-        if !args.json {
-            eprintln!(
-                "bricks: waiting for {} background sub-agent(s) (at most {})",
-                rt.pending(None).len(),
-                cersei_types::duration::display_ms(limit)
-            );
+        let deadline = drain_deadline.unwrap_or_else(tokio::time::Instant::now);
+        if !args.json && !rt.pending(None).is_empty() {
+            if limit.is_zero() {
+                eprintln!(
+                    "bricks: cancelling {} background sub-agent(s)",
+                    rt.pending(None).len()
+                );
+            } else {
+                eprintln!(
+                    "bricks: waiting for {} background sub-agent(s) (at most {})",
+                    rt.pending(None).len(),
+                    bricks_types::duration::display_ms(limit)
+                );
+            }
         }
-        let deadline = tokio::time::Instant::now() + limit;
         while !rt.pending(None).is_empty() && tokio::time::Instant::now() < deadline {
             match tokio::time::timeout_at(
                 deadline.min(tokio::time::Instant::now() + std::time::Duration::from_millis(200)),

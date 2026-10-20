@@ -15,6 +15,8 @@ export interface RunEndSummary {
   durationMs: number | null
   /** The duration formatted for display (« 762 ms »), `null` when unknown. */
   duration: string | null
+  /** The time worked, as `MM:SS` (`HH:MM:SS` from an hour); `null` when unknown. */
+  worked: string | null
   /**
    * Edit operations of the run, summed per line. `null` unless every edited file
    * is text (a binary file has no line count) and the run edited at least one file.
@@ -25,6 +27,21 @@ export interface RunEndSummary {
   reason: string | null
   /** The error of a failed run, when the engine gave one. */
   error: string | null
+}
+
+/**
+ * The time a run worked, from the engine's timestamps: `MM:SS` under an hour,
+ * `HH:MM:SS` from an hour (hours may pass 24). Seconds are cut, not rounded:
+ * 762 ms is `00:00`. `null` when the time is unknown or negative.
+ */
+export function formatWorked(ms: number | null): string | null {
+  if (ms === null || !Number.isFinite(ms) || ms < 0) return null
+  const total = Math.floor(ms / 1000)
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const seconds = total % 60
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return hours > 0 ? `${pad(hours)}:${pad(minutes)}:${pad(seconds)}` : `${pad(minutes)}:${pad(seconds)}`
 }
 
 export function runEndSummary(run: RunInfo | undefined): RunEndSummary {
@@ -40,6 +57,7 @@ export function runEndSummary(run: RunInfo | undefined): RunEndSummary {
     label: outcome ? OUTCOME_LABEL[outcome] : 'Fin de l’exécution',
     durationMs,
     duration: durationMs === null ? null : formatToolDuration(durationMs),
+    worked: formatWorked(durationMs),
     additions: countable ? files.reduce((sum, file) => sum + file.added, 0) : null,
     deletions: countable ? files.reduce((sum, file) => sum + file.removed, 0) : null,
     reason: outcome === 'incomplete' && run ? terminationLabel(run.termination) : null,

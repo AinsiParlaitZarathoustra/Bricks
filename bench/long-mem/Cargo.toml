@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
-description = "Head-to-head LongMemEval benchmark for the Cersei memory stack"
+description = "Head-to-head LongMemEval benchmark for the Bricks memory stack"
 publish = false
 
 [[bin]]
@@ -16,10 +16,10 @@ name = "longmem-recall"
 path = "src/bin/longmem_recall.rs"
 
 [dependencies]
-cersei-types      = { workspace = true }
-cersei-provider   = { workspace = true }
-cersei-embeddings = { workspace = true }
-cersei-memory     = { workspace = true, features = ["embed", "graph", "structured"] }
+bricks-types      = { workspace = true }
+bricks-provider   = { workspace = true }
+bricks-embeddings = { workspace = true }
+bricks-memory     = { workspace = true, features = ["embed", "graph", "structured"] }
 tokio-util        = { workspace = true }
 
 tokio             = { workspace = true }

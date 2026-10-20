@@ -1,51 +1,48 @@
 ---
 title: "Cookbook: ML Coding Agent"
-description: Build a coding agent specialized for machine learning workflows — training, evaluation, and model iteration.
+description: Build a coding agent for machine-learning work — run training scripts with custom tools, read model code with the code-intelligence primitives, and keep experiment results in graph memory.
 ---
 
-import { TypeTable } from 'fumadocs-ui/components/type-table';
+import { Callout } from 'fumadocs-ui/components/callout';
 
 # Cookbook: ML Coding Agent
 
-Build an agent that understands ML codebases, runs training scripts, evaluates models, and iterates on architectures — all from natural language instructions.
+This recipe builds an agent that reads an ML codebase, runs training scripts, and reports the results. It adds two custom tools to the coding tools, uses the code-intelligence primitive to find model definitions, and records experiments in graph memory.
 
-## Why Cersei for ML?
+<Callout type="warn">
+The agent in this recipe runs `python` commands the model writes, with the permissions you give it. Run it in a project you are willing to let it change, and approve its tool calls, or use a permission policy that asks.
+</Callout>
 
-Unlike generic agent SDKs, Cersei gives you:
-- **Full control over tool execution** — run `python train.py` with custom timeout, capture GPU metrics
-- **Graph memory** — track experiment results across sessions (loss curves, hyperparams, what worked)
-- **Tree-sitter code intelligence** — parse Python ML code to understand model architectures before modifying
-- **Provider agnostic** — use GPT-5.3 for cheap iteration, Claude Opus for complex architecture decisions
-
-## The Agent
+## The agent
 
 ```rust
-use cersei::prelude::*;
-use cersei_tools::tool_primitives::{code_intel, process};
-use std::path::Path;
+use async_trait::async_trait;
+use bricks::prelude::*;
+use bricks::tools::{PermissionLevel, Tool, ToolContext, ToolResult};
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let provider = cersei_provider::from_model_string("auto")?.0;
+    // provider_id/model_id from ~/.bricks/providers.toml
+    let selection = std::env::args().nth(1).unwrap_or_else(|| "my-provider/my-model".into());
 
-    // Custom tools for ML workflows
-    let mut tools = cersei_tools::coding(); // Read, Write, Edit, Glob, Grep, Bash
+    let mut tools = bricks::tools::coding();   // Read, Write, Edit, Glob, Grep, Bash, …
     tools.push(Box::new(TrainTool));
-    tools.push(Box::new(EvalTool));
     tools.push(Box::new(GpuStatusTool));
 
-    let agent = Agent::builder()
-        .provider(provider)
-        .tools(tools)
-        .system_prompt(ML_SYSTEM_PROMPT)
-        .max_tokens(16384)
-        .working_dir(".")
-        .build()?;
+    let agent = Arc::new(
+        Agent::builder()
+            .provider(bricks::provider_from_config(None, &selection)?)
+            .tools(tools)
+            .system_prompt(ML_SYSTEM_PROMPT)
+            .max_tokens(16384)
+            .working_dir(".")
+            .build()?,
+    );
 
-    let agent = std::sync::Arc::new(agent);
     let mut stream = agent.run_stream(
-        "Analyze the model architecture in model.py, then train for 5 epochs \
-         and report the loss curve. If val_loss plateaus, suggest architecture changes."
+        "Read model.py and describe the architecture. Then train for 5 epochs and report \
+         the loss curve. If val_loss plateaus, suggest architecture changes.",
     );
 
     while let Some(event) = stream.next().await {
@@ -68,14 +65,17 @@ const ML_SYSTEM_PROMPT: &str = "You are an ML engineering agent. You can:
 - Run training scripts and capture metrics
 - Analyze loss curves and suggest improvements
 - Modify hyperparameters and model code
-- Track experiments across sessions via memory
 
-Always check GPU status before training. Report metrics in tables.";
+Check the GPU status before training. Report metrics in tables.";
 ```
 
-## Custom Tools
+`run_stream` returns an `AgentStream`, whose `next()` yields the events until `Complete`. The agent must be in an `Arc`, because the stream keeps a reference to it.
 
-### Train Tool
+## Custom tools
+
+### Train
+
+Runs a Python script in the working directory, with a timeout:
 
 ```rust
 struct TrainTool;
@@ -84,7 +84,7 @@ struct TrainTool;
 impl Tool for TrainTool {
     fn name(&self) -> &str { "Train" }
     fn description(&self) -> &str {
-        "Run a training script with GPU monitoring. Returns stdout, stderr, and training metrics."
+        "Run a Python training script in the project. Returns stdout and stderr."
     }
     fn permission_level(&self) -> PermissionLevel { PermissionLevel::Execute }
 
@@ -92,8 +92,8 @@ impl Tool for TrainTool {
         serde_json::json!({
             "type": "object",
             "properties": {
-                "script": { "type": "string", "description": "Python script to run" },
-                "args": { "type": "string", "description": "CLI arguments", "default": "" },
+                "script": { "type": "string", "description": "Python script to run, e.g. train.py" },
+                "args": { "type": "string", "description": "Command-line arguments", "default": "" },
                 "timeout_secs": { "type": "integer", "default": 600 }
             },
             "required": ["script"]
@@ -105,19 +105,17 @@ impl Tool for TrainTool {
         let args = input["args"].as_str().unwrap_or("");
         let timeout = input["timeout_secs"].as_u64().unwrap_or(600);
 
-        let cmd = format!("python {} {}", script, args);
-        let opts = process::ExecOptions {
+        // The script and arguments come from the model. Check them before they reach a shell.
+        let cmd = format!("python {script} {args}");
+        let opts = bricks::tools::tool_primitives::process::ExecOptions {
             cwd: Some(ctx.working_dir.clone()),
             timeout: Some(std::time::Duration::from_secs(timeout)),
             ..Default::default()
         };
 
-        match process::exec(&cmd, opts).await {
+        match bricks::tools::tool_primitives::process::exec(&cmd, opts).await {
             Ok(output) => {
-                let mut result = String::new();
-                if !output.stdout.is_empty() {
-                    result.push_str(&output.stdout);
-                }
+                let mut result = output.stdout.clone();
                 if !output.stderr.is_empty() {
                     result.push_str("\n--- stderr ---\n");
                     result.push_str(&output.stderr);
@@ -136,7 +134,9 @@ impl Tool for TrainTool {
 }
 ```
 
-### GPU Status Tool
+### GPU status
+
+Reports the NVIDIA GPU when `nvidia-smi` works, and otherwise checks PyTorch's MPS backend:
 
 ```rust
 struct GpuStatusTool;
@@ -152,95 +152,85 @@ impl Tool for GpuStatusTool {
     }
 
     async fn execute(&self, _input: serde_json::Value, _ctx: &ToolContext) -> ToolResult {
-        // Try nvidia-smi first, fall back to Apple MPS check
-        let nvidia = process::exec(
-            "nvidia-smi --query-gpu=name,memory.used,memory.total,utilization.gpu --format=csv,noheader",
-            Default::default(),
-        ).await;
+        use bricks::tools::tool_primitives::process::{exec, ExecOptions};
 
-        if let Ok(output) = nvidia {
-            if output.exit_code == 0 {
-                return ToolResult::success(format!("NVIDIA GPU:\n{}", output.stdout));
+        if let Ok(out) = exec(
+            "nvidia-smi --query-gpu=name,memory.used,memory.total,utilization.gpu --format=csv,noheader",
+            ExecOptions::default(),
+        ).await {
+            if out.exit_code == 0 {
+                return ToolResult::success(format!("NVIDIA GPU:\n{}", out.stdout));
             }
         }
 
-        // Check for Apple Silicon MPS
-        let mps = process::exec(
+        match exec(
             "python -c \"import torch; print(f'MPS available: {torch.backends.mps.is_available()}')\"",
-            Default::default(),
-        ).await;
-
-        match mps {
-            Ok(output) if output.exit_code == 0 => {
-                ToolResult::success(format!("Apple Silicon:\n{}", output.stdout))
-            }
+            ExecOptions::default(),
+        ).await {
+            Ok(out) if out.exit_code == 0 => ToolResult::success(format!("Apple Silicon:\n{}", out.stdout)),
             _ => ToolResult::success("No GPU detected. Training will use CPU."),
         }
     }
 }
 ```
 
-## Using Tree-Sitter for Model Analysis
+## Finding the model definitions
 
-Before modifying ML code, use tree-sitter to understand the architecture:
+Before the agent edits model code, the code-intelligence primitive can list the classes and functions of the project. `scan_project` parses up to the given number of files with tree-sitter:
 
 ```rust
-use cersei_tools::tool_primitives::code_intel;
+use bricks::tools::tool_primitives::code_intel;
 use std::path::Path;
 
-// Scan the ML project
-let intels = code_intel::scan_project(Path::new("./"), 20);
-
-// Find model definition files
-for intel in &intels {
-    let has_model = intel.symbols.iter().any(|s| {
-        s.name.contains("Model") || s.name.contains("Network") || s.name.contains("Net")
-    });
-    if has_model {
-        println!("Model file: {} — symbols:", intel.path.display());
-        for sym in &intel.symbols {
+for intel in code_intel::scan_project(Path::new("./"), 20) {
+    let models: Vec<_> = intel.symbols.iter()
+        .filter(|s| s.name.contains("Model") || s.name.contains("Net"))
+        .collect();
+    if !models.is_empty() {
+        println!("{}:", intel.path.display());
+        for sym in models {
             println!("  {} {} (line {})", sym.kind.label(), sym.name, sym.line);
         }
     }
 }
 ```
 
-## Experiment Tracking with Graph Memory
+## Experiment tracking with graph memory
 
-Store experiment results in Cersei's graph memory for cross-session recall:
+Record each run in a graph store, so that a later session can find the results. This needs the `graph` feature of `bricks-memory` (see [Graph Memory](/docs/cookbook-graph-memory)):
 
 ```rust
-use cersei_memory::graph::GraphMemory;
+use bricks::memory::graph::GraphMemory;
+use bricks::memory::memdir::MemoryType;
+use std::path::Path;
 
-let graph = GraphMemory::open(Path::new("~/.abstract/graph.db"))?;
+let graph = GraphMemory::open(Path::new("./memory.db"))?;
 
-// After each training run, store results
-graph.store_memory(
+let id = graph.store_memory(
     "experiment: lr=1e-4, epochs=10, val_loss=0.23, val_acc=0.91",
-    cersei_memory::memdir::MemoryType::Project,
-    0.95, // high confidence
+    MemoryType::Project,
+    0.95,
 )?;
+graph.tag_memory(&id, "experiment-results")?;
 
-// Tag with topic
-let mem_id = graph.store_memory(/* ... */)?;
-graph.tag_memory(&mem_id, "experiment-results")?;
-
-// Later: recall what worked
-let results = graph.by_topic("experiment-results");
-// Returns: all experiment results sorted by confidence
+// In a later session:
+let results: Vec<String> = graph.by_topic("experiment-results");
 ```
 
-## Full Example Flow
+`by_topic` returns the matching memories as text. It does not sort them.
 
-```
-User: "Train the model on the new dataset and compare with last run"
+## An illustrative flow
+
+This shows the shape of a session. It is not a recorded run, and the numbers are placeholders:
+
+```text
+User: "Train the model on the new dataset and compare with the last run"
 
 Agent:
-1. [GpuStatus] → MPS available: True
-2. [Read] model.py → Understands architecture (ResNet variant, 8M params)
-3. [Grep] "val_loss" in training logs → Finds last run: val_loss=0.31
-4. [Train] python train.py --data new_dataset --epochs 10
-   → Training output: epoch 10/10, val_loss=0.24, val_acc=0.89
-5. [Memory] Stores: "new_dataset run: val_loss=0.24 (improved from 0.31)"
-6. Synthesizes comparison table with improvement analysis
+1. [GpuStatus]  → MPS available: True
+2. [Read]       model.py → the architecture is a small convolutional network
+3. [Grep]       "val_loss" in the training logs → the last run reached val_loss=<last value>
+4. [Train]      python train.py --data new_dataset --epochs 10
+5. [Memory]     store the new result, tagged as an experiment
+6. The reply compares the two runs in a table
 ```

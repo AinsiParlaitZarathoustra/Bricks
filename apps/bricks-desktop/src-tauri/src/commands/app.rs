@@ -9,7 +9,7 @@ pub async fn app_info(state: State<'_, AppState>) -> IpcResult<AppInfo> {
     Ok(state.app_info())
 }
 
-/// `cersei_agent::control::ModelChoice[]` from the configured catalog.
+/// `bricks_agent::control::ModelChoice[]` from the configured catalog.
 #[tauri::command]
 pub async fn models_list(state: State<'_, AppState>) -> IpcResult<serde_json::Value> {
     state.models()
@@ -44,7 +44,7 @@ pub(crate) async fn save_preferences(state: &AppState, prefs: Preferences) -> Ip
 #[cfg(test)]
 mod tests {
     use super::*;
-    use cersei_agent::control::ApprovalMode;
+    use bricks_agent::control::ApprovalMode;
 
     #[tokio::test]
     async fn saving_the_approval_preference_applies_it_at_once_and_at_startup() {

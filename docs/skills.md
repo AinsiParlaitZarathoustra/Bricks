@@ -219,7 +219,7 @@ agent's other tool calls to the skill's directory.
 | `/skills trust` / `/skills deny` | `trust_project_skills {allow}` | `skills_trust_resolved` |
 | `/skill <name> <request>` | `submit {prompt: {blocks, skills: [name]}}` | `skill_activated`, then the run |
 
-Events (JSONL schema 5; these are additions):
+Events (added in JSONL schema 5 and unchanged in schema 6):
 
 * `skill_activated {agent_id?, name, source, revision, origin}`: `origin` is `user`,
   `model`, `profile` or `restored`.
@@ -234,13 +234,13 @@ There is no event per file read during a discovery.
 ## SDK
 
 ```rust
-use cersei::skills::{SkillAccess, SkillsService, ProjectDecision};
+use bricks::skills::{SkillAccess, SkillsService, ProjectDecision};
 
 let access = SkillAccess::new(Arc::new(SkillsService::standard(project, home)));
 access.decide_project(ProjectDecision::Granted);      // an explicit decision
 let agent = Agent::builder()
     .provider(provider)
-    .tools(cersei::tools::coding())
+    .tools(bricks::tools::coding())
     .skills(access)        // catalog + `Skill` (registered once) + this agent's activations
     .build()?;
 ```
@@ -261,4 +261,4 @@ Nothing is converted or moved automatically.
 | `$ARGUMENTS`, `$ARGUMENTS_SUFFIX` | Not substituted. Write the instructions for a request given separately (`/skill <name> <request>`, or the `args` of `Skill`). |
 | Aliases of built-in skills (`mem`, `diagnose`, `check`…) | Removed: use the names. |
 | `loop` built-in | Removed: Bricks has no scheduler. |
-| `cersei-skills` crate, `cersei_tools::skills`, `SkillTool::with_project_root` | The `bricks-skills` crate (`cersei::skills`), `AgentBuilder::skills`. |
+| `cersei-skills` crate, `cersei_tools::skills`, `SkillTool::with_project_root` | The `bricks-skills` crate (`bricks::skills`), `AgentBuilder::skills`. |

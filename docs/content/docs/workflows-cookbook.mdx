@@ -1,6 +1,6 @@
 ---
 title: "Workflows Cookbook"
-description: Complete, runnable cersei-workflows recipes — sequential pipelines, parallel fan-out, branching, shared state, agent and tool steps, nested workflows, suspend/resume, and driving it all from a UI.
+description: Complete, runnable bricks-workflows recipes — sequential pipelines, parallel fan-out, branching, shared state, agent and tool steps, nested workflows, suspend/resume, and driving it all from a UI.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -8,17 +8,17 @@ import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
 
 # Workflows Cookbook
 
-Practical recipes built on `cersei-workflows`. Each is self-contained. They assume:
+Practical recipes built on `bricks-workflows`. Each is self-contained. They assume:
 
 ```toml
 [dependencies]
-cersei = { version = "0.2.1", features = ["workflows"] }
+bricks = { version = "0.6", features = ["workflows"] }
 tokio = { version = "1", features = ["full"] }
 serde_json = "1"
 ```
 
 ```rust
-use cersei::workflows::prelude::*;
+use bricks::workflows::prelude::*;
 use serde_json::json;
 use std::sync::Arc;
 ```
@@ -31,7 +31,7 @@ The "hello world" — three steps, each receiving the previous step's output.
 
 ```rust
 #[tokio::main]
-async fn main() -> cersei::types::Result<()> {
+async fn main() -> bricks::types::Result<()> {
     let registry = StepRegistry::new();
     registry.register(Arc::new(FnStep::new("upper", |input, _ctx| async move {
         let s = input.get("message").and_then(|v| v.as_str()).unwrap_or("");
@@ -125,7 +125,7 @@ Condition::And(vec![
 
 ## Sharing state across steps
 
-`StepContext` carries a shared, mutable `state` (Mastra's `setState`/`getState`) for values you don't want to thread through every step's input. Writing it emits a `StateUpdated` event, and it lands in `WorkflowResult.state`.
+`StepContext` carries a shared, mutable `state` (a `setState`/`getState`-style API) for values you don't want to thread through every step's input. Writing it emits a `StateUpdated` event, and it lands in `WorkflowResult.state`.
 
 ```rust
 let registry = StepRegistry::new();
@@ -171,15 +171,14 @@ let def = WorkflowBuilder::new("dashboard")
 
 ## A step that runs an agent
 
-`AgentStep` wraps a [`cersei_agent::Agent`](/docs/api-agent). The node input is rendered into the prompt template (`{{field}}` per field, `{{input}}` for the whole input), and the step returns `{ text, turns, stop_reason }`.
+`AgentStep` wraps a [`bricks_agent::Agent`](/docs/api-agent). The node input is rendered into the prompt template (`{{field}}` per field, `{{input}}` for the whole input), and the step returns `{ text, turns, stop_reason }`.
 
 ```rust
-use cersei::prelude::*;
+use bricks::prelude::*;
 
 let agent = Arc::new(
     Agent::builder()
-        .provider(Anthropic::from_env()?)
-        .model("claude-sonnet-4-6")
+        .provider(bricks::provider_from_config(None, "my-provider/my-model")?)
         .build()?,
 );
 
@@ -193,7 +192,7 @@ registry.register(Arc::new(AgentStep::new(
 let def = WorkflowBuilder::new("review-triage").then("classify").commit();
 let wf = Workflow::compile(def, &registry)?;
 let out = wf.start(json!({ "review": "Best purchase of the year." })).await?;
-// out.result == { "text": "positive", "turns": 1, "stop_reason": "EndTurn" }
+// out.result has the shape { "text", "turns", "stop_reason" } (see the AgentStep row in the API reference).
 ```
 
 You can mix agent and function steps freely — e.g. `.then("classify").then("route")` where `route` is a `FnStep` that branches on the agent's text.
@@ -205,7 +204,7 @@ You can mix agent and function steps freely — e.g. `.then("classify").then("ro
 `ToolStep` wraps any [`Tool`](/docs/api-tools), reusing its `input_schema` and dispatching the node input straight into `Tool::execute`. The output is `{ content, is_error, metadata }`; a tool error becomes a failed step.
 
 ```rust
-use cersei::tools::Tool;
+use bricks::tools::Tool;
 
 let registry = StepRegistry::new();
 registry.register(Arc::new(
@@ -302,7 +301,7 @@ while let Some(event) = stream.next().await {
 
 ## Driving a workflow from the visual builder
 
-The visual builder (React + xyflow) is just another producer of `WorkflowDef` JSON. The host receives JSON, deserializes it, compiles it against the steps it has registered, and runs it. Nothing about execution differs from a builder-authored workflow.
+An external visual builder (React Flow, for example) is just another producer of `WorkflowDef` JSON. The host receives JSON, deserializes it, compiles it against the steps it has registered, and runs it. Nothing about execution differs from a builder-authored workflow.
 
 ```rust
 // Received from the UI as JSON:

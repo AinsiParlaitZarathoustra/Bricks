@@ -16,6 +16,7 @@ import type {
 } from '$lib/ipc/client'
 import type { Command, Envelope, ModelChoice } from '$lib/ipc/engine'
 import { Conversation, type Draft } from './conversation.svelte'
+import { reader } from './reader.svelte'
 
 export const DEFAULT_PREFERENCES: Preferences = {
   theme: 'system',
@@ -32,7 +33,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   terminal_ratio: null,
 }
 
-export type RightView = 'context' | 'changes'
+export type RightView = 'context' | 'changes' | 'reader'
 
 /**
  * How a conversation that has just opened takes the view: `always` (the user
@@ -555,3 +556,6 @@ export function onChangeRecorded(listener: ChangeListener): () => void {
 }
 
 export const app = new AppStore()
+
+// The reader reads the edit operations of each open conversation from its timeline.
+reader.connect((sessionId) => app.conversations.get(sessionId)?.items ?? [])

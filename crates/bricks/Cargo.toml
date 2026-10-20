@@ -1,0 +1,59 @@
+[package]
+name = "bricks"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Bricks: A modular Rust SDK for building coding agents"
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+readme = "../../README.md"
+
+[dependencies]
+bricks-types = { workspace = true }
+bricks-provider = { workspace = true }
+bricks-tools = { workspace = true }
+bricks-tools-derive = { workspace = true }
+bricks-agent = { workspace = true }
+bricks-memory = { workspace = true }
+bricks-hooks = { workspace = true }
+bricks-mcp = { workspace = true }
+bricks-skills = { workspace = true }
+bricks-vms = { workspace = true, optional = true }
+bricks-agentlang = { workspace = true, optional = true }
+bricks-agentrl = { workspace = true, optional = true }
+bricks-workflows = { workspace = true, optional = true }
+async-trait = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+parking_lot = { workspace = true }
+which = { workspace = true }
+uuid = { workspace = true }
+sha2 = { workspace = true }
+base64 = { workspace = true }
+url = { workspace = true }
+reqwest = { workspace = true }
+chrono = { workspace = true }
+dirs = { workspace = true }
+futures = { workspace = true }
+
+[features]
+default = ["vms"]
+vms = ["dep:bricks-vms", "bricks-tools/vms"]
+# AgentTemplate DSL — the programmable sub-agent language.
+agentlang = ["dep:bricks-agentlang"]
+# AgentRL — the self-evolving orchestration layer (pulls in agentlang + vms).
+agentrl = ["dep:bricks-agentrl", "agentlang", "vms"]
+# Workflows — the serializable, UI-buildable workflow engine.
+workflows = ["dep:bricks-workflows"]
+
+[dev-dependencies]
+tokio = { workspace = true }
+tempfile = { workspace = true }
+tracing-subscriber = { workspace = true }
+

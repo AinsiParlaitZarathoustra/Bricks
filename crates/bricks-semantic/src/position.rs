@@ -277,11 +277,11 @@ impl PositionMapper {
         &self,
         offset: usize,
         enc: PositionEncoding,
-    ) -> Result<cersei_lsp::Position, PositionError> {
+    ) -> Result<bricks_lsp::Position, PositionError> {
         let lc = self.offset_to_line_col(offset)?;
         let start = self.line_starts[lc.line as usize];
         let character = self.text[start..offset].chars().map(|c| enc.units(c)).sum();
-        Ok(cersei_lsp::Position {
+        Ok(bricks_lsp::Position {
             line: lc.line,
             character,
         })
@@ -292,7 +292,7 @@ impl PositionMapper {
     /// and a column inside a character are errors.
     pub fn from_lsp(
         &self,
-        pos: &cersei_lsp::Position,
+        pos: &bricks_lsp::Position,
         enc: PositionEncoding,
     ) -> Result<usize, PositionError> {
         let range = self.line_range(pos.line)?;
@@ -342,7 +342,7 @@ mod tests {
         assert!(pm.offset_to_line_col(1).is_err());
         assert_eq!(
             pm.from_lsp(
-                &cersei_lsp::Position {
+                &bricks_lsp::Position {
                     line: 0,
                     character: 5
                 },
@@ -353,7 +353,7 @@ mod tests {
         );
         assert!(
             pm.from_lsp(
-                &cersei_lsp::Position {
+                &bricks_lsp::Position {
                     line: 1,
                     character: 0
                 },
@@ -416,7 +416,7 @@ mod tests {
         // Inside the surrogate pair of 😀.
         assert_eq!(
             pm.from_lsp(
-                &cersei_lsp::Position {
+                &bricks_lsp::Position {
                     line: 0,
                     character: 2
                 },
@@ -433,7 +433,7 @@ mod tests {
         // Past the end of the line: end of line (LSP rule).
         assert_eq!(
             pm.from_lsp(
-                &cersei_lsp::Position {
+                &bricks_lsp::Position {
                     line: 0,
                     character: 99
                 },

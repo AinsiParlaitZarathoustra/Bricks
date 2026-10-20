@@ -2,11 +2,11 @@
 
 ## Installation
 
-The workspace version is 0.6.1 (`Cargo.toml`). Depend on a checkout of this repository, the `cersei` crate in `crates/cersei`:
+The workspace version is 0.6.1 (`Cargo.toml`). Depend on a checkout of this repository, the `bricks` facade crate in `crates/bricks`:
 
 ```toml
 [dependencies]
-cersei = { path = "../bricks/crates/cersei" }   # adjust to your checkout
+bricks = { path = "../bricks/crates/bricks" }   # adjust to your checkout
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 ```
@@ -15,20 +15,20 @@ To use the `bricks` command-line tool instead, install it from the checkout: `ca
 
 ## Prerequisites
 
-- A recent stable Rust: edition 2024, 1.88 or later (let chains); tested with Rust 1.98.1
+- A recent stable Rust toolchain for edition 2024 (see `Cargo.toml`); the build was tested with Rust 1.98.1
 - A provider declared in `~/.bricks/providers.toml` (see [Providers](02-providers.md)). Start from `docs/providers.example.toml`. Its API key is read from the environment variable named by `api_key_env`.
 - No external tools for `Grep`: it runs in-process. `Bash` uses the `bash` found on `PATH`; `PowerShell` needs `pwsh` or `powershell`.
 
 ## Your First Agent
 
 ```rust
-use cersei::prelude::*;
+use bricks::prelude::*;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let output = Agent::builder()
         .provider(provider_from_config(None, "my-provider/my-model")?) // ~/.bricks/providers.toml
-        .tools(cersei::tools::coding())                                 // files, shell, web
+        .tools(bricks::tools::coding())                                 // files, shell, web
         .permission_policy(AllowAll)                                    // allow all tool calls
         .run_with("Count the number of .rs files in this directory")
         .await?;

@@ -127,52 +127,63 @@ function card(conv: Conversation, item: RunEndItem): string {
 }
 
 /**
- * The summary line only: the card text without its heading, the spoken totals of the diff
- * (screen-reader text of DiffStat), and the reason, error and sections that follow.
+ * The header line only: the card text before the reason, the error and the two groups
+ * (« N fichiers modifiés », « N commandes exécutées »).
  */
 function summaryLine(conv: Conversation, item: RunEndItem): string {
-	const head = card(conv, item)
-		.replace('Bilan de l’exécution', '')
-		.split(/Motif :|Erreur :|Fichiers touchés/)[0];
-	return head.replace(/\s*\d+ ajouts?, \d+ suppressions?/, '').replace(/\s*\d+ ajouts?, \d+ suppressions?/, '').trim();
+	return card(conv, item)
+		.split(/Motif :|Erreur :|\d+ fichiers? modifiés?|\d+ commandes? exécutées?/)[0]
+		.trim();
 }
 
-describe('run-end card: one sober line from the real run data', () => {
-	it('reads « Terminé · duration · +added −removed » with no turn count, no model id and no « Durée : » prefix', () => {
+/** The files group trigger, with the spoken totals of DiffStat removed. */
+function filesGroup(conv: Conversation, item: RunEndItem): string | null {
+	const m = card(conv, item).match(/\d+ fichiers? modifiés?[^]*$/);
+	if (!m) return null;
+	return m[0].replace(/\s*\d+ ajouts?, \d+ suppressions?/, '').split(/\d+ commandes? exécutées?/)[0].trim();
+}
+
+describe('run-end card: one compact header and closed groups from the real run data', () => {
+	it('reads « Terminé · A travaillé MM:SS » with no turn count, no model id and no « Durée : » prefix', () => {
 		const { conv, item } = runOf({ outcome: 'succeeded', at: T0 + 762 }, [
 			{ path: 'src/calcul.ts', kind: 'modify', added: 120, removed: 24 },
 		]);
 		const text = card(conv, item);
-		expect(summaryLine(conv, item)).toBe('Terminé · 762 ms · +120 −24');
+		expect(summaryLine(conv, item)).toBe('Terminé · A travaillé 00:00');
+		expect(filesGroup(conv, item)).toMatch(/^1 fichier modifié \+120 −24 calcul\.ts/);
+		// The group is closed by default.
+		expect(render(RunEndCard, { props: { item, conversation: conv } }).body).toContain('aria-expanded="false"');
 		expect(text).not.toContain('Durée');
 		expect(text).not.toContain(MODEL);
 		expect(text).not.toMatch(/\btours?\b/i);
 		expect(text).not.toMatch(/\bturns?\b/i);
 	});
 
-	it('sums the edit operations of the run and shows no counts for a binary file', () => {
+	it('sums the text edits of the run in the files group, a binary file adding no counts', () => {
 		const { conv, item } = runOf({ outcome: 'succeeded', at: T0 + 900 }, [
 			{ path: 'a.ts', kind: 'modify', added: 2, removed: 1 },
 			{ path: 'img.png', kind: 'create', added: 0, removed: 0, binary: true },
 		]);
-		expect(summaryLine(conv, item)).toBe('Terminé · 900 ms');
-		expect(card(conv, item)).toContain('binaire');
+		expect(summaryLine(conv, item)).toBe('Terminé · A travaillé 00:00');
+		expect(filesGroup(conv, item)).toMatch(/^2 fichiers modifiés \+2 −1 a\.ts/);
+		expect(card(conv, item)).toContain('img.png binaire');
 	});
 
-	it('shows no counts when the run edited nothing', () => {
+	it('shows no files group when the run edited nothing', () => {
 		const { conv, item } = runOf({ outcome: 'succeeded', at: T0 + 40 }, []);
-		expect(summaryLine(conv, item)).toBe('Terminé · 40 ms');
+		expect(summaryLine(conv, item)).toBe('Terminé · A travaillé 00:00');
+		expect(filesGroup(conv, item)).toBeNull();
 	});
 
 	it('keeps the failed state and its error, and the cancelled state without a second sentence', () => {
 		const failed = runOf({ outcome: 'failed', error: 'quota dépassé', at: T0 + 120 }, []);
 		const failedText = card(failed.conv, failed.item);
-		expect(summaryLine(failed.conv, failed.item)).toBe('Échec · 120 ms');
+		expect(summaryLine(failed.conv, failed.item)).toBe('Échec · A travaillé 00:00');
 		expect(failedText).toContain('Erreur : quota dépassé');
 
 		const cancelled = runOf({ outcome: 'cancelled', at: T0 + 120 }, []);
 		const cancelledText = card(cancelled.conv, cancelled.item);
-		expect(summaryLine(cancelled.conv, cancelled.item)).toBe('Annulé · 120 ms');
+		expect(summaryLine(cancelled.conv, cancelled.item)).toBe('Annulé · A travaillé 00:00');
 		expect(cancelledText).not.toMatch(/Erreur|Motif/);
 	});
 });

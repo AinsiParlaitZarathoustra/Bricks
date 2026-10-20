@@ -11,7 +11,7 @@ export type SkillsCatalog = {
  */
 project_id: string | null, 
 /**
- * `cersei_agent::control::SkillsListing`.
+ * `bricks_agent::control::SkillsListing`.
  */
 listing: import('../engine').SkillsListing, 
 /**

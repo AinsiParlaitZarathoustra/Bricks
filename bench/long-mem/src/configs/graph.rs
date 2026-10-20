@@ -4,7 +4,7 @@
 //! retrieval time we use `GraphMemory::recall_top_k` which pulls substring
 //! candidates and re-ranks by query-word-overlap.
 //!
-//! This is the "honest floor" for Cersei's current graph stack — no LLM fact
+//! This is the "honest floor" for Bricks's current graph stack — no LLM fact
 //! extraction, no semantic matching. If embed beats this on `single-session-*`,
 //! that confirms semantic retrieval matters. If hybrid (Config D) beats embed
 //! on `multi-session` + `knowledge-update`, that confirms the graph layer is
@@ -14,8 +14,8 @@ use crate::configs::{Config, DEFAULT_TOP_K};
 use crate::dataset::Question;
 use anyhow::Result;
 use async_trait::async_trait;
-use cersei_memory::graph::GraphMemory;
-use cersei_memory::memdir::MemoryType;
+use bricks_memory::graph::GraphMemory;
+use bricks_memory::memdir::MemoryType;
 
 pub struct GraphConfig {
     mem: Option<GraphMemory>,

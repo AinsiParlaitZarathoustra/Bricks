@@ -6,7 +6,7 @@
 //! skill names as chosen. Activation itself (refusal of an unusable skill, trust
 //! of project skills) is the engine's and is covered by its own tests.
 
-use cersei_agent::control::{Command, Prompt, PromptBlock};
+use bricks_agent::control::{Command, Prompt, PromptBlock};
 use serde_json::json;
 
 fn submit_of(command: Command) -> Prompt {

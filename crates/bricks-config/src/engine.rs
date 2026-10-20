@@ -1,9 +1,9 @@
 //! The engine configuration every frontend assembles the same way.
 
 use crate::projects::Projects;
-use cersei_agent::BricksConfig;
-use cersei_agent::control::{EngineConfig, ModelCatalog, SkillsSetup};
-use cersei_provider::ProviderRegistry;
+use bricks_agent::BricksConfig;
+use bricks_agent::control::{EngineConfig, ModelCatalog, SkillsSetup};
+use bricks_provider::ProviderRegistry;
 use std::path::Path;
 use std::sync::Arc;
 

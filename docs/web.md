@@ -1,6 +1,6 @@
 # Web search and reading
 
-`WebSearch` and `WebFetch` run on `cersei-web`: search → bounded downloads →
+`WebSearch` and `WebFetch` run on `bricks-web`: search → bounded downloads →
 Markdown extraction → structural passages → lexical ranking (BM25) →
 citable passages. Everything is configured in `bricks.toml` `[web]`
 (annotated in [bricks.example.toml](bricks.example.toml)).
@@ -190,7 +190,7 @@ Input: `url` or `doc` (`D1`…), `max_chars` (Unicode characters, default
   their ranges, plus how many of the document's passages were omitted
   (lossy, said so).
 * **`raw`.** The bytes as received, paged the same way.
-* **`json_summary`.** The JSON summary of the compression engine (Sprint 3).
+* **`json_summary`.** The JSON summary of the compression engine.
 * **Stored copies.** A page is downloaded once per session. Later windows,
   `doc`, and a restored session read the stored copy; `refresh: true`
   downloads it again.
@@ -211,11 +211,15 @@ Input: `url` or `doc` (`D1`…), `max_chars` (Unicode characters, default
 
 ## Measurements
 
-`cargo run --release -p cersei-web --example measure_web` runs on the local
-corpus ([tests/fixtures](../crates/cersei-web/tests/fixtures), synthetic,
-provenance in its README).
+`cargo run --release -p bricks-web --example measure_web` runs on the local
+corpus ([tests/fixtures](../crates/bricks-web/tests/fixtures), synthetic,
+provenance in its README). The figures below come from one run on macOS
+arm64, release build. This document does not record the date of that run or
+a report that holds it, so treat them as an example of the output format, and
+run the command again for current figures. They are not a promise of size or
+speed.
 
-* **Columns.** Sizes and estimated tokens (`cersei_types::tokens`, local
+* **Columns.** Sizes and estimated tokens (`bricks_types::tokens`, local
   heuristic) for HTML → Markdown → passages, the median time of
   extraction, splitting and ranking, the allocations of one extraction, and
   whether the reference passage of each query was kept.
@@ -238,8 +242,9 @@ provenance in its README).
 * **Loopback download.** 5 pages × 50 ms server delay, 2 per host: 164 ms,
   2 in flight on the host. This shows overlap, not Internet latency.
 * **One live run** (DuckDuckGo, query "tokio JoinSet documentation", not a
-  benchmark): search 876 ms, download 486 ms, extraction 221 ms, ranking
-  260 ms, total 1.84 s.
+  benchmark, not dated in this repository): search 876 ms, download 486 ms,
+  extraction 221 ms, ranking 260 ms, total 1.84 s. Network conditions and the
+  search provider's responses change these numbers.
 
 ## Dependencies
 
@@ -249,7 +254,7 @@ provenance in its README).
 | `dom_query` | 0.28 | DOM, selectors, Markdown writer (no second converter needed) | MIT |
 | `bm25` | 2.3.2, no default features | BM25 scoring (own tokenizer) | MIT |
 | `encoding_rs` | 0.8.42 | charsets | Apache-2.0/MIT + BSD-3 |
-| `hickory-resolver` | 0.26.3 | DNS of every HTTP client (`cersei_types::http`), so policy checks see the answers the client uses | MIT/Apache-2.0 |
+| `hickory-resolver` | 0.26.3 | DNS of every HTTP client (`bricks_types::http`), so policy checks see the answers the client uses | MIT/Apache-2.0 |
 
 * **Evaluated, not added.** `htmd` (dom_query's writer was enough on the
   fixtures) and `text-splitter` (its Markdown feature brings a large

@@ -1,18 +1,22 @@
 ---
 title: "LongMemEval — Memory Benchmark"
-description: Head-to-head long-term-memory benchmark for the Cersei memory stack against Mastra, Zep, and Supermemory using the ICLR 2025 LongMemEval dataset.
+description: Long-term memory benchmark of Bricks memory configurations against published results of Mastra, Zep and Supermemory, on the ICLR 2025 LongMemEval dataset. Measured on 2026-04-25.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
 import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
 
-# LongMemEval — Cersei vs Mastra / Zep / Supermemory
+# LongMemEval — Bricks vs Mastra / Zep / Supermemory
 
-[LongMemEval](https://arxiv.org/abs/2410.10813) (ICLR 2025) is the 500-question long-term-memory benchmark Mastra used for its [*Observational Memory*](https://mastra.ai/research/observational-memory) research, Zep reports on in the [Graphiti paper](https://arxiv.org/abs/2501.13956), and Supermemory cites in its comparisons. We run the same 500 questions through four Cersei memory configurations so the numbers line up one-for-one with what those frameworks publish.
+[LongMemEval](https://arxiv.org/abs/2410.10813) (ICLR 2025) is the 500-question long-term-memory benchmark Mastra used for its [*Observational Memory*](https://mastra.ai/research/observational-memory) research, Zep reports on in the [Graphiti paper](https://arxiv.org/abs/2501.13956), and Supermemory cites in its comparisons. We run the same 500 questions through four Bricks memory configurations, so the numbers line up with what those frameworks publish.
+
+<Callout type="warn">
+**Dated measurement, before later changes.** The runs below took place on **2026-04-25**, with the memory stack of version 0.1.8. They predate the native sub-agents of 0.4.6 and the change that runs each `Bash` call in its own process (commit `4263cd9`). They are a record of that run. They are not a measurement of the current code, and the result files are not kept in the repository.
+</Callout>
 
 ## TL;DR
 
-Ran `longmemeval_s` — 500 questions — on **2026-04-25** (0.1.8 re-run with the Memory++ stack) against four Cersei configurations. Answerer, judge and observer are all `gemini-2.5-flash`; `EmbeddingMemory` uses `gemini-embedding-001` (3072-d, Matryoshka). The hybrid config adds **Omega-style per-question-type RAG prompts**, **LLM query expansion (lex + vec + HyDE)**, **abstention floors** (`vec_min=0.35`, `graph_min=0.30`), and **Jaccard ≥ 0.85 semantic dedup at ingest** — all new in 0.1.8.
+Ran `longmemeval_s` — 500 questions — on **2026-04-25** (0.1.8 re-run with the Memory++ stack) against four Bricks configurations. Answerer, judge and observer are all `gemini-2.5-flash`; `EmbeddingMemory` uses `gemini-embedding-001` (3072-d, Matryoshka). The hybrid config adds **Omega-style per-question-type RAG prompts**, **LLM query expansion (lex + vec + HyDE)**, **abstention floors** (`vec_min=0.35`, `graph_min=0.30`), and **Jaccard ≥ 0.85 semantic dedup at ingest** — all new in 0.1.8.
 
 | Config | Overall (macro, excl abstention) | Abstention | Correct / total | Input tokens (sum) | Avg wall (ms) |
 |---|---|---|---|---|---|
@@ -25,18 +29,18 @@ Ran `longmemeval_s` — 500 questions — on **2026-04-25** (0.1.8 re-run with t
 
 ## Where this places us on the public leaderboard
 
-Against the numbers [collected here](https://xiaowu0162.github.io/long-mem-eval/) and across Mastra, Supermemory, Zep, Hindsight, and EmergenceMem reports:
+The third-party figures below are as their authors published them at the time. This page does not re-measure them. Against the numbers [collected here](https://xiaowu0162.github.io/long-mem-eval/) and across Mastra, Supermemory, Zep, Hindsight, and EmergenceMem reports:
 
-| System | Model | Overall | Delta vs Cersei Baseline (0.1.8) |
+| System | Model | Overall | Delta vs Bricks Baseline (0.1.8) |
 |---|---|---:|---:|
 | Mastra OM | `gpt-5-mini` | 94.87 % | +7.3 |
 | Mastra OM | `gemini-3-pro-preview` | 93.27 % | +5.7 |
 | Hindsight | `gemini-3-pro-preview` | 91.40 % | +3.8 |
 | Mastra OM | `gemini-3-flash-preview` | 89.20 % | +1.6 |
 | Hindsight | `GPT-OSS-120B` | 89.00 % | +1.4 |
-| **Cersei Baseline (0.1.8)** | **`gemini-2.5-flash`** | **87.6 %** | **—** |
-| **Cersei Embed-only (0.1.8)** | **`gemini-2.5-flash`** | **86.6 %** | −1.0 |
-| **Cersei Hybrid (0.1.8)** | **`gemini-2.5-flash`** | **86.3 %** | −1.3 |
+| **Bricks Baseline (0.1.8)** | **`gemini-2.5-flash`** | **87.6 %** | **—** |
+| **Bricks Embed-only (0.1.8)** | **`gemini-2.5-flash`** | **86.6 %** | −1.0 |
+| **Bricks Hybrid (0.1.8)** | **`gemini-2.5-flash`** | **86.3 %** | −1.3 |
 | EmergenceMem Internal\* | `gpt-4o` | 86.00 % | −1.6 |
 | Supermemory | `gemini-3-pro-preview` | 85.20 % | −2.4 |
 | Supermemory | `gpt-5` | 84.60 % | −3.0 |
@@ -51,7 +55,7 @@ Against the numbers [collected here](https://xiaowu0162.github.io/long-mem-eval/
 
 **Headlines**
 
-- **Cersei Baseline @ 87.6 %** and **Hybrid @ 86.3 %** both clear Supermemory on `gemini-3-pro-preview` (85.2 %) and `gpt-5` (84.6 %), Mastra OM on `gpt-4o` (84.23 %), Mastra RAG on `gpt-4o` (80.05 %), Zep on `gpt-4o` (71.2 %), and EmergenceMem Internal on `gpt-4o` (86.0 %).
+- **Bricks Baseline @ 87.6 %** and **Hybrid @ 86.3 %** both clear Supermemory on `gemini-3-pro-preview` (85.2 %) and `gpt-5` (84.6 %), Mastra OM on `gpt-4o` (84.23 %), Mastra RAG on `gpt-4o` (80.05 %), Zep on `gpt-4o` (71.2 %), and EmergenceMem Internal on `gpt-4o` (86.0 %).
 - **0.1.8's Memory++ stack (Omega RAG prompts + query expansion + abstention floors + dedup)** delivered a **+2.5 pp lift on `multi-session`** (the hybrid's weakest type) — the targeted gain the plan called for.
 - The remaining gap to Mastra OM / `gemini-3-flash-preview` (89.2 %) and `gpt-5-mini` (94.87 %) is concentrated on **(a)** answerer-model tier and **(b)** the A2/A3 levers queued for 0.1.9 — FTS5 channel + three-way RRF + per-type `RetrievalProfile`.
 - **Pure semantic retrieval (`EmbeddingMemory`, 86.6 %)** beats Mastra OM / `gpt-4o` (84.23 %) and Supermemory / `gpt-4o` (81.6 %) with **19× fewer input tokens** than our own full-context baseline.
@@ -83,7 +87,7 @@ The per-question wall time difference between embed (39.1 s) and hybrid (183.7 s
 
 ## The four configurations
 
-| Config | Cersei backend | What it tests |
+| Config | Bricks backend | What it tests |
 |---|---|---|
 | **A. `baseline`** | `JsonlMemory` — full haystack in prompt | Control lower bound. The answerer sees every turn, capped only by the LLM context window. |
 | **B. `embed`** | `EmbeddingMemory` (`usearch` HNSW + `gemini-embedding-001` at 3072-d, cosine) | Pure semantic retrieval. Directly comparable to Mastra RAG. |
@@ -94,8 +98,8 @@ The per-question wall time difference between embed (39.1 s) and hybrid (183.7 s
 
 - **Dataset:** [`xiaowu0162/longmemeval`](https://huggingface.co/datasets/xiaowu0162/longmemeval) — 500 questions, 6 question types (`single-session-user`, `single-session-assistant`, `single-session-preference`, `multi-session`, `temporal-reasoning`, `knowledge-update`) plus abstention cases (detected via `question_id.ends_with("_abs")`). Variants: `longmemeval_s` (~115k tokens/Q, headline), `longmemeval_m` (~1.5M tokens/Q), `longmemeval_oracle` (evidence-only control).
 - **Judge rubric:** **verbatim port** of Mastra's six question-type prompts (`explorations/longmemeval/src/evaluation/longmemeval-metric.ts` in Mastra's repository), which in turn copies from the official Python evaluator.
-- **Observer rubric:** **verbatim port** of [`OBSERVER_EXTRACTION_INSTRUCTIONS`](https://github.com/pacifio/cersei/blob/main/bench/long-mem/src/mastra_prompts.rs) from Mastra's `@mastra/memory` — temporal anchoring, user-assertions-beat-questions, state-change rules, preservation of specifics.
-- **Context-injection rubric:** **verbatim port** of [`OBSERVATION_CONTEXT_PROMPT` + `OBSERVATION_CONTEXT_INSTRUCTIONS`](https://github.com/pacifio/cersei/blob/main/bench/long-mem/src/mastra_prompts.rs) wrapped around retrieved context before it hits the answerer. Contains Mastra's `KNOWLEDGE UPDATES` / `PLANNED ACTIONS` / `MOST RECENT USER INPUT` guidance.
+- **Observer rubric:** **verbatim port** of [`OBSERVER_EXTRACTION_INSTRUCTIONS`](https://github.com/AinsiParlaitZarathoustra/Bricks/blob/main/bench/long-mem/src/mastra_prompts.rs) from Mastra's `@mastra/memory` — temporal anchoring, user-assertions-beat-questions, state-change rules, preservation of specifics.
+- **Context-injection rubric:** **verbatim port** of [`OBSERVATION_CONTEXT_PROMPT` + `OBSERVATION_CONTEXT_INSTRUCTIONS`](https://github.com/AinsiParlaitZarathoustra/Bricks/blob/main/bench/long-mem/src/mastra_prompts.rs) wrapped around retrieved context before it hits the answerer. Contains Mastra's `KNOWLEDGE UPDATES` / `PLANNED ACTIONS` / `MOST RECENT USER INPUT` guidance.
 - **Models:** answerer, judge, and observer all on `gemini-2.5-flash`, temperature 0 (0.3 for observer, matches Mastra's `observation.modelSettings.temperature`). Embeddings: `gemini-embedding-001`, 3072-dim, with Matryoshka truncation if requested.
 - **Metric:** `overall_accuracy` is the **macro average** across question types excluding abstention (matching Mastra `cli.ts:99`). Abstention is reported separately.
 - **Top-k** for retrieval configs: **20** (matches Mastra's published RAG config).
@@ -115,7 +119,7 @@ echo "GOOGLE_API_KEY=AIza..." > .env   # gitignored
 source .env
 cargo run --release -p longmem-bench -- \
   --dataset s --config all --concurrency 4 --top-k 20 \
-  --provider gemini \
+  --embeddings gemini \
   --answerer-model gemini-2.5-flash \
   --judge-model gemini-2.5-flash \
   --extractor-model gemini-2.5-flash
@@ -128,7 +132,8 @@ Budget: ~$20–30 in Gemini API cost on 2.5-flash, ~3–4 h wall time at concurr
 # 10 questions × 4 configs on the oracle variant (~30 s, <$0.05)
 source .env
 cargo run --release -p longmem-bench -- \
-  --dataset oracle --config all --limit 10 --provider gemini
+  --dataset oracle --config all --limit 10 \
+  --embeddings gemini --answerer-model gemini-2.5-flash --judge-model gemini-2.5-flash
 ```
 </Tab>
 <Tab value="One config">
@@ -136,7 +141,8 @@ cargo run --release -p longmem-bench -- \
 # Just the hybrid config on the 500-Q _s set
 source .env
 cargo run --release -p longmem-bench -- \
-  --dataset s --config hybrid --provider gemini --concurrency 4
+  --dataset s --config hybrid --embeddings gemini --concurrency 4 \
+  --answerer-model gemini-2.5-flash --judge-model gemini-2.5-flash --extractor-model gemini-2.5-flash
 ```
 </Tab>
 </Tabs>
@@ -145,7 +151,7 @@ cargo run --release -p longmem-bench -- \
 
 API keys have leaked from this repo **twice** before we tightened things up — a hardcoded one in `bench/term-bench/runner-google.sh` and, later, keys embedded in reqwest error messages (`?key=…` in the URL) that ended up in tracked `.log` and `rows-*.json` files. Permanent fixes applied:
 
-1. **Gemini calls now use `x-goog-api-key` header**, never query string — `crates/cersei-embeddings/src/gemini.rs`.
+1. **Gemini calls now use `x-goog-api-key` header**, never query string — `crates/bricks-embeddings/src/gemini.rs`.
 2. **Error messages are scrubbed**: any string that could carry `key=<…>` runs through `redact_url_key` before it hits logs or result files.
 3. **`.gitignore`** blocks `bench/**/*.log`, `bench/long-mem/results/`, `bench/long-mem/results-*/`, `bench/term-bench/tb-results/`, `bench/**/runner-*.sh`, `bench/**/abstract-output.jsonl`, `.env`, and `.env.local`.
 4. **Runner scripts refuse to start without `GOOGLE_API_KEY`** in env — no more inline keys.
@@ -153,15 +159,15 @@ API keys have leaked from this repo **twice** before we tightened things up — 
 
 ## What goes where
 
-- Source: [`bench/long-mem/`](https://github.com/pacifio/cersei/tree/main/bench/long-mem)
+- Source: [`bench/long-mem/`](https://github.com/AinsiParlaitZarathoustra/Bricks/tree/main/bench/long-mem)
 - Dataset loader: `bench/long-mem/src/dataset.rs`
 - Judge (6 rubric ports + LLM call): `bench/long-mem/src/judge.rs`
 - Per-config retrieval: `bench/long-mem/src/configs/{baseline,embed,graph,hybrid}.rs`
 - Runner + RRF fusion: `bench/long-mem/src/runner.rs`, `configs/hybrid.rs`
 - Aggregation: `bench/long-mem/src/report.rs`
 - SDK wiring behind the configs:
-  - [`EmbeddingMemory`](https://github.com/pacifio/cersei/blob/main/crates/cersei-memory/src/embedding_memory.rs) — thin adapter between `EmbeddingStore` and the `Memory` trait (new in 0.1.8).
-  - [`GraphMemory::recall_top_k`](https://github.com/pacifio/cersei/blob/main/crates/cersei-memory/src/graph.rs) — scored retrieval by query-word overlap (new in 0.1.8).
+  - [`EmbeddingMemory`](https://github.com/AinsiParlaitZarathoustra/Bricks/blob/main/crates/bricks-memory/src/embedding_memory.rs) — thin adapter between `EmbeddingStore` and the `Memory` trait (new in 0.1.8).
+  - [`GraphMemory::recall_top_k`](https://github.com/AinsiParlaitZarathoustra/Bricks/blob/main/crates/bricks-memory/src/graph.rs) — scored retrieval by query-word overlap (new in 0.1.8).
 
 ## Credits
 
@@ -187,6 +193,6 @@ results/
 
 ## Caveats
 
-- Our `longmemeval_s` numbers are measured with `gpt-4o-mini` as both answerer and judge. Mastra's *Observational Memory* research tests several judge/answerer combinations — when comparing numbers, make sure the model pair matches. Running with `--answerer-model gpt-4o` / `--judge-model gpt-4o` is a one-line flag if you want to rerun against a different pair.
+- The numbers on this page use `gemini-2.5-flash` as answerer, judge and observer (see the TL;DR). Mastra's *Observational Memory* research tests several judge/answerer combinations — when comparing numbers, make sure the model pair matches. `--answerer-model` and `--judge-model` are required flags of the runner, so choose the pair explicitly; `--extractor-model` is optional.
 - `concurrency=4` (outer) × `INNER_EXTRACT_CONCURRENCY=6` (hybrid fact extraction) keeps us under OpenAI tier-1 rate limits. If you have higher tier throughput, bumping `--concurrency 8` will halve wall time.
-- A one-shot bench like this measures recall quality with *fixed* retrieval — it does not exercise agents calling tools during answering. If you need tool-use-in-the-loop behaviour, add a `cersei::Agent` wrapper; the memory backends tested here all plug in via [`.memory(...)`](/docs/api-agent) on the builder.
+- A one-shot bench like this measures recall quality with *fixed* retrieval — it does not exercise agents calling tools during answering. If you need tool-use-in-the-loop behaviour, add a `bricks::Agent` wrapper; the memory backends tested here all plug in via [`.memory(...)`](/docs/api-agent) on the builder.

@@ -11,7 +11,7 @@ import { Callout } from 'fumadocs-ui/components/callout';
 Every public function, struct, and enum across the 6 tool primitive modules.
 
 ```rust
-use cersei_tools::tool_primitives::{diff, fs, process, http, search, git};
+use bricks_tools::tool_primitives::{diff, fs, process, http, search, git};
 ```
 
 ---
@@ -262,7 +262,7 @@ Execute a command through a shell. Returns when the command completes or times o
 ```rust
 pub fn exec_streaming(
     command: &str, opts: ExecOptions
-) -> Result<(Receiver<OutputLine>, JoinHandle<ExecOutput>), io::Error>
+) -> Result<(mpsc::Receiver<OutputLine>, tokio::task::JoinHandle<ExecOutput>), std::io::Error>
 ```
 
 Execute a command and stream output lines through a channel. The `JoinHandle` resolves to `ExecOutput` when the command finishes. `OutputLine` is either `Stdout(String)` or `Stderr(String)`.
@@ -284,14 +284,6 @@ pub async fn get(url: &str, opts: HttpOptions) -> Result<HttpResponse, HttpError
 ```rust
 pub async fn post(url: &str, body: &str, opts: HttpOptions) -> Result<HttpResponse, HttpError>
 ```
-
-### `fetch_html`
-
-```rust
-pub async fn fetch_html(url: &str, max_chars: usize, opts: HttpOptions) -> Result<String, HttpError>
-```
-
-Fetch a URL and convert HTML to readable plain text using `html2text`. Non-HTML content returned as-is. Truncated to `max_chars`.
 
 ### `HttpResponse`
 

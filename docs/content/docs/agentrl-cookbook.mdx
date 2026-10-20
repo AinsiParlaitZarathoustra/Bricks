@@ -1,6 +1,6 @@
 ---
 title: "AgentRL Cookbook"
-description: Runnable AgentRL recipes — a self-improving coding agent, forcing the recovery loop, custom verifiers and runners, and authoring tools from AgentTemplate programs.
+description: Runnable AgentRL recipes — a verified coding task, forcing the recovery loop, custom verifiers and runners, running proposals in sandboxes, and authoring tools from AgentTemplate programs.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -8,19 +8,25 @@ import { Cards, Card } from 'fumadocs-ui/components/card';
 
 # AgentRL Cookbook
 
-Practical, runnable recipes. All examples assume the `agentrl` feature:
+Recipes built on `bricks-agentrl`. They assume the `agentrl` feature of the facade:
 
 ```toml
-cersei = { version = "0.6", features = ["agentrl"] }
+[dependencies]
+bricks = { version = "0.6", features = ["agentrl"] }
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
 ```
 
-## 1. A self-improving coding agent
+Each recipe reads its model from `~/.bricks/providers.toml`, as a `provider_id/model_id` selection. Replace `my_provider/my-model` with a selection that exists in your file. Run the recipes on a copy of the project: the general agent writes to its working directory without asking.
 
-Hand AgentRL a real task with an **independent** verifier and let it solve, register, and reuse.
+## 1. A verified coding task
+
+Give AgentRL a task and an independent check. It tries the task, and if the general run passes, it returns `Directly`.
 
 ```rust
-use cersei::prelude::*;
-use cersei::agentrl::{CerseiRunner, CommandVerifier, Orchestrator, ToolRegistry, Verifier};
+use bricks::agentrl::{CerseiRunner, CommandVerifier, Orchestrator, ToolRegistry, Verifier};
+use bricks::provider::Provider;
+use bricks::ProviderRegistry;
 use std::sync::Arc;
 
 #[tokio::main]
@@ -31,9 +37,7 @@ async fn main() -> anyhow::Result<()> {
         "python3 gcd.py 48 36 | grep -qx 12 && python3 gcd.py 0 7 | grep -qx 7",
     ));
 
-    // The model comes from ~/.bricks/providers.toml as provider_id/model_id
-    // (`my_provider` is an id defined in that file).
-    let model = ProviderRegistry::load(None)?.resolve("my_provider/gemini-3.1-pro-preview")?;
+    let model = ProviderRegistry::load(None)?.resolve("my_provider/my-model")?;
     let selection = model.selection();
     let provider_factory = Arc::new(move || {
         model.build_provider().expect("provider builds").into_boxed() as Box<dyn Provider>
@@ -45,7 +49,6 @@ async fn main() -> anyhow::Result<()> {
     );
 
     let orchestrator = Orchestrator::new(runner, registry.clone());
-
     let outcome = orchestrator
         .solve("Create gcd.py: two int args, print their GCD (Euclidean). gcd(0, n) == n.")
         .await?;
@@ -57,19 +60,20 @@ async fn main() -> anyhow::Result<()> {
 ```
 
 <Callout type="warn">
-Make the verifier independent of anything the agent writes — exercise the real behavior, not the agent's own test file.
+The verifier must check behaviour the agent cannot rewrite. A test file that the agent can create or edit proves nothing.
 </Callout>
 
-## 2. Force the recovery loop (and register a tool)
+## 2. Force the recovery loop and register a tool
 
-The GeneralAgent solves easy tasks directly. To exercise the **plan → sandbox → promote → register** path, restrict the GeneralAgent so it *can't* finish — here, a read-only toolset. It fails the verifier, the planner proposes fixes, proposals run with full tools in isolated sandboxes, and the winner is registered.
+The general agent often solves easy tasks on its own. To exercise the path **plan → proposals → promote → register**, give the general agent only a read tool. It usually cannot finish the task, so the verifier fails and the planner takes over. Proposals still get the full coding tools, each in its own copy of the working directory.
 
 ```rust
-use cersei::agentrl::{CerseiRunner, Orchestrator, OrchestratorConfig, Solved, ToolsFactory};
+use bricks::agentrl::{CerseiRunner, Orchestrator, OrchestratorConfig, Solved, ToolsFactory};
+use bricks::tools::{Tool, file_read::FileReadTool};
+use std::sync::Arc;
 
-// GeneralAgent gets ONLY read access → guaranteed first-pass failure.
 let readonly: ToolsFactory = Arc::new(|| {
-    vec![Box::new(cersei::tools::file_read::FileReadTool) as Box<dyn Tool>]
+    vec![Box::new(FileReadTool) as Box<dyn Tool>]
 });
 
 let runner = Arc::new(
@@ -78,58 +82,56 @@ let runner = Arc::new(
         .with_general_tools(readonly),
 );
 
-let orchestrator = Orchestrator::new(runner, registry.clone())
-    .with_config(OrchestratorConfig {
-        max_rl_rounds: 1,
-        num_proposals: 2,
-        registry_search_k: 5,
-        session_id: "recovery".into(),
-    });
+let orchestrator = Orchestrator::new(runner, registry.clone()).with_config(OrchestratorConfig {
+    max_rl_rounds: 1,
+    num_proposals: 2,
+    session_id: "recovery".into(),
+    ..Default::default()
+});
 
 let outcome = orchestrator.solve(task).await?;
-assert!(matches!(outcome.how, Some(Solved::ByNewTool(_))));
+if let Some(Solved::ByNewTool(id)) = &outcome.how {
+    println!("registered tool {id}");
+}
 for e in registry.all() {
-    println!("registered: {} ({})", e.name, e.tool_id);
+    println!("registry: {} ({})", e.name, e.tool_id);
 }
 ```
 
-<Callout type="info">
-This is the same shape as the live end-to-end test in `crates/cersei-agentrl/tests/live_agentrl.rs`, which takes its model from `BRICKS_LIVE_MODEL` instead of a hard-coded name. Run it with:
+To run the same recipe against a real model as a test, the crate ships `crates/bricks-agentrl/tests/live_agentrl.rs`. It is ignored by default and needs a model:
 
 ```bash
-set -a; . ./.env; set +a
 BRICKS_LIVE_MODEL=provider_id/model_id \
-  cargo test -p cersei-agentrl --test live_agentrl -- --ignored --nocapture
+  cargo test -p bricks-agentrl --test live_agentrl -- --ignored --nocapture
 ```
 
-`BRICKS_LIVE_CONFIG` selects a providers file other than `~/.bricks/providers.toml`.
-</Callout>
+`BRICKS_LIVE_CONFIG` names a providers file other than `~/.bricks/providers.toml`. The test pays for the model calls it makes.
 
-## 3. The cache hit (self-improvement)
+## 3. The cache hit
 
-Once a tool is registered, a similar task is solved by **recall** — `registry.search` surfaces the tool, the GeneralAgent uses it, and the planner never runs.
+After a tool is registered, a similar task can be solved by recalling it. `registry.search` surfaces the tool, and the general agent uses it.
 
 ```rust
 let again = orchestrator.solve("fix the parser build error").await?;
 match again.how {
-    Some(Solved::ByCachedTool(id)) => println!("cache hit → {id} (no planner, no sandboxes)"),
+    Some(Solved::ByCachedTool(id)) => println!("solved with registered tool {id}"),
     other => println!("path: {other:?}"),
 }
 ```
 
-Wire `with_memory` so the problem statement is also written to the agent's memory:
+Pass a memory to record each new tool as a recall hint:
 
 ```rust
-let orchestrator = Orchestrator::new(runner, registry).with_memory(memory);
+let orchestrator = Orchestrator::new(runner, registry).with_memory(memory); // Arc<dyn Memory>
 ```
 
 ## 4. A custom verifier
 
-Anything that decides "did it work?" can be a `Verifier` — run a test suite, start a server and curl it, diff output.
+Any type that implements `Verifier` can decide success: run a test suite, start a server and call it, compare output.
 
 ```rust
-use cersei::agentrl::{VerifyResult, Verifier};
 use async_trait::async_trait;
+use bricks::agentrl::{VerifyResult, Verifier};
 use std::path::Path;
 
 struct CargoTestVerifier;
@@ -137,9 +139,12 @@ struct CargoTestVerifier;
 #[async_trait]
 impl Verifier for CargoTestVerifier {
     async fn verify(&self, workdir: &Path) -> VerifyResult {
-        let out = tokio::process::Command::new("cargo")
-            .arg("test").current_dir(workdir).output().await;
-        match out {
+        match tokio::process::Command::new("cargo")
+            .arg("test")
+            .current_dir(workdir)
+            .output()
+            .await
+        {
             Ok(o) => VerifyResult {
                 passed: o.status.success(),
                 detail: String::from_utf8_lossy(&o.stderr).chars().take(800).collect(),
@@ -150,58 +155,77 @@ impl Verifier for CargoTestVerifier {
 }
 ```
 
-(`CommandVerifier::new("cargo test")` does exactly this — implement the trait when you need richer logic.)
+`CommandVerifier::new("cargo test")` does the same through `/bin/sh`. Write your own when you need more than an exit status.
 
 ## 5. A custom runner
 
-The loop is generic over `AgentRlRunner`. Implement it to plug in your own agent stack, sandbox backend, or proposal strategy.
+The loop is generic over `AgentRlRunner`. A custom runner can use its own agents, its own proposal execution, and its own promotion.
 
 ```rust
-use cersei::agentrl::{AgentRlRunner, GeneralResult, Proposal, ProposalOutcome, RegistryEntry, FailureTrace};
 use async_trait::async_trait;
+use bricks::agentrl::{AgentRlRunner, FailureTrace, GeneralResult, Proposal, ProposalOutcome, RegistryEntry};
 
-struct MyRunner { /* providers, sandbox runtime, ... */ }
+struct MyRunner { /* providers, sandbox runtime, … */ }
 
 #[async_trait]
 impl AgentRlRunner for MyRunner {
-    async fn run_general(&self, task: &str, available: &[RegistryEntry]) -> GeneralResult { /* ... */ }
-    async fn plan(&self, trace: &FailureTrace, n: usize) -> Vec<Proposal> { /* ... */ }
-    async fn run_proposal(&self, p: &Proposal) -> ProposalOutcome { /* ... */ }
-    async fn promote(&self, winner: &ProposalOutcome) { /* copy/restore the winner */ }
+    async fn run_general(&self, task: &str, available: &[RegistryEntry]) -> GeneralResult { /* … */ todo!() }
+    async fn plan(&self, trace: &FailureTrace, n: usize) -> Vec<Proposal> { /* … */ todo!() }
+    async fn run_proposal(&self, p: &Proposal) -> ProposalOutcome { /* … */ todo!() }
+    async fn promote(&self, winner: &ProposalOutcome) { /* copy or restore the winner */ }
 }
 ```
 
-<Callout type="info">
-Drive the orchestrator with a mock `AgentRlRunner` in tests to verify your loop policy (register-then-reuse, round bounds) with zero network — see `crates/cersei-agentrl/tests/rl_loop.rs`.
-</Callout>
+The `todo!()` placeholders are for you to replace. Test the loop policy (registration, reuse, round limits) with a mock runner, as `crates/bricks-agentrl/tests/rl_loop.rs` does: it needs no network.
 
-## 6. Run proposals in real cersei-vms sandboxes
+## 6. Run proposals in sandboxes
 
-`CerseiRunner` isolates proposals in temp directories by default. For container isolation, run proposals through [`cersei-vms`](/docs/vms-overview): allocate a sandbox per proposal, inject its handle into the agent's `ToolContext.extensions` so `BashTool` transparently routes through it, then `snapshot()` the winner and `restore()` it as the promoted state. Implement this inside a custom `run_proposal`/`promote`.
+`CerseiRunner` runs each proposal in a copy of the working directory. For container isolation, write a runner whose `run_proposal` creates a sandbox, and whose `promote` copies the result out. The sandbox pieces are in [`bricks-vms`](/docs/vms-overview).
 
 ```rust
-let runtime = cersei::vms::DockerRuntime::new()?;     // or LocalProcessRuntime
-let sb = runtime.create(SandboxOpts::image("cersei/sandbox-base:latest")).await?;
-// inject Arc<dyn Sandbox> into the proposal agent's extensions, run, verify,
-// then: let snap = sb.snapshot().await?;  (promote via runtime.restore)
+use bricks::vms::prelude::*;
+use std::sync::Arc;
+
+let runtime = DockerRuntime::new()?;                     // needs a running Docker daemon
+let sb: Arc<dyn Sandbox> = runtime
+    .create(SandboxOpts::image("cersei/sandbox-base:latest"))
+    .await?;
+
+// Inside run_proposal: insert `sb` into the proposal agent's extensions, so its Bash
+// calls run in the container, then verify with the same Verifier as the general run.
+// After a pass, the container's state can be captured with sb.snapshot().await?.
 ```
+
+<Callout type="info">
+This is a sketch of the wiring, not a finished runner. The sandbox is not created for the proposal by `CerseiRunner`, and nothing in the repository connects the two.
+</Callout>
 
 ## 7. Author a tool from an AgentTemplate program
 
-Let a model write a short [AgentTemplate](/docs/agentrl-template) program, run it through `RunAgentTemplate`, and (with the registry wired) register it for reuse.
+A model writes a short [AgentTemplate](/docs/agentrl-template) program, and the `RunAgentTemplate` tool runs it. Once the program works, it can be registered; registration by the program needs the registry wired into the dispatch, which the default setup does not do.
 
 ```rust
-use cersei::agentlang::{AGENTLANG_SPEC, RunAgentTemplateTool};
+use bricks::agentlang::{AGENTLANG_SPEC, DispatchHandle, RunAgentTemplateTool, VecToolDispatch};
+use bricks::prelude::*;
+use bricks::tools::Extensions;
+use std::sync::Arc;
 
-let model = ProviderRegistry::load(None)?.resolve("my_provider/<model_id>")?;
+let dispatch: Arc<dyn bricks::agentlang::ToolDispatch> =
+    Arc::new(VecToolDispatch::from_boxed(bricks::tools::coding()));
+let ext = Extensions::default();
+ext.insert(DispatchHandle(dispatch));
 
 let agent = Agent::builder()
-    .provider_boxed(model.build_provider()?.into_boxed())
+    .provider(bricks::provider_from_config(None, "my-provider/my-model")?)
     .tool(RunAgentTemplateTool)
-    .append_system_prompt(AGENTLANG_SPEC)  // teach the model the DSL
-    .extensions(ext)                       // DispatchHandle (+ Mailbox/KvStore)
-    .run_with("Write a template that reads config.json and posts a summary to the 'ops' agent.")
+    .append_system_prompt(AGENTLANG_SPEC)  // teach the model the language
+    .extensions(ext)                       // carries DispatchHandle
+    .build()?;
+
+let output = agent
+    .run("Write a template that reads config.json and reports its keys.")
     .await?;
+println!("{}", output.text());
 ```
 
 <Cards>
@@ -212,6 +236,6 @@ let agent = Agent::builder()
     Full type and trait reference.
   </Card>
   <Card title="AgentTemplate" href="/docs/agentrl-template">
-    The programmable DSL.
+    The programmable language.
   </Card>
 </Cards>

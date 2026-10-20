@@ -212,7 +212,7 @@ fi
 if $FULL; then
     echo ""
     echo -e "${CYAN}[5] Tool I/O Dispatch (SDK-level)${RESET}"
-    echo -e "${DIM}    In-process tool execution via Cersei SDK${RESET}"
+    echo -e "${DIM}    In-process tool execution via Bricks SDK${RESET}"
     echo ""
 
     cd "$SCRIPT_DIR" && cargo run --example benchmark_io --release 2>&1 | grep -E "^\s+(Read|Write|Edit|Glob|Grep|Bash)\s+avg="

@@ -1,5 +1,5 @@
 ---
-title: Tools (cersei-tools)
+title: Tools (bricks-tools)
 description: Tool trait, 39 built-in tools, permission system, bash safety analysis, Agent Skills.
 ---
 
@@ -7,7 +7,7 @@ import { Callout } from 'fumadocs-ui/components/callout';
 import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
 import { TypeTable } from 'fumadocs-ui/components/type-table';
 
-# cersei-tools
+# bricks-tools
 
 Tool execution system with 39 built-in tools, a granular permission model, a bash command safety analysis (SDK primitive), and Agent Skills (`SKILL.md`) served by `bricks-skills`.
 
@@ -46,9 +46,9 @@ pub trait Tool: Send + Sync {
 ### ToolResult
 
 ```rust
-ToolResult::success("File contents here")
-ToolResult::error("Permission denied")
-ToolResult::success("data").with_metadata(json!({"size": 1024}))
+ToolResult::success("File contents here");
+ToolResult::error("Permission denied");
+ToolResult::success("data").with_metadata(json!({"size": 1024}));
 ```
 
 | Method | Description |
@@ -103,15 +103,15 @@ Convenience functions that return pre-configured tool collections:
 
 | Function | Count | Tools Included |
 |----------|-------|----------------|
-| `cersei::tools::all()` | 38 | Everything below, plus `AskUserQuestion`, `SyntheticOutput`, `Config` and `ToolSearch` |
-| `cersei::tools::coding()` | 17 | filesystem + shell + web |
-| `cersei::tools::filesystem()` | 9 | Read, Write, Edit, ApplyPatch, Glob, Grep, CodeSearch, CodeScout, NotebookEdit |
-| `cersei::tools::shell()` | 6 | Bash, BashTaskStatus, BashTaskOutput, BashTaskStop, Job, PowerShell |
-| `cersei::tools::web()` | 2 | WebFetch, WebSearch |
-| `cersei::tools::planning()` | 3 | EnterPlanMode, ExitPlanMode, TodoWrite |
-| `cersei::tools::scheduling()` | 5 | CronCreate, CronList, CronDelete, Sleep, RemoteTrigger |
-| `cersei::tools::orchestration()` | 9 | SendMessage, Tasks (6), Worktree (2) |
-| `cersei::tools::none()` | 0 | Empty (for chat-only agents) |
+| `bricks::tools::all()` | 38 | Everything below, plus `AskUserQuestion`, `SyntheticOutput`, `Config` and `ToolSearch` |
+| `bricks::tools::coding()` | 17 | filesystem + shell + web |
+| `bricks::tools::filesystem()` | 9 | Read, Write, Edit, ApplyPatch, Glob, Grep, CodeSearch, CodeScout, NotebookEdit |
+| `bricks::tools::shell()` | 6 | Bash, BashTaskStatus, BashTaskOutput, BashTaskStop, Job, PowerShell |
+| `bricks::tools::web()` | 2 | WebFetch, WebSearch |
+| `bricks::tools::planning()` | 3 | EnterPlanMode, ExitPlanMode, TodoWrite |
+| `bricks::tools::scheduling()` | 5 | CronCreate, CronList, CronDelete, Sleep, RemoteTrigger |
+| `bricks::tools::orchestration()` | 9 | SendMessage, Tasks (6), Worktree (2) |
+| `bricks::tools::none()` | 0 | Empty (for chat-only agents) |
 
 ### Tool Catalog
 
@@ -190,7 +190,7 @@ The permission level is the one each tool declares in code (`permission_level()`
 The fastest way to create a tool. The macro generates `Tool` impl, JSON schema, and input deserialization from your `ToolExecute` implementation.
 
 ```rust
-use cersei::prelude::*;
+use bricks::prelude::*;
 use schemars::JsonSchema;   // the prelude exports the crates, not the derive names
 use serde::Deserialize;
 
@@ -220,6 +220,9 @@ struct SearchInput {
 }
 
 fn default_limit() -> usize { 10 }
+
+// Stub for the example: your search goes here.
+fn do_search(_query: &str, _limit: usize) -> Vec<String> { Vec::new() }
 ```
 
 **Derive attributes:**
@@ -232,12 +235,14 @@ fn default_limit() -> usize { 10 }
 
 The `Input` type must derive `Deserialize` (serde) and `JsonSchema` (schemars). Field doc comments become parameter descriptions in the schema. An input field the tool does not declare is an error, with a message that suggests the correct name.
 
+The expansion names the types it uses by their full paths under `bricks_tools` (`bricks_tools::PermissionLevel`, `bricks_tools::ToolCategory`, …). A crate that uses `#[derive(Tool)]` therefore declares `bricks-tools` as a dependency next to `bricks`, as it had to declare `cersei-tools` before the rename. See [Migration](/docs/migration).
+
 ### Manual Implementation
 
 For full control, implement `Tool` directly:
 
 ```rust
-use cersei::prelude::*;
+use bricks::prelude::*;
 use serde_json::Value;
 
 struct ManualTool;
@@ -275,8 +280,8 @@ impl Tool for ManualTool {
 
 ```rust
 let agent = Agent::builder()
-    .provider(cersei::provider_from_config(None, "my-provider/my-model")?)
-    .tools(cersei::tools::coding())  // 18 built-in tools
+    .provider(bricks::provider_from_config(None, "my-provider/my-model")?)
+    .tools(bricks::tools::coding())  // 18 built-in tools
     .tool(SearchTool)                // + your custom tool
     .tool(ManualTool)                // + another
     .build()?;
@@ -312,7 +317,7 @@ Every tool declares a permission level. The agent's `PermissionPolicy` checks th
     },
     Forbidden: {
       type: 'PermissionLevel::Forbidden',
-      description: 'The SDK runner passes it to the policy like any other level (crates/cersei-agent/src/runner.rs:1377). The bricks CLI denies it (crates/cersei-agent/src/control/settings.rs:83). A policy you write must deny it itself.',
+      description: 'The SDK runner passes it to the policy like any other level (crates/bricks-agent/src/runner.rs:1377). The bricks CLI denies it (crates/bricks-agent/src/control/settings.rs:83). A policy you write must deny it itself.',
     },
   }}
 />
@@ -324,10 +329,11 @@ Every tool declares a permission level. The agent's `PermissionPolicy` checks th
 | `AllowAll` | Permit everything. For trusted environments and testing. |
 | `AllowReadOnly` | Only `None` and `ReadOnly` tools. Safe for analysis tasks. |
 | `DenyAll` | Block everything. For pure chat agents. |
-| `RuleBased { rules }` | Ordered rules matching a tool name (`"all"` matches any tool). The first matching rule decides; when no rule matches, the call is allowed. `path_pattern` is not evaluated by `check` (`crates/cersei-tools/src/permissions.rs:76-111`). |
+| `RuleBased { rules }` | Ordered rules matching a tool name (`"all"` matches any tool). The first matching rule decides; when no rule matches, the call is allowed. `path_pattern` is not evaluated by `check` (`crates/bricks-tools/src/permissions.rs:76-111`). |
 | `InteractivePolicy::new(handler)` | Defer to a callback function for decisions. |
 
 ```rust
+use bricks_tools::permissions::{PermissionAction, PermissionRule};
 // Rule-based example
 let rules = vec![
     PermissionRule { tool_name: Some("Bash".into()), path_pattern: None, action: PermissionAction::Deny },
@@ -346,14 +352,14 @@ Policies implement `PermissionPolicy::check`, which returns a `PermissionDecisio
 classifies the command before it runs, and the approval does not depend on
 the command text.
 
-`cersei_tools::tool_primitives::bash_safety::analyze_command` is a separate
+`bricks_tools::tool_primitives::bash_safety::analyze_command` is a separate
 primitive: it parses a command with tree-sitter and reports a risk level
 (`BashRiskLevel`: `Safe`, `Moderate`, `High`, `Forbidden`), the commands seen and the paths
 written. A caller may use it, for example to show a warning; it is not wired
 into the tool's permissions. See
 [Code intelligence](/docs/code-intelligence#bash-command-safety-analysis).
 
-The heuristic `cersei_tools::bash_classifier` module (`classify_bash_command`,
+The heuristic `bricks_tools::bash_classifier` module (`classify_bash_command`,
 its `BashRiskLevel` with `Low`/`Medium`/`Critical`) was removed in 0.5.0;
 use `bash_safety` instead.
 
@@ -361,17 +367,17 @@ use `bash_safety` instead.
 
 ## Skills
 
-Skills are [Agent Skills](https://agentskills.io/specification) (`SKILL.md`), served by the `bricks-skills` crate (`cersei::skills`). Give an agent a skills service and the `Skill` tool is registered, the catalog goes into its system prompt, and its activations are its own:
+Skills are [Agent Skills](https://agentskills.io/specification) (`SKILL.md`), served by the `bricks-skills` crate (`bricks::skills`). Give an agent a skills service and the `Skill` tool is registered, the catalog goes into its system prompt, and its activations are its own:
 
 ```rust
 use std::sync::Arc;
-use cersei::skills::{SkillAccess, SkillsService};
+use bricks::skills::{SkillAccess, SkillsService};
 
 let service = Arc::new(SkillsService::standard(project_dir, home_dir));   // project: &Path, home: Option<&Path>
 let access = SkillAccess::new(service);
 let agent = Agent::builder()
     .provider(provider)
-    .tools(cersei::tools::coding())
+    .tools(bricks::tools::coding())
     .skills(access)
     .build()?;
 ```
@@ -389,4 +395,4 @@ Sources by priority: `<project>/.agents/skills`, `<project>/.claude/skills`, `~/
 // Fourth call: echo $FOO → bar (variables persist)
 ```
 
-Closing the agent (`agent.close().await`, async) or dropping it stops the session's processes. Dropping does it synchronously and forced (`crates/cersei-agent/src/lib.rs:515-518`).
+Closing the agent (`agent.close().await`, async) or dropping it stops the session's processes. Dropping does it synchronously and forced (`crates/bricks-agent/src/lib.rs:515-518`).

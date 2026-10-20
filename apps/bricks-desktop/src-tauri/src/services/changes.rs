@@ -277,6 +277,7 @@ mod tests {
             at,
             files: vec![ChangeFile {
                 path: "src/main.rs".into(),
+                absolute: None,
                 kind: "modified".into(),
                 added: 2,
                 removed: 1,

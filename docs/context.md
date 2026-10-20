@@ -26,7 +26,7 @@ occupation of the request being sent.
 | `mixed` | A measured or counted base, plus a local estimate of what was added since. `measured_tokens` and `estimated_tokens` give the two parts. |
 | `estimated` | Local estimate only (no usage yet, or the measurement was invalidated). Never shown as a measurement, never zero for a non-empty context. |
 
-The local estimate (`cersei_types::tokens`, "local character-class heuristic
+The local estimate (`bricks_types::tokens`, "local character-class heuristic
 (v1)") weighs ASCII letters, punctuation, whitespace and non-ASCII characters
 separately and carries an upper bound (+25 %). After a measurement it is
 calibrated per model on the request just measured (ratio bounded to 0.5–2).

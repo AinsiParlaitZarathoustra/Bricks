@@ -4,6 +4,7 @@
 	import PanelRightIcon from '@lucide/svelte/icons/panel-right';
 	import PanelBottomIcon from '@lucide/svelte/icons/panel-bottom';
 	import GitCompareIcon from '@lucide/svelte/icons/git-compare';
+	import BookOpenIcon from '@lucide/svelte/icons/book-open';
 	import PanelToggle from './PanelToggle.svelte';
 	import { cn } from '$lib/utils.js';
 
@@ -22,6 +23,9 @@
 		/** Visibility of the changes view (independent of the right panel). Toggle shown only when onToggleChanges is provided. */
 		changesPressed?: boolean;
 		onToggleChanges?: () => void;
+		/** Visibility of the reader view of the right column. Toggle shown only when onToggleReader is provided. */
+		readerPressed?: boolean;
+		onToggleReader?: () => void;
 		class?: string;
 	}
 
@@ -36,10 +40,12 @@
 		onToggleTerminal,
 		changesPressed = false,
 		onToggleChanges,
+		readerPressed = false,
+		onToggleReader,
 		class: className
 	}: Props = $props();
 
-	const hasRightToggles = $derived(Boolean(onToggleRight || onToggleTerminal || onToggleChanges));
+	const hasRightToggles = $derived(Boolean(onToggleRight || onToggleTerminal || onToggleChanges || onToggleReader));
 </script>
 
 <!--
@@ -108,6 +114,16 @@
 						pressed={changesPressed}
 						icon={GitCompareIcon}
 						onclick={onToggleChanges}
+					/>
+				{/if}
+				{#if onToggleReader}
+					<PanelToggle
+						ariaLabel="Lecteur"
+						tooltipShow="Afficher le lecteur"
+						tooltipHide="Masquer le lecteur"
+						pressed={readerPressed}
+						icon={BookOpenIcon}
+						onclick={onToggleReader}
 					/>
 				{/if}
 			</div>

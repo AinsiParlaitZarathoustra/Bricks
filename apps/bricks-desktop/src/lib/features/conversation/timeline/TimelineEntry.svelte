@@ -7,8 +7,12 @@
   import EditRow from './EditRow.svelte'
   import NoticeLine from './NoticeLine.svelte'
   import RunEndCard from './RunEndCard.svelte'
+  import ResponseCopy from './ResponseCopy.svelte'
 
   let { item, conversation }: { item: TimelineItem; conversation: Conversation } = $props()
+
+  /** The response this item ends, when it is complete and has text: its copy action follows the item. */
+  const response = $derived(conversation.responseByAnchor(item.id))
 </script>
 
 {#if item.kind === 'user'}
@@ -25,4 +29,8 @@
   <NoticeLine {item} />
 {:else if item.kind === 'run_end'}
   <RunEndCard {item} {conversation} />
+{/if}
+
+{#if response && response.complete && response.copyText.trim()}
+  <ResponseCopy text={response.copyText} />
 {/if}

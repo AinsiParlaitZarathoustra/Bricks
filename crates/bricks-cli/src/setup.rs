@@ -10,8 +10,8 @@
 //! folder, not the one Bricks was started in.
 
 use crate::args::Global;
-use cersei_agent::control::{EngineConfig, OpenOptions, SessionChoice};
-use cersei_provider::ProviderRegistry;
+use bricks_agent::control::{EngineConfig, OpenOptions, SessionChoice};
+use bricks_provider::ProviderRegistry;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -189,12 +189,12 @@ mod tests {
 #[cfg(test)]
 mod prompt_tests {
     use super::*;
+    use bricks_agent::BricksConfig;
+    use bricks_agent::control::scripted::{Reply, Script, ScriptedCatalog};
+    use bricks_agent::control::{Command, Controller, Event, OpenOptions, Prompt, SessionChoice};
     use bricks_config::Projects;
-    use cersei_agent::BricksConfig;
-    use cersei_agent::control::scripted::{Reply, Script, ScriptedCatalog};
-    use cersei_agent::control::{Command, Controller, Event, OpenOptions, Prompt, SessionChoice};
 
-    const REFERENCE: &str = include_str!("../../cersei-agent/tests/fixtures/bricks_foundation.txt");
+    const REFERENCE: &str = include_str!("../../bricks-agent/tests/fixtures/bricks_foundation.txt");
 
     fn registry() -> Arc<ProviderRegistry> {
         Arc::new(

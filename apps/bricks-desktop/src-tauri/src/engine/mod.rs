@@ -11,18 +11,19 @@ pub mod live;
 pub mod sessions;
 
 use crate::contract::{AppInfo, IpcErrorCode, IpcResult, ProviderInfo, ToolApproval};
-use crate::services::error;
 use crate::services::attachments;
 use crate::services::changes::ChangeJournal;
 use crate::services::conversations::path_text;
+use crate::services::error;
 use crate::services::paths::check_folder;
 use crate::services::prefs::PrefsStore;
 use crate::services::projects::ProjectStore;
 use crate::services::run_labels::RunLabelStore;
+use crate::services::run_records::RunRecordStore;
 use crate::services::skills::SkillsCatalogStore;
-use cersei_agent::control::{ApprovalMode, ApprovalOverride, ModelCatalog};
-use cersei_provider::ProviderRegistry;
-use cersei_provider::config::{AuthMode, ProviderConfig};
+use bricks_agent::control::{ApprovalMode, ApprovalOverride, ModelCatalog};
+use bricks_provider::ProviderRegistry;
+use bricks_provider::config::{AuthMode, ProviderConfig};
 use catalog::DesktopCatalog;
 use hub::Hub;
 use live::OpenSession;
@@ -57,6 +58,8 @@ pub struct AppState {
     pub(crate) skills: Arc<SkillsCatalogStore>,
     /// Presentation labels of runs started from typed commands.
     pub(crate) run_labels: Arc<RunLabelStore>,
+    /// What the desktop keeps of each finished run.
+    pub(crate) run_records: Arc<RunRecordStore>,
     pub(crate) hub: Arc<Hub>,
     /// The open sessions, by session id.
     sessions: Mutex<HashMap<String, Arc<OpenSession>>>,
@@ -105,6 +108,7 @@ impl AppState {
             prefs: Arc::new(prefs),
             skills: Arc::new(SkillsCatalogStore::new(dirs::home_dir())),
             run_labels: Arc::new(RunLabelStore::at(desktop.join("run-labels"))),
+            run_records: Arc::new(RunRecordStore::at(desktop.join("run-records"))),
             projects: Arc::new(projects),
             hub: Arc::new(Hub::new(journal)),
             sessions: Mutex::new(HashMap::new()),
@@ -144,7 +148,7 @@ impl AppState {
         }
     }
 
-    /// `cersei_agent::control::ModelChoice[]` from the configured catalog.
+    /// `bricks_agent::control::ModelChoice[]` from the configured catalog.
     pub fn models(&self) -> IpcResult<serde_json::Value> {
         self.registry()?;
         let models = ModelCatalog::models(self.catalog.as_ref());
@@ -190,7 +194,7 @@ impl AppState {
         self.projects
             .list()
             .into_iter()
-            .find(|p| cersei_agent::control::same_workspace(Path::new(&p.path), dir))
+            .find(|p| bricks_agent::control::same_workspace(Path::new(&p.path), dir))
             .map(|p| p.id)
     }
 
@@ -208,7 +212,7 @@ impl AppState {
 /// the default `~/.bricks/providers.toml` (the same choice as the registry).
 pub fn providers_file() -> PathBuf {
     bricks_config::providers_file_from_env()
-        .or_else(cersei_provider::config::default_config_path)
+        .or_else(bricks_provider::config::default_config_path)
         .unwrap_or_else(|| bricks_config::bricks_home().join("providers.toml"))
 }
 

@@ -1,83 +1,81 @@
 ---
 title: Architecture
-description: How Cersei is structured — design principles, crate organization, data flow.
+description: "How Bricks ADK is organised: the engine, the frontends that present it, and the contract they share."
 ---
 
 # Architecture
 
-Bricks is a workspace of crates inherited from Cersei (`cersei-*`) plus its own (`bricks-*`): the `bricks` CLI and the desktop application (`apps/bricks-desktop`) sit on top of the engine. Every component is modular and replaceable via traits. The full list is in the [crate map](/docs/crate-map).
+Bricks has two layers. The **engine** runs an agent: the loop, the providers,
+the tools, the approvals, the context, the sessions. The **frontends** present
+the engine: the `bricks` command, Bricks Desktop, and an application of your
+own built with the library. The frontends keep no conversation store of their
+own. The session store of the engine is the authority on the conversation, and
+a frontend reads it again when a session is resumed.
 
-## Design Principles
-
-1. **Trait-based extensibility** — Provider, Tool, Memory, Permission, Hook are all traits. Swap any implementation.
-2. **Zero-cost abstractions** — In-process tool dispatch at 0.02-0.09ms. No IPC, no subprocess spawning.
-3. **Streaming-first** — All async operations emit events. Never blocks waiting for tool results.
-4. **POSIX-native I/O** — Direct syscalls where possible. File ops use `std::fs`, shell uses `nix`.
-5. **Compatible** — Session format (JSONL), memory format (MEMORY.md), are Claude Code compatible; skills follow the Agent Skills standard (`SKILL.md` in `.agents/skills` or `.claude/skills`; Claude-specific directives are not implemented — see `docs/skills.md`).
-
-## Crate Map
-
-```
-bricks-cli                The `bricks` binary: arguments, configuration, headless / JSONL
-apps/bricks-desktop       Desktop application (Tauri): the interactive interface
-cersei                    Facade — re-exports all sub-crates via prelude
-  cersei-types            Messages, errors, stream events (no dependencies)
-  cersei-provider         Provider trait, registry from providers.toml, 3 protocols
-  cersei-tools            34 tools, permissions, bash analysis, the Skill tool
-  bricks-skills           Agent Skills: sources, trust, activation
-  cersei-tools-derive     #[derive(Tool)] proc macro
-  cersei-agent            Agent builder, agentic loop, compact, events
-  cersei-memory           Memory trait, memdir, CLAUDE.md, graph, sessions
-  cersei-hooks            Hook/middleware trait + shell hooks
-  cersei-mcp              MCP client (JSON-RPC 2.0, stdio)
-  cersei-web, cersei-compression, bricks-semantic, cersei-lsp, …
+```text
+frontends    bricks-cli (the `bricks` command)      apps/bricks-desktop (Bricks Desktop)
+             your application, through the `bricks` facade
+                      │  commands ↓        ↑ events      (bricks_agent::control)
+engine       bricks-agent: Controller → Agent (loop, approvals, context, sessions)
+                      │
+services     bricks-provider · bricks-tools · bricks-memory · bricks-compression
+             bricks-semantic · bricks-web · bricks-mcp · bricks-skills · bricks-hooks
+                      │
+foundation   bricks-types (messages, errors, stream events, the shared HTTP client)
 ```
 
-## Dependency Flow
+The engine never depends on a frontend. `bricks-config` assembles the engine
+for the frontends: the Bricks home folder, the provider registry and the
+project's `bricks.toml`. A library user builds an `Agent` with the builder and
+calls the loaders it needs, such as `provider_from_config`.
 
-```
-cersei-types (leaf — no internal deps)
-    ^
-cersei-provider (depends on types)
-    ^
-cersei-tools (depends on types, mcp)
-    ^
-cersei-agent (depends on types, provider, tools, memory, hooks, mcp)
-    ^
-cersei (facade — depends on everything)
+## Principles
 
-bricks-cli (depends on cersei-agent, cersei-provider)
-```
+1. **Traits at the seams.** A provider, a tool, a memory backend, a permission
+   policy and a hook are traits. Each one can be replaced by your own
+   implementation.
+2. **Configuration for models, code for behaviour.** Models, limits, prices and
+   reasoning profiles come from `providers.toml`. Project settings come from
+   `bricks.toml`. Nothing is built in: a model is never chosen silently, and no
+   model catalogue is compiled into the engine.
+3. **One contract for every frontend.** The `bricks_agent::control` module takes
+   typed commands and emits versioned events. The `bricks` command and Bricks
+   Desktop use the same contract, so both present the same events and accept the same commands.
+   The JSONL schema is documented in `docs/cli.md` in the repository.
+4. **Approvals belong to the engine.** The approval policy in `[permissions]` is
+   applied by the engine for every frontend. A frontend only shows the request
+   and asks the person.
+5. **Few subprocesses.** File, search and web tools run in the process. A
+   subprocess starts for a command the agent runs (`Bash`, `PowerShell`, a
+   background job), and for a language server when one is configured.
 
-`cersei-memory`, `cersei-hooks`, and `cersei-mcp` are siblings — they depend on `cersei-types` but not on each other.
+## What the ADK provides, and what a session is given
 
-## Data Flow
+The ADK has a built-in tool set, `bricks_tools::all()`, with file, shell,
+web, planning, scheduling and orchestration tools. The `bricks` command and
+Bricks Desktop give a session a smaller set: the coding tools, the skill tool
+when skills are enabled, and the sub-agent tools when `[agents]` is enabled.
+The list is in the *Tools of a session* section of `docs/cli.md` in the
+repository. An agent you build with the library chooses its own tools.
 
-```
-User Input
-    |
-    v
-Agent::run_stream(prompt)
-    |
-    +---> System prompt assembly (cersei-agent/system_prompt.rs)
-    |         +---> CLAUDE.md hierarchy (cersei-memory/claudemd.rs)
-    |         +---> MEMORY.md index (cersei-memory/memdir.rs)
-    |
-    +---> Provider::complete(request) (cersei-provider)
-    |         +---> SSE stream parsing
-    |         +---> StreamEvent emission
-    |
-    +---> Tool dispatch (cersei-tools)
-    |         +---> Permission check
-    |         +---> Tool::execute()
-    |         +---> Hook pipeline (pre/post)
-    |
-    +---> Context management (cersei-agent/compact.rs)
-    |         +---> Token counting
-    |         +---> Auto-compact at 90%
-    |         +---> Tool result budgeting
-    |
-    +---> Event channel (broadcast or callback)
-              +---> AgentEvent (26 variants)
-              +---> Multiple consumers
-```
+## Sub-agents
+
+When `[agents] enabled` is true, which is the default in a session, the agent
+can start sub-agents with the native tools `Agent`, `Agents`, `AgentControl`
+and `AgentProfiles`.
+
+* A sub-agent runs its own loop with a fresh context. It gets its parent's
+  permissions and at most its parent's tools.
+* `Agents` runs several independent tasks at the same time. Each parallel
+  writer works in its own git worktree, and its changes come back as a
+  ChangeSet that is inspected and applied separately.
+* A sub-agent is cancelled with the run that started it.
+
+Integrators who spawn sub-agents themselves can use `bricks_agent::agent_tool::AgentTool`,
+which is public.
+
+## Where to go next
+
+- [Crate map](/docs/crate-map): every crate and its role.
+- [Data flow](/docs/data-flow): the agentic loop, the events, and the sessions.
+- [Installation](/docs/installation) and [Quick start](/docs/quick-start).

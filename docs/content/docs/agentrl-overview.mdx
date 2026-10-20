@@ -1,6 +1,6 @@
 ---
 title: "AgentRL Overview"
-description: AgentRL — a self-evolving orchestration layer for Cersei. Agents that trace their own failures, propose fixes in sandboxes, and register the winners as reusable, programmable tools.
+description: AgentRL — an orchestration loop for Bricks ADK. When an agent fails a verifier, AgentRL plans fixes, tries them in isolated working copies, keeps the one that passes, and registers it as a reusable tool.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -9,102 +9,93 @@ import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
 
 # AgentRL
 
-AgentRL turns Cersei from a *single-shot* coding agent into a **self-evolving** one. Give it a task. If the agent solves it, you're done. If it **fails**, AgentRL traces *why*, asks a planner for directed fixes, runs those fixes as throwaway sub-agents in **isolated sandboxes**, promotes the one that actually passes verification, and **registers it as a reusable tool**. The next time a similar problem shows up, the agent finds that tool and skips straight to the solution.
+AgentRL is the orchestration loop of Bricks ADK for coding tasks that must be verified. You give it a task and a **verifier**, a command or a check that decides whether the work is done. AgentRL first looks for a registered tool that already solves a similar task. Then it runs a general coding agent. If that run fails the verifier, it traces the failure, asks a planner agent for fixes, tries those fixes in isolated working copies, promotes the one that passes, and registers it as a new tool for later tasks.
 
-<Callout type="info">
-**Flagship feature.** AgentRL is the orchestration layer that ties together the rest of Cersei — the agent runtime, the sandbox system (`cersei-vms`), memory, embeddings, and a small programmable language (**AgentTemplate**). It ships as two crates: `cersei-agentrl` (the loop) and `cersei-agentlang` (the DSL).
+<Callout type="warn">
+**AgentRL is opt-in and not used by the `bricks` command-line tool or the desktop app.** It is a library feature, enabled with `features = ["agentrl"]` on the `bricks` facade. Its production runner has no approval step. Read [the safety notes](#safety) before running it on a project.
 </Callout>
 
-## The idea in one loop
+## The loop
 
 ```text
-            ┌─────────────────────────────────────────────────────────┐
-  task ───▶ │  registry.search(task)  ──▶  GeneralAgent (+ cached tools)│
-            └─────────────────────────────────────────────────────────┘
-                                   │
-                    success?  ─────┴───── no ───▶  ExecutionGraph.failure_trace()
-                       │                                   │  (directionality)
-                      yes                                  ▼
-                       │                          PlannerAgent → N proposals
-                       ▼                                   │
-                  ✅ done                    fan out into isolated sandboxes
-                                                           │
-                                          verify each ─── winner ──▶ promote
-                                                           │
-                                          register winner as a reusable Tool
-                                          + record the problem in memory
-                                                           │
-                                                   ✅ done (ByNewTool)
+  task ──▶ registry.search(task) ──▶ general agent (+ matching registered tools)
+                                            │
+                       verifier passes? ────┴──── yes ──▶ solved (Directly / ByCachedTool)
+                                            │
+                                            no
+                                            ▼
+                     ExecutionGraph.failure_trace()  (ordered, secret-scrubbed)
+                                            │
+                                            ▼
+                     planner agent ──▶ up to num_proposals proposals
+                                            │
+                     each proposal runs in its own working copy, then is verified
+                                            │
+                     first passing proposal (in proposal order) ──▶ promote to the workdir
+                                            │
+                     register it as a tool, record the problem in memory ──▶ solved (ByNewTool)
 ```
 
-Every box is a real, swappable component:
+The parts:
 
-- **ExecutionGraph** — a DAG of turns and tool calls, built passively from the agent's event stream by a `Reporter`. On failure it distills a **`FailureTrace`** that tells the planner exactly what to fix.
-- **GeneralAgent / PlannerAgent** — not new types; ordinary [`Agent`](/docs/api-agent)s configured with different prompts and toolsets.
-- **Sandboxes** — proposals run in isolated working directories (or [`cersei-vms`](/docs/vms-overview) sandboxes) so parallel attempts never trample each other.
-- **ToolRegistry** — a local, persisted, searchable **database of agent-built tools**. Lookup-before-build; register-on-win.
-- **Verifier** — an independent check (`cargo test`, a script, anything) that decides "did this actually work?" The agent can't game it.
+- **ExecutionGraph**: a graph of agent runs, turns and tool calls, built from the agent's events by a `GraphReporter`. On failure it yields a `FailureTrace` with the failing tool calls and their excerpts.
+- **General agent and planner**: ordinary `Agent`s with different prompts and tool sets.
+- **Proposal runs**: each proposal runs a coding agent in a temporary copy of the working directory.
+- **ToolRegistry**: a persisted list of solutions, searched by keyword. A solution is a `SolutionSpec` (system prompt, goal template, allowed tools).
+- **Verifier**: decides success for the general agent and for every proposal, with the same check.
 
-## Why it matters
+## What the production runner does
 
-A normal agent re-derives the same fix every time it hits a recurring problem class. AgentRL **remembers solutions as executable tools**, so it gets cheaper and more capable over time:
+`CerseiRunner` is the built-in `AgentRlRunner`. Its behaviour, from the code:
 
-<Cards>
-  <Card title="Self-improving">
-    Solved problems become `DynamicTool`s in a registry. Similar future tasks are solved by recall, not re-derivation — no planner, no sandboxes, no extra LLM spend.
-  </Card>
-  <Card title="Safe by construction">
-    Recovery attempts run in isolated sandboxes. Untrusted, parallel, and disposable — only the verified winner is promoted to your real working directory.
-  </Card>
-  <Card title="Directed recovery">
-    Failures aren't retried blindly. The `ExecutionGraph` extracts a scrubbed, ordered failure trace that gives each proposal concrete directionality.
-  </Card>
-  <Card title="Programmable">
-    Sub-agents can be authored in <a href="/docs/agentrl-template">AgentTemplate</a> — a tiny functional language (`io.read().write()`, `agent.send()`, `agent.tools.register()`) that LLMs emit and the runtime executes safely.
-  </Card>
-</Cards>
+| Step | What happens |
+|---|---|
+| General run | The agent runs **in the working directory itself**, with the coding tools (`bricks::tools::coding()`), `registry_search`, and one `DynamicTool` per registry entry found by the search. Its permission policy allows everything (`AllowAll`). |
+| Verification | The verifier runs in the working directory after the general run. A failure adds a synthetic node to the graph so the planner has something to act on. |
+| Planning | A planner agent returns a JSON list of `{angle, goal}`. If that cannot be parsed, built-in angles are used. |
+| Proposal runs | Each proposal copies the working directory to a temporary directory, runs a coding agent there with the same verifier, and reports whether it passed. |
+| Promotion | The winning copy is copied back over the working directory. |
 
-## Programmable end to end
+<Callout type="info">
+Proposals are isolated by copying, not by a `bricks-vms` sandbox. To run proposals in containers, implement `AgentRlRunner` yourself and use sandboxes there; see the [cookbook](/docs/agentrl-cookbook#5-a-custom-runner).
+</Callout>
 
-AgentRL is built to be driven, not just configured. Two seams make it fully programmable:
+## Safety
 
-1. **The `AgentRlRunner` trait** is the *mechanism* — how a general agent runs, how proposals are generated, how each runs in a sandbox. Use the batteries-included [`CerseiRunner`](/docs/agentrl-api#cerseirunner) (real `Agent` + `Provider`), or implement the trait yourself.
-2. **The AgentTemplate language** lets the model write its *own* tools. Cersei can't easily rewrite its own runtime — but an LLM can write a short template program that the runtime executes on top of the existing tools, then register it for reuse.
+- **The general agent writes to your working directory with no approval step.** `CerseiRunner` uses `AllowAll`. Point it at a copy of the project, or at a directory you are willing to change.
+- **The verifier is your guarantee.** It must check real behaviour and must not depend on files the agent can write. See [the verifier notes](/docs/agentrl-api#verifier).
+- **Secrets are scrubbed** from the failure trace, registry entries and memory hints (API-key shapes and values of secret-looking environment variables). The scrubbing is pattern-based; it does not replace keeping secrets out of the project.
 
-## 60-second example
+## A short example
 
 ```rust
-use cersei::prelude::*;
-use cersei::agentrl::{CerseiRunner, CommandVerifier, Orchestrator, ToolRegistry, Verifier};
+use bricks::agentrl::{CerseiRunner, CommandVerifier, Orchestrator, ToolRegistry, Verifier};
+use bricks::provider::Provider;
+use bricks::ProviderRegistry;
 use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // A persisted, searchable database of agent-built tools.
+    // Registered solutions persist in this directory.
     let registry = ToolRegistry::open(dirs::home_dir().unwrap().join(".cersei/agentrl"))?;
 
-    // An INDEPENDENT verifier — the agent cannot cheat this check.
+    // An independent check: the agent cannot change what this command tests.
     let verifier: Arc<dyn Verifier> =
         Arc::new(CommandVerifier::new("python3 gcd.py 48 36 | grep -qx 12"));
 
-    // The model comes from ~/.bricks/providers.toml as provider_id/model_id
-    // (`my_provider` is an id defined in that file).
-    let model = ProviderRegistry::load(None)?.resolve("my_provider/gemini-3.1-pro-preview")?;
+    // provider_id/model_id, as defined in ~/.bricks/providers.toml.
+    let model = ProviderRegistry::load(None)?.resolve("my_provider/my-model")?;
     let selection = model.selection();
-
-    // A fresh provider per agent (sub-agents get their own client).
     let provider_factory = Arc::new(move || {
         model.build_provider().expect("provider builds").into_boxed() as Box<dyn Provider>
     });
 
-    // The production runner: real agents + provider + sandboxed proposals.
     let runner = Arc::new(
         CerseiRunner::new(provider_factory, "./work", registry.clone(), verifier)
-            .with_model(&selection), // required for non-Anthropic providers
+            .with_model(&selection),
     );
 
-    let orchestrator = Orchestrator::new(runner, registry);
-    let outcome = orchestrator
+    let outcome = Orchestrator::new(runner, registry)
         .solve("Create gcd.py: takes two ints, prints their GCD via the Euclidean algorithm.")
         .await?;
 
@@ -113,32 +104,34 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-<Callout type="warn">
-**Model selection.** `cersei-agent` defaults to an Anthropic model when none is set. For Gemini, OpenAI, or any other provider you **must** call `.with_model(...)` on the runner (or `.model(...)` on the builder), or requests will fail.
+`with_model` sets the model the runner gives to every agent it builds. Pass the same `provider_id/model_id` string the provider was resolved from.
+
+## Outcomes
+
+`Orchestrator::solve` returns `SolveOutcome { solved, how, … }`, where `how` is one of:
+
+| `Solved` | Meaning |
+|---|---|
+| `Directly` | The general agent passed the verifier, with no registered tool used. |
+| `ByCachedTool(id)` | The general agent passed, and it used a registered tool that the search found. |
+| `ByNewTool(id)` | The general agent failed, a proposal passed, and the proposal was registered as tool `id`. |
+
+If no proposal passes within `max_rl_rounds` rounds, `solved` is `false` and `how` is `None`.
+
+<Callout type="info">
+This repository does not keep a recorded result of a live AgentRL run, so no success rate is claimed here. The opt-in live test in `crates/bricks-agentrl/tests/live_agentrl.rs` runs the loop against a model you name; see the [cookbook](/docs/agentrl-cookbook#2-force-the-recovery-loop-and-register-a-tool).
 </Callout>
-
-## What runs when (observed)
-
-From the live end-to-end tests against Gemini:
-
-| Scenario | Path | What happened |
-|---|---|---|
-| Capable agent, solvable task | `Solved::Directly` | GeneralAgent wrote `gcd.py` in one run (recovering from 2 tool errors mid-run). The verifier passed. No planner, no sandboxes. |
-| First attempt fails | `Solved::ByNewTool(id)` | GeneralAgent failed the verifier → trace → planner proposed 2 fixes → both ran in isolated sandboxes → the winner was promoted and **registered as a reusable tool**. |
-| Similar task, second time | `Solved::ByCachedTool(id)` | `registry.search` surfaced the previously-built tool; the agent solved it via recall. The planner never ran. |
 
 ## Install
 
-AgentRL is behind a feature flag (it pulls in the embeddings + sandbox crates):
-
 ```toml
 [dependencies]
-cersei = { version = "0.6", features = ["agentrl"] }
+bricks = { version = "0.6", features = ["agentrl"] }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 ```
 
-This enables `cersei::agentrl` (the loop) and `cersei::agentlang` (the DSL), and turns on the `vms` sandbox feature.
+The feature enables `bricks::agentrl` (the loop) and `bricks::agentlang` (the AgentTemplate language), and turns on the `vms` feature.
 
 ## Explore
 
@@ -146,13 +139,13 @@ This enables `cersei::agentrl` (the loop) and `cersei::agentlang` (the DSL), and
   <Card title="API Reference" href="/docs/agentrl-api">
     `Orchestrator`, `AgentRlRunner`, `CerseiRunner`, `ExecutionGraph`, `ToolRegistry`, `Verifier`, `DynamicTool`.
   </Card>
-  <Card title="AgentTemplate Language" href="/docs/agentrl-template">
-    The programmable DSL: grammar, builtins, chaining, permissions, and the `RunAgentTemplate` tool.
+  <Card title="AgentTemplate" href="/docs/agentrl-template">
+    The small language that a model can write, and the `RunAgentTemplate` tool.
   </Card>
   <Card title="Cookbook" href="/docs/agentrl-cookbook">
-    Runnable recipes: a self-improving coding agent, forcing the recovery loop, custom runners and verifiers.
+    Runnable recipes: a self-improving coding agent, forcing the recovery loop, custom verifiers and runners.
   </Card>
   <Card title="Sandboxes & VMs" href="/docs/vms-overview">
-    The isolation layer AgentRL runs proposals in. Runtimes, primitives, snapshots.
+    The sandbox layer that custom runners can use. Not used by `CerseiRunner`.
   </Card>
 </Cards>

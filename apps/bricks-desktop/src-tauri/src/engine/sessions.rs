@@ -19,11 +19,11 @@ use crate::services::conversations::{
 };
 use crate::services::run_labels::normalize_label;
 use crate::services::{invalid, io_error, not_found, now_ms};
-use cersei_agent::control::{
+use bricks_agent::control::{
     Activity, Command, Controller, OpenOptions, SessionChoice, SessionMeta, SessionScope,
     list_sessions, list_sessions_in,
 };
-use cersei_memory::{JsonlMemory, Memory};
+use bricks_memory::{JsonlMemory, Memory};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -62,7 +62,7 @@ impl AppState {
         let mut cfg = bricks_config::engine_config(Path::new(&project.path), registry, true);
         // The catalog and the approval override are the application's: a
         // change of either reaches every session, at its next run.
-        cfg.catalog = Arc::clone(&self.catalog) as Arc<dyn cersei_agent::control::ModelCatalog>;
+        cfg.catalog = Arc::clone(&self.catalog) as Arc<dyn bricks_agent::control::ModelCatalog>;
         cfg.approval_override = Arc::clone(&self.approval);
         // Sessions are stored under this application state's home (tests use
         // a temporary one), never the global default.
@@ -92,6 +92,7 @@ impl AppState {
             created_at,
             message_count,
             Arc::clone(&self.run_labels),
+            Arc::clone(&self.run_records),
         );
         // What opening queued (the session's own first event) is taken now,
         // before any consumer runs, so the first view receives it.
@@ -136,7 +137,8 @@ impl AppState {
         let transcript = self.sessions_dir().join(format!("{session_id}.jsonl"));
         let files = files_dir(self.sessions_dir(), session_id);
         let labels = Arc::clone(&self.run_labels);
-        let labelled = labels.exists(session_id);
+        let records = Arc::clone(&self.run_records);
+        let labelled = labels.exists(session_id) || records.exists(session_id);
         if !transcript.exists() && !files.exists() && !labelled {
             return Err(not_found("conversation inconnue"));
         }
@@ -145,9 +147,12 @@ impl AppState {
             .await
             .map_err(|e| io_error("suppression de la conversation", e))?;
         let id = session_id.to_string();
-        tauri::async_runtime::spawn_blocking(move || labels.delete(&id))
-            .await
-            .map_err(|e| error(IpcErrorCode::Internal, e.to_string()))??;
+        tauri::async_runtime::spawn_blocking(move || -> IpcResult<()> {
+            labels.delete(&id)?;
+            records.delete(&id)
+        })
+        .await
+        .map_err(|e| error(IpcErrorCode::Internal, e.to_string()))??;
         self.hub.publish(DesktopEvent::SessionDeleted {
             session_id: session_id.to_string(),
         });

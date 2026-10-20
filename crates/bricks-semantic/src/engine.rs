@@ -12,7 +12,7 @@ use crate::render;
 use crate::result::*;
 use crate::syntax::{self, Lang, TreeCache};
 use crate::view::{Document, Snapshot, ViewHandle, ViewKind};
-use cersei_lsp::RawLocation;
+use bricks_lsp::RawLocation;
 use futures::future::{BoxFuture, FutureExt, Shared};
 use parking_lot::Mutex;
 use serde_json::{Value, json};
@@ -1188,7 +1188,7 @@ impl Exec {
             let Some(uri) = sym["location"]["uri"].as_str() else {
                 continue;
             };
-            let path = PathBuf::from(cersei_lsp::uri_to_path(uri));
+            let path = PathBuf::from(bricks_lsp::uri_to_path(uri));
             let path = std::fs::canonicalize(&path).unwrap_or(path);
             if !self.engine.in_scope(&self.roots, &path) {
                 self.out_of_scope_results += 1;
@@ -1198,7 +1198,7 @@ impl Exec {
                 continue;
             };
             // A `WorkspaceSymbol` may come without a range: the file only.
-            let range = cersei_lsp::parse_locations(&sym["location"])
+            let range = bricks_lsp::parse_locations(&sym["location"])
                 .into_iter()
                 .next();
             let start = range
@@ -1246,7 +1246,7 @@ impl Exec {
                     }
                     c.symbol = Some(SymbolRef {
                         name: name.clone(),
-                        kind: cersei_lsp::symbol_kind_name(sym["kind"].as_u64().unwrap_or(0))
+                        kind: bricks_lsp::symbol_kind_name(sym["kind"].as_u64().unwrap_or(0))
                             .to_string(),
                     });
                     cands.push(c);
@@ -1409,7 +1409,7 @@ impl Exec {
                 &sym["location"]["range"]
             };
             let pos = |k: &str| -> Option<usize> {
-                let p = cersei_lsp::Position {
+                let p = bricks_lsp::Position {
                     line: range[k]["line"].as_u64()? as u32,
                     character: range[k]["character"].as_u64()? as u32,
                 };
@@ -1429,7 +1429,7 @@ impl Exec {
                 );
                 c.symbol = Some(SymbolRef {
                     name: name.clone(),
-                    kind: cersei_lsp::symbol_kind_name(sym["kind"].as_u64().unwrap_or(0))
+                    kind: bricks_lsp::symbol_kind_name(sym["kind"].as_u64().unwrap_or(0))
                         .to_string(),
                 });
                 let line = doc
@@ -1673,7 +1673,7 @@ impl Exec {
             }
             Err(e) => {
                 let outcome = match e {
-                    cersei_lsp::LspError::Cancelled => StepOutcome::Cancelled,
+                    bricks_lsp::LspError::Cancelled => StepOutcome::Cancelled,
                     _ => StepOutcome::Failed,
                 };
                 self.step(Backend::Lsp, method, outcome, t, Some(e.to_string()));
@@ -1693,7 +1693,7 @@ impl Exec {
         let mut out = Vec::new();
         let mut unmapped = 0;
         for l in locs {
-            let path = PathBuf::from(cersei_lsp::uri_to_path(&l.uri));
+            let path = PathBuf::from(bricks_lsp::uri_to_path(&l.uri));
             let path = std::fs::canonicalize(&path).unwrap_or(path);
             if !self.engine.in_scope(&self.roots, &path) {
                 self.out_of_scope_results += 1;
@@ -1870,7 +1870,7 @@ impl Exec {
                 } else {
                     match self.lsp_request(&inst, &at, method, extra).await {
                         Ok(v) => {
-                            let locs = cersei_lsp::parse_locations(&v);
+                            let locs = bricks_lsp::parse_locations(&v);
                             Ok(self.map_locations(&inst, locs, relation, method))
                         }
                         Err(e) => Err(e),
@@ -2072,7 +2072,7 @@ impl Exec {
                         .lsp_request(&inst, &at, "textDocument/hover", json!({}))
                         .await
                 {
-                    ctx.documentation = cersei_lsp::client::hover_text(&v);
+                    ctx.documentation = bricks_lsp::client::hover_text(&v);
                     if ctx.documentation.is_some() {
                         ctx.provenance.push(Provenance {
                             backend: Backend::Lsp,
@@ -2086,7 +2086,7 @@ impl Exec {
                         .lsp_request(&inst, &at, "textDocument/definition", json!({}))
                         .await
                 {
-                    let locs = cersei_lsp::parse_locations(&v);
+                    let locs = bricks_lsp::parse_locations(&v);
                     cands.extend(self.map_locations(
                         &inst,
                         locs,
@@ -2106,7 +2106,7 @@ impl Exec {
                         )
                         .await
                 {
-                    let locs = cersei_lsp::parse_locations(&v);
+                    let locs = bricks_lsp::parse_locations(&v);
                     let total = locs.len();
                     let mut refs = self.map_locations(
                         &inst,
@@ -2278,7 +2278,7 @@ impl Exec {
                 .unwrap_or_default();
             keys.push((sev, code.clone(), msg.clone()));
             let parse = |v: &Value| -> Option<usize> {
-                let p = cersei_lsp::Position {
+                let p = bricks_lsp::Position {
                     line: v["line"].as_u64()? as u32,
                     character: v["character"].as_u64()? as u32,
                 };
@@ -2359,8 +2359,8 @@ impl Exec {
     ) -> (DiagnosticsState, Vec<Value>, &'static str) {
         let version = synced.version;
         let before = synced.diag_seq_before;
-        let fits = |e: &cersei_lsp::DiagnosticsEntry| {
-            cersei_lsp::manager::is_for_version(e, version, before)
+        let fits = |e: &bricks_lsp::DiagnosticsEntry| {
+            bricks_lsp::manager::is_for_version(e, version, before)
         };
         let entry = tokio::select! {
             e = inst.client.wait_diagnostics(&synced.uri, wait, fits) => e,

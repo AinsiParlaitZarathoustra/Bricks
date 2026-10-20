@@ -1,6 +1,6 @@
 ---
 title: Changelog
-description: Release history for Cersei SDK and Abstract CLI.
+description: Release history for the Bricks ADK (formerly Cersei SDK) and the Abstract CLI.
 ---
 
 # Changelog
@@ -31,6 +31,34 @@ export function Tag({ type }) {
     </span>
   );
 }
+
+<Version version="Unreleased" date="Not yet released">
+
+<Tag type="changed" /> **Crates renamed: Bricks ADK.** The facade is `bricks` (was `cersei`); the crates use the `bricks-` prefix (`bricks-agent`, `bricks-tools`, `bricks-memory`, …) and `bricks_*` imports. `bricks-config`, `bricks-semantic`, `bricks-skills`, `bricks-cli` and `bricks-desktop` keep their names. `CerseiError`, `CERSEI_*` variables and a few external identities keep theirs. The table of names is in the migration guide.
+
+<Tag type="removed" /> **`delegate` and `MultiEdit` are removed.** The `delegate` tool and the `delegate` batch module (`run_batch`, `DelegateConfig`, …) are gone; use the native `Agent` and `Agents` tools, whose parameters differ. `MultiEdit` is gone; `Edit` takes `edits`. Stored histories still display both.
+
+<Tag type="changed" /> **Native sub-agent tools**: `Agent`, `Agents`, `AgentControl` and `AgentProfiles`, with background runs, worktrees with ChangeSets, and a bounded depth. `AgentTool` stays for embedders.
+
+<Tag type="changed" /> **Edits.** No read is required before an edit (the read guard is removed). `Edit` applies several replacements in order and writes all or nothing. Writes hold a per-file lock, and a change is written only if the file still matches its approval; a hook that changes an input is decided again.
+
+<Tag type="changed" /> **`Bash` runs one process per command.** Calls of a session run side by side. The working directory, exported variables, functions and aliases of a command that ends normally carry over; non-exported variables and shell options do not.
+
+<Tag type="changed" /> **Waits and limits.** `[agents] background_drain_ms` defaults to `0` (a headless run exits with code 6 if background sub-agents are cut), `[agents] admission_timeout_ms` to `30000`, and the new `[agent] retry_after_max_wait_ms` (`60000`) bounds a provider's `Retry-After`. Process stops are awaited through kernel notifications, not polled. Language-server stderr is read to its end at shutdown, for at most 500 ms.
+
+<Tag type="changed" /> **JSONL schema 6.** `tool_finished` and `agent_tool_finished` gain `executed` and `status`; `agent_tool_finished` also gains `output` and `output_truncated`; `edit_applied` files gain `absolute`, `patch` and `patch_truncated`. See `docs/cli.md`.
+
+<Tag type="changed" /> **Run end card is compact.** `Terminé · A travaillé MM:SS` (`HH:MM:SS` past one hour; durations are rounded down to the second), then two groups closed by default: `N fichiers modifiés +A −D`, the sum of the applied edit operations (not a Git diff; binary files have no line counts), and `N commandes exécutées`, the commands of the response and of its sub-agents. Refused calls and background polling are not counted, and a command still running is never shown as successful. Tool durations elsewhere stay in milliseconds.
+
+<Tag type="changed" /> **One « Copier » button per response**, copying the whole answer of a run (assistant segments joined by blank lines, without reasoning or tool output). It is kept across history and restart; the per-segment buttons are removed.
+
+<Tag type="changed" /> **Edit rows are compact**: the file name and its counts. The full path is in the tooltip, and a click opens the file in the reader.
+
+<Tag type="added" /> **Read-only reader.** The « Lecteur » toggle, top right, opens a column with one tab per file. Source shows numbered, highlighted lines, read in windows of 400 lines (2 MiB limit) with Précédentes and Suivantes. Aperçu renders Markdown files. Modifications lists each recorded patch per operation, never merged. Paths are confined to the project folder or the agent workspace.
+
+<Tag type="changed" /> **Display details.** The reasoning label is « Réfléchit », and the diff additions and deletions use brighter colours.
+
+</Version>
 
 <Version version="0.6.1" date="2026-10-14">
 

@@ -21,11 +21,16 @@ function run(overrides: Partial<RunInfo> = {}, files: FileTotals[] = []): RunInf
 }
 
 const file = (path: string, added: number, removed: number, binary = false): FileTotals => ({
+	key: `run-1|${path}`,
 	path,
+	absolute: null,
+	name: path.split('/').pop() ?? path,
 	added,
 	removed,
 	binary,
-	operations: 1
+	kind: 'modify',
+	operations: 1,
+	agentIds: []
 });
 
 describe('runEndSummary: the state and the duration', () => {

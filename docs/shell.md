@@ -110,6 +110,16 @@ gone or a zombie). The command publishes nothing. The result has status
 `timed_out`, no exit code, the partial output and the number of processes
 stopped (and forced). Background tasks are not touched.
 
+**Waiting for exits.** Stopping a tree does not poll. A watcher thread waits
+in the kernel for the exit of each process it targets: `kqueue` with
+`EVFILT_PROC`/`NOTE_EXIT` on macOS, a `pidfd` per process in an `epoll` set on
+Linux. Each exit is written to a pipe that the waiting task reads, under the
+same grace and forced-stop deadlines as before. Where no notification is
+available (the kernel refuses `pidfd_open`, the platform has none, or the
+polling mode is set, as in tests), the wait checks `kill(pid, 0)` every 25 ms
+within the same deadline. That fallback counts a zombie as running until its
+parent reaps it. On Windows, the wait still checks `tasklist` every 25 ms.
+
 **Yield.** A foreground command still running after `yield_time_ms` is not
 killed. The call returns status `Running` with its ids and cursors (§3), and
 the command goes on until it ends or its `timeout` expires.
@@ -144,7 +154,7 @@ with forced signals.
 | Situation | Unix (macOS, Linux) | Windows |
 | --- | --- | --- |
 | Normal close / drop | Commands and tasks: whole trees terminated and reaped. | `taskkill /T /F` on each tree. |
-| Timeout or stop of a foreground command | Descendants found by parent links (`ps`), TERM then KILL, verified. | Not stopped individually: the PowerShell session is destroyed with its tree. |
+| Timeout or stop of a foreground command | Descendants found by parent links (`ps`), TERM then KILL, exits awaited by kernel notification (`kqueue` or `pidfd`), verified. | Not stopped individually: the PowerShell session is destroyed with its tree. |
 | Process that double-forks and is re-parented to init (a deliberately detached daemon) | Not found: no longer a descendant. | Not found. |
 | Bricks killed with SIGKILL / crash | Nothing runs to clean up: commands and tasks survive in their own sessions. | Same. |
 
@@ -239,7 +249,7 @@ formatted one by one with `Out-String`.
      protects Python. Lines inside multi-line strings, template literals, Rust
      raw strings and here-documents must match exactly. A single-line
      `old_string` also matches its trimmed text when that text occurs once in the
-     file (`crates/cersei-tools/src/tool_primitives/replace.rs`).
+     file (`crates/bricks-tools/src/tool_primitives/replace.rs`).
   3. **Relocation** (bounded: files ≤ 100 000 lines, blocks ≤ 400 lines): the
      same lines allowing only blank lines and runs of spaces outside quoted text
      to differ, with the same constant indentation shift. It finds a block whose
@@ -249,21 +259,27 @@ formatted one by one with `Out-String`.
 * On refusal, the message says why (absent, ambiguous, or "the code itself
   differs") and gives the closest regions (line ranges, an excerpt, similarity).
 
-**Concurrency.** A per-file lock inside the Bricks process is held from the
-read of the file to the write, so two calls of Bricks that edit one file run one
-after the other and never overwrite each other's change. The lock does not
+**Concurrency.** A per-file lock, shared by every session and agent of the
+Bricks process (a symbolic link and its target share one lock), is held from
+the read of the file to the write, so two calls of Bricks that edit one file
+run one after the other and never overwrite each other's change. No lock is
+held while an approval is pending. The lock does not
 arbitrate external programs (an editor, a script): Bricks still checks that the
 file did not change on disk between its read and its write, and refuses the
 call if it did. Edit and Read calls in the same batch have no guaranteed order.
 
 **Approval.** The preview shown for an approval and the text the execution
-writes come from the same preparation. Execution checks the approval again under
-the lock. An approval that became stale (the file changed, or a hook changed the
-input) gives a new decision; nothing is written without one.
+writes come from the same preparation. The approval records the SHA-256 of
+the text the diff was computed from. Execution checks it again under the lock,
+just before the write: a file that changed since the approval is not written,
+and the call is decided again on the file as it is now. A hook that changes the
+input (`HookAction::ModifyInput`) is decided again when the change it makes
+differs from the approved one, so the change written is the change approved.
+Nothing is written without a decision.
 
 **Migration from `MultiEdit`.** `MultiEdit` is removed; an unknown tool name is
-an error. Use `Edit` with `edits`. SDK code uses `file_edit::FileEditTool`
-with the same `edits` form.
+an error. Use `Edit` with `edits`. SDK code uses
+`bricks_tools::file_edit::FileEditTool` with the same `edits` form.
 
 ## 6. ApplyPatch
 
@@ -338,6 +354,6 @@ from their error flag, without a code.
 
 | Platform | What ran |
 | --- | --- |
-| macOS (arm64), bash 3.2.57 | The shell tests (`crates/cersei-tools/tests/shell_session.rs`), the agent tests (`crates/cersei-agent/tests/shell_tools_e2e.rs`), the file-tool tests. |
+| macOS (arm64), bash 3.2.57 | The shell tests (`crates/bricks-tools/tests/shell_session.rs`), the agent tests (`crates/bricks-agent/tests/shell_tools_e2e.rs`), the file-tool tests. |
 | Linux | Not executed. The Unix code path is the same as macOS (bash, `ps`, `setsid`, FIFOs), but nothing was run on Linux. |
-| Windows / PowerShell | Not executed, not compiled: no Windows machine, and cross-compilation fails on C dependencies (`ring`). `pwsh` is not installed on the development machine; `crates/cersei-tools/tests/powershell_session.rs` is `#[ignore]` and must be run with `--ignored` where PowerShell exists. Job Objects are not implemented (trees are terminated with `taskkill /T /F`). The Bash tool is unavailable on Windows. |
+| Windows / PowerShell | Not executed, not compiled: no Windows machine, and cross-compilation fails on C dependencies (`ring`). `pwsh` is not installed on the development machine; `crates/bricks-tools/tests/powershell_session.rs` is `#[ignore]` and must be run with `--ignored` where PowerShell exists. Job Objects are not implemented (trees are terminated with `taskkill /T /F`). The Bash tool is unavailable on Windows. |

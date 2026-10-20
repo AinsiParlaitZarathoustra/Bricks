@@ -1,56 +1,49 @@
 ---
 title: "Benchmarks: Graph Memory"
-description: Grafeo graph database performance — store, recall, query, graph ON vs OFF.
+description: Graph memory and file-based memory costs, from the dated benchmark report of 2026-10-08 (Grafeo store, 1,000 and 10,000 nodes).
 ---
+
+import { Callout } from 'fumadocs-ui/components/callout';
 
 # Graph Memory Benchmarks
 
-Grafeo embedded graph database. Apple Silicon, release build, `memory_bench.rs`.
+Measurements of the graph store (Grafeo, the `graph` feature of `bricks-memory`) and of the file-based memory, from the benchmark report of **8 October 2026** (`docs/benchmarks-bricks-2026-10-08.md` in the repository). Bricks 0.4.6 at commit `dee981e`, Apple A18 Pro, macOS 27.2, release build. Each figure is a mean over warm runs, on temporary files.
 
-## Operations
+<Callout type="warn">
+These figures were taken before the change that runs each `Bash` call in its own process (commit `4263cd9`). They do not involve `Bash`, but they describe the code at `dee981e`. Run the benchmark again before you rely on a figure.
+</Callout>
 
-| Operation | Time | Notes |
-|-----------|------|-------|
-| Store single node | 30 us | UUID + content + metadata |
-| Store 100 nodes (bulk) | 8572 us (86 us/node) | Amortized with WAL |
-| Tag memory (topic) | 1241 us | Creates/links Topic node |
-| Link memories (edge) | 2681 us | Creates RELATES_TO edge |
-| Query by type | 3200 us | Filter all Memory nodes |
-| Query by topic | 77 us | Traverse Topic-Memory edges |
-| Recall (hit) | 98 us | Indexed content lookup |
-| Stats | 480 us | Count nodes/edges |
+## Local memory
 
-Benchmark dataset: 1503 memories, 123 topics, 152 relationships.
+| Operation | Mean | Min | Max |
+|-----------|-----:|----:|----:|
+| Scan of 100 files with frontmatter | 1.84 ms | 1.46 ms | 3.69 ms |
+| Load `MEMORY.md` | 15.4 µs | 12.9 µs | 118.9 µs |
+| Text recall over 100 files | 2.03 ms | 1.58 ms | 4.20 ms |
+| Graph write, 1,000 nodes | 76.2 µs per node | – | – |
+| Graph recall, 1,000 nodes | 1.36 ms | 1.18 ms | 4.99 ms |
+| Query by subject | 114.5 µs | 104.6 µs | 145.3 µs |
+| Session write | 35.9 µs per entry | 25.5 µs | 383.7 µs |
+| Session load, 100 entries | 279.3 µs | 237.7 µs | 381.5 µs |
 
-## Graph ON vs OFF
+These are local file and graph measurements. They are not a memory-quality benchmark: for that, see [LongMemEval](/docs/bench-memory).
 
-Same operations on identical 100-file dataset:
+## Graph at 10,000 nodes
 
-| Operation | Graph OFF | Graph ON | Delta |
-|-----------|-----------|----------|-------|
-| Scan 100 files | 1310 us | 1308 us | -0.2% |
-| Recall (100 files) | 1359 us | **103 us** | **-92.5%** |
-| Build context | 17 us | 16 us | -6.4% |
+The report ran 10 workers with 100 queries each, so 1,000 samples, against a graph of 10,000 nodes:
 
-Graph recall is **92.5% faster** than text-matching recall. The graph does indexed lookups on node content instead of scanning every file.
+| Mean | p50 | p95 | p99 |
+|-----:|----:|----:|----:|
+| 87.99 ms | 83.03 ms | 130.01 ms | 226.49 ms |
 
-Scan and context building are unaffected — graph adds zero overhead to those paths.
+The report notes that the binary's banner still announced 100 agents, while the code ran 10 workers. The 100,000-node step was not run, and its zero fields in the JSON output are not measurements.
 
-## Scaling
+## Reproduce
 
-| File Count | Scan (graph OFF) | Recall (graph ON) |
-|------------|-----------------|-------------------|
-| 10 | 141 us | ~10 us |
-| 100 | 1212 us | 103 us |
-| 200 | 2411 us | ~103 us |
-| 500 | 6154 us | ~103 us |
-
-Text-matching recall scales linearly with file count. Graph recall is constant — it queries the index regardless of dataset size.
-
-## Run
-
-The example is in the `cersei-memory` crate (`crates/cersei-memory/examples/memory_bench.rs`) and needs the `graph` feature. It was previously part of the `abstract-cli` package, which no longer exists in the Bricks workspace.
+From the repository root:
 
 ```bash
-cargo run --release -p cersei-memory --features graph --example memory_bench
+cargo run --release -p bricks-memory --features graph --example memory_bench
 ```
+
+The example is `crates/bricks-memory/examples/memory_bench.rs`. It is the successor of the `memory_bench` example that lived in the removed `abstract-cli` package.

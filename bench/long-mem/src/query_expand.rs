@@ -9,8 +9,8 @@
 //! repeats / different vocabulary" rule.
 
 use anyhow::{Context, Result};
-use cersei_provider::{CompletionRequest, Provider};
-use cersei_types::Message;
+use bricks_provider::{CompletionRequest, Provider};
+use bricks_types::Message;
 use serde::Deserialize;
 
 // VERBATIM from `omega/query_expansion.py:30-41`.

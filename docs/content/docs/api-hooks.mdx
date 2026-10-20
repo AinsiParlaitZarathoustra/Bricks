@@ -1,11 +1,11 @@
 ---
-title: Hooks (cersei-hooks)
+title: Hooks (bricks-hooks)
 description: Middleware system for intercepting agent lifecycle events.
 ---
 
-# cersei-hooks
+# bricks-hooks
 
-Hooks intercept agent lifecycle events. The runner fires `PreToolUse` (after the permission check), `PostModelTurn` and `TurnsElapsed` (`crates/cersei-agent/src/runner.rs:1159`, `1172`, `1410`). `PostToolUse`, `PreModelTurn`, `Stop` and `Error` are declared in `cersei-hooks` but no code path fires them.
+Hooks intercept agent lifecycle events. The runner fires `PreToolUse` (after the permission check), `PostModelTurn` and `TurnsElapsed` (`crates/bricks-agent/src/runner.rs:1159`, `1172`, `1410`). `PostToolUse`, `PreModelTurn`, `Stop` and `Error` are declared in `bricks-hooks` but no code path fires them.
 
 ## Hook Trait
 
@@ -56,18 +56,22 @@ pub enum HookAction {
     Continue,                  // go on
     Block(String),             // PreToolUse: the tool does not run and the model gets "Blocked by hook: …".
                                // PostModelTurn: the run fails with CerseiError::Provider("Blocked by hook: …")
-    ModifyInput(Value),        // PreToolUse: the tool runs with the new input
+    ModifyInput(Value),        // PreToolUse: the call is decided again if the change differs from the approved one, then runs with the new input
     InjectMessage(Box<Message>), // returned by the hook API, but the runner does not apply it (no arm in runner.rs)
 }
 ```
 
-Hooks run in registration order. The first action that is not `Continue` ends the chain; the others do not run for that event (`crates/cersei-hooks/src/lib.rs`, `run_hooks`). The runner acts on `Block` at `PreToolUse` and `PostModelTurn`, and on `ModifyInput` at `PreToolUse` only.
+Hooks run in registration order. The first action that is not `Continue` ends the chain; the others do not run for that event (`crates/bricks-hooks/src/lib.rs`, `run_hooks`). The runner acts on `Block` at `PreToolUse` and `PostModelTurn`, and on `ModifyInput` at `PreToolUse` only.
+
+### ModifyInput and approval
+
+A hook that returns `ModifyInput` does not bypass the approval. Before the tool runs, the runner computes the change the new input would make. When that change differs from the change that was approved (for a file tool, another diff; a tool with no preview is not compared), the call is decided again: the permission policy and the person asked as for any call, and the tool checks the approval once more under the file lock before it writes. A new input whose change is the approved one runs without a second question. After three decision rounds (`MAX_DECISION_ROUNDS` in `crates/bricks-agent/src/runner.rs`), the call is refused and nothing is written.
 
 ## Examples
 
 ### Cost Guard
 
-A `Block` at `PostModelTurn` ends the run with an error (`crates/cersei-agent/src/runner.rs:1159-1163`).
+A `Block` at `PostModelTurn` ends the run with an error (`crates/bricks-agent/src/runner.rs:1159-1163`).
 
 ```rust
 pub struct CostGuard { pub max_usd: f64 }
@@ -135,7 +139,7 @@ impl Hook for BlockDangerous {
 `ShellHook` runs a shell command at hook points. Its constructor takes the command as a string; no crate in this workspace builds one yet, so an embedder wires it. The command receives the event as JSON in `CERSEI_HOOK_CONTEXT`. With `blocking = true`, a non-zero exit becomes a `Block`:
 
 ```rust
-use cersei_hooks::{HookEvent, ShellHook};
+use bricks_hooks::{HookEvent, ShellHook};
 
 // command, events, blocking
 let hook = ShellHook::new("echo 'Tool used'", &[HookEvent::PreToolUse], false);

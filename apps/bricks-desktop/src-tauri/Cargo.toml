@@ -18,11 +18,11 @@ tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 bricks-config = { workspace = true }
 bricks-skills = { workspace = true }
-cersei-agent = { workspace = true }
-cersei-provider = { workspace = true }
-cersei-tools = { workspace = true }
-cersei-types = { workspace = true }
-cersei-memory = { workspace = true }
+bricks-agent = { workspace = true }
+bricks-provider = { workspace = true }
+bricks-tools = { workspace = true }
+bricks-types = { workspace = true }
+bricks-memory = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

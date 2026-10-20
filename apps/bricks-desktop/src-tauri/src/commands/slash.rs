@@ -1,10 +1,10 @@
 //! The shared `/` command registry over IPC.
-//! The registry is `cersei_agent::control::slash`, the same one the terminal
+//! The registry is `bricks_agent::control::slash`, the same one the terminal
 //! uses; this file only maps its actions to the contract types. Messages
 //! are French.
 use crate::contract::*;
-use cersei_agent::control::Command;
-use cersei_agent::control::slash::{self, Action, Present};
+use bricks_agent::control::Command;
+use bricks_agent::control::slash::{self, Action, Present};
 
 /// The registry as the desktop palette and help show it.
 pub(crate) fn command_list() -> Vec<SlashCommandInfo> {

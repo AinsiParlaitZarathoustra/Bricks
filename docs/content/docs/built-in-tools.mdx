@@ -1,6 +1,6 @@
 ---
 title: Built-in Tools Reference
-description: Complete reference for all 35 built-in tools — input schemas, permission levels, and usage notes.
+description: Complete reference for the 38 built-in tools — input schemas, permission levels, and usage notes.
 ---
 
 import { TypeTable } from 'fumadocs-ui/components/type-table';
@@ -8,17 +8,17 @@ import { Callout } from 'fumadocs-ui/components/callout';
 
 # Built-in Tools Reference
 
-35 tools across 6 categories. Each tool is available via the composition functions in `cersei::tools`.
+38 tools in the categories below. Each tool is available via the composition functions in `bricks::tools`. The sub-agent tools (`Agent`, `Agents`, `AgentControl`, `AgentProfiles`) are not in those sets: see [Sub-agent tools](#sub-agent-tools).
 
-```rust
-cersei::tools::all()           // all 35
-cersei::tools::coding()        // filesystem + shell + web (11)
-cersei::tools::filesystem()    // 6 tools
-cersei::tools::shell()         // 2 tools
-cersei::tools::web()           // 3 tools
-cersei::tools::planning()      // 3 tools
-cersei::tools::scheduling()    // 5 tools
-cersei::tools::orchestration() // 9 tools
+```text
+bricks::tools::all()           // all 38
+bricks::tools::coding()        // filesystem + shell + web (17)
+bricks::tools::filesystem()    // 9 tools
+bricks::tools::shell()         // 6 tools
+bricks::tools::web()           // 2 tools
+bricks::tools::planning()      // 3 tools
+bricks::tools::scheduling()    // 5 tools
+bricks::tools::orchestration() // 9 tools
 ```
 
 ---
@@ -73,7 +73,7 @@ Write content to a file, creating parent directories if they don't exist.
 
 ### Edit
 
-Replace text in a file, with one replacement (`old_string`, `new_string`) or several (`edits`). Several replacements are applied in order, each against the result of the previous one, and the file is written only if all of them apply. Fails if an `old_string` is not unique (unless `replace_all` is true). Replaces the former `MultiEdit`, which no longer exists.
+Replace text in a file, with one replacement (`old_string`, `new_string`) or several (`edits`). Several replacements are applied in order, each against the result of the previous one, and the file is written only if all of them apply. Fails if an `old_string` is not unique (unless `replace_all` is true). No `Read` is needed first: the change is decided on what it would do to the file. The file is written under a per-file lock, and not at all if it changed after its change was approved (the call is then decided again). Replaces the former `MultiEdit`, which no longer exists.
 
 **Permission:** Write
 
@@ -86,13 +86,11 @@ Replace text in a file, with one replacement (`old_string`, `new_string`) or sev
     },
     old_string: {
       type: 'string',
-      description: 'The text to find and replace.',
-      required: true,
+      description: 'One replacement: the text to find. Use with new_string, not with edits.',
     },
     new_string: {
       type: 'string',
-      description: 'The replacement text.',
-      required: true,
+      description: 'One replacement: the replacement text. Omit it, or give an empty string, to delete old_string.',
     },
     replace_all: {
       type: 'boolean',
@@ -218,7 +216,7 @@ Execute a shell command. Each call is its own process, started from the session'
 />
 
 <Callout>
-Bash calls are approved by the permission policy at the `Execute` level, whatever the command. No analysis of the command runs before it and none lowers or raises that level. The AST analysis of `cersei_tools::tool_primitives::bash_safety` is an SDK primitive a caller can use on its own; see [Code intelligence](/docs/code-intelligence#bash-command-safety-analysis).
+Bash calls are approved by the permission policy at the `Execute` level, whatever the command. No analysis of the command runs before it and none lowers or raises that level. The AST analysis of `bricks_tools::tool_primitives::bash_safety` is an SDK primitive a caller can use on its own; see [Code intelligence](/docs/code-intelligence#bash-command-safety-analysis).
 </Callout>
 
 ### PowerShell
@@ -269,7 +267,7 @@ Fetch a URL and return readable text. HTML is converted to plain text via `html2
 
 ### WebSearch
 
-Search the web via an API (Brave Search by default). Requires `CERSEI_SEARCH_API_KEY`.
+Search the web. DuckDuckGo is used by default, with no key. A keyed provider (Brave, Tavily or Exa) is used only when `[web.search]` in `bricks.toml` names it; its key is read from the variable named by `api_key_env`, never written in the file.
 
 **Permission:** ReadOnly
 
@@ -287,67 +285,6 @@ Search the web via an API (Brave Search by default). Requires `CERSEI_SEARCH_API
     },
   }}
 />
-
-### ExaSearch
-
-AI-powered web search using [Exa](https://exa.ai). Returns structured results with optional text content, highlights, and summaries. Requires `EXA_API_KEY`.
-
-**Permission:** ReadOnly
-
-<TypeTable
-  type={{
-    query: {
-      type: 'string',
-      description: 'Search query.',
-      required: true,
-    },
-    search_type: {
-      type: '"auto" | "neural" | "fast"',
-      description: 'Search method.',
-      default: 'auto',
-    },
-    num_results: {
-      type: 'integer',
-      description: 'Number of results to return.',
-      default: '10 (max 100)',
-    },
-    category: {
-      type: 'string',
-      description: 'Focus category: company, research paper, news, personal site, financial report, people.',
-    },
-    content_mode: {
-      type: '"text" | "highlights" | "summary" | "all"',
-      description: 'Content to retrieve with results.',
-      default: 'highlights',
-    },
-    max_characters: {
-      type: 'integer',
-      description: 'Max characters for text/highlight content per result.',
-    },
-    include_domains: {
-      type: 'string[]',
-      description: 'Only include results from these domains.',
-    },
-    exclude_domains: {
-      type: 'string[]',
-      description: 'Exclude results from these domains.',
-    },
-    start_published_date: {
-      type: 'string',
-      description: 'Earliest publication date (ISO 8601).',
-    },
-    end_published_date: {
-      type: 'string',
-      description: 'Latest publication date (ISO 8601).',
-    },
-    user_location: {
-      type: 'string',
-      description: 'Two-letter ISO country code for location bias.',
-    },
-  }}
-/>
-
----
 
 ## Planning
 
@@ -622,7 +559,7 @@ Create an isolated git worktree for parallel branch work.
     path: {
       type: 'string',
       description: 'Directory for the worktree.',
-      default: '/tmp/cersei-wt-{branch}',
+      default: '<temp dir>/bricks-wt-{branch}',
     },
   }}
 />
@@ -644,6 +581,25 @@ Remove a git worktree and return to the original working directory.
 />
 
 ---
+
+### Sub-agent tools
+
+`Agent` (one sub-agent), `Agents` (up to `[agents] max_batch` at once),
+`AgentControl` (handles, results, cancellation and ChangeSets) and
+`AgentProfiles` (list and search the profiles) are native tools. The CLI and
+the controller register them when `[agents] enabled` is true (the default).
+They are not in `bricks::tools::all()`, and the library type `AgentTool` stays
+for embedders.
+
+**Permission:** `Agent` and `Agents`: Execute. Allowing one allows that
+delegation only: each child's own tool calls go through the policy one by one.
+`AgentControl`: ReadOnly for `list`, `status`, `result`, `wait` and
+`inspect_changes`, Execute for `cancel`, Write for `apply_changes` and
+`discard_changes`. `AgentProfiles`: ReadOnly.
+
+Their parameters, the limits (`max_depth`, `max_concurrent`, `max_batch`,
+`admission_timeout_ms` = 30000) and the isolation rules are in
+`docs/agents.md` in the repository.
 
 ## Other
 
@@ -759,6 +715,6 @@ Search for available tools by keyword.
 | Level | Tools |
 |-------|-------|
 | **None** (18) | EnterPlanMode, ExitPlanMode, TodoWrite, CronList, Sleep, SendMessage, TaskCreate, TaskGet, TaskUpdate, TaskList, TaskStop, TaskOutput, AskUserQuestion, SyntheticOutput, Config, Skill, ToolSearch |
-| **ReadOnly** (4) | Read, Glob, Grep, WebFetch, WebSearch, ExaSearch |
-| **Write** (4) | Write, Edit, NotebookEdit, EnterWorktree, ExitWorktree |
+| **ReadOnly** (5) | Read, Glob, Grep, WebFetch, WebSearch |
+| **Write** (5) | Write, Edit, NotebookEdit, EnterWorktree, ExitWorktree |
 | **Execute** (5) | Bash, PowerShell, CronCreate, CronDelete, RemoteTrigger |

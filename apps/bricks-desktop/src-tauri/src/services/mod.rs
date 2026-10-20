@@ -11,6 +11,7 @@ pub mod projects;
 pub mod providers;
 pub mod providers_toml;
 pub mod run_labels;
+pub mod run_records;
 pub mod skills;
 
 use crate::contract::{IpcError, IpcErrorCode};

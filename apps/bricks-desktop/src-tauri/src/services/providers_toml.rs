@@ -5,7 +5,7 @@
 
 use crate::contract::{IpcErrorCode, IpcResult, ModelPatch, ProviderPatch, ReasoningProfileEdit};
 use crate::services::{error, invalid, not_found};
-use cersei_provider::config::ProvidersConfig;
+use bricks_provider::config::ProvidersConfig;
 use serde_json::{Map, Value as Json};
 use std::collections::BTreeSet;
 use toml_edit::{Array, ArrayOfTables, DocumentMut, InlineTable, Item, Table, TableLike, Value};

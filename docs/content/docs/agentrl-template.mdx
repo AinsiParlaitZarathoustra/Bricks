@@ -1,6 +1,6 @@
 ---
 title: "AgentTemplate Language"
-description: AgentTemplate — a small functional DSL that LLMs author and the Cersei runtime executes. Namespaced builtins, method chaining, agent messaging, and a permission-gated interpreter.
+description: AgentTemplate — a small functional language that a model writes and Bricks ADK executes. Namespaced builtins mapped to the existing tools, method chaining, agent messaging, and a permission-gated interpreter.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -9,29 +9,29 @@ import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
 
 # AgentTemplate
 
-**AgentTemplate** is a tiny functional language that agents and LLMs write, and the Cersei runtime executes on top of the existing tool set. It is the *programmable* surface of [AgentRL](/docs/agentrl-overview): you can't easily make Cersei rewrite its own runtime, but an LLM can emit a short template program — chained file/network/agent operations — that the runtime runs safely and can then register as a reusable tool.
+**AgentTemplate** is a small language. A model writes a short program of file, network and agent operations, and Bricks ADK runs it on the existing tools. It is the programmable surface of [AgentRL](/docs/agentrl-overview): the program can be registered as a tool after it works.
 
-It ships as the `cersei-agentlang` crate, re-exported as `cersei::agentlang` when the `agentlang` (or `agentrl`) feature is on.
+It ships as the `bricks-agentlang` crate, re-exported as `bricks::agentlang` when the `agentlang` feature (or `agentrl`, which implies it) is enabled.
 
 <Callout type="info">
-**Design.** Hand-written lexer + recursive-descent parser, zero parser dependencies, precise `line:col` spans for LLM self-correction. Values are `serde_json::Value` throughout — the same universal type the tool layer already speaks. Every side-effecting builtin is permission-gated, and a step budget bounds every run.
+**Design.** A hand-written lexer and recursive-descent parser, with no parser dependency and `line:col` positions in its errors, so a model can correct a program. Values are `serde_json::Value`. Each side-effecting builtin is checked against the permission policy, and a step budget bounds every run.
 </Callout>
 
 ## A taste
 
-```elixir
+```text
 # variables start with $
 $cfg = io.read("/etc/app.toml")
 io.write("/tmp/app.toml", content: $cfg)
 
-# method chaining — the previous result flows into the next call
+# chaining: the previous result is the next call's input
 io.read("/tmp/in.txt").write("/tmp/out.txt")
 
-# the most important feature: agents talking to agents
+# agents can message each other through the mailbox
 $tools = agent.tools.list()
 agent.send(to: "planner", $tools)
 
-# ask for a capability; returns a bool you can branch on
+# ask whether the caller holds a permission; returns a boolean
 agent.permission.ask('rw')
 ```
 
@@ -50,61 +50,62 @@ arg        = IDENT ":" expr  |  expr ;                 (* named or positional *)
 literal    = STR | NUM | "true" | "false" | "null" | "[" [expr {"," expr}] "]" ;
 ```
 
-- **Variables** are `$name`. Assignment is `$name = expr`.
-- **Strings** use `'single'` or `"double"` quotes; escapes `\n \t \\ \" \'`.
-- **Comments** start with `#` and run to end of line.
-- Statements are newline-terminated.
+- Variables are `$name`. Assignment is `$name = expr`.
+- Strings use `'single'` or `"double"` quotes. Escapes include `\n`, `\t`, `\\`, `\"` and `\'`.
+- A comment starts with `#` and runs to the end of the line.
+- Statements end at a newline.
 
 ## Builtins
 
-Each builtin maps to a concrete Cersei tool or cross-sandbox primitive, and carries a permission level enforced before it runs.
+Each builtin maps to one tool or primitive, with a permission level that is checked before it runs.
 
 | Call | Backend | Permission |
 |---|---|---|
 | `io.read($file)` | `Read` tool | read |
 | `io.write($file, content: $data)` | `Write` tool | write |
-| `io.edit($file, ...)` | `Edit` tool | write |
+| `io.edit($file, …)` | `Edit` tool | write |
 | `io.glob($pattern)` | `Glob` tool | read |
 | `io.grep($pattern)` | `Grep` tool | read |
-| `io.delete($file)` | `Bash` (`rm`) | write |
+| `io.delete($file)` | `Bash` (`rm`), checked as a `Bash` call | write |
 | `net.get($url)` | `WebFetch` tool | read |
 | `net.search($query)` | `WebSearch` tool | read |
-| `agent.send(to: $id, $payload)` | `Mailbox::publish` | write |
-| `agent.tools.call($name, {..})` | dynamic tool dispatch | exec |
-| `agent.tools.list()` | registry/dispatch list | none |
-| `agent.tools.register(..)` | registry register | dangerous |
-| `agent.permission.ask('rw')` | permission policy | none |
-| `kv.get($key)` / `kv.set($key, $v)` | `KvStore` | read / write |
+| `agent.send(to: $id, $payload)` | `Mailbox` publish | write |
+| `agent.tools.call($name, …)` | dispatch of a named tool | execute |
+| `agent.tools.list()` | names of the dispatchable tools | none |
+| `agent.tools.register(…)` | registration in the `bricks-agentrl` registry | dangerous |
+| `agent.permission.ask(mode)`, mode `'r'`, `'w'`, `'rw'` or `'x'` | permission policy | none |
+| `kv.get($key)` / `kv.set($key, $value)` | `KvStore` | read / write |
 
 <Callout type="info">
-`agent.tools.register(..)` requires the AgentRL `ToolRegistry` to be wired into the dispatch layer; without it, the call returns an explicit "unsupported in this context" error rather than failing silently.
+`agent.tools.register(…)` needs a `ToolRegistry` wired into the dispatch. Without one, the call fails with a "not wired in this context" error. Nothing in the `bricks` command-line tool or desktop app wires it today.
 </Callout>
 
-### Chaining semantics
+### Chaining
 
-In a chain like `io.read($src).write($dst)`, the result of each call is threaded into the next as the implicit value `$_` **and** as that tool's *pipe-target* input (e.g. `Write`'s `content`) when you don't supply it explicitly. Chain tails inherit the head's namespace, so `.write(...)` after `io.read(...)` resolves to `io.write`.
+In `io.read($src).write($dst)`, the result of each call becomes the implicit value `$_`, and it fills that tool's pipe target (for `Write`, `content`) when the call does not give it. A chain tail resolves in the namespace of its head, so `.write(...)` after `io.read(...)` is `io.write`.
 
 ## Running a program
 
-Two ways: directly via `run_program`, or through the `RunAgentTemplate` tool (which is how an agent runs it).
+Either call `run_program` directly, or give the agent the `RunAgentTemplate` tool, which is how an agent runs a program.
 
 <Tabs items={['Direct', 'As an agent tool']}>
   <Tab value="Direct">
 ```rust
-use cersei::agentlang::{run_program, EvalCtx, VecToolDispatch};
-use cersei::prelude::*;
+use bricks::agentlang::{EvalCtx, VecToolDispatch, run_program};
+use bricks::tools::{Tool, file_read::FileReadTool, file_write::FileWriteTool};
+use serde_json::json;
 use std::sync::Arc;
 
-// Dispatch resolves builtin tool names → real Tool implementations.
+// Dispatch resolves builtin tool names to Tool implementations.
 let dispatch = Arc::new(VecToolDispatch::new(vec![
-    Arc::new(cersei::tools::file_read::FileReadTool) as Arc<dyn Tool>,
-    Arc::new(cersei::tools::file_write::FileWriteTool) as Arc<dyn Tool>,
+    Arc::new(FileReadTool) as Arc<dyn Tool>,
+    Arc::new(FileWriteTool) as Arc<dyn Tool>,
 ]));
 
-let ctx = ToolContext { /* working_dir, session_id, permissions, ... */ ..base };
-let mut ev = EvalCtx::new(&ctx, dispatch)
-    .with_var("src", serde_json::json!("/tmp/in.txt"))
-    .with_var("dst", serde_json::json!("/tmp/out.txt"));
+// `tool_ctx` is the ToolContext your tools run with (permissions included).
+let mut ev = EvalCtx::new(&tool_ctx, dispatch)
+    .with_var("src", json!("/tmp/in.txt"))
+    .with_var("dst", json!("/tmp/out.txt"));
 
 let value = run_program(
     "$data = io.read($src)\nio.write($dst, content: $data)",
@@ -114,73 +115,77 @@ let value = run_program(
   </Tab>
   <Tab value="As an agent tool">
 ```rust
-use cersei::agentlang::{DispatchHandle, RunAgentTemplateTool, VecToolDispatch};
-use cersei::prelude::*;
+use bricks::agentlang::{DispatchHandle, RunAgentTemplateTool, VecToolDispatch};
+use bricks::prelude::*;
+use bricks::tools::Extensions;
 use std::sync::Arc;
 
-// Inject a dispatch handle (and optionally a Mailbox / KvStore) into the
-// tool context extensions, then hand the agent the RunAgentTemplate tool.
-let dispatch: Arc<dyn cersei::agentlang::ToolDispatch> =
-    Arc::new(VecToolDispatch::from_boxed(cersei::tools::coding()));
+// The tool context needs a dispatch handle; Mailbox and KvStore are optional.
+let dispatch: Arc<dyn bricks::agentlang::ToolDispatch> =
+    Arc::new(VecToolDispatch::from_boxed(bricks::tools::coding()));
 
 let ext = Extensions::default();
 ext.insert(DispatchHandle(dispatch));
 
 let agent = Agent::builder()
-    .provider(Anthropic::from_env()?)
-    .tool(RunAgentTemplateTool)   // the single execution surface
-    .extensions(ext)              // builtins reach tools through this
+    .provider(bricks::provider_from_config(None, "my-provider/my-model")?)
+    .tool(RunAgentTemplateTool)
+    .extensions(ext)
     .build()?;
 ```
   </Tab>
 </Tabs>
 
-The `EvalCtx` is the eval environment:
+`RunAgentTemplate` takes `{ "program": string, "vars"?: object }` and is permission level `Execute`. Its programs are checked again, builtin by builtin, under the active policy.
+
+The evaluation context:
 
 ```rust
 EvalCtx::new(&tool_context, dispatch)
-    .with_mailbox(mailbox)   // Arc<Mailbox> → enables agent.send
-    .with_kv(kv)             // Arc<KvStore> → enables kv.get/set
-    .with_self_id(id)        // this agent's identity for mailbox `from`
-    .with_var("x", json!(1)) // seed a variable
-    .with_limits(Limits { max_steps: 1000 });
+    .with_mailbox(Arc::new(mailbox))  // enables agent.send
+    .with_kv(Arc::new(kv))            // enables kv.get / kv.set
+    .with_self_id(sandbox_id)         // sender id for mailbox messages (default "agentlang")
+    .with_var("x", json!(1))          // seed a variable
+    .with_limits(Limits { max_steps: 1000, ..Default::default() });
 ```
+
+Through `RunAgentTemplate`, the `Mailbox` and `KvStore` are read from the tool context extensions as plain values (`ext.insert(mailbox)`, `ext.insert(kv)`). If `DispatchHandle` is missing, the tool returns an error.
 
 ## Safety
 
-- **Permission-gated.** Before any side-effecting builtin, the interpreter builds a `PermissionRequest` and consults the [`PermissionPolicy`](/docs/api-tools#permissions) in the `ToolContext`. Under `AllowReadOnly`, `io.write` is denied with a `line:col` error and never reaches the tool layer.
-- **Step budget.** `Limits::max_steps` bounds total builtin calls, guarding against runaway/recursive programs.
-- **No host escape.** There is no `eval`/exec primitive — the only way to touch the host is through mapped, gated builtins.
-- **Sandbox-aware.** When a `Sandbox` handle is present in the context, `io`/`net` route through it (fail-closed if routing isn't available).
+- **Permission-gated.** Before a side-effecting builtin runs, the interpreter builds a `PermissionRequest` and asks the policy in the tool context. Under a read-only policy, `io.write` is refused with a `line:col` error and never reaches the tool.
+- **Step budget.** `Limits::max_steps` (default 1000) bounds the number of builtin calls.
+- **No host escape.** There is no `eval` or shell primitive. The host is reached only through the mapped, gated builtins.
+- **Sandboxes are identities, not a jail.** If a `Sandbox` is in the context, `RunAgentTemplate` uses its id as the sender id for messages. `io.*` and `net.*` still call the host tools. Only the `Bash` tool, which `io.delete` uses, routes into a sandbox. For sandboxed work, use a `Bash`-based path or run the agent inside a sandbox you manage.
 
-## Errors for LLMs
+## Errors
 
-Parse and runtime errors carry spans and render as self-correctable messages:
+Parse and runtime errors carry a span and read as messages a model can fix:
 
 ```text
 parse error at 1:9: unterminated string literal
-runtime error at 2:1: runtime error: io.write: permission denied (read-only mode)
+runtime error at 2:1: io.write: <reason from the permission policy>
 ```
 
-Through the `RunAgentTemplate` tool these come back as an error `ToolResult`, so the agent loop feeds them straight back to the model to fix.
+Through `RunAgentTemplate`, these come back as an error result, so the agent sees them and can retry.
 
 ## Teaching the language to a model
 
-`cersei::agentlang::AGENTLANG_SPEC` (and `language_spec()`) is a short, example-heavy spec string. Inject it into an agent's system prompt when you allow it to author sub-agents:
+`bricks::agentlang::AGENTLANG_SPEC` (or `language_spec()`) is a short, example-based description of the language. Put it in the system prompt of an agent that writes programs:
 
 ```rust
 let agent = Agent::builder()
-    .provider(Anthropic::from_env()?)
+    .provider(bricks::provider_from_config(None, "my-provider/my-model")?)
     .tool(RunAgentTemplateTool)
-    .append_system_prompt(cersei::agentlang::AGENTLANG_SPEC)
+    .append_system_prompt(bricks::agentlang::AGENTLANG_SPEC)
     .build()?;
 ```
 
 <Cards>
   <Card title="AgentRL Overview" href="/docs/agentrl-overview">
-    How the language fits the self-evolving loop.
+    How the language fits the self-improving loop.
   </Card>
   <Card title="AgentRL Cookbook" href="/docs/agentrl-cookbook">
-    Runnable recipes, including authoring + registering a tool from a template.
+    Runnable recipes, including authoring a tool from a template.
   </Card>
 </Cards>

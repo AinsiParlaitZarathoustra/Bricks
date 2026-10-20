@@ -1,49 +1,51 @@
 ---
 title: "AgentRL API"
-description: API reference for cersei-agentrl — Orchestrator, the AgentRlRunner trait, CerseiRunner, ExecutionGraph, ToolRegistry, DynamicTool, and the Verifier system.
+description: API reference for bricks-agentrl — Orchestrator, the AgentRlRunner trait, CerseiRunner, ExecutionGraph, ToolRegistry, DynamicTool, RegistrySearchTool, the Verifier types, and the memory bridge.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
-import { Cards, Card } from 'fumadocs-ui/components/card';
 
-# cersei-agentrl
+# bricks-agentrl — API Reference
 
-Everything below is re-exported under `cersei::agentrl` when the `agentrl` feature is enabled, or directly from the `cersei_agentrl` crate.
+Everything below is re-exported under `bricks::agentrl` when the `agentrl` feature of the `bricks` facade is enabled. The crate itself is `bricks-agentrl`. `CerseiRunner` and `CerseiError` keep their names in the code.
 
 ## Orchestrator
 
-The policy engine — it owns the run → fail → plan → sandbox → promote → register loop. It is generic over an [`AgentRlRunner`](#agentrlrunner) (the mechanism) so the loop is testable and swappable.
+The loop: lookup, general run, failure trace, proposals, promotion, registration. It is generic over an [`AgentRlRunner`](#agentrlrunner), which holds the mechanism, so the loop can be tested with a mock runner.
 
 ```rust
 let orchestrator = Orchestrator::new(runner, registry) // Arc<dyn AgentRlRunner>, Arc<ToolRegistry>
-    .with_memory(memory)         // Arc<dyn Memory>: record solved problems for recall
-    .with_config(config)         // OrchestratorConfig
-    .with_id_fn(Arc::new(|| ...)); // deterministic tool ids (tests)
+    .with_memory(memory)            // Arc<dyn Memory>: record solved problems for recall
+    .with_config(config)            // OrchestratorConfig
+    .with_id_fn(Arc::new(|| …));    // tool ids; the default is "tool-<uuid>"
 
 let outcome: SolveOutcome = orchestrator.solve("the task").await?;
 ```
 
 | Method | Signature | Purpose |
 |---|---|---|
-| `new` | `(Arc<dyn AgentRlRunner>, Arc<ToolRegistry>) -> Self` | Construct with a mechanism + a registry. |
-| `with_memory` | `(self, Arc<dyn Memory>) -> Self` | When set, solved problems are written to memory for future recall. |
-| `with_config` | `(self, OrchestratorConfig) -> Self` | Tune rounds, proposal count, search width, session id. |
-| `with_id_fn` | `(self, Arc<dyn Fn() -> String + Send + Sync>) -> Self` | Override tool-id generation (defaults to a uuid). |
-| `registry` | `(&self) -> &Arc<ToolRegistry>` | Borrow the registry. |
-| `solve` | `(&self, task: &str) -> Result<SolveOutcome>` | Run the full loop. |
+| `new` | `(Arc<dyn AgentRlRunner>, Arc<ToolRegistry>) -> Self` | Builds the orchestrator. |
+| `with_memory` | `(self, Arc<dyn Memory>) -> Self` | Writes a recall hint to memory when a new tool is registered. |
+| `with_config` | `(self, OrchestratorConfig) -> Self` | Sets rounds, proposal count, search width, samples and session id. |
+| `with_id_fn` | `(self, Arc<dyn Fn() -> String + Send + Sync>) -> Self` | Replaces tool id generation. |
+| `registry` | `(&self) -> &Arc<ToolRegistry>` | Borrows the registry. |
+| `solve` | `(&self, task: &str) -> Result<SolveOutcome>` | Runs the loop once for a task. |
 
-### OrchestratorConfig
+### `OrchestratorConfig`
 
 ```rust
 pub struct OrchestratorConfig {
-    pub max_rl_rounds: u32,     // bound on plan→propose→retry (default 1)
-    pub num_proposals: usize,   // proposals per round (default 2)
-    pub registry_search_k: usize, // tools to pre-load before the general run (default 5)
-    pub session_id: String,     // memory session (default "agentrl")
+    pub max_rl_rounds: u32,        // plan-and-propose rounds after a failed general run (default 1)
+    pub num_proposals: usize,      // proposals per round (default 2)
+    pub registry_search_k: usize,  // registry entries pre-loaded for the general run (default 5)
+    pub session_id: String,        // memory session (default "agentrl")
+    pub num_samples: u32,          // general attempts before planning; the first pass wins (default 1)
 }
 ```
 
-### SolveOutcome & Solved
+Build it with the struct literal and `..Default::default()`, which fills every field you leave out.
+
+### `SolveOutcome` and `Solved`
 
 ```rust
 pub struct SolveOutcome {
@@ -54,15 +56,15 @@ pub struct SolveOutcome {
 }
 
 pub enum Solved {
-    Directly,              // GeneralAgent solved it on the first pass
-    ByCachedTool(String),  // solved via a previously-registered tool (cache hit)
-    ByNewTool(String),     // RL loop fired: a proposal won and was registered
+    Directly,              // the general agent passed the verifier; no registered tool used
+    ByCachedTool(String),  // the general agent passed and used a registered tool
+    ByNewTool(String),     // a proposal passed and was registered under this tool id
 }
 ```
 
 ## AgentRlRunner
 
-The *mechanism* behind the loop. Implement this to control how agents actually run, or use the built-in [`CerseiRunner`](#cerseirunner).
+The mechanism behind the loop. Implement it to control how agents run and where proposals execute; `CerseiRunner` is the built-in implementation.
 
 ```rust
 #[async_trait]
@@ -70,7 +72,7 @@ pub trait AgentRlRunner: Send + Sync {
     async fn run_general(&self, task: &str, available: &[RegistryEntry]) -> GeneralResult;
     async fn plan(&self, trace: &FailureTrace, n: usize) -> Vec<Proposal>;
     async fn run_proposal(&self, proposal: &Proposal) -> ProposalOutcome;
-    async fn promote(&self, _winner: &ProposalOutcome) {} // default: no-op
+    async fn promote(&self, winner: &ProposalOutcome) {}   // default: no-op
 }
 ```
 
@@ -80,101 +82,100 @@ pub trait AgentRlRunner: Send + Sync {
 | `Proposal` | `id: String`, `goal: String`, `context: String` |
 | `ProposalOutcome` | `proposal_id: String`, `passed: bool`, `solution: Option<SolutionSpec>`, `summary: String`, `artifact_dir: Option<PathBuf>` |
 
+A proposal is registered only when it passes **and** carries a `solution`. `artifact_dir` is what `promote` should copy back.
+
 <Callout type="info">
-**Why a trait?** It separates the loop (deterministic, unit-testable) from the runtime (LLM calls, sandboxes). The test suite drives the orchestrator with a mock runner to prove the full register-then-reuse cycle without any network.
+The trait separates the loop from the runtime. The crate's tests drive the orchestrator with a mock runner, which checks the register-then-reuse cycle without any network. See `crates/bricks-agentrl/tests/rl_loop.rs`.
 </Callout>
 
 ## CerseiRunner
 
-The batteries-included `AgentRlRunner`: drives real [`Agent`](/docs/api-agent)s with a real [`Provider`](/docs/api-provider).
+The built-in `AgentRlRunner`. It drives real `Agent`s with a real `Provider`; see [the overview](/docs/agentrl-overview#what-the-production-runner-does) for what each step does.
 
 ```rust
 let runner = CerseiRunner::new(
         provider_factory,  // ProviderFactory = Arc<dyn Fn() -> Box<dyn Provider> + Send + Sync>
-        "./work",          // working directory
+        "./work",          // the working directory the general agent edits
         registry,          // Arc<ToolRegistry>
         verifier,          // Arc<dyn Verifier>
     )
-    .with_model("gemini-3.1-pro-preview")
-    .with_general_tools(factory); // optional: restrict the GeneralAgent's toolset
+    .with_model("my_provider/my-model")
+    .with_general_tools(factory);
 ```
 
 | Method | Purpose |
 |---|---|
-| `with_model(s)` | Set the model (**required** for non-Anthropic providers). |
-| `with_general_tools(ToolsFactory)` | Override the GeneralAgent's base toolset. Registry tools are always added on top. Useful to force escalation into the recovery loop. |
+| `with_model(s)` | The model given to every agent the runner builds. Set it explicitly. |
+| `with_general_tools(ToolsFactory)` | Replaces the general agent's base tools. Registry tools are added on top. Restricting the tools is how the recovery loop is exercised in tests. |
+| `with_system_prompt(s)` | Replaces the general agent's system prompt. |
+| `with_compression(level)` | Sets the compression level of the agents. |
+| `with_proposal_verifier(v)` | Uses a different verifier for proposals. |
+| `with_bricks_config(cfg)` | Applies a `bricks.toml` configuration to every agent. |
 
-What it does per method:
-
-- **`run_general`** builds an agent with `cersei::tools::coding()` + a `RegistrySearchTool` + a `DynamicTool` for each pre-loaded registry entry, attaches a [`GraphReporter`](#executiongraph), runs the task, then judges success with the `Verifier`. If the verifier rejects a tool-clean run, a synthetic failure node is injected so a `FailureTrace` still has directionality.
-- **`plan`** runs a planner agent that emits a JSON array of `{angle, goal}` proposals; falls back to built-in heuristics if parsing fails.
-- **`run_proposal`** copies the working dir into an isolated temp directory, runs a focused sub-agent there with full coding tools, and verifies the result.
-- **`promote`** copies the winning proposal's directory back into the canonical working dir.
+The general agent's tools are `bricks::tools::coding()`, plus `registry_search` (`RegistrySearchTool`), plus one `DynamicTool` per pre-loaded entry. Proposal agents get `coding()` only.
 
 ## ExecutionGraph
 
-A DAG of the run, populated passively by `GraphReporter` (a [`Reporter`](/docs/api-agent#reporters)) from the agent's `AgentEvent` stream.
+A graph of the run, filled passively by `GraphReporter`, which implements `Reporter` for the agent's events.
 
 ```rust
 let gr = GraphReporter::new();
-let agent = Agent::builder()./* ... */.reporter(gr.clone()).build()?;
+let agent = Agent::builder()./* … */.reporter(gr.clone()).build()?;
 agent.run(task).await?;
-let graph: ExecutionGraph = gr.graph();           // snapshot
-let trace: FailureTrace = graph.failure_trace(task); // distilled directionality
+let graph: ExecutionGraph = gr.graph();              // a snapshot
+let trace: FailureTrace = graph.failure_trace(task); // what the planner reads
 ```
 
-| Type | Notes |
+| Type | Fields and values |
 |---|---|
-| `RunNode` | `{ id, kind: NodeKind, label, status: NodeStatus, turn, detail: NodeDetail }` |
-| `NodeKind` | `AgentRun` \| `Turn` \| `ToolCall` |
-| `NodeStatus` | `Running` \| `Ok` \| `Failed` |
-| `Edge` | `{ from, to, rel: EdgeRel }` — `Contains` \| `FailedAfter` \| `Spawned` |
-| `FailureTrace` | `{ problem_statement, failing_nodes: Vec<FailurePoint>, final_error, hypotheses }` |
-| `FailurePoint` | `{ tool, input_excerpt, error_excerpt, turn }` — **all excerpts are secret-scrubbed** |
+| `ExecutionGraph` | `nodes: Vec<RunNode>`, `edges: Vec<Edge>`, `root: NodeId`. Methods include `node`, `has_failure`, `failure_trace`. |
+| `RunNode` | `id`, `kind: NodeKind`, `label`, `status: NodeStatus`, `turn`, `detail: NodeDetail` |
+| `NodeKind` | `AgentRun`, `Turn`, `ToolCall` |
+| `NodeStatus` | `Running`, `Ok`, `Failed` |
+| `Edge` | `from`, `to`, `rel: EdgeRel`, where `EdgeRel` is `Contains`, `FailedAfter` or `Spawned` |
+| `FailureTrace` | `problem_statement`, `failing_nodes: Vec<FailurePoint>`, `final_error: Option<String>`, `hypotheses: Vec<String>` |
+| `FailurePoint` | `tool`, `input_excerpt`, `error_excerpt`, `turn` |
 
-`FailureTrace::directionality()` renders the trace as a prompt-ready string for planners.
-
-<Callout type="warn">
-**Secrets never leak.** Every string that enters a `FailureTrace`, a `RegistryEntry`, or any persisted artifact passes through `cersei_agentrl::scrub::redact`, which removes API-key shapes (`sk-…`, `AIza…`, `Bearer …`) and the values of secret-looking environment variables.
-</Callout>
+Every excerpt passes through the scrubber (see [Safety](/docs/agentrl-overview#safety)). `FailureTrace::directionality()` renders the trace as text for a planner prompt.
 
 ## ToolRegistry
 
-A local, persisted, searchable database of agent-built tools.
+A persisted list of agent-built tools, with keyword search.
 
 ```rust
-let registry = ToolRegistry::open("~/.cersei/agentrl")?; // jsonl-backed, loads on open
+let registry = ToolRegistry::open("~/.cersei/agentrl")?; // returns Arc<ToolRegistry>; a tilde is not expanded
 // or: let registry = ToolRegistry::in_memory();          // for tests
 
-registry.register(entry)?;                 // scrubs + appends to entries.jsonl
-let hits = registry.search("build a parser", 5); // keyword ranking (MVP)
+registry.register(entry)?;                      // scrubs, then appends to entries.jsonl
+let hits = registry.search("build a parser", 5);
 let one = registry.get(&tool_id);
 let all = registry.all();
-registry.record_success(&tool_id);         // bump a tool's success counter
+registry.record_success(&tool_id);
+let n = registry.len();
 ```
+
+`open` reads the existing `entries.jsonl` in the directory and creates the directory if needed. `in_memory` keeps nothing on disk.
+
+`search(query, k)` counts how many query terms appear in an entry's name, description or problem domain. Entries with at least one match are ranked by that count, with `success_count` breaking ties.
 
 | Type | Fields |
 |---|---|
-| `RegistryEntry` | `tool_id`, `name`, `description`, `problem_domain`, `failure_trace`, `solution: SolutionSpec`, `created_at`, `success_count` |
+| `RegistryEntry` | `tool_id`, `name`, `description`, `problem_domain`, `failure_trace: FailureTrace`, `solution: SolutionSpec`, `created_at`, `success_count` |
 | `SolutionSpec` | `system_prompt`, `goal_template`, `allowed_tools: Vec<String>`, `snapshot_id: Option<String>` |
 
-<Callout type="info">
-**Search.** The MVP uses keyword ranking (terms × `success_count` tie-break). A `cersei-embeddings` vector index is the planned upgrade — the API stays the same.
-</Callout>
+The search is keyword-based. No embedding index is used. The `bricks-embeddings` crate is a separate component that could back a future search.
 
-## DynamicTool & RegistrySearchTool
+## DynamicTool and RegistrySearchTool
 
-A registered solution becomes callable like any built-in tool:
+A registered solution becomes a tool the agent can call:
 
 ```rust
-// `replayer` knows how to re-apply a SolutionSpec (CerseiRunner provides one
-// that spawns a fresh sub-agent seeded from the spec).
-let tool = DynamicTool::new(entry, replayer); // impl Tool { name, description, execute }
+let tool = DynamicTool::new(entry, replayer); // Tool named after the entry
 ```
 
-`RegistrySearchTool::new(registry)` is a built-in `Tool` (`registry_search`) that lets an agent look up prior solutions explicitly — returns matching `{tool_id, name, description, success_count}`.
+`RegistrySearchTool::new(registry)` is the tool named `registry_search`. It lets an agent look up earlier solutions and returns the matching `tool_id`, `name`, `description` and `success_count`.
 
-The `SolutionReplayer` trait is the extension point:
+`DynamicTool` delegates to a `SolutionReplayer`:
 
 ```rust
 #[async_trait]
@@ -183,30 +184,44 @@ pub trait SolutionReplayer: Send + Sync {
 }
 ```
 
+`CerseiRunner` provides a replayer that starts a fresh coding sub-agent seeded from the solution's `SolutionSpec`.
+
 ## Verifier
 
-How "did it actually work?" is decided. Both the GeneralAgent and every proposal are judged by the **same** verifier, so a proposal can only win if it genuinely passes.
+Decides whether the work is done. The general agent and every proposal are judged by the same verifier.
 
 ```rust
 #[async_trait]
 pub trait Verifier: Send + Sync {
-    async fn verify(&self, workdir: &Path) -> VerifyResult; // { passed: bool, detail: String }
+    async fn verify(&self, workdir: &Path) -> VerifyResult;
 }
 
-// Built-in: runs a shell command in the working dir; passes iff exit 0.
-let v = CommandVerifier::new("cargo test"); // default 120s timeout
+pub struct VerifyResult { pub passed: bool, pub detail: String }
 ```
 
+Built-in verifiers:
+
+| Verifier | Passes when |
+|---|---|
+| `CommandVerifier::new(command)` | The command, run with `/bin/sh -c` in the working directory, exits with status 0. Timeout 120 s (field `timeout`). |
+| `TestScriptVerifier::new(candidates)` / `default_candidates()` | A test script from the candidate list passes. |
+| `ChainVerifier::new(verifiers)` | Every verifier in the list passes. |
+| `AcceptVerifier` | Always passes, so every run counts as solved. Use it only when no real check exists. |
+
 <Callout type="warn">
-Make the verifier **independent** of anything the agent writes. If the agent can author its own test, it can make that test pass trivially — your check must exercise the real behavior (`python3 gcd.py 48 36 | grep -qx 12`, `cargo test`, a curl against a started server, …).
+Make the verifier **independent** of what the agent writes. If the agent can write the test, it can make the test pass. Check real behaviour, for example `python3 gcd.py 48 36 | grep -qx 12` or `cargo test` on a suite the agent cannot edit.
 </Callout>
 
 ## Memory bridge
 
 ```rust
-cersei_agentrl::memory_bridge::record_solution(
+bricks_agentrl::memory_bridge::record_solution(
     &memory, session_id, problem, tool_name, tool_id,
 ).await?;
 ```
 
-Stores a short, scrubbed recall hint ("Solved X — reusable tool `name` (id …); recall via registry_search") so the GeneralAgent's normal memory search surfaces it next time. The orchestrator calls this automatically when `with_memory` is set.
+Stores a short, scrubbed hint: the problem, and that a reusable tool with that name and id is registered and can be found with `registry_search`. The orchestrator calls it when `with_memory` is set and a new tool is registered, so the agent's normal memory search can surface it later.
+
+## Secret scrubbing
+
+`bricks_agentrl::scrub::redact(text)` removes API-key shapes (OpenAI-style `sk-…`, `sk-ant-…`, Google `AIza…`, `Bearer …` values) and the values of environment variables whose names look secret. `redact_excerpt(text, max)` also shortens the result. The same scrubbing runs on every string that reaches a trace, a registry entry or a memory hint.

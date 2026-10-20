@@ -1,0 +1,263 @@
+---
+title: Migration to Bricks ADK
+description: Renamed crates and import paths, the removed delegation and multi-edit tools, the edit and shell changes, and the settings whose defaults changed. Also lists what keeps its old name.
+---
+
+# Migration to Bricks ADK
+
+The Rust SDK was called Cersei. It is now the **Bricks ADK**: the facade crate
+is `bricks`, and the other crates use the `bricks-` prefix. This page is the
+single reference for the rename and for the behaviour changes of Sprint 14.6
+that a client, an embedder or a script must follow. The change list is in the
+changelog (`docs/content/docs/changelog.mdx`) and in the root `CHANGELOG.md`.
+
+Nothing is converted automatically. Old sessions and recorded histories stay
+readable: a stored `delegate` or `MultiEdit` call still displays.
+
+## 1. Crate names
+
+| Before (package) | Now (package) | Import path |
+|---|---|---|
+| `cersei` (facade) | `bricks` | `bricks` |
+| `cersei-types` | `bricks-types` | `bricks_types` |
+| `cersei-provider` | `bricks-provider` | `bricks_provider` |
+| `cersei-tools` | `bricks-tools` | `bricks_tools` |
+| `cersei-tools-derive` | `bricks-tools-derive` | `bricks_tools_derive` |
+| `cersei-agent` | `bricks-agent` | `bricks_agent` |
+| `cersei-memory` | `bricks-memory` | `bricks_memory` |
+| `cersei-hooks` | `bricks-hooks` | `bricks_hooks` |
+| `cersei-mcp` | `bricks-mcp` | `bricks_mcp` |
+| `cersei-lsp` | `bricks-lsp` | `bricks_lsp` |
+| `cersei-embeddings` | `bricks-embeddings` | `bricks_embeddings` |
+| `cersei-compression` | `bricks-compression` | `bricks_compression` |
+| `cersei-vms` | `bricks-vms` | `bricks_vms` |
+| `cersei-agentlang` | `bricks-agentlang` | `bricks_agentlang` |
+| `cersei-agentrl` | `bricks-agentrl` | `bricks_agentrl` |
+| `cersei-workflows` | `bricks-workflows` | `bricks_workflows` |
+| `cersei-tbench` | `bricks-tbench` | `bricks_tbench` |
+| `cersei-web` | `bricks-web` | `bricks_web` |
+| `cersei-testkit` | `bricks-testkit` | `bricks_testkit` |
+| `cersei-benchmark` | `bricks-benchmark` | `bricks_benchmark` |
+
+Unchanged packages: `bricks-config`, `bricks-semantic`, `bricks-skills`,
+`bricks-cli` (its binary is still `bricks`) and `bricks-desktop`.
+
+The directories under `crates/` follow the package names. In scripts and CI,
+`cargo run -p cersei-tools …` becomes `cargo run -p bricks-tools …`. The
+`tbench-agent` binary keeps its name. The temporary folders of `EnterWorktree`
+are now named `bricks-wt-<branch>` (they were `cersei-wt-<branch>`).
+
+## 2. Imports and the facade
+
+Before (the removed crate name, for comparison only):
+
+```text
+use cersei::prelude::*;
+let agent = Agent::builder()
+    .provider(cersei::provider_from_config(None, "my-provider/my-model")?)
+    .tools(cersei::tools::coding())
+    .build()?;
+```
+
+Now:
+
+```rust
+use bricks::prelude::*;
+let agent = Agent::builder()
+    .provider(bricks::provider_from_config(None, "my-provider/my-model")?)
+    .tools(bricks::tools::coding())
+    .build()?;
+```
+
+```toml
+# Before
+cersei = "0.6"
+# Now: the package `bricks`, at the version of the release that carries this change
+bricks = "…"
+```
+
+The facade re-exports the same modules under the new names: `bricks::tools`,
+`bricks::provider`, `bricks::types`, `bricks::memory`, `bricks::hooks`,
+`bricks::mcp`, `bricks::skills`, and `bricks::vms`, `bricks::agentlang`,
+`bricks::agentrl`, `bricks::workflows` behind their features. A crate that
+imports a sub-crate directly uses the `bricks_*` name in the table above.
+
+### The `Tool` derive
+
+`#[derive(Tool)]` expands to paths under `bricks_tools`
+(`bricks_tools::PermissionLevel`, `bricks_tools::ToolCategory`, …). A crate
+that uses the derive declares `bricks-tools` as a dependency, as it had to
+declare `cersei-tools`. The derive itself is re-exported by `bricks::prelude`.
+
+## 3. Removed: the `delegate` tool
+
+The `delegate` tool and its batch module are removed. A call named `delegate`
+is now an unknown tool.
+
+| Removed | Use instead |
+|---|---|
+| the `delegate` tool, `cersei_agent::delegate_tool::DelegateTool` | the native `Agent` tool for one sub-task, `Agents` for several |
+| the batch module `cersei_agent::delegate`: `run_batch`, `DelegateConfig`, `DelegateTask`, `DelegateResult`, `DELEGATE_BLOCKED_TOOLS`, `DEFAULT_MAX_CONCURRENT`, `ProviderFactory` | No function with the same parameters is provided. Start each sub-task yourself, or give the model `AgentTool` |
+
+`ToolsetFactory` is in `bricks_agent::agent_tool` (same type, `Arc<dyn Fn() -> Vec<Box<dyn Tool>> + Send + Sync>`).
+A sub-agent holds one slot of the scheduler, through `AgentTool`.
+
+The native tools have other parameters. They are not an equivalent of
+`delegate`, and no equivalence is promised. `delegate` took `goal`, `tasks`,
+`context` and `workspace`. `Agent` takes one self-contained `task`; `Agents`
+takes a list of `agents` entries and `fail_fast`:
+
+```json
+{"agents": [
+  {"task": "Audit the payment module", "profile": "inspecteur"},
+  {"task": "Run the payment tests and report failures", "profile": "testeur"}
+ ],
+ "fail_fast": false}
+```
+
+Rewrite each old task as a complete, self-contained `task`: a sub-agent sees
+nothing of the conversation except its `task` and its `context`.
+
+`AgentTool` stays for embedders, with its guarantees. The CLI and the
+controller register only the native tools, never two tools named `Agent`.
+
+## 4. `MultiEdit` is now `Edit` with `edits`
+
+The `MultiEdit` tool and its module (`cersei_tools::multi_edit`,
+`MultiEditTool`) are removed. A call named `MultiEdit` is an unknown tool.
+
+```json
+// Before: MultiEdit
+{"file_path": "src/lib.rs", "edits": [{"old_string": "a", "new_string": "b"}]}
+
+// Now: Edit (the same arguments, under the name Edit)
+{"file_path": "src/lib.rs", "edits": [{"old_string": "a", "new_string": "b"}]}
+```
+
+`Edit` takes either one replacement (`old_string`, `new_string`,
+`replace_all`) or `edits`, never both. SDK code replaces `MultiEditTool` with
+`bricks_tools::file_edit::FileEditTool`. The replacements are applied in order,
+and the file is written once, only if all of them apply.
+
+## 5. Edits no longer need a read
+
+The runtime no longer refuses `Edit`, `Write`, `NotebookEdit` or `ApplyPatch`
+on a file the model has not read in the session. A prompt, a test or a hook
+that expected the "read before edit" error must be changed. Reading a file is
+still the right way to learn its exact text, and the tool descriptions say so.
+
+Other changes of the same area, with no action needed:
+
+* A file change is written under a per-file lock, shared by every session
+  and agent of the process.
+* A change is written only if the file is still the state its approval was
+  given for. A file that moved on is not written, and the call is decided
+  again. A hook that changes the input is decided again when the change it makes
+  differs from the one approved.
+* `Write` writes through a temporary file and a rename.
+* `tool_primitives::fs::edit_file` is kept as it was. `Processed::partial_view`
+  is still produced but no longer decides what counts as read.
+
+## 6. Bash runs one process per command
+
+Each `Bash` call is its own `bash` process. Calls of one session run side by
+side; a long command no longer holds back the next one. A background task
+(`background: true`) starts from a copy of the session state and never
+publishes into it.
+
+What a command leaves for the next calls, when it ends normally:
+
+| Kept | Not kept |
+|---|---|
+| the working directory (`cd`) | non-exported shell variables |
+| exported variables added, changed or removed | shell options (`set -e`, `shopt`) |
+| functions and aliases | the changes of an interrupted, timed-out or killed command |
+| the state of a command that exits with a non-zero code | the changes of a command that replaced its `EXIT` trap, or used `exec` |
+
+If a script relied on a state set by an earlier call, put the state it needs
+in the same command, or export it. `source .venv/bin/activate` still persists
+through its exports.
+
+## 7. Settings whose defaults changed
+
+| Setting | Before | Now | What changes for you |
+|---|---|---|---|
+| `[agents] background_drain_ms` | `600000` | `0` | A headless `bricks run` no longer waits for background sub-agents after its answer. Those still running are cancelled at once, and the run exits with code `6`. Set `600000` to keep the wait. |
+| `[agents] admission_timeout_ms` | `600000` | `30000` | A child that waits for a slot gets `AgentAdmissionTimeout` after 30 s. Raise it to keep the old wait. |
+| `[agent] retry_after_max_wait_ms` | (none) | `60000` | A provider's `Retry-After` longer than this is not waited for: no retry is sent, and the run fails with a message that names the key. `0` never waits for one. Raise it to keep waiting. |
+
+`[web.search] max_retry_wait_ms` is unchanged. It bounds only the single
+rate-limit wait of a web-search provider, not the runner's budget.
+
+The same release changes some waits without a setting:
+
+* Stopping a process tree is notified by the kernel (`kqueue` on macOS, a
+  `pidfd` on Linux) instead of being polled. Where no notification exists, a
+  bounded check runs every 25 ms.
+* A language server's stderr is read to its end at shutdown, for at most
+  500 ms, instead of a fixed 50 ms wait.
+
+## 8. Names that stay
+
+These identities are not renamed. Keep them as they are in configuration,
+scripts, data and external systems.
+
+* `CerseiError`, the error type of the SDK.
+* Environment variables that start with `CERSEI_`: for example
+  `CERSEI_MEMORY_PATH_OVERRIDE`, `CERSEI_COORDINATOR_MODE`,
+  `CERSEI_HOOK_CONTEXT` (the JSON context a shell hook receives),
+  `CERSEI_ENVD_SOCKET`, and the `CERSEI_BENCH_*` variables of the benchmarks.
+* The `.cersei` directories used by the VMS crate (`~/.cersei/vms/…`). The
+  legacy skills folder `.cersei/skills` was never read and stays unread.
+* The `cersei-envd` binary, its socket path `/run/cersei-envd.sock`, and the
+  sandbox image `cersei/sandbox-base`.
+* The `tbench-agent` binary.
+* Docker image and label names of the sandbox and benchmark images.
+* The HTTP `User-Agent` sent by the tools, `Cersei-Agent/0.1`.
+
+## 9. Providers
+
+The Cersei-era provider clients are removed. Models come from `providers.toml`
+and are selected as `provider_id/model_id`.
+
+| Before | Now |
+|---|---|
+| `Anthropic::from_env()`, `Anthropic::builder()…` | a `[[providers]]` entry with `protocol = "anthropic_messages"`, then `bricks::provider_from_config(None, "provider_id/model_id")` |
+| `OpenAi::builder().base_url(..).model(..).api_key(..)` | a `[[providers]]` entry with `protocol = "chat_completions"` (Ollama or vLLM: `auth = "none"`) |
+| `OpenAi::from_env()`, `Gemini::from_env()` | the same, with `api_key_env` naming the variable; the Gemini client has no native adapter, so a Gemini-compatible endpoint goes through one of the three protocols |
+| `AnthropicVertex`, `Gemini` clients | removed |
+| `Auth`, `AuthProvider`, `OAuthToken`, `oauth_login` | removed; keys come from `api_key_env` or `api_key` |
+| `from_model_string("openai/gpt-4o")`, provider detected from a model name | explicit `provider_id/model_id`; nothing is detected |
+| `--model` aliases | `bricks --model provider_id/model_id` (`--providers <file>` for another file) |
+| `*_API_KEY`, `*_BASE_URL` read implicitly | removed; reference the key with `api_key_env`, put the URL in `endpoint` |
+| `.send_num_ctx(true)` (Ollama) | `parameters = { options = { num_ctx = 32768 } }` on the model |
+| `thinking_budget`, `EffortLevel`, `--effort` | reasoning profiles, selected with `reasoning_profile(id)` |
+
+See [Providers](/docs/providers) for the file format.
+
+## 10. Event schema 6
+
+The event schema moved from 5 to 6. The change is additive: a client does not
+have to change, and events and sessions written at 5 read as before (an absent
+`executed` means the call ran). A client that wants the new fields reads:
+
+* `tool_finished` and `agent_tool_finished`: `executed` (`false` for a call
+  that never ran) and `status`. `agent_tool_finished` also carries `output`,
+  cut to 64 KiB, with `output_truncated`.
+* `edit_applied`: each file's `absolute` path, its `patch` (the diff actually
+  written, cut to 512 KiB, with `patch_truncated`). `binary` is now set for a
+  binary file, which has no patch (it was always false before).
+
+## 11. Checklist
+
+1. Rename the dependency and the imports (`cersei` → `bricks`, `cersei_*` →
+   `bricks_*`), and add `bricks-tools` to crates that use `#[derive(Tool)]`.
+2. Replace `delegate` calls and `DelegateTool` with `Agent`, `Agents` or
+   `AgentTool`, and rewrite each task as a self-contained `task`.
+3. Replace `MultiEdit` and `MultiEditTool` with `Edit` (`edits`) and
+   `FileEditTool`.
+4. Remove any "read before edit" assumption from prompts, tests and hooks.
+5. Review the shell calls that depended on state from an earlier call.
+6. Set `background_drain_ms`, `admission_timeout_ms` and
+   `retry_after_max_wait_ms` explicitly where the old waits were needed, and
+   handle exit code `6` in headless scripts.

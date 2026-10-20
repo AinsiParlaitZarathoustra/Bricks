@@ -1,34 +1,35 @@
 ---
 title: "Cookbook: Agent Deployment"
-description: Deploy Cersei agents as services, CLI tools, API endpoints, and background workers.
+description: Deploy Bricks ADK agents as a command-line tool, an HTTP API, a background job, and a process with persisted sessions and graph memory.
 ---
 
 # Cookbook: Agent Deployment
 
-## As a CLI Tool
+Each recipe builds an agent with the `bricks` facade. The provider comes from a `provider_id/model_id` selection in `~/.bricks/providers.toml`, so the same code works with any provider you have configured. Recipes that run without a person present use `AllowAll`, which approves every tool call. Use it only where that is what you want: a sandbox, a copy of a repository, or a task you have reviewed.
 
-Build a single-binary coding agent:
+## As a command-line tool
+
+A single binary that takes a prompt, or reads prompts from standard input:
 
 ```rust
-use cersei::prelude::*;
+use bricks::prelude::*;
 use clap::Parser;
 
 #[derive(Parser)]
 struct Cli {
     prompt: Option<String>,
+    /// provider_id/model_id, from ~/.bricks/providers.toml
     #[arg(long)]
-    model: Option<String>,
+    model: String,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let model = cli.model.as_deref().unwrap_or("claude-sonnet-4-6");
 
     let agent = Agent::builder()
-        .provider(Anthropic::from_env()?)
-        .tools(cersei::tools::all())
-        .model(model)
+        .provider(bricks::provider_from_config(None, &cli.model)?)
+        .tools(bricks::tools::all())
         .permission_policy(AllowAll)
         .auto_compact(true)
         .build()?;
@@ -37,11 +38,12 @@ async fn main() -> anyhow::Result<()> {
         let output = agent.run(&prompt).await?;
         println!("{}", output.text());
     } else {
-        // REPL loop
-        loop {
-            let mut input = String::new();
-            std::io::stdin().read_line(&mut input)?;
-            if input.trim().is_empty() { break; }
+        use std::io::BufRead;
+        for line in std::io::stdin().lock().lines() {
+            let input = line?;
+            if input.trim().is_empty() {
+                break;
+            }
             let output = agent.run(input.trim()).await?;
             println!("{}", output.text());
         }
@@ -50,103 +52,130 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
+`tools::all()` includes shell and file tools, so `AllowAll` lets the agent run commands in the current directory. For a read-only assistant use `tools::coding()` with `AllowReadOnly`.
+
 ## As an HTTP API
 
+A route that answers each request with a new agent. It returns the errors instead of panicking:
+
 ```rust
-use axum::{routing::post, Json, Router};
-use cersei::prelude::*;
+use axum::{http::StatusCode, routing::post, Json, Router};
+use bricks::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize)]
 struct AgentRequest { prompt: String }
 
 #[derive(Serialize)]
-struct AgentResponse { response: String, tokens: u64, turns: u32 }
+struct AgentResponse { response: String, output_tokens: u64, turns: u32 }
 
-async fn handle(Json(req): Json<AgentRequest>) -> Json<AgentResponse> {
+async fn handle(Json(req): Json<AgentRequest>) -> std::result::Result<Json<AgentResponse>, (StatusCode, String)> {
+    let provider = bricks::provider_from_config(None, "my-provider/my-model")
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
     let output = Agent::builder()
-        .provider(Anthropic::from_env().unwrap())
-        .tools(cersei::tools::coding())
+        .provider(provider)
+        .tools(bricks::tools::coding())
         .permission_policy(AllowReadOnly)
         .run_with(&req.prompt)
         .await
-        .unwrap();
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
-    Json(AgentResponse {
+    Ok(Json(AgentResponse {
         response: output.text().to_string(),
-        tokens: output.usage.output_tokens,
+        output_tokens: output.usage.output_tokens,
         turns: output.turns,
-    })
+    }))
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     let app = Router::new().route("/agent", post(handle));
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
+    axum::serve(listener, app).await?;
+    Ok(())
 }
 ```
 
-## With Session Persistence
+Building an agent per request keeps requests independent. Each one starts with no conversation history.
+
+## With session persistence
+
+`JsonlMemory` stores each session as JSON lines in a directory. Giving the same `session_id` to a new agent continues the conversation:
 
 ```rust
-let memory = JsonlMemory::new("./sessions");
+use bricks::memory::JsonlMemory;   // re-exported from bricks-memory
 
 let agent = Agent::builder()
-    .provider(Anthropic::from_env()?)
-    .tools(cersei::tools::coding())
-    .memory(memory)
-    .session_id(&session_id)
+    .provider(bricks::provider_from_config(None, "my-provider/my-model")?)
+    .tools(bricks::tools::coding())
+    .memory(JsonlMemory::new("./sessions"))
+    .session_id(session_id)          // impl Into<String>
     .auto_compact(true)
     .build()?;
 
-// Conversations resume automatically across restarts
+// Run it as usual; a later process that uses the same session_id resumes the history.
 ```
 
-## With Graph Memory
+## With graph memory
+
+`MemoryManager` keeps project facts that the agent can recall later. Its graph store is behind the `graph` feature of `bricks-memory`, which the `bricks` facade does not turn on; enable it in your own `Cargo.toml`:
+
+```toml
+bricks-memory = { version = "0.6", features = ["graph"] }
+```
 
 ```rust
-use cersei::memory::manager::MemoryManager;
+use bricks::memory::manager::MemoryManager;
+use bricks::memory::memdir::MemoryType;
+use std::path::Path;
 
-let mm = MemoryManager::new(project_root)
+let mm = MemoryManager::new(Path::new("./my-project"))
     .with_graph(Path::new("./agent.grafeo"))?;
 
-// Store facts the agent learns
-mm.store_memory("User prefers functional patterns", MemoryType::User, 0.9);
-mm.tag_memory(&id, "coding-style");
+// Store a fact the agent learned. The call returns the id, or None when storage fails.
+if let Some(id) = mm.store_memory("User prefers functional patterns", MemoryType::User, 0.9) {
+    mm.tag_memory(&id, "coding-style");
+}
 
-// Recall during conversations
-let relevant = mm.recall("coding style preferences", 5);
+// Recall during a later conversation.
+let relevant: Vec<String> = mm.recall("coding style preferences", 5);
 ```
 
-## Background Worker (Cron)
+The `MemoryType` values include `User`, `Feedback`, `Project` and `Reference`.
+
+## Background job
+
+A loop that runs an agent on a schedule, in a project directory:
 
 ```rust
-// Run agent on a schedule
+use std::time::Duration;
+
 loop {
     let output = Agent::builder()
-        .provider(Anthropic::from_env()?)
-        .tools(cersei::tools::coding())
+        .provider(bricks::provider_from_config(None, "my-provider/my-model")?)
+        .tools(bricks::tools::coding())
         .working_dir("./my-project")
         .permission_policy(AllowAll)
-        .run_with("Check for new issues and fix any simple bugs")
+        .build()?
+        .run("Check for new issues and fix any simple bugs")
         .await?;
 
-    println!("Agent completed: {} turns, {} tool calls", output.turns, output.tool_calls.len());
+    println!("agent completed: {} turns, {} tool calls", output.turns, output.tool_calls.len());
     tokio::time::sleep(Duration::from_secs(3600)).await;
 }
 ```
 
-## Multi-Agent Coordination
+Run this under a supervisor such as systemd or a container runtime, so that a crash restarts it. The loop itself has no retry logic.
+
+## Sub-agents and orchestration
+
+The agent builder does not add sub-agent tools by itself. `tools::all()` includes the orchestration tools `SendMessage`, the task tools and the worktree tools, but not the sub-agent tools. The `bricks` command-line tool and desktop app add the native `Agent`, `Agents`, `AgentControl` and `AgentProfiles` tools when `[agents] enabled` is set in `bricks.toml`: those tools are backed by a spawner that the session controller creates. An agent built only with `Agent::builder()` does not get them.
 
 ```rust
-// Agent with sub-agent capabilities
 let agent = Agent::builder()
-    .provider(Anthropic::from_env()?)
-    .tools(cersei::tools::all())  // includes AgentTool, Tasks, SendMessage
-    .system_prompt("You are a coordinator. Delegate tasks to sub-agents.")
+    .provider(bricks::provider_from_config(None, "my-provider/my-model")?)
+    .tools(bricks::tools::all())   // SendMessage, task and worktree tools
+    .system_prompt("You are a coordinator. Split the work and check the results.")
     .build()?;
-
-// The model can now spawn sub-agents, create tasks, and send messages
-// between agents using the built-in orchestration tools
 ```

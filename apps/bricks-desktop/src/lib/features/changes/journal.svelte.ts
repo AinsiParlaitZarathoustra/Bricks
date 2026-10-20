@@ -14,6 +14,12 @@ import { onChangeRecorded } from '$lib/state/app.svelte'
 /** Records per page of the project history. */
 export const HISTORY_PAGE = 50
 
+/**
+ * Records asked for one conversation: the engine's largest page. Its default
+ * (200) would cut a longer conversation's changes without a word.
+ */
+export const SESSION_LIST_LIMIT = 2000
+
 const newestFirst = (a: ChangeRecord, b: ChangeRecord) => b.at - a.at
 
 export class ProjectJournal {
@@ -84,7 +90,7 @@ export class SessionJournal {
     const seq = ++this.#seq
     this.loading = true
     try {
-      const records = await changeLogList(this.projectId, this.sessionId)
+      const records = await changeLogList(this.projectId, this.sessionId, SESSION_LIST_LIMIT)
       if (seq !== this.#seq) return
       this.records = [...records].sort(newestFirst)
       this.error = null

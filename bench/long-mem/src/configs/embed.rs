@@ -8,9 +8,9 @@ use crate::configs::{Config, DEFAULT_TOP_K};
 use crate::dataset::Question;
 use anyhow::Result;
 use async_trait::async_trait;
-use cersei_embeddings::{EmbeddingProvider, Metric};
-use cersei_memory::Memory;
-use cersei_memory::embedding_memory::EmbeddingMemory;
+use bricks_embeddings::{EmbeddingProvider, Metric};
+use bricks_memory::Memory;
+use bricks_memory::embedding_memory::EmbeddingMemory;
 
 pub struct EmbedConfig<P: EmbeddingProvider + Send + Sync> {
     mem: Option<EmbeddingMemory<P>>,

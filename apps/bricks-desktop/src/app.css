@@ -93,10 +93,10 @@
 	--info-soft: oklch(0.95 0.025 250);
 
 	/* diffs: + green, - red */
-	--diff-add: oklch(0.44 0.11 150);
-	--diff-add-bg: oklch(0.95 0.035 150);
-	--diff-del: oklch(0.5 0.17 25);
-	--diff-del-bg: oklch(0.95 0.03 25);
+	--diff-add: oklch(0.54 0.17 148);
+	--diff-add-bg: oklch(0.94 0.06 150);
+	--diff-del: oklch(0.56 0.21 27);
+	--diff-del-bg: oklch(0.94 0.05 25);
 
 	/* code */
 	--code-bg: oklch(0.955 0.006 80);
@@ -151,10 +151,10 @@
 	--info: oklch(0.78 0.1 250);
 	--info-soft: oklch(0.27 0.03 250);
 
-	--diff-add: oklch(0.8 0.13 150);
-	--diff-add-bg: oklch(0.27 0.04 150);
-	--diff-del: oklch(0.76 0.14 25);
-	--diff-del-bg: oklch(0.28 0.04 25);
+	--diff-add: oklch(0.8 0.19 150);
+	--diff-add-bg: oklch(0.31 0.07 150);
+	--diff-del: oklch(0.73 0.19 25);
+	--diff-del-bg: oklch(0.31 0.07 25);
 
 	--code-bg: oklch(0.165 0.005 60);
 	--code-foreground: oklch(0.92 0.008 80);

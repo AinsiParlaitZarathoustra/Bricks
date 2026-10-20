@@ -3,10 +3,10 @@
 
 #![allow(dead_code)]
 
+use bricks_lsp::mock::{self, MockConfig, MockDocs, MockHandle};
+use bricks_lsp::{LspClient, LspResult, LspServerConfig};
 use bricks_semantic::lsp::Launcher;
 use bricks_semantic::{SemanticConfig, SemanticEngine};
-use cersei_lsp::mock::{self, MockConfig, MockDocs, MockHandle};
-use cersei_lsp::{LspClient, LspResult, LspServerConfig};
 use futures::future::BoxFuture;
 use parking_lot::Mutex;
 use serde_json::{Value, json};
@@ -48,10 +48,10 @@ pub fn canonical(d: &tempfile::TempDir) -> PathBuf {
 }
 
 fn text_of(uri: &str, docs: &MockDocs) -> Option<String> {
-    let uri = cersei_lsp::normalize_uri(uri);
+    let uri = bricks_lsp::normalize_uri(uri);
     docs.get(&uri)
         .map(|(_, t)| t.clone())
-        .or_else(|| std::fs::read_to_string(cersei_lsp::uri_to_path(&uri)).ok())
+        .or_else(|| std::fs::read_to_string(bricks_lsp::uri_to_path(&uri)).ok())
 }
 
 /// Byte offset of an LSP position (`utf16` or bytes).
@@ -132,7 +132,7 @@ pub fn handler(root: PathBuf, utf16: bool) -> mock::Handler {
                 let target_uri = if text[..s].ends_with("::") {
                     let q = &text[..s - 2];
                     let (qs, _) = word_at(q, q.len());
-                    cersei_lsp::path_to_uri(&root.join("src").join(format!("{}.rs", &q[qs..])))
+                    bricks_lsp::path_to_uri(&root.join("src").join(format!("{}.rs", &q[qs..])))
                 } else {
                     uri.clone()
                 };
@@ -164,7 +164,7 @@ pub fn handler(root: PathBuf, utf16: bool) -> mock::Handler {
                     None
                 };
                 for f in files {
-                    let u = cersei_lsp::path_to_uri(&f);
+                    let u = bricks_lsp::path_to_uri(&f);
                     let t = text_of(&u, docs).unwrap_or_default();
                     for (i, _) in t.match_indices(&word) {
                         let is_def = t[..i].ends_with("fn ");
@@ -188,7 +188,7 @@ pub fn handler(root: PathBuf, utf16: bool) -> mock::Handler {
                     .collect();
                 files.sort();
                 for f in files {
-                    let u = cersei_lsp::path_to_uri(&f);
+                    let u = bricks_lsp::path_to_uri(&f);
                     let t = text_of(&u, docs).unwrap_or_default();
                     if let Some(i) = t.find(&format!("fn {q}(")) {
                         // The whole item's line, like SymbolInformation.

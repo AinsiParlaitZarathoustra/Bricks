@@ -6,7 +6,7 @@
 //! bricks-desktop export_bindings`). Engine types (`Envelope`, `Snapshot`,
 //! `ModelChoice`, `Command`, ...) cross the bridge as their own serde JSON
 //! and are typed on the frontend by `src/lib/ipc/engine.ts`, which mirrors
-//! `cersei_agent::control::protocol`.
+//! `bricks_agent::control::protocol`.
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -128,7 +128,7 @@ pub struct OpenSessionRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct OpenedSession {
     pub session: SessionItem,
-    /// `cersei_agent::control::Snapshot`.
+    /// `bricks_agent::control::Snapshot`.
     #[ts(type = "import('../engine').Snapshot")]
     pub snapshot: serde_json::Value,
     pub history: Vec<HistoryMessage>,
@@ -142,6 +142,10 @@ pub struct OpenedSession {
     /// first (desktop-only metadata; absent for older sessions).
     #[serde(default)]
     pub run_labels: Vec<RunLabel>,
+    /// What the desktop kept of each finished run (answer text, commands,
+    /// file changes), oldest first; absent for older sessions.
+    #[serde(default)]
+    pub run_records: Vec<RunRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -225,7 +229,11 @@ pub struct ChangeRecord {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct ChangeFile {
+    /// The path as the change names it.
     pub path: String,
+    /// The file written, absolute, when the engine said where (older records: none).
+    #[serde(default)]
+    pub absolute: Option<String>,
     /// `create` | `modify` | `delete` (engine `ChangeKind`).
     pub kind: String,
     pub added: u32,
@@ -379,7 +387,7 @@ pub enum Theme {
 // ─── slash commands and session inspection ────────────────────
 
 /// One entry of the shared `/` command registry
-/// (`cersei_agent::control::slash`).
+/// (`bricks_agent::control::slash`).
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct SlashCommandInfo {
     pub name: String,
@@ -458,7 +466,7 @@ pub struct SessionConfigInfo {
     pub effective_reasoning: Option<String>,
     pub interactive: bool,
     pub memory_space: Option<String>,
-    /// `cersei_agent::control::ApprovalRules` (actions per level and tool).
+    /// `bricks_agent::control::ApprovalRules` (actions per level and tool).
     #[ts(type = "Record<string, unknown>")]
     pub approval_rules: serde_json::Value,
     pub allowed_for_session: Vec<String>,
@@ -663,7 +671,7 @@ pub struct ReasoningProfileEdit {
 pub struct SkillsCatalog {
     /// Project whose sources were included (`None`: user and built-in only).
     pub project_id: Option<String>,
-    /// `cersei_agent::control::SkillsListing`.
+    /// `bricks_agent::control::SkillsListing`.
     #[ts(type = "import('../engine').SkillsListing")]
     pub listing: serde_json::Value,
     /// Sources scanned, in order.
@@ -698,4 +706,91 @@ pub struct RunLabel {
     #[serde(default)]
     #[ts(type = "number | null")]
     pub user_index: Option<u32>,
+}
+
+// ─── Run records (desktop-only, one line per run version) ──────────────────
+
+/// What the desktop keeps of a run once it ends: the answer text, its shell
+/// commands and its file changes. The history has the messages, not these. A
+/// run is matched to its user message by `user_index` only when that index was
+/// proven when the record was written; otherwise the run has no message here.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct RunRecord {
+    /// Format of the record (`1`).
+    #[serde(default)]
+    pub version: u32,
+    pub run_id: String,
+    /// 0-based index, among ALL user-role messages of the history, of the
+    /// message the run added. `None` when it was not proven.
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub user_index: Option<u32>,
+    #[ts(type = "number")]
+    pub started_at: i64,
+    /// `None` while the run has not ended.
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub finished_at: Option<i64>,
+    /// The engine's outcome: `succeeded`, `incomplete`, `failed` or
+    /// `cancelled`; `None` when the run did not report one.
+    #[serde(default)]
+    pub outcome: Option<String>,
+    #[serde(default)]
+    pub files: Vec<RunFile>,
+    #[serde(default)]
+    pub commands: Vec<RunCommand>,
+    /// The answer: its text segments in order (each trimmed, empty ones left
+    /// out), joined by a blank line. A segment is cut by a tool call, an edit,
+    /// a notice or an approval.
+    #[serde(default)]
+    pub assistant_text: String,
+}
+
+/// The file changes of a run for one file: sums of its edit operations.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct RunFile {
+    /// `<run id>|<absolute path, or the path as written when unknown>`.
+    pub key: String,
+    /// The path as the change names it.
+    pub path: String,
+    #[serde(default)]
+    pub absolute: Option<String>,
+    /// `create`, `modify` or `delete`: the last one known.
+    pub kind: String,
+    #[ts(type = "number")]
+    pub added: u64,
+    #[ts(type = "number")]
+    pub removed: u64,
+    pub binary: bool,
+    #[ts(type = "number")]
+    pub operations: u64,
+    /// The sub-agents that made an operation on it (empty: the session agent only).
+    #[serde(default)]
+    pub agent_ids: Vec<String>,
+}
+
+/// One shell command a run executed (the session agent's or a sub-agent's).
+/// Refusals are not commands; background jobs are followed through `job_id`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct RunCommand {
+    pub root_run_id: String,
+    #[serde(default)]
+    pub agent_id: Option<String>,
+    pub tool_call_id: String,
+    /// The tool name (`Bash`, `bash`, `Shell`, `PowerShell`).
+    pub name: String,
+    /// The command text as the tool received it (`""` when unknown).
+    pub command: String,
+    /// `running`, `success`, `failure`, `timed_out`, `cancelled` or `unknown`.
+    pub status: String,
+    pub is_error: bool,
+    #[serde(default)]
+    #[ts(type = "number | null")]
+    pub duration_ms: Option<u64>,
+    /// The output, cut to 64 KiB.
+    #[serde(default)]
+    pub output: Option<String>,
+    /// The background job the command handed over, when it was matched.
+    #[serde(default)]
+    pub job_id: Option<String>,
 }

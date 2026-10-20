@@ -3,8 +3,9 @@
 // at other conversations so no event is lost. Owner: orchestrator.
 
 import { SvelteMap } from 'svelte/reactivity'
-import type { HistoryMessage, OpenedSession, RunLabel, SessionItem } from '$lib/ipc/client'
+import type { HistoryMessage, OpenedSession, RunLabel, RunRecord, SessionItem } from '$lib/ipc/client'
 import type {
+  ChangeKind,
   InstanceRecord,
   AgentProfilesEvent,
   SearchHit,
@@ -27,6 +28,8 @@ import type {
   WrittenFile,
 } from '$lib/ipc/engine'
 import { TERMINAL_AGENT_STATES } from '$lib/ipc/engine'
+import { commandKey, fileKey, isShellTool, operationKey } from '$lib/features/conversation/operations'
+import { responseByAnchor, responseGroups, type ResponseGroup } from '$lib/features/conversation/responses'
 
 /** Deeply reactive copy, for objects stored in a SvelteMap and mutated in place. */
 function reactive<T extends object>(value: T): T {
@@ -81,13 +84,28 @@ export interface ApprovalItem {
   resolved?: { decision: Decision; by: DecidedBy }
 }
 
+/** One file of an applied change, as the engine wrote it. */
+export interface EditFile {
+  /** The path as the change names it. */
+  path: string
+  kind: ChangeKind
+  added: number
+  removed: number
+  binary?: boolean
+  /** The file written, absolute (absent for a ChangeSet, or an older event). */
+  absolute?: string
+  /** The entry approved and written, as a unified diff; `null` for a binary file. */
+  patch?: string | null
+  patchTruncated?: boolean
+}
+
 export interface EditItem {
   kind: 'edit'
   id: string
   runId?: string
   toolCallId: string
   tool: string
-  files: WrittenFile[]
+  files: EditFile[]
   agentId?: string
   changesetId?: string
 }
@@ -115,23 +133,46 @@ export type TimelineItem =
   | NoticeItem
   | RunEndItem
 
-/** Line sums of applied edits for one path (operations, not a net diff). */
-export interface FileTotals {
+/**
+ * Line sums of the applied edits of one file in one run (operations, not a net
+ * diff). Keyed by `fileKey` (the full path when known): two files of one name
+ * stay two files.
+ */
+export interface RunFileSummary {
+  key: string
   path: string
+  absolute: string | null
+  /** The basename, exactly. */
+  name: string
   added: number
   removed: number
   binary: boolean
+  /** The last kind known: `create`, `modify` or `delete`. */
+  kind: ChangeKind
   /** Number of edit operations summed. */
   operations: number
+  /** The sub-agents that made an operation on it (none: the session agent only). */
+  agentIds: string[]
 }
 
+export type FileTotals = RunFileSummary
+
+export type CommandStatus = 'running' | 'success' | 'failure' | 'timed_out' | 'cancelled' | 'unknown'
+
+/** One shell command a run executed, the session agent's or a sub-agent's. */
 export interface CommandEvidence {
+  /** `rootRunId|agentId|toolCallId`: one entry per key. */
+  key: string
+  rootRunId: string
+  /** `null` for the session agent. */
+  agentId: string | null
   toolCallId: string
   name: string
   command: string
+  status: CommandStatus
   isError: boolean
-  durationMs: number
-  output: string
+  durationMs: number | null
+  output: string | null
 }
 
 export interface RunInfo {
@@ -147,10 +188,14 @@ export interface RunInfo {
   finalText?: string
   turns?: number
   approvalsUnsatisfied: ApprovalRequest[]
-  /** Edit operations of this run, keyed by path. */
-  files: SvelteMap<string, FileTotals>
+  /** Edit operations of this run, keyed by `fileKey`. */
+  files: SvelteMap<string, RunFileSummary>
+  /** The same files, in the order they were first edited. */
+  fileSummaries: RunFileSummary[]
   /** Shell commands the run executed, with their real output. */
   commands: CommandEvidence[]
+  /** `finishedAt - startedAt` when both are known and in order; `null` otherwise. */
+  workedMs: number | null
 }
 
 export interface AgentToolCall {
@@ -230,7 +275,61 @@ export interface MemoryState {
   lastMaintenance?: { at: number; outcome: string; report?: unknown; error?: string }
 }
 
-const SHELL_TOOLS = new Set(['Bash', 'bash', 'Shell', 'PowerShell'])
+function basename(path: string): string {
+  return path.split(/[\\/]/).pop() || path
+}
+
+/** Time worked by a run, from the engine's timestamps (`null` when missing or out of order). */
+function workedOf(startedAt: number, finishedAt: number | undefined): number | null {
+  return finishedAt !== undefined && finishedAt >= startedAt ? finishedAt - startedAt : null
+}
+
+function editFile(f: WrittenFile): EditFile {
+  return {
+    path: f.path,
+    kind: f.kind,
+    added: f.added,
+    removed: f.removed,
+    binary: f.binary ?? false,
+    absolute: f.absolute,
+    patch: f.patch ?? null,
+    patchTruncated: f.patch_truncated ?? false,
+  }
+}
+
+/** A command's status as the engine reports it (`unknown` when it says nothing). */
+function statusOf(status: string | undefined): CommandStatus {
+  switch (status) {
+    case 'running':
+    case 'success':
+    case 'failure':
+    case 'timed_out':
+    case 'cancelled':
+      return status
+    default:
+      return 'unknown'
+  }
+}
+
+/** The status a background job's end gives its command. */
+function jobStatus(state: string): CommandStatus {
+  switch (state) {
+    case 'completed':
+      return 'success'
+    case 'failed':
+      return 'failure'
+    case 'stopped':
+      return 'cancelled'
+    default:
+      return 'unknown'
+  }
+}
+
+/** The command text of a shell call's input (`''` when there is none). */
+function commandText(input: unknown): string {
+  const command = (input as { command?: unknown } | null | undefined)?.command
+  return typeof command === 'string' ? command : ''
+}
 
 /**
  * Whether a user text is an engine skill activation: the instructions of a
@@ -241,6 +340,49 @@ const SHELL_TOOLS = new Set(['Bash', 'bash', 'Shell', 'PowerShell'])
 function isEngineSkillActivation(text: string): boolean {
   const t = text.trim()
   return t.startsWith('<skill_activation id="') && t.endsWith('</skill_activation>')
+}
+
+/** The summary of a stored run, from its record. */
+function storedRun(record: RunRecord, prompt: string): RunInfo {
+  const fileSummaries: RunFileSummary[] = record.files.map((f) => ({
+    key: f.key,
+    path: f.path,
+    absolute: f.absolute ?? null,
+    name: basename(f.path),
+    added: f.added,
+    removed: f.removed,
+    binary: f.binary,
+    kind: f.kind as ChangeKind,
+    operations: f.operations,
+    agentIds: [...f.agent_ids],
+  }))
+  const files = new SvelteMap<string, RunFileSummary>()
+  for (const f of fileSummaries) files.set(f.key, f)
+  const finishedAt = record.finished_at ?? undefined
+  return {
+    runId: record.run_id,
+    prompt,
+    model: '',
+    startedAt: record.started_at,
+    finishedAt,
+    outcome: (record.outcome ?? undefined) as RunOutcome | undefined,
+    approvalsUnsatisfied: [],
+    files,
+    fileSummaries,
+    commands: record.commands.map((c) => ({
+      key: commandKey(c.root_run_id, c.agent_id, c.tool_call_id),
+      rootRunId: c.root_run_id,
+      agentId: c.agent_id ?? null,
+      toolCallId: c.tool_call_id,
+      name: c.name,
+      command: c.command,
+      status: statusOf(c.status),
+      isError: c.is_error,
+      durationMs: c.duration_ms ?? null,
+      output: c.output ?? null,
+    })),
+    workedMs: workedOf(record.started_at, finishedAt),
+  }
 }
 
 export class Conversation {
@@ -301,6 +443,17 @@ export class Conversation {
   private runLabels = new SvelteMap<string, string>()
   /** Label of the submit sent last, until the next live run starts (see `setPendingSubmitLabel`). */
   private pendingSubmitLabel: string | null = null
+  /** Run records of the stored runs (`opened.run_records`), for the responses. */
+  private storedRuns: RunRecord[] = []
+  /** Runs whose summary (files, commands, time) comes from their record: events never add to it. */
+  private recordedRuns = new Set<string>()
+  /** Operation keys already counted, per run (see `operationKey`). */
+  private operationKeys = new Map<string, Set<string>>()
+  /** Background job id → the command (run id, command key) it was matched to. */
+  private jobCommands = new Map<string, { runId: string; key: string }>()
+  /** Jobs already matched to a command. */
+  private claimedJobs = new Set<string>()
+  private readonly responseCache = $derived.by(() => responseGroups(this.items, this.runs, this.storedRuns))
 
   constructor(opened: OpenedSession, projectId: string | null) {
     this.sessionId = opened.session.id
@@ -308,10 +461,27 @@ export class Conversation {
     this.session = opened.session
     this.title = opened.session.title
     this.applySnapshot(opened.snapshot)
+    this.storedRuns = opened.run_records ?? []
     const userItemIds = this.loadHistory(opened.history)
+    this.attachRecords(this.storedRuns, userItemIds)
     this.replay(opened.recent_events)
+    // Envelopes up to the snapshot are already in this view: a later delivery of one is ignored.
+    this.lastSeq = Math.max(this.lastSeq, opened.last_seq)
     // Absent for sessions stored before labels existed.
     this.applyStoredLabels(opened.run_labels ?? [], userItemIds)
+  }
+
+  /**
+   * The responses of the conversation, in order, built from every item (not the
+   * visible ones). Each copyable one has its « Copier » button after its last item.
+   */
+  get responses(): ResponseGroup[] {
+    return this.responseCache
+  }
+
+  /** The copyable response that ends at this item (its « Copier » button), if any. */
+  responseByAnchor(itemId: string): ResponseGroup | undefined {
+    return responseByAnchor(this.responseCache, itemId)
   }
 
   get running(): boolean {
@@ -525,6 +695,34 @@ export class Conversation {
   }
 
   /**
+   * Places the stored runs on their messages. A record whose `user_index` is
+   * proven gives its run to that user message and to the items after it, up to
+   * the next user message; its summary (files, commands, time) is the record's;
+   * its end is a « bilan » item after the response. A record without a proven
+   * index stays unplaced: nothing is matched by text.
+   */
+  private attachRecords(records: RunRecord[], userItemIds: Map<number, string>) {
+    for (const record of records) {
+      if (record.user_index == null || this.runs.has(record.run_id)) continue
+      const id = userItemIds.get(record.user_index)
+      const at = this.items.findIndex((i) => i.kind === 'user' && i.id === id)
+      const item = this.items[at]
+      if (item?.kind !== 'user' || item.runId) continue
+      item.runId = record.run_id
+      this.runs.set(record.run_id, reactive<RunInfo>(storedRun(record, item.text)))
+      this.recordedRuns.add(record.run_id)
+      let end = at + 1
+      for (; end < this.items.length && this.items[end].kind !== 'user'; end++) {
+        const own = this.items[end]
+        if (own.kind !== 'run_end' && !own.runId) own.runId = record.run_id
+      }
+      if (record.finished_at != null) {
+        this.items.splice(end, 0, { kind: 'run_end', id: localId('r'), runId: record.run_id })
+      }
+    }
+  }
+
+  /**
    * Re-applies the bridge's recent envelopes after the stored history: a
    * running run's events are replayed (its partial messages are dropped
    * from the history first, they come back from the events); for a
@@ -636,29 +834,18 @@ export class Conversation {
         break
       }
       case 'edit_applied': {
+        this.closeAssistant()
         this.items.push({
           kind: 'edit',
           id: localId('e'),
           runId,
           toolCallId: env.tool_call_id,
           tool: env.tool,
-          files: env.files,
+          files: env.files.map(editFile),
           agentId: env.agent_id,
           changesetId: env.changeset_id,
         })
-        const run = this.run(runId)
-        if (run) {
-          for (const f of env.files) {
-            const prev = run.files.get(f.path)
-            run.files.set(f.path, {
-              path: f.path,
-              added: (prev?.added ?? 0) + f.added,
-              removed: (prev?.removed ?? 0) + f.removed,
-              binary: (prev?.binary ?? false) || !!f.binary,
-              operations: (prev?.operations ?? 0) + 1,
-            })
-          }
-        }
+        this.recordEdit(env, runId)
         break
       }
       case 'context':
@@ -710,6 +897,7 @@ export class Conversation {
         const run = this.run(id ?? undefined)
         if (run) {
           run.finishedAt = env.at
+          run.workedMs = workedOf(run.startedAt, env.at)
           run.outcome = env.outcome
           run.error = env.error
           run.termination = env.termination
@@ -717,12 +905,32 @@ export class Conversation {
           run.turns = env.turns
           run.approvalsUnsatisfied = env.approvals_unsatisfied ?? []
         }
-        if (id) this.items.push({ kind: 'run_end', id: localId('r'), runId: id })
+        // One « bilan » per run: a replay of a stored run already placed it.
+        if (id && !this.items.some((i) => i.kind === 'run_end' && i.runId === id)) {
+          this.items.push({ kind: 'run_end', id: localId('r'), runId: id })
+        }
         if (this.runningRunId === id) this.runningRunId = null
         this.pendingChange = null
-        for (const item of this.items)
-          if (item.kind === 'tool' && item.status === 'running' && item.runId === id)
-            item.status = 'error'
+        for (const item of this.items) {
+          if (item.kind !== 'tool' || item.status !== 'running' || item.runId !== id) continue
+          // A shell call that never reported an end is a command of unknown outcome.
+          const live = this.liveRun(id)
+          if (live && isShellTool(item.name)) {
+            this.putCommand(live, {
+              key: commandKey(live.runId, null, item.toolCallId),
+              rootRunId: live.runId,
+              agentId: null,
+              toolCallId: item.toolCallId,
+              name: item.name,
+              command: commandText(item.input),
+              status: 'unknown',
+              isError: false,
+              durationMs: null,
+              output: null,
+            })
+          }
+          item.status = 'error'
+        }
         break
       }
       case 'agent_spawned':
@@ -757,13 +965,13 @@ export class Conversation {
         break
       }
       case 'agent_tool_finished': {
-        const t = this.agents
-          .get(env.agent_id)
-          ?.tools.findLast((t) => t.toolCallId === env.tool_call_id)
+        const agent = this.agents.get(env.agent_id)
+        const t = agent?.tools.findLast((t) => t.toolCallId === env.tool_call_id)
         if (t) {
           t.status = env.is_error ? 'error' : 'ok'
           t.durationMs = env.duration_ms
         }
+        if (agent) this.recordAgentCommand(env, agent, t?.input)
         break
       }
       case 'agent_finished': {
@@ -871,6 +1079,8 @@ export class Conversation {
           j.durationMs = env.duration_ms
           j.logs = env.logs ?? []
         }
+        const link = this.jobCommands.get(env.job_id)
+        if (link) this.updateCommand(link.runId, link.key, env.state, env.duration_ms, env.logs ?? [])
         break
       }
       case 'agent_control_result':
@@ -888,6 +1098,9 @@ export class Conversation {
 
   private startRun(env: Extract<Envelope, { type: 'run_started' }>, live: boolean) {
     const runId = env.run_id ?? localId('run')
+    this.lastSeq = Math.max(this.lastSeq, env.seq)
+    // A stored run keeps its record's summary when its events are replayed.
+    if (!live && this.recordedRuns.has(runId)) return
     this.runs.set(runId, reactive<RunInfo>({
       runId,
       prompt: env.prompt,
@@ -896,9 +1109,10 @@ export class Conversation {
       startedAt: env.at,
       approvalsUnsatisfied: [],
       files: new SvelteMap(),
+      fileSummaries: [],
       commands: [],
+      workedMs: null,
     }))
-    this.lastSeq = Math.max(this.lastSeq, env.seq)
     if (!live) return
     this.runningRunId = runId
     this.lastRejection = null
@@ -908,6 +1122,7 @@ export class Conversation {
       this.pendingSubmitLabel = null
     }
     const commandLabel = this.runLabels.get(runId)
+    this.closeAssistant()
     this.items.push({
       kind: 'user',
       id: localId('u'),
@@ -919,25 +1134,140 @@ export class Conversation {
     })
   }
 
-  private recordCommand(env: Extract<Envelope, { type: 'tool_finished' }>) {
-    if (!SHELL_TOOLS.has(env.name)) return
-    const run = this.run(env.run_id)
+  /** The run whose summary the events add to: none for a stored run (its record is the summary). */
+  private liveRun(runId: string | undefined): RunInfo | undefined {
+    if (!runId || this.recordedRuns.has(runId)) return undefined
+    return this.run(runId)
+  }
+
+  /** Counts each edit operation of an applied change once (`operationKey`). */
+  private recordEdit(env: Extract<Envelope, { type: 'edit_applied' }>, runId: string | undefined) {
+    const owner = env.agent_id ? this.agents.get(env.agent_id)?.spawn.root_run_id : undefined
+    const run = this.liveRun(owner ?? runId)
     if (!run) return
-    const tool = this.findTool(env.tool_call_id, env.name)
-    const input = (tool?.input ?? {}) as { command?: unknown }
-    run.commands.push({
+    const counted = this.operationsOf(run.runId)
+    for (const f of env.files) {
+      const opKey = operationKey(env.agent_id, env.tool_call_id, f.path)
+      if (counted.has(opKey)) continue
+      counted.add(opKey)
+      const key = fileKey(run.runId, f.absolute, f.path)
+      const prev = run.files.get(key)
+      const agentIds = prev ? [...prev.agentIds] : []
+      if (env.agent_id && !agentIds.includes(env.agent_id)) agentIds.push(env.agent_id)
+      run.files.set(key, {
+        key,
+        path: f.path,
+        absolute: f.absolute ?? prev?.absolute ?? null,
+        name: basename(f.path),
+        added: (prev?.added ?? 0) + f.added,
+        removed: (prev?.removed ?? 0) + f.removed,
+        binary: (prev?.binary ?? false) || !!f.binary,
+        kind: f.kind,
+        operations: (prev?.operations ?? 0) + 1,
+        agentIds,
+      })
+    }
+    run.fileSummaries = [...run.files.values()]
+  }
+
+  private operationsOf(runId: string): Set<string> {
+    let counted = this.operationKeys.get(runId)
+    if (!counted) {
+      counted = new Set()
+      this.operationKeys.set(runId, counted)
+    }
+    return counted
+  }
+
+  /**
+   * A shell call of the session agent ended. A refusal (`executed: false`) never
+   * ran and is not a command. A running one stays `running` until its job ends.
+   */
+  private recordCommand(env: Extract<Envelope, { type: 'tool_finished' }>) {
+    if (!isShellTool(env.name) || env.executed === false) return
+    const run = this.liveRun(env.run_id)
+    if (!run) return
+    const command = commandText(this.findTool(env.tool_call_id, env.name)?.input)
+    this.putCommand(run, {
+      key: commandKey(run.runId, null, env.tool_call_id),
+      rootRunId: run.runId,
+      agentId: null,
       toolCallId: env.tool_call_id,
       name: env.name,
-      command: typeof input.command === 'string' ? input.command : '',
+      command,
+      status: statusOf(env.status),
       isError: env.is_error,
       durationMs: env.duration_ms,
       output: env.output,
     })
   }
 
+  /** A sub-agent's shell call ended (its own entry, under its root run). */
+  private recordAgentCommand(
+    env: Extract<Envelope, { type: 'agent_tool_finished' }>,
+    agent: AgentInfo,
+    input: unknown,
+  ) {
+    if (!isShellTool(env.name) || env.executed === false) return
+    const rootRunId = agent.spawn.root_run_id
+    const run = this.liveRun(rootRunId)
+    if (!run) return
+    this.putCommand(run, {
+      key: commandKey(rootRunId, env.agent_id, env.tool_call_id),
+      rootRunId,
+      agentId: env.agent_id,
+      toolCallId: env.tool_call_id,
+      name: env.name,
+      command: commandText(input),
+      status: statusOf(env.status),
+      isError: env.is_error,
+      durationMs: env.duration_ms,
+      output: env.output ?? null,
+    })
+  }
+
+  /** Adds a command, or replaces the entry of its key. A running one takes a job that already ended. */
+  private putCommand(run: RunInfo, command: CommandEvidence) {
+    const at = run.commands.findIndex((c) => c.key === command.key)
+    if (at >= 0) run.commands[at] = command
+    else run.commands.push(command)
+    if (command.status !== 'running') return
+    const job = [...this.jobs.values()].find(
+      (j) =>
+        !this.claimedJobs.has(j.jobId) &&
+        j.command === command.command &&
+        j.rootRunId === run.runId &&
+        (this.agents.has(j.agentId) ? j.agentId : null) === command.agentId,
+    )
+    if (!job) return
+    this.claimedJobs.add(job.jobId)
+    this.jobCommands.set(job.jobId, { runId: run.runId, key: command.key })
+    if (job.state !== 'running') {
+      this.updateCommand(run.runId, command.key, job.state, job.durationMs ?? null, job.logs)
+    }
+  }
+
+  /** The end of a background job, on the command it was matched to. */
+  private updateCommand(runId: string, key: string, state: string, durationMs: number | null | undefined, logs: string[]) {
+    const run = this.run(runId)
+    const at = run?.commands.findIndex((c) => c.key === key) ?? -1
+    if (!run || at < 0) return
+    const current = run.commands[at]
+    const status = jobStatus(state)
+    run.commands[at] = {
+      ...current,
+      status,
+      isError: status !== 'success',
+      durationMs: durationMs ?? current.durationMs,
+      output: logs.length > 0 ? logs.join('\n') : current.output,
+    }
+  }
+
   private currentAssistant(runId: string | undefined): AssistantItem {
     const last = this.items.at(-1)
     if (last?.kind === 'assistant' && last.streaming && last.runId === runId) return last
+    // Every other item closes the answer before it (see `closeAssistant`).
+    this.closeAssistant()
     const item: AssistantItem = {
       kind: 'assistant',
       id: localId('a'),
@@ -951,6 +1281,10 @@ export class Conversation {
     return this.items.at(-1) as AssistantItem
   }
 
+  /**
+   * Closes the streaming answer. Every item pushed after it closes it first, so
+   * at most one answer is streaming, and it is the last item.
+   */
   private closeAssistant() {
     const last = this.items.at(-1)
     if (last?.kind === 'assistant') last.streaming = false
@@ -965,6 +1299,7 @@ export class Conversation {
   }
 
   private notice(level: NoticeItem['level'], message: string, runId?: string) {
+    this.closeAssistant()
     this.items.push({ kind: 'notice', id: localId('n'), runId, level, message })
   }
 }

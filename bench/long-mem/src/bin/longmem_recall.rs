@@ -33,9 +33,9 @@
 mod dataset;
 
 use anyhow::{Context, Result, anyhow};
-use cersei_embeddings::{EmbeddingProvider, GeminiEmbeddings, HashingEmbeddings, OpenAiEmbeddings};
-use cersei_memory::structured::clock::parse_time;
-use cersei_memory::structured::{
+use bricks_embeddings::{EmbeddingProvider, GeminiEmbeddings, HashingEmbeddings, OpenAiEmbeddings};
+use bricks_memory::structured::clock::parse_time;
+use bricks_memory::structured::{
     EpisodeInput, LlmExtractor, MemoryConfig, RecallQuery, StructuredMemory,
 };
 use clap::Parser;
@@ -158,7 +158,7 @@ async fn run_structured(
     mode: &str,
     cli: &Cli,
     ks: &[usize],
-    extractor: Option<Arc<dyn cersei_memory::structured::Extractor>>,
+    extractor: Option<Arc<dyn bricks_memory::structured::Extractor>>,
 ) -> Result<Row> {
     let mut cfg = MemoryConfig::default().with_space("user:longmemeval");
     let kmax = *ks.iter().max().unwrap_or(&10);
@@ -244,7 +244,7 @@ async fn run_structured(
 }
 
 fn run_legacy(q: &Question, ks: &[usize]) -> Result<Row> {
-    let g = cersei_memory::graph::GraphMemory::open_in_memory().map_err(|e| anyhow!("{e}"))?;
+    let g = bricks_memory::graph::GraphMemory::open_in_memory().map_err(|e| anyhow!("{e}"))?;
     let t0 = Instant::now();
     let mut by_content: HashMap<String, String> = HashMap::new();
     for (i, session) in q.haystack_sessions.iter().enumerate() {
@@ -253,7 +253,7 @@ fn run_legacy(q: &Question, ks: &[usize]) -> Result<Row> {
         for turn in session {
             // Same formatting as the former `graph` configuration.
             let content = format!("[{date}] {}: {}", turn.role, turn.content);
-            let _ = g.store_memory(&content, cersei_memory::memdir::MemoryType::Project, 0.9);
+            let _ = g.store_memory(&content, bricks_memory::memdir::MemoryType::Project, 0.9);
             by_content.entry(content).or_insert(sid.clone());
         }
     }
@@ -303,10 +303,10 @@ async fn main() -> Result<()> {
         .filter_map(|s| s.trim().parse().ok())
         .collect();
     let modes: Vec<String> = cli.modes.split(',').map(|s| s.trim().to_string()).collect();
-    let extractor: Option<Arc<dyn cersei_memory::structured::Extractor>> =
+    let extractor: Option<Arc<dyn bricks_memory::structured::Extractor>> =
         match &cli.extractor_model {
             Some(sel) => {
-                let registry = cersei_provider::ProviderRegistry::load(cli.providers.as_deref())
+                let registry = bricks_provider::ProviderRegistry::load(cli.providers.as_deref())
                     .map_err(|e| anyhow!("{e}"))?;
                 let provider = registry
                     .resolve(sel)

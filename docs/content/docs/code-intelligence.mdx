@@ -7,16 +7,16 @@ import { TypeTable } from 'fumadocs-ui/components/type-table';
 
 # Code & AST Intelligence
 
-Cersei provides two layers of code intelligence available as both SDK library APIs and agent tools:
+Bricks provides two layers of code intelligence available as both SDK library APIs and agent tools:
 
-- **`cersei-lsp`** — Language Server Protocol client for semantic operations (hover, definitions, references, symbols, diagnostics)
-- **Tree-sitter modules** in `cersei-tools` — AST-based import extraction, symbol discovery, dependency ranking, and bash command safety analysis
+- **`bricks-lsp`** — Language Server Protocol client for semantic operations (hover, definitions, references, symbols, diagnostics)
+- **Tree-sitter modules** in `bricks-tools` — AST-based import extraction, symbol discovery, dependency ranking, and bash command safety analysis
 
-Both are library APIs that let an agent understand a codebase without reading every file. `cersei-lsp` is used by `bricks-semantic`; the Cersei-era `abstract` CLI used both systems (see below).
+Both are library APIs that let an agent understand a codebase without reading every file. `bricks-lsp` is used by `bricks-semantic`; the Cersei-era `abstract` CLI used both systems (see below).
 
 ---
 
-## `cersei-lsp` Crate
+## `bricks-lsp` Crate
 
 A standalone LSP client crate with on-demand server management. Spawns language servers lazily on first file access, communicates via JSON-RPC 2.0 over stdio.
 
@@ -24,7 +24,7 @@ A standalone LSP client crate with on-demand server management. Spawns language 
 
 ```toml
 [dependencies]
-cersei-lsp = "0.6"
+bricks-lsp = "0.6"
 ```
 
 ### Architecture
@@ -44,7 +44,7 @@ LspManager (multi-server registry)
 ### Quick Start
 
 ```rust
-use cersei_lsp::{LspManager, LspServerConfig};
+use bricks_lsp::{LspManager, LspServerConfig};
 use std::path::Path;
 
 #[tokio::main]
@@ -115,7 +115,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 Low-level client for a single server. Usually accessed through `LspManager`, but available for direct use:
 
 ```rust
-use cersei_lsp::{LspClient, LspServerConfig};
+use bricks_lsp::{LspClient, LspServerConfig};
 
 let config = LspServerConfig::new(
     "rust-analyzer", "rust-analyzer",
@@ -133,6 +133,7 @@ client.shutdown().await?;
 #### Types
 
 ```rust
+use bricks_lsp::types::{DiagnosticSeverity, Range};
 // Symbol from document_symbols()
 pub struct SymbolInfo {
     pub name: String,      // e.g. "Config"
@@ -174,7 +175,7 @@ pub struct LspDiagnostic {
 ### Custom Server Example
 
 ```rust
-use cersei_lsp::{LspManager, LspServerConfig};
+use bricks_lsp::{LspManager, LspServerConfig};
 
 let mut mgr = LspManager::new("/project");
 
@@ -195,7 +196,7 @@ mgr.register_builtins(); // Also load defaults
 For long-running applications (like Abstract CLI), use the global manager:
 
 ```rust
-use cersei_lsp::global_lsp_manager;
+use bricks_lsp::global_lsp_manager;
 
 let mgr = global_lsp_manager(Path::new("/project"));
 let mut guard = mgr.lock().await;
@@ -207,7 +208,7 @@ let symbols = guard.document_symbols(Path::new("src/lib.rs")).await?;
 
 ## Tree-sitter Code Intelligence
 
-Located in `cersei_tools::tool_primitives::code_intel`. Parses source files using native tree-sitter grammars to extract imports and symbols without running a language server.
+Located in `bricks_tools::tool_primitives::code_intel`. Parses source files using native tree-sitter grammars to extract imports and symbols without running a language server.
 
 ### Supported Languages
 
@@ -221,7 +222,7 @@ Located in `cersei_tools::tool_primitives::code_intel`. Parses source files usin
 ### Analyzing a Single File
 
 ```rust
-use cersei_tools::tool_primitives::code_intel::{analyze_file, Language};
+use bricks_tools::tool_primitives::code_intel::{analyze_file, Language};
 use std::path::Path;
 
 let source = r#"
@@ -256,7 +257,7 @@ for sym in &intel.symbols {
 `scan_project()` discovers all source files, parses them, and returns the most important ones ranked by a dependency score:
 
 ```rust
-use cersei_tools::tool_primitives::code_intel::{scan_project, format_project_intel};
+use bricks_tools::tool_primitives::code_intel::{scan_project, format_project_intel};
 use std::path::Path;
 
 let intels = scan_project(Path::new("/path/to/project"), 20);
@@ -313,14 +314,14 @@ Files are ranked by importance score:
 
 ## Bash Command Safety Analysis
 
-Located in `cersei_tools::tool_primitives::bash_safety`. Uses tree-sitter to parse bash commands into ASTs and classify them by risk level.
+Located in `bricks_tools::tool_primitives::bash_safety`. Uses tree-sitter to parse bash commands into ASTs and classify them by risk level.
 
 It is an SDK primitive: nothing calls it before the `Bash` tool runs a command, and it changes no permission. The tool is approved by the permission policy at the `Execute` level. The analysis runs nothing, and it is conservative: a parse error, a dynamic command name or target (`$CMD`, `"$DIR"`), an interpreter or an unknown program is never `Safe`, and every segment of a list, pipeline, substitution or redirection counts. It does not see aliases, functions defined elsewhere, `PATH` or the content of scripts.
 
 ### Usage
 
 ```rust
-use cersei_tools::tool_primitives::bash_safety::{analyze_command, is_safe, is_forbidden};
+use bricks_tools::tool_primitives::bash_safety::{analyze_command, is_safe, is_forbidden};
 
 // Safe commands
 assert!(is_safe("ls -la"));
@@ -388,7 +389,7 @@ The analyzer detects these AST patterns:
 
 ## LSP Tool (Agent-Facing)
 
-The `LSP` tool in `cersei-tools` is available to any agent built with that crate. It exposes all 5 LSP operations to the model.
+The `LSP` tool in `bricks-tools` is available to any agent built with that crate. It exposes all 5 LSP operations to the model.
 
 ### Tool Schema
 
@@ -418,7 +419,7 @@ Agent: [calls LSP tool with action=hover, file=src/main.rs, line=15, column=10]
 
 ## Integration in Abstract CLI (historical)
 
-The Cersei-era `abstract` CLI used both systems as follows. That crate is no longer in this workspace, and the Bricks CLI does not call these functions; they remain available to any agent built with `cersei-tools`.
+The Cersei-era `abstract` CLI used both systems as follows. That crate is no longer in this workspace, and the Bricks CLI does not call these functions; they remain available to any agent built with `bricks-tools`.
 
 1. **At startup**: `scan_project()` runs tree-sitter analysis on top 20 files, injects dependency-ranked summaries into the system prompt as `project_intel`
 2. **During exploration**: The agent calls the `LSP` tool for semantic queries (hover, definitions, references)

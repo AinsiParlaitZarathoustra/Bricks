@@ -7,25 +7,25 @@ import { Callout } from 'fumadocs-ui/components/callout';
 
 # Multimodal Input
 
-Messages aren't text-only. A user message can carry **images, video, audio, and documents (PDF/text)** alongside text, and Cersei serializes each block to the wire format the target provider expects. The blocks are provider-agnostic — the same message can be sent to Anthropic, OpenAI, or Gemini, and each backend takes what it supports and drops the rest.
+Messages aren't text-only. A user message can carry **images, audio, video and documents (PDF or text)** alongside text. Bricks serializes each block to the wire format of the protocol the model uses, and what a model accepts is declared in its `providers.toml` entry (`input_modalities`, `document_mime_types`).
 
-## What each provider accepts
+A request that needs an input its model or adapter cannot carry fails with `Unsupported`, naming the model and the block, before anything is sent. Nothing is dropped or converted to text without saying so.
 
-| Media | Anthropic | OpenAI | Gemini |
+| Input | `chat_completions` | `responses` | `anthropic_messages` |
 | --- | --- | --- | --- |
-| Images (PNG/JPEG/GIF/WebP) | ✅ | ✅ | ✅ |
-| PDF / documents | ✅ | ✅ (`file` part) | ✅ |
-| Video (MP4/MOV/WebM…) | — | — | ✅ |
-| Audio (MP3/WAV/Ogg…) | — | — | ✅ |
+| Images | data, URL | data, URL, file id | data, URL, file id |
+| Audio | data (`wav`, `mp3`) | no | no |
+| Video | no | no | no |
+| Documents | data, file id | data, URL, file id | data (`application/pdf`, `text/plain`), URL, file id |
 
-Media a provider can't accept is silently omitted from that provider's request rather than sent and rejected — so a single multimodal message stays portable across backends.
+Model-native output is text only. Media inside a tool result is carried by `anthropic_messages` (images, documents) only. See `docs/providers.md`, section 7, for the authoritative matrix.
 
 ## Attach a file in one line
 
 `ContentBlock::from_path` reads the file, **detects its MIME type** from the leading bytes (with an extension fallback), base64-encodes it, and picks the right block type — an `Image` block for image/video/audio, a `Document` block for PDF/text.
 
 ```rust
-use cersei::prelude::*;
+use bricks::prelude::*;
 
 // text + several local files
 let msg = Message::user_with_files(
@@ -34,7 +34,7 @@ let msg = Message::user_with_files(
 )?;
 ```
 
-Everything here is re-exported through `cersei::prelude`.
+Everything here is re-exported through `bricks::prelude`.
 
 ## Lower-level constructors
 
@@ -66,7 +66,7 @@ let msg = Message::user_with_media("Caption", vec![
 `detect_mime` is exported if you want the classifier on its own. It sniffs magic bytes for the formats the major providers accept (PNG, JPEG, GIF, WebP, PDF, MP4/MOV, WebM, MP3, WAV, Ogg) and falls back to the file extension:
 
 ```rust
-use cersei::prelude::{detect_mime, MediaKind};
+use bricks::types::{detect_mime, MediaKind};
 
 let mime = detect_mime(&bytes, Some(std::path::Path::new("clip.mp4"))); // Some("video/mp4")
 let kind = MediaKind::from_mime("video/mp4");                            // MediaKind::Video
@@ -79,15 +79,16 @@ If the type can't be determined, `from_path` returns `CerseiError::Config` — p
 Multimodal messages flow through the normal request path — no special call:
 
 ```rust
-use cersei::prelude::*;
-use cersei::provider::{CompletionRequest, Provider, ProviderOptions};
+use bricks::prelude::*;
+use bricks::provider::{CompletionRequest, Provider, ProviderOptions};
 
 let image = ContentBlock::from_path("demo.png")?;
 let message = Message::user_with_media("What UI is this?", vec![image]);
 
-let provider = Gemini::from_env()?; // GEMINI_API_KEY or GOOGLE_API_KEY
+// A model of your providers.toml that declares image input; its key comes from its api_key_env.
+let provider = bricks::provider_from_config(None, "my-provider/my-vision-model")?;
 let request = CompletionRequest {
-    model: "gemini-2.5-flash".into(),
+    model: provider.model().api_model.clone(),
     messages: vec![message],
     system: Some("You are a careful visual analyst.".into()),
     tools: Vec::new(),
@@ -95,6 +96,7 @@ let request = CompletionRequest {
     temperature: None,
     stop_sequences: Vec::new(),
     options: ProviderOptions::default(),
+    output_modalities: Vec::new(), // empty: text only
 };
 
 let response = provider.complete(request).await?.collect().await?;
@@ -103,19 +105,10 @@ println!("{}", response.message.get_all_text());
 
 The same message also works through the `Agent` runner via `AgentBuilder::with_messages`.
 
-<Callout type="warn">
-**Gemini 2.5 + thinking budget.** `gemini-2.5`+ models spend dynamic-thinking tokens out of `maxOutputTokens`, so a small budget can return a truncated answer with `stop_reason = MaxTokens` even though little visible text was produced. Disable thinking to give the whole budget to the answer:
-
-```rust
-let mut options = ProviderOptions::default();
-options.set("thinking_budget", 0); // -> generationConfig.thinkingConfig.thinkingBudget
-```
-</Callout>
 
 ## Runnable examples
 
-- `cersei/examples/multimodal.rs` — provider-agnostic; picks Anthropic/Gemini/OpenAI from whichever key is set.
-- `cersei/examples/gemini_vision_test.rs` — a live image-analysis smoke test.
+- `crates/bricks/examples/multimodal.rs` — takes a `provider_id/model_id` and one or more files (image, audio, PDF), and sends them to that configured model.
 
 ```bash
 set -a; source .env; set +a

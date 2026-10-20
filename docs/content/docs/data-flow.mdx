@@ -1,149 +1,163 @@
 ---
 title: Data Flow
-description: How data moves through the agentic loop — from prompt to tool call to response.
+description: How a prompt becomes model requests, tool calls, events and a stored session.
 ---
 
 # Data Flow
 
-## The Agentic Loop
+## The agentic loop
 
+```text
+1. A prompt is submitted to the agent (run, run_with, run_stream, or a frontend's submit command).
+2. The system prompt is assembled: the instructions, and what the enabled services add,
+   such as recalled memory, the skills catalogue and the sub-agent profiles.
+3. Before a request, the context is checked: a request that would not fit is compacted first
+   or not sent.
+4. The provider streams the model's answer: text and reasoning deltas, and tool calls.
+5. Each tool call goes through the approval policy, then the hooks, then the tool.
+   Its result goes back into the history, after the tool-output compression.
+6. If the model made tool calls, the loop returns to step 3 with the results.
+   If it gave a final answer with no tool call, the run ends with an output.
+7. After the run, the session is saved, and the memory maintenance, if enabled, runs.
 ```
-1. User sends prompt
-2. Agent builds system prompt (CLAUDE.md + memory + tools)
-3. Agent calls Provider::complete() with streaming
-4. Provider returns CompletionStream (SSE events)
-5. Agent processes events:
-   - TextDelta → forward to listeners
-   - ToolUse → dispatch to tool, collect result
-   - StopReason::ToolUse → add tool result, go to step 3
-   - StopReason::EndTurn → return AgentOutput
-6. Auto-compact if context > 90% of window
-7. Persist session to JSONL
+
+Each pass through steps 3 to 6 is one **turn**. Tools being available is never
+an obligation to use them: a run ends when the model gives a final answer.
+The other ways a run goes on have a visible cause and a bound:
+
+| Continuation | Bound |
+|---|---|
+| The answer was cut by the output-token limit | Three continuations, then the run stops as incomplete |
+| The same calls return the same results | After five repeated rounds the run stops as incomplete |
+| A transport error (rate limit, server error, network) | Five retries with backoff. A `Retry-After` longer than `[agent] retry_after_max_wait_ms` is not waited for |
+| The request is refused as too long | One compaction recovery per turn (`max_overflow_recoveries`) |
+
+## Context and compaction
+
+The context is measured from the server's reported usage, with explicit
+estimates in between. The defaults, which the project's `bricks.toml` can
+change, are in `docs/bricks.example.toml`:
+
+* **Pre-flight**: when the occupation, counted as an upper bound, reaches
+  `preflight_ratio` (0.80), or when a large addition arrived since the last
+  measurement, the context is checked before the request.
+* **Compaction** after a turn, when the occupation reaches `compact_threshold`
+  (0.85). The most recent messages are kept verbatim, and the older ones are
+  summarised. A compaction must shrink the context by `min_compaction_gain`
+  (20 % by default).
+* The **raw history** is never shortened. Compaction changes the history sent
+  to the model, and the session keeps the full record.
+
+## Tool dispatch
+
+```text
+tool call from the model
+  │
+  ├─ the tool name is looked up in the session's tool set
+  │    (an unknown name returns an error result to the model)
+  ├─ the approval policy decides: allow, ask the person, or deny (a denial
+  │    returns an error result to the model and nothing runs)
+  ├─ PreToolUse hooks run: a hook can block the call, or change its input
+  │    (a changed input is decided again)
+  ├─ the tool executes
+  └─ the result is compressed when it is long, and added to the history
 ```
 
-Each iteration of steps 3-5 is one "turn". The agent loops until `StopReason::EndTurn`, max turns reached, or cancellation.
+Tool calls of one turn can run side by side. Their results are added to the
+history in the order the model made the calls. A file change is shown as a
+diff before it is written, and it is written only when the decision allows it.
 
-## Event Pipeline
+## Events
 
-Three observation mechanisms, from simplest to most powerful:
+A run emits events as it goes: text and thinking deltas, tool start and end,
+permission requests, turn and model-request boundaries, compaction, usage and
+cost, sub-agent and hook events, and more. Three ways to observe them:
 
-### Callback (synchronous)
+**A callback**, called for each event, when the agent is built:
 
 ```rust
-Agent::builder()
-    .on_event(|e| match e {
-        AgentEvent::TextDelta(t) => print!("{t}"),
-        AgentEvent::ToolStart { name, .. } => eprintln!("[{name}]"),
-        _ => {}
-    })
-```
-
-### Broadcast (multi-consumer)
-
-```rust
-let agent = Agent::builder().enable_broadcast(256).build()?;
-
-let mut rx = agent.subscribe().unwrap();
-tokio::spawn(async move {
-    while let Ok(e) = rx.recv().await {
-        // consumer 1
-    }
-});
-
-let mut rx2 = agent.subscribe().unwrap();
-tokio::spawn(async move {
-    while let Ok(e) = rx2.recv().await {
-        // consumer 2
-    }
-});
-```
-
-### Stream (bidirectional control)
-
-```rust
-let mut stream = agent.run_stream("Deploy");
-
-while let Some(event) = stream.next().await {
-    match event {
-        AgentEvent::PermissionRequired(req) => {
-            stream.respond_permission(req.id, PermissionDecision::Allow);
+let agent = Agent::builder()
+    .on_event(|event| {
+        if let AgentEvent::TextDelta(text) = event {
+            print!("{text}");
         }
-        AgentEvent::Complete(output) => break,
-        _ => {}
-    }
+    })
+    // ...provider, tools and policy as in the quick start...
+    .build()?;
+```
+
+**A broadcast channel**, with several consumers. Enable it when the agent is
+built, then subscribe as many times as needed:
+
+```rust
+let agent = Agent::builder()
+    .enable_broadcast(256)
+    // ...
+    .build()?;
+
+if let Some(mut events) = agent.subscribe() {
+    tokio::spawn(async move {
+        while let Ok(event) = events.recv().await {
+            // one consumer
+        }
+    });
 }
-
-// Inject messages mid-stream
-stream.inject_message("Actually, stop and explain first");
-
-// Cancel
-stream.cancel();
 ```
 
-## Tool Dispatch
+**A stream**, returned by `run_stream`. It also carries the controls of the run:
+`respond_permission` answers a `PermissionRequired` event, `inject_message`
+adds a message to the run, and `cancel` stops it.
 
-```
-Agent receives ToolUse block from model
-    |
-    v
-Look up tool by name in Vec<Box<dyn Tool>>
-    |
-    v
-Check PermissionPolicy::check(request)
-    |
-    +---> Denied → return error to model
-    |
-    v
-Run Hook pipeline (PreToolUse)
-    |
-    +---> Blocked → return error to model
-    |
-    v
-Tool::execute(input, context)
-    |
-    v
-Run Hook pipeline (PostToolUse)
-    |
-    v
-Return ToolResult to model as next message
-```
+The event stream is part of the library. The frontends use the versioned
+events of the command/event contract, `bricks_agent::control`, which the JSONL
+output of `bricks run --json` writes. Its schema is in `docs/cli.md` in the
+repository. The schema version is 6.
 
-Dispatch is in-process. No subprocess, no IPC. A Read tool call completes in 0.09ms.
+The end of a tool call says whether it ran (`executed`: `false` for a call
+refused, denied, or blocked by a hook, which never ran) and how it ended
+(`status`: `success`, `failure`, `timed_out`, `cancelled`, or `running` for a
+background command still going). An `edit_applied` event lists each file
+written with its absolute path, the unified diff actually written (cut at
+512 KiB, with `patch_truncated`), and `binary` for a binary file, which has no
+diff.
 
-## Context Management
+## Sessions
 
-```
-Before each turn:
-    |
-    v
-Count tokens (provider.count_tokens or estimate)
-    |
-    +---> Below 90% → proceed normally
-    |
-    +---> Above 90% → auto-compact
-              |
-              v
-         Group old messages by topic
-              |
-              v
-         Summarize via LLM call
-              |
-              v
-         Replace originals with summaries
-              |
-              v
-         Free tool results above budget
-```
+A session is the conversation together with the settings it was started with.
+In the `bricks` command and in Bricks Desktop, sessions are stored under
+`~/.bricks/sessions`. A session keeps:
 
-## Session Persistence
+* the conversation: the active history, the raw history and the compaction
+  snapshots;
+* the saved outputs of tool calls that were too long to keep in the history;
+* its settings, in `session.json`: the working directory, the model, the
+  reasoning profile and the long-term memory space.
 
-```
-Each user message → append to JSONL
-Each assistant message → append to JSONL
-Compaction summary → append Summary entry
-Deleted messages → append Tombstone entry
+Resuming a session restores these. The working directory must still exist,
+and the model must still be in the providers file; if either is missing, the
+session is not resumed and the reason is shown. Shell state is not restored:
+processes, background jobs and shell variables of the earlier run are not
+carried over.
 
-Load: read all lines, collect tombstone UUIDs, skip tombstoned entries
-```
+Deleting a session removes all of these files. Sessions and their formats are
+described in `docs/cli.md` in the repository.
 
-Format is Claude Code compatible. Sessions stored at `~/.claude/projects/<sanitized-root>/<session-id>.jsonl`.
+## Run records (Bricks Desktop)
+
+Bricks Desktop keeps, for each run that ends, its answer text, its shell
+commands and its file changes, so the conversation view can show them. The
+history keeps the messages, not these. They are kept in
+`desktop/run-records/<session>.jsonl` under the Bricks home (`~/.bricks` by
+default), one version of a run per line:
+
+* the file is append-only: a run is written again when its record changes (a
+  background job or a sub-agent ending later), and the last version of a run
+  wins. Runs keep the order of their first line;
+* a damaged line is skipped on read, and never stops the others;
+* deleting the session deletes the file.
+
+Each command and file change carries its provenance: the root run, the
+sub-agent (`agent_id`, absent for the session agent) and the tool call
+(`tool_call_id`). The counters of a file (`added`, `removed`, `operations`)
+are cumulative sums of the applied operations, not a net Git diff: a file
+changed twice counts both changes.

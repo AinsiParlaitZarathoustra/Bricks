@@ -8,7 +8,7 @@ description: Build custom tools for database queries, API calls, deploy pipeline
 ## Database Query Tool
 
 ```rust
-use cersei::prelude::*;
+use bricks::prelude::*;
 
 #[derive(Tool)]
 #[tool(name = "db_query", description = "Execute a SQL query", permission = "execute")]
@@ -109,8 +109,8 @@ struct DeployInput {
 
 ```rust
 let agent = Agent::builder()
-    .provider(Anthropic::from_env()?)
-    .tools(cersei::tools::coding())  // built-in tools
+    .provider(bricks::provider_from_config(None, "my-provider/my-model")?)
+    .tools(bricks::tools::coding())  // built-in tools
     .tool(DbQueryTool { pool })      // + custom
     .tool(ApiCallTool)               // + custom
     .tool(DeployTool)                // + custom

@@ -8,7 +8,7 @@ npm run check        # svelte-check + TypeScript
 npm run test:unit    # Vitest (tests/unit)
 npm run test:types   # type-check of the tests
 cargo test -p bricks-desktop                       # Rust services, IPC, engine bridge
-cargo test -p cersei-agent --test approval_override  # engine approval policy
+cargo test -p bricks-agent --test approval_override  # engine approval policy
 ```
 
 Rust tests use temporary folders (`tempfile`, a temporary Bricks home); none reads or writes `~/.bricks`.
@@ -44,8 +44,8 @@ Note: each new build changes the app's signature, so macOS asks again for access
 
 ### Concurrent execution and chat details
 
-Automated: `crates/cersei-tools/tests/{shell_session,shell_recipe,edit_recipe}.rs`,
-`crates/cersei-agent/tests/{edit_runtime,edit_history,bash_run_lifetime}.rs`,
+Automated: `crates/bricks-tools/tests/{shell_session,shell_recipe,edit_recipe}.rs`,
+`crates/bricks-agent/tests/{edit_runtime,edit_history,bash_run_lifetime}.rs`,
 `src-tauri/src/commands/agent_file.rs` (tests), `tests/unit/{context-gauge,context-card-structure,copy-inspector-terminal-structure,edit-formats}.test.ts`.
 
 In the app, with a test project (never a real conversation):
@@ -56,7 +56,24 @@ In the app, with a test project (never a real conversation):
   « Contexte », the compact value with its percentage, a thin bar and the cache rate (`—` without counts);
   light and dark.
 - Context card: one line without `≈`; « Consommation session »: Entrée, Sortie, Cache, Requêtes, Coût.
-- « Copier » under an answer copies its Markdown source only (✓ for a moment).
+- One « Copier » per finished response (after its last item, before the summary): it copies every answer
+  segment of the run, in order, Markdown source only (✓ for a moment); still there after a restart.
 - Sub-agent details: no « Identifiant » / « Parent »; task and result rendered as Markdown; « Fichiers
   modifiés » shows file names, a click reveals the file in the Finder (nothing is opened).
 - Terminal: the cross after `+` hides the pane; reopening shows the same tab, output and height.
+
+### Responses, summaries and reader
+
+Automated: `src-tauri/src/services/run_records.rs`, `src-tauri/src/commands/reader_file.rs` (tests),
+`tests/unit/{responses,run-records,run-worked,conversation-changes,reader-tabs,reader-operations,render-links-runend}.test.ts`.
+
+In the app, with a test project:
+
+- Summary: « Terminé · A travaillé MM:SS »; « N fichiers modifiés +A −D » and « N commandes exécutées »
+  closed by default; a refused call is not counted; a sub-agent's commands are listed; white background in
+  the light theme.
+- Edit rows: name and counts, full path in the tooltip; a click opens the reader.
+- Reader (« Lecteur », top right): one tab per file with a close cross; Source (highlighted, numbered,
+  Précédentes/Suivantes past 400 lines), Aperçu for Markdown, Modifications with one patch per operation;
+  a path outside the project is refused.
+- Reasoning reads « Réfléchit »; added and removed lines are clearly green and red in both themes.

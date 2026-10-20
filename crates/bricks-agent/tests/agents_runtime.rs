@@ -1,0 +1,1632 @@
+//! The 10.5 runtime through the real controller: concurrent fan-out,
+//! bounded recursion, background agents, isolated ChangeSets, correlation,
+//! skills, usage aggregation, permissions and jobs.
+//!
+//! The parent follows a script; children are driven by markers in their
+//! task (`[barrier]`, `[spawn-child:…]`, `[write:file=content]`, `[fail]`,
+//! `[hold]`), with fixed usage (7 in / 3 out per response).
+
+use bricks_agent::BricksConfig;
+use bricks_agent::agents::{InstanceState, ProfileSources};
+use bricks_agent::control::scripted::{Reply, Script, ScriptedProvider};
+use bricks_agent::control::*;
+use bricks_provider::{CompletionRequest, CompletionStream, Provider};
+use bricks_types::{MessageContent, Role, Usage};
+use serde_json::json;
+use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
+
+// ─── Test model ──────────────────────────────────────────────────────────────
+
+#[derive(Default)]
+struct Shared {
+    barrier: parking_lot::Mutex<Option<Arc<tokio::sync::Barrier>>>,
+    hold: tokio::sync::Notify,
+    released: std::sync::atomic::AtomicBool,
+    builds: AtomicUsize,
+    active: AtomicUsize,
+    peak: AtomicUsize,
+    child_requests: parking_lot::Mutex<Vec<CompletionRequest>>,
+    /// The parent's script, to add replies for a later run.
+    parent: parking_lot::Mutex<Option<Arc<Script>>>,
+}
+
+impl Shared {
+    fn push_parent(&self, replies: Vec<Reply>) {
+        let s = self.parent.lock().clone().unwrap();
+        for r in replies {
+            s.push(r);
+        }
+    }
+
+    /// Let every `[hold]` child (present or future) go on.
+    fn release(&self) {
+        self.released.store(true, Ordering::SeqCst);
+        self.hold.notify_waiters();
+    }
+}
+
+struct TestProvider {
+    selection: String,
+    parent: Arc<Script>,
+    shared: Arc<Shared>,
+}
+
+fn is_child(r: &CompletionRequest) -> bool {
+    r.system
+        .as_deref()
+        .is_some_and(|s| s.contains("You are a sub-agent"))
+}
+
+fn first_user_text(r: &CompletionRequest) -> String {
+    r.messages
+        .iter()
+        .find(|m| m.role == Role::User)
+        .and_then(|m| m.get_text().map(str::to_string))
+        .unwrap_or_default()
+}
+
+fn has_tool_result(r: &CompletionRequest) -> bool {
+    r.messages.iter().any(|m| match &m.content {
+        MessageContent::Blocks(b) => b
+            .iter()
+            .any(|x| matches!(x, bricks_types::ContentBlock::ToolResult { .. })),
+        _ => false,
+    })
+}
+
+fn tool_results(r: &CompletionRequest) -> usize {
+    r.messages
+        .iter()
+        .map(|m| match &m.content {
+            MessageContent::Blocks(b) => b
+                .iter()
+                .filter(|x| matches!(x, bricks_types::ContentBlock::ToolResult { .. }))
+                .count(),
+            _ => 0,
+        })
+        .sum()
+}
+
+fn marker<'a>(task: &'a str, name: &str) -> Option<&'a str> {
+    let open = format!("[{name}:");
+    let i = task.find(&open)? + open.len();
+    let j = task[i..].find(']')? + i;
+    Some(&task[i..j])
+}
+
+fn child_usage() -> Usage {
+    Usage {
+        input_tokens: 7,
+        output_tokens: 3,
+        ..Default::default()
+    }
+}
+
+#[async_trait::async_trait]
+impl Provider for TestProvider {
+    fn name(&self) -> &str {
+        "test"
+    }
+    fn context_window(&self, _: &str) -> u64 {
+        100_000
+    }
+    fn model_info(&self) -> Option<bricks_provider::ModelInfo> {
+        ScriptedProvider::new(&self.selection, self.parent.clone()).model_info()
+    }
+    async fn complete(&self, req: CompletionRequest) -> bricks_types::Result<CompletionStream> {
+        if !is_child(&req) {
+            return ScriptedProvider::new(&self.selection, self.parent.clone())
+                .complete(req)
+                .await;
+        }
+        self.shared.child_requests.lock().push(req.clone());
+        let task = first_user_text(&req);
+        let n = self.shared.active.fetch_add(1, Ordering::SeqCst) + 1;
+        self.shared.peak.fetch_max(n, Ordering::SeqCst);
+        let _guard = scopeguard(Arc::clone(&self.shared));
+        if task.contains("[fail]") {
+            return Err(bricks_types::CerseiError::Provider(
+                "scripted failure".into(),
+            ));
+        }
+        if task.contains("[barrier]") {
+            let b = self.shared.barrier.lock().clone();
+            if let Some(b) = b {
+                b.wait().await;
+            }
+        }
+        let held = (task.contains("[hold]") && !has_tool_result(&req))
+            || (task.contains("[hold-after]") && has_tool_result(&req));
+        if held {
+            loop {
+                let woken = self.shared.hold.notified();
+                tokio::pin!(woken);
+                woken.as_mut().enable();
+                if self.shared.released.load(Ordering::SeqCst) {
+                    break;
+                }
+                woken.await;
+            }
+        }
+        let looped = marker(&task, "loop").and_then(|n| n.parse::<usize>().ok());
+        let done = tool_results(&req);
+        let mut reply = if looped.is_some_and(|n| done < n) {
+            // `[loop:N]`: N turns of distinct work, then the answer.
+            Reply::tool(
+                &format!("l{done}"),
+                "Glob",
+                json!({ "pattern": format!("*.z{done}") }),
+            )
+        } else if has_tool_result(&req) {
+            Reply::text(&format!("done: {}", task.lines().next().unwrap_or("")))
+        } else if let Some(inner) = marker(&task, "spawn-child-skilled") {
+            Reply::tool(
+                "d1",
+                "Agent",
+                json!({ "task": inner.replace('|', ":"), "profile": "skilled" }),
+            )
+        } else if let Some(inner) = marker(&task, "spawn-child") {
+            Reply::tool(
+                "d1",
+                "Agent",
+                json!({ "task": inner.replace('|', ":").replace('{', "[").replace('}', "]") }),
+            )
+        } else if let Some(w) = marker(&task, "write") {
+            let (file, content) = w.split_once('=').unwrap_or((w, "x"));
+            Reply::tool(
+                "w1",
+                "Write",
+                json!({ "file_path": file, "content": format!("{content}\n") }),
+            )
+        } else if task.contains("[glob]") {
+            Reply::tool("g1", "Glob", json!({ "pattern": "*.txt" }))
+        } else if let Some(cmd) = marker(&task, "bash") {
+            Reply::tool("b1", "Bash", json!({ "command": cmd }))
+        } else {
+            Reply::text(&format!("result of {}", task.lines().next().unwrap_or("")))
+        };
+        reply.usage = Some(child_usage());
+        ScriptedProvider::new(&self.selection, Script::new(vec![reply]))
+            .complete(req)
+            .await
+    }
+}
+
+struct ActiveGuard(Arc<Shared>);
+impl Drop for ActiveGuard {
+    fn drop(&mut self) {
+        self.0.active.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+fn scopeguard(s: Arc<Shared>) -> ActiveGuard {
+    ActiveGuard(s)
+}
+
+struct TestCatalog {
+    inner: Arc<bricks_agent::control::scripted::ScriptedCatalog>,
+    shared: Arc<Shared>,
+}
+
+impl ModelCatalog for TestCatalog {
+    fn models(&self) -> Vec<ModelChoice> {
+        self.inner.models()
+    }
+    fn build(&self, selection: &str, reasoning: Option<&str>) -> Result<Box<dyn Provider>, String> {
+        self.inner.build(selection, reasoning)?;
+        self.shared.builds.fetch_add(1, Ordering::SeqCst);
+        Ok(Box::new(TestProvider {
+            selection: selection.into(),
+            parent: self.inner.script.clone(),
+            shared: Arc::clone(&self.shared),
+        }))
+    }
+}
+
+// ─── Harness ─────────────────────────────────────────────────────────────────
+
+struct Env {
+    ctl: Controller,
+    events: EventStream,
+    dir: tempfile::TempDir,
+    shared: Arc<Shared>,
+}
+
+fn git(dir: &Path, args: &[&str]) {
+    let o = std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_AUTHOR_NAME", "t")
+        .env("GIT_AUTHOR_EMAIL", "t@t")
+        .env("GIT_COMMITTER_NAME", "t")
+        .env("GIT_COMMITTER_EMAIL", "t@t")
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+}
+
+fn allow(tools: &[&str]) -> ApprovalRules {
+    let mut r = ApprovalRules::default();
+    for t in tools {
+        r.tools.insert(t.to_string(), Action::Allow);
+    }
+    r
+}
+
+async fn open(
+    replies: Vec<Reply>,
+    rules: ApprovalRules,
+    interactive: bool,
+    tweak: impl FnOnce(&mut BricksConfig),
+) -> Env {
+    open_full(replies, rules, interactive, tweak, |_, _| {}).await
+}
+
+async fn open_full(
+    replies: Vec<Reply>,
+    rules: ApprovalRules,
+    interactive: bool,
+    tweak: impl FnOnce(&mut BricksConfig),
+    engine: impl FnOnce(&mut EngineConfig, &Path),
+) -> Env {
+    let dir = tempfile::tempdir().unwrap();
+    // A repository with one commit (worktrees need one).
+    git(dir.path(), &["init", "-q", "-b", "main"]);
+    std::fs::write(dir.path().join("shared.txt"), "base\n").unwrap();
+    std::fs::write(dir.path().join(".gitignore"), ".sessions/\n").unwrap();
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-q", "-m", "init"]);
+    let script = Script::new(replies);
+    let shared = Arc::new(Shared::default());
+    *shared.parent.lock() = Some(script.clone());
+    let catalog = Arc::new(TestCatalog {
+        inner: bricks_agent::control::scripted::ScriptedCatalog::new(&["a", "b"], script),
+        shared: Arc::clone(&shared),
+    });
+    let mut bricks = BricksConfig::default();
+    bricks.agent.model = Some("test/a".into());
+    bricks.permissions = rules;
+    bricks.semantic.lsp.enabled = false;
+    bricks.agents.admission_timeout_ms = 20_000;
+    tweak(&mut bricks);
+    let mut cfg = EngineConfig::new(dir.path(), catalog, bricks, dir.path().join(".sessions"));
+    cfg.interactive = interactive;
+    cfg.agent_profile_sources = Some(ProfileSources {
+        project_dir: Some(dir.path().join(".bricks/agents")),
+        user_dir: None,
+    });
+    engine(&mut cfg, dir.path());
+    let (ctl, mut events) = Controller::open(
+        cfg,
+        OpenOptions {
+            session: SessionChoice::New,
+            model: None,
+            reasoning: None,
+        },
+    )
+    .await
+    .unwrap();
+    next(&mut events).await;
+    Env {
+        ctl,
+        events,
+        dir,
+        shared,
+    }
+}
+
+async fn next(events: &mut EventStream) -> Envelope {
+    tokio::time::timeout(Duration::from_secs(30), events.next())
+        .await
+        .expect("an event within 30 s")
+        .expect("stream open")
+}
+
+async fn until_finished(events: &mut EventStream) -> Vec<Envelope> {
+    let mut out = Vec::new();
+    loop {
+        let e = next(events).await;
+        let done = matches!(e.event, Event::RunFinished { .. });
+        out.push(e);
+        if done {
+            return out;
+        }
+    }
+}
+
+/// Events until `pred` holds for one of them (inclusive).
+async fn until(events: &mut EventStream, pred: impl Fn(&Event) -> bool) -> Vec<Envelope> {
+    let mut out = Vec::new();
+    loop {
+        let e = next(events).await;
+        let done = pred(&e.event);
+        out.push(e);
+        if done {
+            return out;
+        }
+    }
+}
+
+fn spawned(evs: &[Envelope]) -> Vec<bricks_agent::agents::SpawnInfo> {
+    evs.iter()
+        .filter_map(|e| match &e.event {
+            Event::AgentSpawned { agent } => Some((**agent).clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn results(evs: &[Envelope]) -> Vec<bricks_agent::agents::AgentResult> {
+    evs.iter()
+        .filter_map(|e| match &e.event {
+            Event::AgentFinished { result } => Some((**result).clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn tool_out(evs: &[Envelope], id: &str) -> (bool, String) {
+    evs.iter()
+        .find_map(|e| match &e.event {
+            Event::ToolFinished {
+                tool_call_id,
+                is_error,
+                output,
+                ..
+            } if tool_call_id == id => Some((*is_error, output.clone())),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no result for {id}"))
+}
+
+async fn submit(env: &mut Env, text: &str) -> Vec<Envelope> {
+    env.ctl
+        .send(Command::Submit {
+            prompt: Prompt::text(text),
+        })
+        .unwrap();
+    until_finished(&mut env.events).await
+}
+
+// ─── Fan-out and ordering ────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn agents_run_children_at_the_same_time_and_answer_in_order() {
+    let mut env = open(
+        vec![
+            Reply::tool(
+                "c1",
+                "Agents",
+                json!({ "agents": [
+                    { "task": "T0 [barrier]", "profile": "inspecteur" },
+                    { "task": "T1 [barrier]", "profile": "web_searcher" },
+                    { "task": "T2 [barrier]", "profile": "testeur" }
+                ]}),
+            ),
+            Reply::text("synthesis"),
+        ],
+        allow(&["Agents"]),
+        true,
+        |_| {},
+    )
+    .await;
+    // Three children must reach the barrier together: sequential runs
+    // would wait forever.
+    *env.shared.barrier.lock() = Some(Arc::new(tokio::sync::Barrier::new(3)));
+    let evs = submit(&mut env, "go").await;
+    assert!(
+        env.shared.peak.load(Ordering::SeqCst) >= 3,
+        "overlap demonstrated"
+    );
+    let (err, out) = tool_out(&evs, "c1");
+    assert!(!err, "{out}");
+    let p0 = out.find("result of T0").unwrap();
+    let p1 = out.find("result of T1").unwrap();
+    let p2 = out.find("result of T2").unwrap();
+    assert!(p0 < p1 && p1 < p2, "results in the order asked");
+    // Correlation: one parent call, positions, parallel → worktrees.
+    let sp = spawned(&evs);
+    assert_eq!(sp.len(), 3);
+    assert!(sp.iter().all(|s| s.tool_call_id.as_deref() == Some("c1")));
+    let mut idx: Vec<usize> = sp.iter().filter_map(|s| s.batch_index).collect();
+    idx.sort();
+    assert_eq!(idx, vec![0, 1, 2]);
+    assert!(sp.iter().all(|s| s.isolation == "worktree" && s.depth == 1));
+    // Usage: parent 2 × (100/10), children 3 × (7/3), counted once.
+    // Published just before `run_finished`.
+    let n = evs.len();
+    assert!(matches!(evs[n - 2].event, Event::RunUsage { .. }));
+    let ru = evs
+        .iter()
+        .find_map(|e| match &e.event {
+            Event::RunUsage {
+                own,
+                descendants,
+                total,
+                final_total,
+                ..
+            } => Some((
+                own.clone(),
+                descendants.clone(),
+                total.clone(),
+                *final_total,
+            )),
+            _ => None,
+        })
+        .unwrap();
+    assert_eq!((ru.0.input_tokens, ru.0.output_tokens), (200, 20));
+    assert_eq!((ru.1.input_tokens, ru.1.output_tokens), (21, 9));
+    assert_eq!((ru.2.input_tokens, ru.2.output_tokens), (221, 29));
+    assert!(ru.3, "nothing left running: final");
+}
+
+#[tokio::test]
+async fn two_agent_calls_in_one_turn_carry_their_own_call_ids() {
+    let mut env = open(
+        vec![
+            Reply::tools(vec![
+                ("call_a", "Agent", json!({ "task": "AAA" })),
+                ("call_b", "Agent", json!({ "task": "BBB" })),
+            ]),
+            Reply::text("ok"),
+        ],
+        allow(&["Agent"]),
+        true,
+        |_| {},
+    )
+    .await;
+    let evs = submit(&mut env, "go").await;
+    let sp = spawned(&evs);
+    assert_eq!(sp.len(), 2);
+    for s in sp {
+        let want = if s.task.starts_with("AAA") {
+            "call_a"
+        } else {
+            "call_b"
+        };
+        assert_eq!(s.tool_call_id.as_deref(), Some(want), "{}", s.task);
+    }
+}
+
+// ─── Recursion and limits ────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn a_chain_runs_with_a_single_slot() {
+    let mut env = open(
+        vec![
+            Reply::tool(
+                "c1",
+                "Agent",
+                json!({ "task": "level1 [spawn-child:level2 leaf]" }),
+            ),
+            Reply::text("chain done"),
+        ],
+        allow(&["Agent"]),
+        true,
+        |b| {
+            b.agents.max_concurrent = 1;
+        },
+    )
+    .await;
+    let evs = tokio::time::timeout(Duration::from_secs(20), submit(&mut env, "go"))
+        .await
+        .expect("no circular wait with max_concurrent = 1");
+    let sp = spawned(&evs);
+    assert_eq!(sp.len(), 2);
+    assert_eq!(sp[0].depth, 1);
+    assert_eq!(sp[1].depth, 2);
+    assert_eq!(sp[1].parent_id.as_deref(), Some(sp[0].agent_id.as_str()));
+    let rs = results(&evs);
+    assert!(rs.iter().all(|r| r.status == "completed"), "{rs:?}");
+    assert_eq!(
+        env.ctl
+            .agent_runtime()
+            .unwrap()
+            .scheduler
+            .stats()
+            .peak_active,
+        1
+    );
+}
+
+#[tokio::test]
+async fn depth_and_total_limits_refuse_before_any_provider() {
+    // Depth: max_depth = 1, the child tries to start a sub-agent.
+    let mut env = open(
+        vec![
+            Reply::tool(
+                "c1",
+                "Agent",
+                json!({ "task": "level1 [spawn-child:too deep]" }),
+            ),
+            Reply::text("ok"),
+        ],
+        allow(&["Agent"]),
+        true,
+        |b| b.agents.max_depth = 1,
+    )
+    .await;
+    let builds_before = env.shared.builds.load(Ordering::SeqCst);
+    let evs = submit(&mut env, "go").await;
+    assert_eq!(spawned(&evs).len(), 1, "no grandchild");
+    assert_eq!(
+        env.shared.builds.load(Ordering::SeqCst),
+        builds_before + 1,
+        "only the child's provider"
+    );
+    let child_tool = evs.iter().find_map(|e| match &e.event {
+        Event::AgentToolFinished { name, is_error, .. } if name == "Agent" => Some(*is_error),
+        _ => None,
+    });
+    assert_eq!(child_tool, Some(true));
+    let reqs = env.shared.child_requests.lock().clone();
+    let fed = serde_json::to_string(&reqs.last().unwrap().messages).unwrap();
+    assert!(fed.contains("AgentDepthExceeded"), "{fed}");
+
+    // Total: 3 asked, 2 allowed per run: the whole batch is refused.
+    let mut env = open(
+        vec![
+            Reply::tool(
+                "c1",
+                "Agents",
+                json!({ "agents": [{"task":"a"},{"task":"b"},{"task":"c"}] }),
+            ),
+            Reply::text("ok"),
+        ],
+        allow(&["Agents"]),
+        true,
+        |b| b.agents.max_total_per_run = 2,
+    )
+    .await;
+    let builds_before = env.shared.builds.load(Ordering::SeqCst);
+    let evs = submit(&mut env, "go").await;
+    let (err, out) = tool_out(&evs, "c1");
+    assert!(err && out.contains("AgentTotalExceeded"), "{out}");
+    assert!(spawned(&evs).is_empty());
+    assert_eq!(env.shared.builds.load(Ordering::SeqCst), builds_before);
+    assert!(env.shared.child_requests.lock().is_empty());
+}
+
+#[tokio::test]
+async fn fail_fast_cancels_the_siblings_and_keeps_their_states() {
+    let mut env = open(
+        vec![
+            Reply::tool(
+                "c1",
+                "Agents",
+                json!({ "fail_fast": true, "agents": [
+                    { "task": "bad [fail]" },
+                    { "task": "slow one [hold]" },
+                    { "task": "slow two [hold]" }
+                ]}),
+            ),
+            Reply::text("handled"),
+        ],
+        allow(&["Agents"]),
+        true,
+        |_| {},
+    )
+    .await;
+    let evs = tokio::time::timeout(Duration::from_secs(20), submit(&mut env, "go"))
+        .await
+        .expect("fail_fast does not wait for the held siblings");
+    let rs = results(&evs);
+    assert_eq!(rs.len(), 3);
+    let by = |t: &str| {
+        let id = spawned(&evs)
+            .into_iter()
+            .find(|s| s.task.starts_with(t))
+            .unwrap()
+            .agent_id;
+        rs.iter().find(|r| r.agent_id == id).unwrap().status.clone()
+    };
+    assert_eq!(by("bad"), "failed");
+    assert_eq!(by("slow one"), "cancelled");
+    assert_eq!(by("slow two"), "cancelled");
+    // Without fail_fast, one failure leaves the others' successes.
+    let mut env = open(
+        vec![
+            Reply::tool(
+                "c1",
+                "Agents",
+                json!({ "agents": [{ "task": "bad [fail]" }, { "task": "good" }] }),
+            ),
+            Reply::text("ok"),
+        ],
+        allow(&["Agents"]),
+        true,
+        |_| {},
+    )
+    .await;
+    let evs = submit(&mut env, "go").await;
+    let mut st: Vec<String> = results(&evs).into_iter().map(|r| r.status).collect();
+    st.sort();
+    assert_eq!(st, vec!["completed", "failed"]);
+}
+
+#[tokio::test]
+async fn a_full_queue_is_an_explicit_individual_result() {
+    let mut env = open(
+        vec![
+            Reply::tool("c1", "Agents", json!({ "agents": [{ "task": "one [hold]" }, { "task": "two [hold]" }, { "task": "three [hold]" }] })),
+            Reply::text("ok"),
+        ],
+        allow(&["Agents"]),
+        true,
+        |b| {
+            b.agents.max_concurrent = 1;
+            b.agents.max_queued = 1;
+        },
+    )
+    .await;
+    env.ctl
+        .send(Command::Submit {
+            prompt: Prompt::text("go"),
+        })
+        .unwrap();
+    // Every child holds: one runs, one waits, the last is refused,
+    // whatever the order they arrive in.
+    let evs = until(
+        &mut env.events,
+        |e| matches!(e, Event::AgentFinished { result } if result.status == "failed"),
+    )
+    .await;
+    let failed = results(&evs);
+    assert!(
+        failed[0]
+            .error
+            .as_deref()
+            .is_some_and(|e| e.contains("AgentQueueFull")),
+        "{failed:?}"
+    );
+    env.shared.release();
+    let rest = until_finished(&mut env.events).await;
+    let all: Vec<_> = results(&evs).into_iter().chain(results(&rest)).collect();
+    assert_eq!(all.len(), 3);
+    assert_eq!(all.iter().filter(|r| r.status == "completed").count(), 2);
+}
+
+// ─── No turn limit on any path ───────────────────────────────────────────────
+
+/// Fan-out, background, worktree isolation and a grandchild: every child
+/// works past the former limits (30 by default, 100 at most) and answers.
+#[tokio::test]
+async fn no_path_builds_a_child_with_a_turn_limit() {
+    let mut env = open(
+        vec![
+            Reply::tool(
+                "c1",
+                "Agents",
+                json!({ "background": true, "agents": [
+                    { "task": "first [loop:105]" },
+                    { "task": "second [spawn-child:grandchild {loop|40}]" }
+                ]}),
+            ),
+            Reply::text("started"),
+        ],
+        allow(&["Agents", "Agent"]),
+        true,
+        |_| {},
+    )
+    .await;
+    let evs = submit(&mut env, "go").await;
+    let sp = spawned(&evs);
+    assert!(sp.iter().all(|s| s.background && s.isolation == "worktree"));
+    let fin = tokio::time::timeout(
+        Duration::from_secs(120),
+        until(&mut env.events, |e| {
+            matches!(
+                e,
+                Event::RunUsage {
+                    final_total: true,
+                    ..
+                }
+            )
+        }),
+    )
+    .await
+    .expect("the test harness's own timeout");
+    let rs = results(&fin);
+    assert_eq!(rs.len(), 3, "two children and a grandchild");
+    for r in &rs {
+        assert_eq!(r.status, "completed", "{r:?}");
+        assert_eq!(r.termination, Some(bricks_agent::Termination::Completed));
+    }
+    let mut turns: Vec<u32> = rs.iter().map(|r| r.turns).collect();
+    turns.sort();
+    // The grandchild (depth 2) ran 40 turns of work, the first child 105.
+    assert_eq!(turns, vec![2, 41, 106]);
+}
+
+// ─── Background ──────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn a_background_agent_outlives_the_answer_and_totals_become_final() {
+    let mut env = open(
+        vec![
+            Reply::tool(
+                "c1",
+                "Agent",
+                json!({ "task": "long work [hold]", "background": true }),
+            ),
+            Reply::text("started it"),
+        ],
+        allow(&["Agent"]),
+        true,
+        |_| {},
+    )
+    .await;
+    let t = std::time::Instant::now();
+    let evs = submit(&mut env, "go").await;
+    assert!(
+        t.elapsed() < Duration::from_secs(10),
+        "the handle came back at once"
+    );
+    let (err, out) = tool_out(&evs, "c1");
+    assert!(!err && out.contains("started in the background"), "{out}");
+    let sp = spawned(&evs);
+    assert!(sp[0].background && sp[0].isolation == "worktree");
+    // The answer ended the run, not the child.
+    let rt = env.ctl.agent_runtime().unwrap();
+    assert_eq!(rt.pending(None).len(), 1);
+    let p = evs.iter().find_map(|e| match &e.event {
+        Event::RunUsage {
+            final_total,
+            pending_agents,
+            ..
+        } => Some((*final_total, *pending_agents)),
+        _ => None,
+    });
+    assert_eq!(p, Some((false, 1)), "partial while the child runs");
+    // Release it: it finishes without waking the parent's loop.
+    let requests_before = env.shared.child_requests.lock().len();
+    env.shared.release();
+    let fin = until(&mut env.events, |e| {
+        matches!(
+            e,
+            Event::RunUsage {
+                final_total: true,
+                ..
+            }
+        )
+    })
+    .await;
+    assert_eq!(results(&fin).len(), 1);
+    assert!(!fin.iter().any(|e| matches!(
+        e.event,
+        Event::RunStarted { .. } | Event::RunFinished { .. }
+    )));
+    let total = fin.iter().find_map(|e| match &e.event {
+        Event::RunUsage { total, .. } => Some(total.input_tokens),
+        _ => None,
+    });
+    assert_eq!(total, Some(200 + 7), "parent 2 × 100 + child 7, once");
+    assert!(env.shared.child_requests.lock().len() > requests_before);
+}
+
+#[tokio::test]
+async fn agent_control_waits_reads_and_cancels_in_scope() {
+    let mut env = open(
+        vec![
+            Reply::tool(
+                "c1",
+                "Agent",
+                json!({ "task": "bg [hold]", "background": true }),
+            ),
+            Reply::text("started"),
+        ],
+        allow(&["Agent", "AgentControl"]),
+        true,
+        |_| {},
+    )
+    .await;
+    let evs = submit(&mut env, "go").await;
+    let id = spawned(&evs)[0].agent_id.clone();
+    let rt = env.ctl.agent_runtime().unwrap();
+    // A sub-agent sees only its descendants; the session sees all.
+    assert!(rt.visible_to(&id, None));
+    assert!(!rt.visible_to(&id, Some("agent_other")));
+    // Cancel through the frontend command.
+    env.ctl
+        .send(Command::AgentControl {
+            action: "cancel".into(),
+            agent_id: Some(id.clone()),
+            changeset_id: None,
+            job_id: None,
+        })
+        .unwrap();
+    let evs = until(&mut env.events, |e| {
+        matches!(e, Event::AgentFinished { .. })
+    })
+    .await;
+    assert_eq!(results(&evs)[0].status, "cancelled");
+    let rec = rt.record(&id).unwrap();
+    assert_eq!(rec.state, InstanceState::Cancelled);
+    // `result` is idempotent and asks nothing of a model.
+    let before = env.shared.child_requests.lock().len();
+    for _ in 0..2 {
+        env.ctl
+            .send(Command::AgentControl {
+                action: "result".into(),
+                agent_id: Some(id.clone()),
+                changeset_id: None,
+                job_id: None,
+            })
+            .unwrap();
+        let e = until(&mut env.events, |e| {
+            matches!(e, Event::AgentControlResult { .. })
+        })
+        .await;
+        assert!(matches!(
+            &e.last().unwrap().event,
+            Event::AgentControlResult { ok: true, .. }
+        ));
+    }
+    assert_eq!(env.shared.child_requests.lock().len(), before);
+}
+
+#[tokio::test]
+async fn a_cancelled_child_keeps_the_usage_it_spent() {
+    let mut env = open(
+        vec![
+            Reply::tool(
+                "c1",
+                "Agent",
+                json!({ "task": "one round [glob] [hold-after]", "background": true }),
+            ),
+            Reply::text("started"),
+        ],
+        allow(&["Agent"]),
+        true,
+        |_| {},
+    )
+    .await;
+    let evs = submit(&mut env, "go").await;
+    let id = spawned(&evs)[0].agent_id.clone();
+    // Its first response (a tool call) came back; it now holds.
+    until(&mut env.events, |e| {
+        matches!(e, Event::AgentToolFinished { .. })
+    })
+    .await;
+    env.ctl
+        .send(Command::AgentControl {
+            action: "cancel".into(),
+            agent_id: Some(id),
+            changeset_id: None,
+            job_id: None,
+        })
+        .unwrap();
+    let fin = until(&mut env.events, |e| {
+        matches!(
+            e,
+            Event::RunUsage {
+                final_total: true,
+                ..
+            }
+        )
+    })
+    .await;
+    let r = &results(&fin)[0];
+    assert_eq!(r.status, "cancelled");
+    assert_eq!((r.usage.input_tokens, r.usage.output_tokens), (7, 3));
+    let d = fin.iter().find_map(|e| match &e.event {
+        Event::RunUsage { descendants, .. } => Some(descendants.input_tokens),
+        _ => None,
+    });
+    assert_eq!(d, Some(7), "the result and the total agree");
+}
+
+// ─── Isolated writers and ChangeSets ─────────────────────────────────────────
+
+#[tokio::test]
+async fn parallel_writers_get_worktrees_and_changesets_without_last_writer_wins() {
+    let mut env = open(
+        vec![
+            Reply::tool(
+                "c1",
+                "Agents",
+                json!({ "agents": [
+                    { "task": "edit A [bash:echo by A > shared.txt]" },
+                    { "task": "edit B [bash:echo by B > shared.txt]" }
+                ]}),
+            ),
+            Reply::text("done"),
+        ],
+        allow(&["Agents", "Bash"]),
+        true,
+        |_| {},
+    )
+    .await;
+    // The parent has local, uncommitted work: the children must see it.
+    std::fs::write(env.dir.path().join("parent_note.txt"), "dirty\n").unwrap();
+    let evs = submit(&mut env, "go").await;
+    let ready: Vec<_> = evs
+        .iter()
+        .filter_map(|e| match &e.event {
+            Event::ChangesReady { changeset } => Some((**changeset).clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ready.len(), 2, "{:#?}", results(&evs));
+    assert_ne!(ready[0].branch, ready[1].branch);
+    for cs in &ready {
+        assert_eq!(cs.files.len(), 1, "the inherited note is not theirs");
+        assert_eq!(cs.files[0].path, "shared.txt");
+    }
+    // The parent's tree is untouched until an explicit apply.
+    let shared = env.dir.path().join("shared.txt");
+    assert_eq!(std::fs::read_to_string(&shared).unwrap(), "base\n");
+    let send = |action: &str, id: &str| Command::AgentControl {
+        action: action.into(),
+        agent_id: None,
+        changeset_id: Some(id.into()),
+        job_id: None,
+    };
+    env.ctl.send(send("apply_changes", &ready[0].id)).unwrap();
+    let e = until(&mut env.events, |e| {
+        matches!(e, Event::AgentControlResult { .. })
+    })
+    .await;
+    assert!(matches!(
+        &e.last().unwrap().event,
+        Event::AgentControlResult { ok: true, .. }
+    ));
+    let first = std::fs::read_to_string(&shared).unwrap();
+    env.ctl.send(send("apply_changes", &ready[1].id)).unwrap();
+    let e = until(&mut env.events, |e| {
+        matches!(e, Event::AgentControlResult { .. })
+    })
+    .await;
+    match &e.last().unwrap().event {
+        Event::AgentControlResult { ok, text, .. } => {
+            assert!(!ok && text.contains("WorktreeConflict"), "{text}");
+        }
+        _ => unreachable!(),
+    }
+    assert_eq!(
+        std::fs::read_to_string(&shared).unwrap(),
+        first,
+        "no last-writer-wins"
+    );
+    let conflict = |x: &Event| {
+        matches!(
+            x,
+            Event::ChangesUpdated {
+                state: bricks_agent::agents::ChangeSetState::Conflict,
+                ..
+            }
+        )
+    };
+    if !e.iter().any(|x| conflict(&x.event)) {
+        until(&mut env.events, conflict).await;
+    }
+}
+
+// ─── Skills, permissions ─────────────────────────────────────────────────────
+
+/// Skills on (home in a sub-folder, nothing of the machine), project
+/// skills approved by the caller when `trust`.
+fn with_skills(trust: bool) -> impl FnOnce(&mut EngineConfig, &Path) {
+    move |cfg, dir| {
+        let mut setup = SkillsSetup::with_home(Some(dir.join(".home")));
+        setup.trust_project = trust;
+        cfg.skills = Some(setup);
+    }
+}
+
+fn write_skill(root: &Path, name: &str, body: &str) {
+    let d = root.join(name);
+    std::fs::create_dir_all(&d).unwrap();
+    std::fs::write(
+        d.join("SKILL.md"),
+        format!("---\nname: {name}\ndescription: Procedure {name}.\n---\n{body}\n"),
+    )
+    .unwrap();
+}
+
+async fn skilled_profile(env: &mut Env, skills: &str) {
+    let root = env.dir.path();
+    std::fs::create_dir_all(root.join(".bricks/agents")).unwrap();
+    std::fs::write(
+        root.join(".bricks/agents/skilled.md"),
+        format!(
+            "---\nname: skilled\ndescription: Uses skills.\nskills: [{skills}]\n---\nBe skilled.\n"
+        ),
+    )
+    .unwrap();
+    // Not committed: the skill is found in place, not through Git.
+    write_skill(
+        &root.join(".agents/skills"),
+        "house-style",
+        "SKILL-MARKER-42: write short sentences.",
+    );
+    env.ctl.send(Command::ReloadAgentProfiles).unwrap();
+    until(&mut env.events, |e| {
+        matches!(e, Event::AgentProfiles { .. })
+    })
+    .await;
+    // Sources are read on demand, not per turn.
+    env.ctl.send(Command::ReloadSkills).unwrap();
+    until(&mut env.events, |e| matches!(e, Event::Skills { .. })).await;
+}
+
+fn skill_events(evs: &[Envelope]) -> Vec<(Option<String>, String, String)> {
+    evs.iter()
+        .filter_map(|e| match &e.event {
+            Event::SkillActivated {
+                agent_id,
+                name,
+                origin,
+                ..
+            } => Some((agent_id.clone(), name.clone(), origin.clone())),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn profile_skills_are_preloaded_whole_before_the_childs_first_call() {
+    let mut env = open_full(
+        vec![
+            Reply::tool(
+                "c1",
+                "Agent",
+                json!({ "task": "use the skill [bash:echo hi]", "profile": "skilled" }),
+            ),
+            Reply::text("ok"),
+        ],
+        allow(&["Agent", "Bash"]),
+        true,
+        |_| {},
+        with_skills(true),
+    )
+    .await;
+    skilled_profile(&mut env, "house-style").await;
+    let evs = submit(&mut env, "go").await;
+    let rs = results(&evs);
+    let states: Vec<(String, String)> = rs[0]
+        .skills
+        .iter()
+        .map(|s| (s.name.clone(), s.state.clone()))
+        .collect();
+    assert_eq!(
+        states,
+        vec![("house-style".to_string(), "loaded".to_string())]
+    );
+    assert!(rs[0].skills[0].revision.is_some() && rs[0].skills[0].source.is_some());
+    let child = rs[0].agent_id.clone();
+    assert!(skill_events(&evs).contains(&(Some(child), "house-style".into(), "profile".into())));
+    // In the child's first request, whole, and in the next one.
+    let reqs = env.shared.child_requests.lock().clone();
+    assert!(reqs.len() >= 2);
+    for r in &reqs {
+        let sys = r.system.as_deref().unwrap();
+        assert!(sys.contains("SKILL-MARKER-42: write short sentences."));
+        assert!(!sys.contains("truncated"));
+    }
+    let names: Vec<&str> = reqs[0].tools.iter().map(|t| t.name.as_str()).collect();
+    assert!(names.contains(&"Bash") && names.contains(&"Agent") && names.contains(&"Skill"));
+}
+
+#[tokio::test]
+async fn a_background_child_gets_its_profile_skills_too() {
+    let mut env = open_full(
+        vec![
+            Reply::tool(
+                "c1",
+                "Agent",
+                json!({ "task": "later [glob]", "profile": "skilled", "background": true }),
+            ),
+            Reply::text("started"),
+        ],
+        allow(&["Agent", "Glob"]),
+        true,
+        |_| {},
+        with_skills(true),
+    )
+    .await;
+    skilled_profile(&mut env, "house-style").await;
+    let mut evs = submit(&mut env, "go").await;
+    if results(&evs).is_empty() {
+        evs.extend(
+            until(&mut env.events, |e| {
+                matches!(e, Event::AgentFinished { .. })
+            })
+            .await,
+        );
+    }
+    let rs = results(&evs);
+    assert_eq!(rs[0].skills[0].state, "loaded");
+    let reqs = env.shared.child_requests.lock().clone();
+    assert!(
+        reqs[0]
+            .system
+            .as_deref()
+            .unwrap()
+            .contains("SKILL-MARKER-42")
+    );
+}
+
+#[tokio::test]
+async fn a_profile_skill_that_cannot_be_used_refuses_the_launch_before_any_call() {
+    for (skills, trust, want) in [
+        ("house-style, no-such-skill", true, "no-such-skill"),
+        // Project skills not approved for the session: refused too.
+        ("house-style", false, "not approved"),
+    ] {
+        let mut env = open_full(
+            vec![
+                Reply::tool("c1", "Agent", json!({ "task": "x", "profile": "skilled" })),
+                Reply::text("ok"),
+            ],
+            allow(&["Agent"]),
+            true,
+            |_| {},
+            with_skills(trust),
+        )
+        .await;
+        skilled_profile(&mut env, skills).await;
+        let evs = submit(&mut env, "go").await;
+        let (is_error, out) = tool_out(&evs, "c1");
+        assert!(is_error && out.contains(want), "{out}");
+        assert!(spawned(&evs).is_empty());
+        assert!(env.shared.child_requests.lock().is_empty(), "no child call");
+    }
+}
+
+#[tokio::test]
+async fn a_profile_over_the_skill_budget_is_refused_not_cut() {
+    let mut env = open_full(
+        vec![
+            Reply::tool("c1", "Agent", json!({ "task": "x", "profile": "skilled" })),
+            Reply::text("ok"),
+        ],
+        allow(&["Agent"]),
+        true,
+        |b| b.agents.skills_max_bytes = 100,
+        with_skills(true),
+    )
+    .await;
+    skilled_profile(&mut env, "house-style").await;
+    write_skill(
+        &env.dir.path().join(".agents/skills"),
+        "house-style",
+        &"long line\n".repeat(50),
+    );
+    env.ctl.send(Command::ReloadSkills).unwrap();
+    until(&mut env.events, |e| matches!(e, Event::Skills { .. })).await;
+    let evs = submit(&mut env, "go").await;
+    let (is_error, out) = tool_out(&evs, "c1");
+    assert!(
+        is_error && out.contains("skills_max_bytes") && out.contains("nothing is cut"),
+        "{out}"
+    );
+    assert!(env.shared.child_requests.lock().is_empty());
+}
+
+#[tokio::test]
+async fn a_worktree_child_reads_its_origin_projects_skill_in_place() {
+    let mut env = open_full(
+        vec![
+            Reply::tool(
+                "c1",
+                "Agent",
+                json!({ "task": "work [glob]", "profile": "skilled", "isolation": "worktree" }),
+            ),
+            Reply::text("ok"),
+        ],
+        allow(&["Agent", "Glob"]),
+        true,
+        |_| {},
+        with_skills(true),
+    )
+    .await;
+    skilled_profile(&mut env, "house-style").await;
+    let evs = submit(&mut env, "go").await;
+    let sp = spawned(&evs);
+    assert_eq!(sp[0].isolation, "worktree");
+    let wt = sp[0].workspace.clone();
+    let origin = env.dir.path().canonicalize().unwrap();
+    let sys = env.shared.child_requests.lock()[0].system.clone().unwrap();
+    let skill_dir = origin.join(".agents/skills/house-style");
+    assert!(
+        sys.contains(&format!("Skill directory: {}", skill_dir.display())),
+        "{sys}"
+    );
+    assert!(
+        sys.contains(&format!("Your working directory is unchanged: {wt}")),
+        "{sys}"
+    );
+    assert!(!wt.starts_with(&origin.display().to_string()) || wt.contains("workspaces"));
+}
+
+#[tokio::test]
+async fn nested_delegation_resolves_skills_the_same_way_and_the_parent_keeps_its_own() {
+    let mut env = open_full(
+        vec![
+            Reply::tool("p1", "Skill", json!({ "skill": "parent-only" })),
+            Reply::tool(
+                "c1",
+                "Agent",
+                json!({ "task": "relay [spawn-child-skilled:inner [glob]]" }),
+            ),
+            Reply::text("ok"),
+        ],
+        allow(&["Agent", "Glob"]),
+        true,
+        |_| {},
+        with_skills(true),
+    )
+    .await;
+    skilled_profile(&mut env, "house-style").await;
+    write_skill(
+        &env.dir.path().join(".home/.agents/skills"),
+        "parent-only",
+        "PARENT-ONLY-BODY",
+    );
+    env.ctl.send(Command::ReloadSkills).unwrap();
+    until(&mut env.events, |e| matches!(e, Event::Skills { .. })).await;
+    let evs = submit(&mut env, "go").await;
+    assert!(skill_events(&evs).contains(&(None, "parent-only".into(), "model".into())));
+    let reqs = env.shared.child_requests.lock().clone();
+    let grandchild: Vec<_> = reqs
+        .iter()
+        .filter(|r| {
+            r.system
+                .as_deref()
+                .is_some_and(|s| s.contains("SKILL-MARKER-42"))
+        })
+        .collect();
+    assert!(
+        !grandchild.is_empty(),
+        "the grandchild got its profile's skill"
+    );
+    for r in &reqs {
+        let mut all = r.system.clone().unwrap_or_default();
+        for m in &r.messages {
+            all.push_str(&m.get_all_text());
+        }
+        assert!(
+            !all.contains("PARENT-ONLY-BODY"),
+            "a parent's activation is its own"
+        );
+    }
+    // The children's own ledgers: only the grandchild has `house-style`.
+    let profile_events: Vec<_> = skill_events(&evs)
+        .into_iter()
+        .filter(|(_, n, o)| n == "house-style" && o == "profile")
+        .collect();
+    assert_eq!(profile_events.len(), 1);
+}
+
+#[tokio::test]
+async fn headless_defaults_refuse_cleanly_and_an_explicit_rule_does_not_allow_the_childs_tools() {
+    // Default rules, nobody to ask: delegation is refused, the run says so.
+    let mut env = open(
+        vec![
+            Reply::tool("c1", "Agents", json!({ "agents": [{ "task": "x" }] })),
+            Reply::text("ok"),
+        ],
+        ApprovalRules::default(),
+        false,
+        |_| {},
+    )
+    .await;
+    let evs = submit(&mut env, "go").await;
+    assert!(spawned(&evs).is_empty());
+    assert!(matches!(
+        &evs.last().unwrap().event,
+        Event::RunFinished {
+            failure: Some(FailureKind::ApprovalRequired),
+            ..
+        }
+    ));
+    // `Agents` allowed explicitly: the child's Bash still needs its own rule.
+    let mut env = open(
+        vec![
+            Reply::tool(
+                "c1",
+                "Agents",
+                json!({ "agents": [{ "task": "run [bash:echo hi]" }] }),
+            ),
+            Reply::text("ok"),
+        ],
+        allow(&["Agents"]),
+        false,
+        |_| {},
+    )
+    .await;
+    let evs = submit(&mut env, "go").await;
+    assert_eq!(spawned(&evs).len(), 1);
+    let bash = evs.iter().find_map(|e| match &e.event {
+        Event::AgentToolFinished { name, is_error, .. } if name == "Bash" => Some(*is_error),
+        _ => None,
+    });
+    assert_eq!(bash, Some(true), "refused: no implicit allow");
+}
+
+// ─── Jobs ────────────────────────────────────────────────────────────────────
+
+#[cfg(unix)]
+#[tokio::test]
+async fn background_jobs_are_owned_scoped_and_stopped_as_a_tree() {
+    let mut env = open(
+        vec![
+            Reply::tool(
+                "b1",
+                "Bash",
+                json!({ "command": "sleep 300 & sleep 300 & echo started; wait", "background": true }),
+            ),
+            Reply::text("started"),
+        ],
+        allow(&["Bash"]),
+        true,
+        |_| {},
+    )
+    .await;
+    let evs = submit(&mut env, "go").await;
+    let job = evs
+        .iter()
+        .find_map(|e| match &e.event {
+            Event::JobStarted {
+                job_id, cwd, pid, ..
+            } => Some((job_id.clone(), cwd.clone(), *pid)),
+            _ => None,
+        })
+        .expect("job_started");
+    assert!(
+        job.1
+            .ends_with(env.dir.path().file_name().unwrap().to_str().unwrap())
+    );
+    let (_, out) = tool_out(&evs, "b1");
+    assert!(out.contains(&job.0));
+    // Its children exist.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let kids = bricks_tools::shell::procs::descendants(job.2);
+    assert!(kids.len() >= 2, "{kids:?}");
+    // A person stops it: the whole tree goes.
+    env.ctl
+        .send(Command::AgentControl {
+            action: "stop_job".into(),
+            agent_id: None,
+            changeset_id: None,
+            job_id: Some(job.0.clone()),
+        })
+        .unwrap();
+    let e = until(&mut env.events, |e| matches!(e, Event::JobFinished { .. })).await;
+    match &e.last().unwrap().event {
+        Event::JobFinished { state, .. } => assert_eq!(state, "stopped"),
+        _ => unreachable!(),
+    }
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    for k in kids {
+        assert!(!bricks_tools::shell::procs::is_running(k), "{k} survived");
+    }
+}
+
+// ─── Applied changes (`edit_applied`) ────────────────────────────────────────
+
+/// `(agent_id, changeset_id, first path, added, removed)`.
+type Edit = (Option<String>, Option<String>, String, usize, usize);
+
+fn edits(evs: &[Envelope]) -> Vec<Edit> {
+    evs.iter()
+        .filter_map(|e| match &e.event {
+            Event::EditApplied {
+                agent_id,
+                changeset_id,
+                files,
+                ..
+            } => Some((
+                agent_id.clone(),
+                changeset_id.clone(),
+                files[0].path.clone(),
+                files[0].added,
+                files[0].removed,
+            )),
+            _ => None,
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn shared_children_report_their_writes_and_isolated_ones_only_when_applied() {
+    let mut env = open(
+        vec![
+            Reply::tools(vec![(
+                "c1",
+                "Agent",
+                json!({ "task": "fg [write:fg.txt=a]", "isolation": "shared" }),
+            )]),
+            Reply::tool(
+                "c2",
+                "Agent",
+                json!({ "task": "bg [write:bg.txt=b]", "isolation": "shared", "background": true }),
+            ),
+            Reply::tool(
+                "c3",
+                "Agents",
+                json!({ "agents": [
+                    { "task": "iso one [write:same.txt=one]" },
+                    { "task": "iso two [write:same.txt=two]" }
+                ]}),
+            ),
+            Reply::text("done"),
+        ],
+        allow(&["Agent", "Agents", "Write", "AgentControl"]),
+        true,
+        |_| {},
+    )
+    .await;
+    let mut evs = submit(&mut env, "go").await;
+    // The background child may finish after the answer.
+    if !edits(&evs).iter().any(|e| e.2 == "bg.txt") {
+        evs.extend(
+            until(
+                &mut env.events,
+                |e| matches!(e, Event::EditApplied { files, .. } if files[0].path == "bg.txt"),
+            )
+            .await,
+        );
+    }
+    let sp = spawned(&evs);
+    let id_of = |t: &str| {
+        sp.iter()
+            .find(|s| s.task.starts_with(t))
+            .unwrap()
+            .agent_id
+            .clone()
+    };
+    let e = edits(&evs);
+    // Shared children: their writes, once each, with their identity.
+    assert_eq!(
+        e,
+        vec![
+            (Some(id_of("fg")), None, "fg.txt".into(), 1, 0),
+            (Some(id_of("bg")), None, "bg.txt".into(), 1, 0),
+        ],
+        "worktree writes are not changes of the session's workspace yet"
+    );
+    let ready: Vec<_> = evs
+        .iter()
+        .filter_map(|e| match &e.event {
+            Event::ChangesReady { changeset } => Some((**changeset).clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(ready.len(), 2);
+
+    // Applied by a person: one change, the ChangeSet's lines.
+    let control = |action: &str, id: &str| Command::AgentControl {
+        action: action.into(),
+        agent_id: None,
+        changeset_id: Some(id.into()),
+        job_id: None,
+    };
+    env.ctl
+        .send(control("apply_changes", &ready[0].id))
+        .unwrap();
+    // The result and the change arrive by two routes, in either order.
+    let mut got = Vec::new();
+    while !(got
+        .iter()
+        .any(|e: &Envelope| matches!(e.event, Event::EditApplied { .. }))
+        && got
+            .iter()
+            .any(|e: &Envelope| matches!(e.event, Event::AgentControlResult { .. })))
+    {
+        got.push(next(&mut env.events).await);
+    }
+    assert_eq!(
+        edits(&got),
+        vec![(
+            Some(ready[0].agent_id.clone()),
+            Some(ready[0].id.clone()),
+            "same.txt".into(),
+            1,
+            0
+        )]
+    );
+    // Again: refused, nothing more.
+    env.ctl
+        .send(control("apply_changes", &ready[0].id))
+        .unwrap();
+    let again = until(&mut env.events, |e| {
+        matches!(e, Event::AgentControlResult { .. })
+    })
+    .await;
+    assert!(edits(&again).is_empty());
+    assert!(matches!(
+        &again.last().unwrap().event,
+        Event::AgentControlResult { ok: false, .. }
+    ));
+    // The other one conflicts (same file): nothing.
+    env.ctl
+        .send(control("apply_changes", &ready[1].id))
+        .unwrap();
+    let conflict = until(&mut env.events, |e| {
+        matches!(e, Event::AgentControlResult { .. })
+    })
+    .await;
+    assert!(matches!(
+        &conflict.last().unwrap().event,
+        Event::AgentControlResult { ok: false, .. }
+    ));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    while let Some(e) = env.events.try_next() {
+        assert!(
+            !matches!(e.event, Event::EditApplied { .. }),
+            "{:?}",
+            e.event
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_changeset_applied_by_the_agent_counts_once_too() {
+    let mut env = open(
+        vec![
+            Reply::tool(
+                "c1",
+                "Agent",
+                json!({ "task": "iso [write:tool.txt=x]", "isolation": "worktree" }),
+            ),
+            Reply::text("ready"),
+        ],
+        allow(&["Agent", "Write", "AgentControl"]),
+        true,
+        |_| {},
+    )
+    .await;
+    let evs = submit(&mut env, "go").await;
+    let cs = evs
+        .iter()
+        .find_map(|e| match &e.event {
+            Event::ChangesReady { changeset } => Some((**changeset).clone()),
+            _ => None,
+        })
+        .unwrap();
+    assert!(edits(&evs).is_empty());
+    // The session agent applies it with AgentControl.
+    env.shared.push_parent(vec![
+        Reply::tool(
+            "a1",
+            "AgentControl",
+            json!({ "action": "apply_changes", "changeset_id": cs.id }),
+        ),
+        Reply::tool(
+            "a2",
+            "AgentControl",
+            json!({ "action": "apply_changes", "changeset_id": cs.id }),
+        ),
+        Reply::text("applied"),
+    ]);
+    let evs = submit(&mut env, "apply it").await;
+    let mut e = edits(&evs);
+    if e.is_empty() {
+        e = edits(&until(&mut env.events, |e| matches!(e, Event::EditApplied { .. })).await);
+    }
+    assert_eq!(
+        e,
+        vec![(
+            Some(cs.agent_id.clone()),
+            Some(cs.id.clone()),
+            "tool.txt".into(),
+            1,
+            0
+        )]
+    );
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    while let Some(x) = env.events.try_next() {
+        assert!(
+            !matches!(x.event, Event::EditApplied { .. }),
+            "applied once"
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(env.dir.path().join("tool.txt")).unwrap(),
+        "x\n"
+    );
+}

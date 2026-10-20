@@ -4,7 +4,7 @@
 
 use crate::args::Global;
 use crate::exit;
-use cersei_agent::control::{SessionScope, list_sessions_in};
+use bricks_agent::control::{SessionScope, list_sessions_in};
 use std::path::Path;
 
 pub async fn run(global: &Global, launch: &Path, json: bool, all: bool) -> i32 {

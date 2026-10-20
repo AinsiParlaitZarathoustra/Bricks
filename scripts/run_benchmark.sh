@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Cersei — Run benchmarks
+# Bricks — Run benchmarks
 # Usage: ./run_benchmark.sh [--full] [--memory] [--usage]
 
 set -euo pipefail
@@ -25,18 +25,18 @@ done
 
 # Tool I/O benchmark (always runs)
 echo -e "\n${CYAN}[1] Tool I/O Benchmark${RESET}"
-cargo run -p cersei --example benchmark_io --release 2>&1 | grep -E "avg=|Combined|Fastest|Slowest|Cersei.*faster|std::fs"
+cargo run -p bricks --example benchmark_io --release 2>&1 | grep -E "avg=|Combined|Fastest|Slowest|Bricks.*faster|std::fs"
 
 # Memory benchmark (from stress test)
 if $MEMORY || $FULL; then
     echo -e "\n${CYAN}[2] Memory I/O Benchmark${RESET}"
-    cargo run -p cersei --example stress_memory --release 2>&1 | grep -E "μs|Performance"
+    cargo run -p bricks --example stress_memory --release 2>&1 | grep -E "μs|Performance"
 fi
 
 # Token/cost usage
 if $USAGE || $FULL; then
     echo -e "\n${CYAN}[3] Token Usage Report${RESET}"
-    cargo run -p cersei --example usage_report --release 2>&1 | grep -E "Token|Cost|Billing|tokens|cost|\$"
+    cargo run -p bricks --example usage_report --release 2>&1 | grep -E "Token|Cost|Billing|tokens|cost|\$"
 fi
 
 # Full standalone benchmark

@@ -1,10 +1,10 @@
 //! Project loading: the settings of the folder a session works in.
 
 use crate::memory::{OpenMemories, long_term_memory};
-use cersei_agent::BricksConfig;
-use cersei_agent::control::{ProjectContext, ProjectLoader};
-use cersei_agent::system_prompt::{SystemPromptOptions, build_system_prompt};
-use cersei_provider::ProviderRegistry;
+use bricks_agent::BricksConfig;
+use bricks_agent::control::{ProjectContext, ProjectLoader};
+use bricks_agent::system_prompt::{SystemPromptOptions, build_system_prompt};
+use bricks_provider::ProviderRegistry;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -29,13 +29,13 @@ impl Projects {
 }
 
 /// The names of the tools the session agent announces to the model, as the
-/// controller builds it from the engine's tools (`cersei_tools::coding`):
+/// controller builds it from the engine's tools (`bricks_tools::coding`):
 /// those, and the native sub-agent tools when `[agents] enabled`. The
 /// system prompt's conditional guidance is decided from this list. (`Skill`
 /// is left out: the skills catalog, added to the prompt by the agent, says
 /// how to use it.)
 pub fn announced_tools(bricks: &BricksConfig) -> Vec<String> {
-    let mut names: Vec<String> = cersei_tools::coding()
+    let mut names: Vec<String> = bricks_tools::coding()
         .iter()
         .map(|t| t.name().to_string())
         .collect();
@@ -60,7 +60,7 @@ impl ProjectLoader for Projects {
         });
         let (long_term_memory, memory_space) = match memory {
             Some((m, space)) => (
-                Some(m as Arc<dyn cersei_memory::LongTermMemory>),
+                Some(m as Arc<dyn bricks_memory::LongTermMemory>),
                 Some(space),
             ),
             None => (None, None),

@@ -1,4 +1,4 @@
-//! longmem-bench — head-to-head LongMemEval runner for the Cersei memory stack.
+//! longmem-bench — head-to-head LongMemEval runner for the Bricks memory stack.
 //!
 //! Usage:
 //!   longmem-bench --dataset s --config all --limit 10
@@ -27,8 +27,8 @@ mod runner;
 
 use anyhow::{Context, Result, anyhow};
 use async_trait::async_trait;
-use cersei_embeddings::{EmbeddingError, EmbeddingProvider, GeminiEmbeddings, OpenAiEmbeddings};
-use cersei_provider::{
+use bricks_embeddings::{EmbeddingError, EmbeddingProvider, GeminiEmbeddings, OpenAiEmbeddings};
+use bricks_provider::{
     CompletionRequest, CompletionStream, ConfiguredProvider, Provider, ProviderRegistry,
 };
 use clap::{Parser, ValueEnum};
@@ -76,7 +76,7 @@ impl EmbeddingProvider for AnyEmbeddings {
 #[derive(Parser, Debug)]
 #[command(
     name = "longmem-bench",
-    about = "LongMemEval runner for the Cersei memory stack"
+    about = "LongMemEval runner for the Bricks memory stack"
 )]
 struct Cli {
     /// Dataset variant. Files expected at `./data/longmemeval_<name>.json`.
@@ -328,9 +328,9 @@ struct ModelRouter {
 }
 
 impl ModelRouter {
-    fn lookup(&self, model: &str) -> cersei_types::Result<&ConfiguredProvider> {
+    fn lookup(&self, model: &str) -> bricks_types::Result<&ConfiguredProvider> {
         self.by_selection.get(model).ok_or_else(|| {
-            cersei_types::CerseiError::Config(format!(
+            bricks_types::CerseiError::Config(format!(
                 "model `{model}` was not configured for this run"
             ))
         })
@@ -349,7 +349,7 @@ impl Provider for ModelRouter {
             .unwrap_or(0)
     }
 
-    async fn complete(&self, request: CompletionRequest) -> cersei_types::Result<CompletionStream> {
+    async fn complete(&self, request: CompletionRequest) -> bricks_types::Result<CompletionStream> {
         self.lookup(&request.model)?.complete(request).await
     }
 }

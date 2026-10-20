@@ -211,16 +211,23 @@ describe('Conversation.apply: edits', () => {
 			})
 		);
 
+		// Files are keyed by run and full path (the path as written when no absolute one is known).
 		const run1 = conv.run(RUN_1);
 		expect(run1?.files.size).toBe(2);
-		expect(run1?.files.get('src/a.ts')).toEqual({
+		expect(run1?.files.get(`${RUN_1}|src/a.ts`)).toEqual({
+			key: `${RUN_1}|src/a.ts`,
 			path: 'src/a.ts',
+			absolute: null,
+			name: 'a.ts',
 			added: 5,
 			removed: 1,
 			binary: false,
-			operations: 2
+			kind: 'modify',
+			operations: 2,
+			agentIds: []
 		});
-		expect(run1?.files.get('README.md')).toMatchObject({ added: 10, removed: 0, operations: 1 });
+		expect(run1?.files.get(`${RUN_1}|README.md`)).toMatchObject({ added: 10, removed: 0, operations: 1, kind: 'create' });
+		expect(run1?.fileSummaries.map((f) => f.key)).toEqual([`${RUN_1}|src/a.ts`, `${RUN_1}|README.md`]);
 		expect(conv.items.filter((i) => i.kind === 'edit')).toHaveLength(2);
 
 		// A second run starts its own totals.
@@ -238,8 +245,8 @@ describe('Conversation.apply: edits', () => {
 			)
 		);
 
-		expect(conv.run(RUN_2)?.files.get('src/a.ts')).toMatchObject({ added: 1, removed: 1, operations: 1 });
-		expect(conv.run(RUN_1)?.files.get('src/a.ts')?.added).toBe(5);
+		expect(conv.run(RUN_2)?.files.get(`${RUN_2}|src/a.ts`)).toMatchObject({ added: 1, removed: 1, operations: 1 });
+		expect(conv.run(RUN_1)?.files.get(`${RUN_1}|src/a.ts`)?.added).toBe(5);
 	});
 });
 

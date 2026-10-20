@@ -1,4 +1,4 @@
-//! Cersei SDK — Tool I/O Benchmark Suite
+//! Bricks SDK — Tool I/O Benchmark Suite
 //!
 //! Measures raw tool execution speed (no LLM calls) for all built-in
 //! coding agent tools and compares against native Claude Code CLI.
@@ -16,7 +16,7 @@
 //!   7. std::fs     — raw stdlib baseline for read/write
 //!   8. Claude CLI  — startup overhead of native claude binary
 
-use cersei::prelude::*;
+use bricks::prelude::*;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -194,14 +194,14 @@ async fn main() -> anyhow::Result<()> {
         extensions: Extensions::default(),
     };
 
-    let tools = cersei::tools::all();
+    let tools = bricks::tools::all();
     let find_tool = |name: &str| -> &dyn Tool {
         tools.iter().find(|t| t.name() == name).unwrap().as_ref()
     };
 
     // ── Header ───────────────────────────────────────────────────────────
     println!();
-    println!("  Cersei SDK — Tool I/O Benchmark");
+    println!("  Bricks SDK — Tool I/O Benchmark");
     println!("  ================================");
     println!("  Iterations : {ITERS}");
     println!("  Warmup     : 3");
@@ -254,7 +254,7 @@ async fn main() -> anyhow::Result<()> {
                     serde_json::json!({
                         "file_path": test_file.display().to_string(),
                         "old_string": "Hello, world!",
-                        "new_string": "Hello, Cersei!",
+                        "new_string": "Hello, Bricks!",
                         "replace_all": true,
                     }),
                     &ctx,
@@ -267,7 +267,7 @@ async fn main() -> anyhow::Result<()> {
             let input = serde_json::json!({
                 "file_path": test_file.display().to_string(),
                 "old_string": "Hello, world!",
-                "new_string": "Hello, Cersei!",
+                "new_string": "Hello, Bricks!",
                 "replace_all": true,
             });
             let start = Instant::now();
@@ -370,15 +370,15 @@ async fn main() -> anyhow::Result<()> {
         println!();
         println!("  Comparison");
         println!("  ----------");
-        let cersei_read = results[0].avg_ms();
+        let bricks_read = results[0].avg_ms();
         let cli_startup = r_cli.avg_ms();
-        let ratio = cli_startup / cersei_read;
-        println!("  Cersei tool dispatch (Read): {:.3}ms", cersei_read);
+        let ratio = cli_startup / bricks_read;
+        println!("  Bricks tool dispatch (Read): {:.3}ms", bricks_read);
         println!("  Claude CLI startup:          {:.1}ms", cli_startup);
-        println!("  Ratio:                       Cersei is {:.0}x faster", ratio);
+        println!("  Ratio:                       Bricks is {:.0}x faster", ratio);
 
         println!();
-        println!("  Cersei overhead vs std::fs:");
+        println!("  Bricks overhead vs std::fs:");
         println!(
             "    Read:  +{:.3}ms  ({:.1}x std::fs)",
             results[0].avg_ms() - r_std_read.avg_ms(),

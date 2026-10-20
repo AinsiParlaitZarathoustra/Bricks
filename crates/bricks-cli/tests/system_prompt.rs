@@ -7,7 +7,7 @@ mod common;
 
 use common::*;
 
-const REFERENCE: &str = include_str!("../../cersei-agent/tests/fixtures/bricks_foundation.txt");
+const REFERENCE: &str = include_str!("../../bricks-agent/tests/fixtures/bricks_foundation.txt");
 
 fn reference(code_scout: bool, delegation: bool) -> String {
     REFERENCE

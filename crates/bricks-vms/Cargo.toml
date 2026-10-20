@@ -1,0 +1,54 @@
+[package]
+name = "bricks-vms"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Sandbox & VM isolation for the Bricks coding-agent SDK"
+readme = "../../README.md"
+repository.workspace = true
+homepage.workspace = true
+keywords = ["sandbox", "vm", "agent", "isolation", "docker"]
+categories = ["development-tools"]
+
+[lib]
+name = "bricks_vms"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cersei-envd"
+path = "src/bin/cersei_envd.rs"
+required-features = ["envd"]
+
+[features]
+default = ["backend-docker", "envd"]
+backend-docker = []
+backend-firecracker = []
+backend-e2b = []
+envd = ["dep:tracing-subscriber"]
+
+[dependencies]
+bricks-types.workspace = true
+tokio.workspace = true
+tokio-stream.workspace = true
+tokio-util.workspace = true
+futures.workspace = true
+async-trait.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber = { workspace = true, optional = true }
+uuid.workspace = true
+chrono.workspace = true
+parking_lot.workspace = true
+dashmap.workspace = true
+bytes.workspace = true
+base64.workspace = true
+dirs.workspace = true
+tempfile.workspace = true
+nix.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }

@@ -1,15 +1,16 @@
 ---
-title: Provider (cersei-provider)
+title: Provider (bricks-provider)
 description: Provider trait, providers configured in providers.toml, and the request and response types.
 ---
 
-# cersei-provider
+# bricks-provider
 
-Abstraction over LLM backends. A provider is one model declared in `~/.bricks/providers.toml` and driven by one of three wire protocols (`chat_completions`, `responses`, `anthropic_messages`). Every provider implements streaming completion and reports the context window of its model (`context_window`). A provider built from configuration also exposes the model's declared limits through `model_info()` (`crates/cersei-provider/src/lib.rs:204-235`).
+Abstraction over LLM backends. A provider is one model declared in `~/.bricks/providers.toml` and driven by one of three wire protocols (`chat_completions`, `responses`, `anthropic_messages`). Every provider implements streaming completion and reports the context window of its model (`context_window`). A provider built from configuration also exposes the model's declared limits through `model_info()` (`crates/bricks-provider/src/lib.rs:204-235`).
 
 ## Provider Trait
 
 ```rust
+use bricks::provider::{CompletionResponse, CompletionStream, ModelInfo};
 #[async_trait]
 pub trait Provider: Send + Sync {
     fn name(&self) -> &str;
@@ -28,7 +29,7 @@ pub trait Provider: Send + Sync {
 Nothing is built in. Models are selected explicitly as `provider_id/model_id`, and the provider is never inferred from the model name.
 
 ```rust
-use cersei::provider::{provider_from_config, ProviderRegistry};
+use bricks::provider::{provider_from_config, ProviderRegistry};
 
 // Read ~/.bricks/providers.toml and build the provider for one model
 let provider = provider_from_config(None, "custom/flash")?;
@@ -50,7 +51,7 @@ let provider = model
 | `ProviderRegistry` | The loaded configuration. `models()` lists every model in file order; `resolve(selection)` returns a `ResolvedModel`. |
 | `ResolvedModel` | One configured model. `provider()` returns a `ProviderBuilder`; `build_provider()` builds with the defaults; `selection()` gives `provider_id/model_id`. |
 | `ProviderBuilder` | `reasoning_profile(id)`, `tariff(name)`, `env(lookup)`, `http_client(client)`, `build()`. |
-| `ConfiguredProvider` | The `Provider` implementation for one model. `model()` returns its `ResolvedModel`; `estimate_cost(&Usage)` returns `Option<CostEstimate>`, `None` when no price is known (`crates/cersei-provider/src/provider.rs:269`). |
+| `ConfiguredProvider` | The `Provider` implementation for one model. `model()` returns its `ResolvedModel`; `estimate_cost(&Usage)` returns `Option<CostEstimate>`, `None` when no price is known (`crates/bricks-provider/src/provider.rs:269`). |
 
 ## Protocols
 
@@ -84,18 +85,10 @@ The limits are declared in the configuration. They never change what the server 
 
 ## CompletionRequest
 
+A provider request. Its public fields are `model`, `messages`, `system`, `tools`, `max_tokens`, `temperature`, `stop_sequences`, `options` and `output_modalities` (empty means text only).
+
 ```rust
-pub struct CompletionRequest {
-    pub model: String,
-    pub messages: Vec<Message>,
-    pub system: Option<String>,
-    pub tools: Vec<ToolDefinition>,
-    pub max_tokens: u32,
-    pub temperature: Option<f32>,
-    pub stop_sequences: Vec<String>,
-    pub options: ProviderOptions,
-    pub output_modalities: Vec<Modality>,
-}
+use bricks::provider::CompletionRequest;
 
 let request = CompletionRequest::new("vendor-flash"); // max_tokens defaults to 16384
 ```
@@ -113,6 +106,7 @@ options.set("reasoning_profile", "approfondi");
 Implement `Provider` for a backend that is not covered by the three protocols:
 
 ```rust
+use bricks::provider::CompletionStream;
 struct MyProvider;
 
 #[async_trait]
@@ -120,7 +114,7 @@ impl Provider for MyProvider {
     fn name(&self) -> &str { "my-llm" }
     fn context_window(&self, _model: &str) -> u64 { 128_000 }
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionStream> {
-        // Your implementation here
+        todo!("your implementation: a call to your service")
     }
 }
 ```
@@ -129,4 +123,4 @@ impl Provider for MyProvider {
 
 ## Removed API
 
-The `Anthropic`, `OpenAi` and `Gemini` clients, `Auth`, `AuthProvider`, `OAuthToken`, `from_model_string` and the built-in model registry were removed in 0.3.6. There is no `from_env()` constructor and no environment-variable fallback. See [Providers](/docs/providers) and the migration table in `docs/providers.md` in the repository.
+The `Anthropic`, `OpenAi` and `Gemini` clients, `Auth`, `AuthProvider`, `OAuthToken`, `from_model_string` and the built-in model registry were removed in 0.3.6. There is no `from_env()` constructor and no environment-variable fallback. See [Providers](/docs/providers) and [Migration](/docs/migration) for the table of calls that were replaced.

@@ -1,128 +1,88 @@
 ---
 title: Crate Map
-description: Detailed breakdown of every crate in the Bricks workspace.
+description: Every crate of the Bricks workspace, its role, and what depends on it.
 ---
 
 # Crate Map
 
-The Bricks workspace (version 0.6.1). The inherited crates keep their
-`cersei-*` names. Layers, from the top:
+The Bricks workspace is at version 0.6.1. Its crates are named `bricks-*`,
+except the facade, `bricks`. Each crate lives under `crates/`, and the two
+applications under `apps/`. The workspace layers are described in
+[Architecture](/docs/architecture).
 
-```text
-bricks-cli          the `bricks` binary: arguments, configuration, headless / JSONL
-apps/bricks-desktop the desktop application (Tauri): the interactive interface
-cersei-agent        engine: agent loop, controller (commands/events), approvals, compaction
-  cersei-provider, cersei-tools, cersei-memory, cersei-compression, cersei-web,
-  bricks-semantic, bricks-skills, cersei-lsp, cersei-mcp, cersei-embeddings, …
-cersei-types        shared types and the shared HTTP client
-```
+## Frontends
 
-## bricks-cli
+| Path | Package | What it is |
+|---|---|---|
+| `crates/bricks-cli` | `bricks-cli` (binary `bricks`) | The command. Parses arguments, loads the configuration, starts the engine, and presents its events as text or as versioned JSONL: `bricks run`, `bricks sessions`. Installed with `cargo install --path crates/bricks-cli`. |
+| `apps/bricks-desktop` | `bricks-desktop` (product "Bricks") | Bricks Desktop, the interactive interface. A Tauri 2 application with a Svelte front end. It renders the engine's events and turns the person's actions into engine commands. It holds no agent logic. |
 
-The `bricks` command, a thin layer over the engine: loads `providers.toml`
-and `bricks.toml`, starts the controller of `cersei-agent`, and presents its
-events as text or versioned JSONL (`bricks run`, `bricks sessions`). The
-interactive interface is the desktop application. See `docs/cli.md` in the
-repository.
-Install from a checkout: `cargo install --path crates/bricks-cli`.
+The command and the desktop application use the engine's command/event
+contract, `bricks_agent::control`. The commands and the output format of the `bricks` command are in
+`docs/cli.md` in the repository.
 
-## apps/bricks-desktop
+## The facade
 
-The desktop application (Tauri 2, Svelte): the interactive interface. It
-renders the engine's events and turns gestures into engine commands over the
-same contract (`cersei_agent::control`), and it builds its command palette
-from the shared registry (`cersei_agent::control::slash`). It holds no agent
-logic.
+| Crate | Role |
+|---|---|
+| `bricks` | Re-exports the workspace under one name: `bricks::prelude::*` for the common types, and modules such as `bricks::tools`, `bricks::provider`, `bricks::memory`, `bricks::hooks`, `bricks::mcp` and `bricks::skills`. |
 
-## cersei (facade)
+Feature flags of the facade:
 
-Re-exports everything. Use `cersei::prelude::*` for common types.
+| Feature | Default | Enables |
+|---|---|---|
+| `vms` | yes | `bricks::vms` (`bricks-vms`) |
+| `agentlang` | no | `bricks::agentlang` (`bricks-agentlang`) |
+| `agentrl` | no | `bricks::agentrl` (`bricks-agentrl`); implies `agentlang` and `vms` |
+| `workflows` | no | `bricks::workflows` (`bricks-workflows`) |
 
-```rust
-pub use cersei_types as types;
-pub use bricks_skills as skills;
-pub use cersei_provider as provider;
-pub use cersei_tools as tools;
-pub use cersei_agent::{Agent, AgentBuilder, AgentOutput, Reporter};
-pub use cersei_agent::events::{AgentEvent, AgentStream};
-pub use cersei_memory as memory;
-pub use cersei_hooks as hooks;
-pub use cersei_mcp as mcp;
-// Providers are configuration, not types:
-pub use cersei_provider::{provider_from_config, ConfiguredProvider, ProviderRegistry, ResolvedModel};
+Providers are configuration, not types: the facade exports
+`provider_from_config`, `ProviderRegistry`, `ConfiguredProvider` and
+`ResolvedModel` from `bricks-provider`.
 
-// feature-gated
-pub use cersei_vms as vms;             // feature = "vms"
-pub use cersei_agentlang as agentlang; // feature = "agentlang"
-pub use cersei_agentrl as agentrl;     // feature = "agentrl"
-pub use cersei_workflows as workflows; // feature = "workflows"
-```
+## The engine
 
-## cersei-types
+| Crate | Role |
+|---|---|
+| `bricks-agent` | The `Agent` builder, the agentic loop, the context manager with compaction, the approval gate, the sub-agent tools (`Agent`, `Agents`, `AgentControl`, `AgentProfiles`), and the command/event contract in `control`. |
+| `bricks-config` | The assembly the frontends share: the Bricks home folder, the provider registry, the project loader and the engine configuration. |
 
-Core types: `Message`, `Role`, `ContentBlock`, `Usage`, `StopReason`, `StreamEvent`, `CerseiError`, `ToolDefinition`. Also `cersei_types::http`, the HTTP client shared by providers, web, MCP and embeddings (rustls, Hickory DNS resolver).
+## Services
 
-## cersei-provider
+| Crate | Role |
+|---|---|
+| `bricks-types` | Messages, content blocks, errors (`CerseiError`), stream events, and the shared HTTP client (`bricks_types::http`). It depends on no other workspace crate. |
+| `bricks-provider` | The `Provider` trait, the provider registry read from `providers.toml`, and the three protocol adapters: `chat_completions`, `responses` and `anthropic_messages`. Retries, prices and reasoning profiles. |
+| `bricks-tools` | The `Tool` trait and the built-in tools, grouped in sets: `all()`, `coding()`, `filesystem()`, `shell()`, `web()`, `planning()`, `scheduling()` and `orchestration()`. Also the `PermissionPolicy` trait, the change previews, and the shell sessions and background jobs. |
+| `bricks-tools-derive` | The `#[derive(Tool)]` procedural macro. |
+| `bricks-memory` | The `Memory` trait and its backends: JSONL session storage, an in-memory store, the memory directory, the CLAUDE.md loader. Graph memory (`graph` feature) and structured long-term memory (`structured`) are feature-gated. |
+| `bricks-embeddings` | Embedding providers behind one trait, and a USearch vector index. |
+| `bricks-compression` | Reduction of tool outputs: command-aware rules and tree-sitter skeletons of long files. |
+| `bricks-semantic` | The code understanding engine shared per workspace: lexical search, syntax context, and optional language servers. It backs `CodeScout` and `/search`. |
+| `bricks-lsp` | The language server client. |
+| `bricks-web` | Web search with provider fallback, bounded fetching with SSRF filtering, Markdown extraction and passage selection. |
+| `bricks-mcp` | The MCP client over stdio and Streamable HTTP. |
+| `bricks-skills` | Agent Skills (`SKILL.md`): format and validation, sources, trust of project skills, activation. Re-exported as `bricks::skills`. |
+| `bricks-hooks` | The `Hook` trait, hook events and actions, and `ShellHook`. |
+| `bricks-vms` | Sandboxes and VM isolation. |
+| `bricks-agentlang` | The AgentTemplate language: a lexer, parser and interpreter that run agent templates on top of the tools. |
+| `bricks-agentrl` | AgentRL, the self-evolving orchestration layer: the execution graph, the planner, the dynamic tool registry and the verifiers. |
+| `bricks-workflows` | A serialisable workflow engine. |
 
-`Provider` trait and a registry built from `providers.toml`: each model speaks one of three protocols (`chat_completions`, `responses`, `anthropic_messages`) through one shared, bounded SSE decoder. Retries with `Retry-After`, prices, reasoning profiles. See `docs/providers.md` in the repository.
+## The `Skill` tool
 
-## cersei-tools
-
-`Tool` trait, 34 built-in tools organized into sets, `PermissionPolicy` trait, bash safety analysis (an SDK primitive, not wired into `Bash`'s permissions), shell state persistence, `CostTracker`, skill discovery. Depends on `cersei-embeddings` for `CodeSearch`'s hybrid BM25 + vector mode.
-
-**Tool count by category:**
-- Filesystem: 6 (Read, Write, Edit, Glob, Grep, NotebookEdit)
-- Shell: 2 (Bash, PowerShell)
-- Web: 2 (WebFetch, WebSearch)
-- Planning: 3 (EnterPlanMode, ExitPlanMode, TodoWrite)
-- Scheduling: 5 (CronCreate/List/Delete, Sleep, RemoteTrigger)
-- Orchestration: 9 (SendMessage, Tasks x6, Worktree x2)
-- Other: 3 (AskUserQuestion, SyntheticOutput, ConfigTool)
-- Skills: 1 (`Skill` — activates Agent Skills through `bricks-skills`; added by `AgentBuilder::skills`, not part of the sets)
-
-## cersei-tools-derive
-
-Proc macro: `#[derive(Tool)]`. Auto-generates `Tool` impl from `ToolExecute` trait + JSON schema from input types.
-
-## cersei-embeddings
-
-Provider-agnostic `EmbeddingProvider` trait with built-in Gemini and OpenAI backends, a `usearch`-backed `VectorIndex`, and an ergonomic `EmbeddingStore<P>` for the add-text / search-by-text flow. Depends only on `cersei-types` (for the shared HTTP client). See [embeddings docs](/docs/embeddings-overview).
-
-## cersei-agent
-
-`Agent` builder, agentic loop (runner), 26-variant event system, `AgentStream` (bidirectional), auto-compact, auto-dream, context analysis, session memory extraction, effort levels, coordinator mode, sub-agent tool.
-
-## cersei-memory
-
-`Memory` trait, `JsonlMemory`, `InMemory`, `MemoryManager` (unified), memdir scanner, CLAUDE.md hierarchy loader, JSONL session storage, Grafeo graph backend (feature-gated).
-
-## cersei-hooks
-
-`Hook` trait, `HookEvent`, `HookAction`, `ShellHook`. Middleware for intercepting lifecycle events.
-
-## cersei-mcp
-
-MCP client: JSON-RPC 2.0, stdio transport, tool discovery, resource enumeration, environment variable expansion.
-
-## cersei-agentlang
-
-The **AgentTemplate** DSL: hand-written lexer/parser/AST + an async, permission-gated interpreter. Builtins (`io.*`, `net.*`, `agent.*`, `kv.*`) dispatch by tool name through the `ToolDispatch` trait, so the language is decoupled from the concrete tool set. Exposes `RunAgentTemplateTool` and `AGENTLANG_SPEC`. See [AgentTemplate](/docs/agentrl-template).
-
-## cersei-agentrl
-
-**AgentRL** — the self-evolving orchestration layer. `Orchestrator` (the loop), the `AgentRlRunner` trait + batteries-included `CerseiRunner`, `ExecutionGraph`/`GraphReporter` (failure tracing), `ToolRegistry` + `DynamicTool` (the tool database), the `Verifier` system, and a secret `scrub` pass. Depends on `cersei-agent`, `cersei-vms`, `cersei-embeddings`, `cersei-memory`, and `cersei-agentlang`. See [AgentRL](/docs/agentrl-overview).
+The `Skill` tool is implemented in `bricks-tools`, but it is not part of the
+tool sets above. The engine adds it to an agent that has skills, set with
+`AgentBuilder::skills` from `bricks-skills`.
 
 ## Other crates
 
-* **bricks-semantic** — shared code understanding engine per workspace: lexical search, syntax context, optional LSP.
-* **cersei-compression** — tool-output reduction, command-aware rules, tree-sitter skeletons.
-* **cersei-web** — web search, bounded fetching with SSRF filtering, Markdown extraction, BM25 passages.
-* **cersei-lsp** — LSP client.
-* **bricks-skills** — Agent Skills (`SKILL.md`): format and validation, the five sources and their priorities, trust of project skills, catalog, activation, resources, built-in skills. Re-exported as `cersei::skills`. Formerly `cersei-skills` (renamed in Sprint 12; see `docs/skills.md`).
-* **cersei-workflows** — serializable workflow engine.
-* **cersei-vms** — sandbox and VM isolation.
-* **cersei-tbench** — the Terminal-Bench agent (`tbench-agent`).
-* **cersei-testkit**, **longmem-bench** — test helpers and a benchmark; not published.
+| Crate | Role |
+|---|---|
+| `bricks-testkit` (not published) | Test helpers for the workspace: a local scripted HTTP server. |
+| `bricks-tbench` | The Terminal-Bench coding agent, built on the engine and AgentRL. Its binary is `tbench-agent`. |
+| `longmem-bench` (in `bench/long-mem`, not published) | The LongMemEval benchmark for the memory stack, with the binary `longmem-recall`. |
 
-`abstract-cli`, the CLI of the Cersei era, no longer exists in this
-workspace; `bricks-cli` replaces it.
+`bricks-cli` and `bricks-desktop` are not library crates, and the publication
+script leaves them out. The publication order and the list of published crates
+are in `docs/maintenance.md` in the repository.

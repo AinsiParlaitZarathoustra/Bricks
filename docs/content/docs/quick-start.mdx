@@ -1,40 +1,76 @@
 ---
 title: Quick Start
-description: Build your first coding agent in 10 lines of Rust.
+description: Configure a model, run the bricks command, then run an agent from Rust.
 ---
 
-## Install
+This page assumes the [installation](/docs/installation) is done: the `bricks` command is built, or the `bricks` crate is a dependency of your project.
+
+## 1. Declare a model
+
+Models come from a providers file, `~/.bricks/providers.toml`. Nothing is built in and nothing is guessed from a model name: a model is always named `provider_id/model_id`. This file declares one OpenAI-compatible server. Its key is read from the environment variable named by `api_key_env`, so the key itself never goes in the file:
 
 ```toml
-[dependencies]
-cersei = { git = "https://github.com/pacifio/cersei" }
-tokio = { version = "1", features = ["full"] }
-anyhow = "1"
+schema_version = 1
+
+[[providers]]
+id = "acme"
+name = "Acme gateway"
+endpoint = "https://api.example.com/v1"
+protocol = "chat_completions"
+auth = "bearer"
+api_key_env = "ACME_API_KEY"
+
+[[providers.models]]
+id = "fast"
+name = "Fast model"
+api_model = "vendor-fast-model"
+streaming = true
+tool_calls = true
+
+[providers.models.limits]
+max_input_tokens = 96000
+max_output_tokens = 8000
 ```
 
-For graph memory:
+```bash
+export ACME_API_KEY="…"   # your key, in the shell that runs bricks
+```
+
+A local server needs no key: use `auth = "none"`. The file accepts three wire protocols (`chat_completions`, `responses`, `anthropic_messages`), prices and reasoning profiles. The annotated example is `docs/providers.example.toml` in the repository.
+
+## 2. Run the `bricks` command
+
+Select the model for the project in `bricks.toml`, at the root of the project:
 
 ```toml
-cersei-memory = { git = "https://github.com/pacifio/cersei", features = ["graph"] }
+[agent]
+model = "acme/fast"
 ```
 
-## Prerequisites
+Then, in that folder:
 
-- A recent stable Rust: edition 2024, 1.88 or later (let chains); tested with 1.98
-- An LLM provider API key (`ANTHROPIC_API_KEY` or `OPENAI_API_KEY`)
-- For the Grep tool: `rg` (ripgrep) is preferred but falls back to `grep`
+```bash
+bricks run "Explain the failing test in src/parser.rs"          # one prompt, answer on stdout
+bricks run --json --non-interactive "Analyse the build errors"  # JSONL events, for scripts and CI
+bricks sessions                                                 # the sessions of this project
+bricks run --session <id> "Continue where we stopped"           # continue one, headless
+```
 
-## Your First Agent
+A file change or a shell command waits for your approval in the terminal, with the diff for file changes. Under `--non-interactive` nothing waits: a step that needs approval stops the run with exit code 3. See the `bricks` reference, `docs/cli.md` in the repository, for the output format and the exit codes.
+
+## 3. Run an agent from Rust
+
+Add the crate as described in [Installation](/docs/installation). This program asks a question about the project. It gives the agent the coding tool set, and it allows only the read-only tools, so the agent can read and search but cannot write or run commands:
 
 ```rust
-use cersei::prelude::*;
+use bricks::prelude::*;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let output = Agent::builder()
-        .provider(Anthropic::from_env()?)
-        .tools(cersei::tools::coding())
-        .permission_policy(AllowAll)
+        .provider(provider_from_config(None, "acme/fast")?) // ~/.bricks/providers.toml
+        .tools(bricks::tools::coding())
+        .permission_policy(AllowReadOnly)
         .run_with("What files are in the current directory?")
         .await?;
 
@@ -43,55 +79,49 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-## With Streaming
+`provider_from_config(None, …)` reads `~/.bricks/providers.toml`; pass a path instead of `None` to read another file. `run_with` runs the loop until the model gives a final answer, and returns the answer with its usage and tool calls.
+
+## 4. Stream the events
+
+`run_stream` returns the events of a run as they happen. The agent is shared in an `Arc` for that:
 
 ```rust
-use cersei::prelude::*;
+use std::sync::Arc;
+
+use bricks::prelude::*;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let agent = Agent::builder()
-        .provider(Anthropic::from_env()?)
-        .tools(cersei::tools::coding())
-        .permission_policy(AllowAll)
-        .build()?;
+    let agent = Arc::new(
+        Agent::builder()
+            .provider(provider_from_config(None, "acme/fast")?)
+            .tools(bricks::tools::coding())
+            .permission_policy(AllowReadOnly)
+            .build()?,
+    );
 
-    let mut stream = agent.run_stream("Fix the failing tests");
+    let mut stream = agent.run_stream("Summarise the README");
     while let Some(event) = stream.next().await {
         match event {
-            AgentEvent::TextDelta(t) => print!("{t}"),
-            AgentEvent::ToolStart { name, .. } => eprintln!("[{name}]"),
-            AgentEvent::Complete(_) => break,
+            AgentEvent::TextDelta(text) => print!("{text}"),
+            AgentEvent::ToolStart { name, .. } => eprintln!("\n[{name}]"),
+            AgentEvent::ToolEnd { name, duration, .. } => {
+                eprintln!("[{name} done in {} ms]", duration.as_millis());
+            }
             _ => {}
         }
     }
+    println!();
     Ok(())
 }
 ```
 
-## With OpenAI
+The stream ends when the run ends. When a policy asks for a decision, the stream carries `AgentEvent::PermissionRequired(request)`; answer it with `stream.respond_permission(request.id, PermissionDecision::Allow)`. `stream.cancel()` stops the run. The policy used above decides every request by itself, so the example never asks.
 
-```rust
-let output = Agent::builder()
-    .provider(OpenAi::from_env()?)
-    .model("gpt-4o")
-    .tools(cersei::tools::coding())
-    .run_with("Explain this codebase")
-    .await?;
-```
+## Where next
 
-## With Custom Provider
-
-```rust
-let provider = OpenAi::builder()
-    .base_url("http://localhost:11434/v1")  // Ollama
-    .model("llama3.1:70b")
-    .api_key("ollama")
-    .build()?;
-
-let output = Agent::builder()
-    .provider(provider)
-    .tools(cersei::tools::coding())
-    .run_with("Refactor this function")
-    .await?;
-```
+- [Architecture](/docs/architecture): how the parts fit together.
+- [Crate map](/docs/crate-map): what each crate provides.
+- [Data flow](/docs/data-flow): the agentic loop, events and sessions.
+- [Examples](/docs/examples): the programs in the repository.
+- [Migration](/docs/migration): what changed from the Cersei names and behaviour.

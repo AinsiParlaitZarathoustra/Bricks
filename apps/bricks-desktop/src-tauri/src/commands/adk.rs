@@ -9,7 +9,7 @@ use crate::services::error;
 use tauri::State;
 
 /// The sub-agent instances of an open session, as the agent runtime keeps
-/// them (`cersei_agent::agents::InstanceRecord`, durable across runs).
+/// them (`bricks_agent::agents::InstanceRecord`, durable across runs).
 /// Empty when the session has no sub-agent runtime.
 #[tauri::command]
 pub async fn session_agents(state: State<'_, AppState>, session_id: String) -> IpcResult<serde_json::Value> {
@@ -23,7 +23,7 @@ pub async fn session_agents(state: State<'_, AppState>, session_id: String) -> I
 }
 
 /// The isolated changesets of the sub-agents of an open session
-/// (`cersei_agent::agents::workspace::ChangeSet`), in the runtime's order.
+/// (`bricks_agent::agents::workspace::ChangeSet`), in the runtime's order.
 /// Empty when the session has no sub-agent runtime.
 #[tauri::command]
 pub async fn session_changesets(state: State<'_, AppState>, session_id: String) -> IpcResult<serde_json::Value> {

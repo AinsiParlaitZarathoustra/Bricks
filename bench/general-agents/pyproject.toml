@@ -1,5 +1,5 @@
 [project]
-name = "cersei-general-agent-bench"
+name = "bricks-general-agent-bench"
 version = "0.1.0"
 description = "General agent framework benchmark harnesses (Agno, LangGraph, PydanticAI, CrewAI)"
 requires-python = ">=3.10"

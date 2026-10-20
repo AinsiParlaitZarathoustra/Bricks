@@ -10,7 +10,7 @@ An annotated, secret-free example lives in
 so it cannot drift from the schema.
 
 ```rust
-use cersei::provider_from_config;
+use bricks::provider_from_config;
 
 let provider = provider_from_config(None, "custom/flash")?;                 // ~/.bricks/providers.toml
 let provider = provider_from_config(Some("./p.json".as_ref()), "custom/flash")?; // explicit path
@@ -134,6 +134,15 @@ Every request, whatever the protocol:
    (429 → `RateLimit` with `Retry-After`, 5xx/529 retryable, 401/403/404 fatal) so
    the runner's retry loop sees it. Transport errors drop the URL.
 6. Decode the response (streamed or not) into events; attach a cost estimate.
+
+**Retry-After budget.** The runner retries a retryable error up to five times
+(six calls at most), waiting the local backoff (1, 2, 4, 8, 16 s, with
+jitter) or the server's `Retry-After` when that is longer. A `Retry-After`
+longer than `[agent] retry_after_max_wait_ms` (default `60000`; `0` means never
+wait for one) is not waited for: no retry is sent, and the run fails at once
+with a message naming that key. This budget belongs to the agent's runner. It
+is not `[web.search] max_retry_wait_ms` (default `2000` in the example file),
+which bounds only the single rate-limit wait of a web-search provider.
 
 ## 6. Reasoning profiles
 
@@ -262,18 +271,18 @@ There is no second system running in parallel and no fallback to the old one.
 | `thinking_budget`, `AnthropicBuilder::thinking`, `EffortLevel`, `--effort` | reasoning profiles; `Agent::builder().reasoning_profile(id)` |
 | built-in price table, `CostTracker::add_with_model`, `estimate_cost*` | `pricing` in the file; the provider attaches the estimate; unknown stays unknown |
 | default model `claude-sonnet-4-6` in the agent | none: a provider *is* one configured model; `.model()` is only a label |
-| `cersei::{Anthropic, OpenAi, Gemini}`, prelude `Auth` | `cersei::{provider_from_config, ProviderRegistry, ConfiguredProvider}` |
+| `cersei::{Anthropic, OpenAi, Gemini}` (crate `cersei`, renamed `bricks` in 14.6), prelude `Auth` | `bricks::{provider_from_config, ProviderRegistry, ConfiguredProvider}` |
 | `CompletionRequest` options `thinking_budget`, `num_ctx` | only `tool_choice` and `reasoning_profile` remain; new field `output_modalities` |
 | `ContentBlock::media_bytes` put audio/video in `Image` blocks | routed to `Audio`, `Video`, `Document`; new blocks `Audio`, `Video`, `ProtocolItem` |
 | `tbench-agent --model` default `vertex/…` | `--model provider_id/model_id` required, `--providers <file>` optional |
 | `longmem-bench --provider/--answerer-model gemini-…` | `--answerer-model`, `--judge-model`, `--extractor-model` as `provider_id/model_id`, `--providers`, `--embeddings openai|gemini` (embeddings keep their own key variable) |
 
-Services that are not conversational chat are untouched: `cersei-embeddings`
+Services that are not conversational chat are untouched: `bricks-embeddings`
 keeps its own providers and key variables.
 
-**Example.** Before:
+**Example.** Before (removed API, for comparison only):
 
-```rust
+```rust,ignore
 let provider = OpenAi::builder()
     .base_url("http://localhost:11434/v1")
     .model("llama3.1:70b").api_key("ollama").build()?;
@@ -301,7 +310,7 @@ max_output_tokens = 8000
 ```
 
 ```rust
-let provider = cersei::provider_from_config(None, "ollama/llama")?;
+let provider = bricks::provider_from_config(None, "ollama/llama")?;
 ```
 
 ## 11. What is verified, and what is not

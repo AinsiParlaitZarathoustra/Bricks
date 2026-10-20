@@ -8,8 +8,8 @@ repository.workspace = true
 description = "Shared, per-workspace code understanding engine: lexical search, syntax context and optional LSP"
 
 [dependencies]
-cersei-lsp = { workspace = true }
-cersei-types = { workspace = true }
+bricks-lsp = { workspace = true }
+bricks-types = { workspace = true }
 grep = { workspace = true }
 ignore = { workspace = true }
 tree-sitter = "^0.26"
@@ -29,7 +29,7 @@ tracing = { workspace = true }
 which = { workspace = true }
 
 [dev-dependencies]
-cersei-lsp = { workspace = true, features = ["mock"] }
+bricks-lsp = { workspace = true, features = ["mock"] }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["full", "test-util"] }
 parking_lot = { workspace = true }

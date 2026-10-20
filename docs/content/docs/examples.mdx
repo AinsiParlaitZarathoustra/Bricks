@@ -1,109 +1,66 @@
 ---
 title: Examples
-description: Runnable example programs covering every major Cersei feature.
+description: The example programs of the Bricks workspace, what each one shows, and how to run it.
 ---
 
 # Examples
 
-All examples live in the `examples/` directory and run with:
+The examples of the facade are in `crates/bricks/examples`. Each one is a Rust
+program. Run one from the root of the workspace:
 
 ```bash
-cargo run --example <name> --release
+cargo run -p bricks --example <name>
 ```
 
-## Catalog
+Add `--release` for timings. The examples of the facade compile with the current
+workspace (`cargo check -p bricks --examples`).
 
-| Example | Description |
-|---------|-------------|
-| `simple_agent` | Minimal agent in 3 lines |
-| `custom_tools` | Define and register custom tools with `#[derive(Tool)]` |
-| `streaming_events` | `run_stream()` with colored terminal output |
-| `multi_listener` | Broadcast channel with multiple consumers |
-| `resumable_session` | Persist and resume conversations with `JsonlMemory` |
-| `custom_provider` | Echo provider + OpenAI-compatible endpoints |
-| `hooks_middleware` | Cost guard + audit logger + tool blocker |
-| `benchmark_io` | Full I/O benchmark suite |
-| `usage_report` | Token/cost tracking and billing estimates |
-| `coding_agent` | End-to-end: build a Python todo CLI |
-| `oauth_login` | Anthropic OAuth PKCE login flow |
+**Some examples allow every tool.** `simple_agent` and the examples that use
+`AllowAll` can write files and run commands in the folder they are started
+from. Run them in a scratch folder, or change the policy to `AllowReadOnly`.
 
-## Stress Tests
+## Examples that call a model
+
+These take the model as a `provider_id/model_id` argument, read from the
+providers file. The [quick start](/docs/quick-start) shows how to configure one.
 
 ```bash
-cargo run --example stress_core_infrastructure --release  # system prompt, compact, bash analysis
-cargo run --example stress_tools --release                 # all 34 tools, registry, performance
-cargo run --example stress_orchestration --release         # sub-agents, coordinator, tasks
-cargo run --example stress_skills --release                # Agent Skills: sources, trust, Skill tool
-cargo run --example stress_memory --release                # memdir, CLAUDE.md, sessions, graph
+cargo run -p bricks --example simple_agent -- acme/fast
 ```
 
-160 unit tests, 262 stress checks, 0 failures.
+| Example | What it shows |
+|---|---|
+| `simple_agent` | An agent with the coding tools, one prompt, and the answer printed. |
+| `streaming_events` | `run_stream()`, with text deltas, tool starts and ends, and cost updates as they arrive. |
+| `custom_tools` | Custom tools, with `#[derive(Tool)]` and with the raw `Tool` trait. |
+| `hooks_middleware` | Hooks that intercept tool calls, such as a cost guard that stops the run when spending exceeds a budget. |
+| `multi_listener` | The broadcast channel, with several consumers of the same run. |
+| `resumable_session` | A conversation persisted with `JsonlMemory` and resumed by a second run. |
+| `multimodal` | Images, audio or PDFs attached to a message, when the model accepts them. |
+| `coding_agent` | An end-to-end run: an agent builds a small Python command-line program. |
+| `usage_report` | Token and cost tracking across several turns. It uses a simulated provider, so it needs no model. |
 
-## simple_agent
+## Examples that need no model
 
-```rust
-use cersei::prelude::*;
+| Example | What it shows |
+|---|---|
+| `custom_provider` | How to write a provider, with a local echo provider as the example. |
+| `benchmark_io` | The in-process cost of the file and shell tools, measured over repeated calls. |
+| `stress_core_infrastructure` | The system prompt builder, compaction and the Bash command analysis. |
+| `stress_tools` | Every tool that can run without external services: schemas, execution and the registry. |
+| `stress_orchestration` | Sub-agents, the coordinator, the task tools and messages between agents. Uses a local echo provider. |
+| `stress_skills` | Agent Skills: sources, trust, and the `Skill` tool, on temporary folders only. |
+| `stress_memory` | Memdir, the CLAUDE.md loader, session storage and graph memory. |
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let output = Agent::builder()
-        .provider(Anthropic::from_env()?)
-        .tools(cersei::tools::coding())
-        .permission_policy(AllowAll)
-        .run_with("What files are in the current directory?")
-        .await?;
+The `stress_*` examples check behaviour. They are not performance measurements.
 
-    println!("{}", output.text());
-    Ok(())
-}
-```
+## Examples of other crates
 
-## custom_tools
-
-```rust
-#[derive(Tool)]
-#[tool(name = "weather", description = "Get current weather", permission = "none")]
-struct WeatherTool;
-
-#[async_trait]
-impl ToolExecute for WeatherTool {
-    type Input = WeatherInput;
-    async fn run(&self, input: WeatherInput, _ctx: &ToolContext) -> ToolResult {
-        ToolResult::success(format!("72F and sunny in {}", input.city))
-    }
-}
-
-#[derive(Deserialize, JsonSchema)]
-struct WeatherInput { city: String }
-```
-
-## hooks_middleware
-
-```rust
-Agent::builder()
-    .provider(Anthropic::from_env()?)
-    .tools(cersei::tools::coding())
-    .hook(CostGuard { max_usd: 5.0 })
-    .hook(AuditLogger)
-    .hook(BlockDangerous)
-    .permission_policy(AllowAll)
-    .run_with("Deploy the app")
-    .await?;
-```
-
-## resumable_session
-
-```rust
-let memory = JsonlMemory::new("./sessions");
-let agent = Agent::builder()
-    .provider(Anthropic::from_env()?)
-    .memory(memory)
-    .session_id("my-project-session")
-    .build()?;
-
-// First run
-agent.run("What's in src/?").await?;
-
-// Later — resumes with full context
-agent.run("Now fix the bug you found").await?;
-```
+| Crate | Example | Command | What it shows |
+|---|---|---|---|
+| `bricks-compression` | `show` | `cargo run -p bricks-compression --example show -- <file> <tool> <command-or-path> [level]` | How one output or file is reduced. |
+| `bricks-compression` | `measure` | `cargo run -p bricks-compression --example measure` | The reductions on the fixture corpus and on real files. |
+| `bricks-memory` | `memory_bench` | `cargo run -p bricks-memory --features graph --example memory_bench` | The memory operations on local files and an in-process graph. |
+| `bricks-memory` | `measure_memory` | `cargo run -p bricks-memory --features structured --example measure_memory` | The latency of structured memory on synthetic corpora. |
+| `bricks-tools` | `semantic_bench` | `cargo run -p bricks-tools --example semantic_bench` | One `CodeScout` query against the `Grep` and `Read` path, on the corpus in `bench/semantic`. |
+| `bricks-web` | `measure_web` | `cargo run -p bricks-web --example measure_web` | The web pipeline on a local corpus: HTML, then Markdown, then passages. |

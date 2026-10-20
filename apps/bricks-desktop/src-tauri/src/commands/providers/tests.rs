@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::services::providers_toml::fixtures::PROVIDERS;
-use cersei_agent::control::ModelCatalog;
+use bricks_agent::control::ModelCatalog;
 use tempfile::tempdir;
 
 /// A providers file in a temporary folder, its catalog and its lock.
@@ -284,8 +284,8 @@ async fn one_shot_server() -> (u16, tokio::task::JoinHandle<serde_json::Value>) 
 
 #[tokio::test]
 async fn a_saved_profile_with_free_names_reaches_the_request_it_selects() {
-    use cersei_provider::{Provider, REASONING_PROFILE_OPTION};
-    use cersei_types::Message;
+    use bricks_provider::{Provider, REASONING_PROFILE_OPTION};
+    use bricks_types::Message;
 
     // A local server stands for the provider: it receives the body and answers.
     let (port, server) = one_shot_server().await;
@@ -378,7 +378,7 @@ id = "rapide"
     let provider = catalog
         .build("local/small", Some("approfondi"))
         .expect("the provider builds with the saved profile");
-    let mut request = cersei_provider::CompletionRequest::new("small");
+    let mut request = bricks_provider::CompletionRequest::new("small");
     request.messages.push(Message::user("bonjour"));
     request.temperature = Some(0.7);
     request

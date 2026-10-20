@@ -1,44 +1,55 @@
 ---
 title: "Cookbook: Graph Memory"
-description: Complete control over agent memory using Cersei's graph-based knowledge store.
+description: Structured agent memory in a graph store — store, tag and link memories, recall them by text, type or topic, let confidence decay unless a memory is revalidated, and combine the graph with the project's memory files.
 ---
+
+import { Callout } from 'fumadocs-ui/components/callout';
 
 # Cookbook: Graph Memory
 
-Cersei's graph memory (powered by Grafeo) gives you structured, queryable memory that survives across sessions. Unlike flat-file memory, you can traverse relationships, tag by topic, decay old memories, and recall in 98 microseconds.
+`GraphMemory` keeps memories as nodes of an embedded graph database (Grafeo). Each memory has a type, a confidence and a decay rate, and can be tagged by topic and linked to other memories. It is a separate store from the conversation memories of `JsonlMemory`.
+
+<Callout type="warn">
+Graph memory is behind the `graph` feature of the `bricks-memory` crate. The `bricks` facade does not enable it, so add the crate to your own `Cargo.toml`:
+
+```toml
+bricks-memory = { version = "0.6", features = ["graph"] }
+```
+
+The `structured` feature enables `graph` too, and adds the long-term structured memory that the `bricks` command-line tool uses.
+</Callout>
 
 ## Setup
 
 ```rust
-use cersei_memory::graph::GraphMemory;
-use cersei_memory::memdir::MemoryType;
+use bricks::memory::graph::GraphMemory;
+use bricks::memory::memdir::MemoryType;
 use std::path::Path;
 
-// Open or create the graph database
+// Open or create the database file
 let graph = GraphMemory::open(Path::new("./memory.db"))?;
 
-// Or use in-memory for testing
+// Or keep it in memory, for tests
 let graph = GraphMemory::open_in_memory()?;
 ```
 
-## Storing Memories
+## Storing memories
+
+`store_memory` takes the text, a `MemoryType` (`User`, `Feedback`, `Project` or `Reference`) and a confidence from 0 to 1. It returns the new memory's id.
 
 ```rust
-// Store a user preference
 let id = graph.store_memory(
     "User prefers concise responses without emojis",
     MemoryType::User,
-    0.95, // confidence
+    0.95,
 )?;
 
-// Store a project decision
 let id2 = graph.store_memory(
     "Authentication uses JWT with RS256, stored in HttpOnly cookies",
     MemoryType::Project,
     0.9,
 )?;
 
-// Store feedback
 let id3 = graph.store_memory(
     "Don't add docstrings to code the user didn't change",
     MemoryType::Feedback,
@@ -46,17 +57,16 @@ let id3 = graph.store_memory(
 )?;
 ```
 
-## Tagging and Relationships
+## Tagging and linking
 
 ```rust
-// Tag memories by topic
+// Tag a memory with topics
 graph.tag_memory(&id2, "authentication")?;
 graph.tag_memory(&id2, "security")?;
 
-// Link related memories
+// Link two related memories; the relationship name is free text
 graph.link_memories(&id2, &id3, "RELATES_TO")?;
 
-// Create a topic hierarchy
 let id4 = graph.store_memory(
     "API rate limiting: 100 req/min per user, 1000 req/min per org",
     MemoryType::Project,
@@ -69,50 +79,49 @@ graph.link_memories(&id2, &id4, "RELATES_TO")?;
 ## Querying
 
 ```rust
-// Full-text recall (fuzzy matching)
-let results = graph.recall("authentication", 5);
-// Returns top 5 memories matching "authentication"
+// Text recall: the best matches for the query, at most `limit`
+let results: Vec<String> = graph.recall("authentication", 5);
+
+// The same, with a score for each match
+let scored: Vec<(String, f32)> = graph.recall_top_k("authentication", 5);
 
 // By type
 let user_prefs = graph.by_type(MemoryType::User);
 let project_docs = graph.by_type(MemoryType::Project);
-let feedback = graph.by_type(MemoryType::Feedback);
 
 // By topic
 let security_memories = graph.by_topic("security");
-// Returns all memories tagged with "security"
 ```
 
-## Confidence Decay
+`recall`, `recall_top_k`, `by_type` and `by_topic` return plain values, not `Result`.
 
-Memories automatically lose confidence over time unless revalidated:
+## Confidence decay
 
-```rust
-// Memory stored with confidence 0.95
-let id = graph.store_memory("API uses v2 endpoints", MemoryType::Project, 0.95)?;
+Each memory records a `decay_rate` (0.01 per day by default) and the time it was last validated. Its effective confidence is:
 
-// After 30 days, effective_confidence decays based on decay_rate
-// Default decay_rate = 0.01 per day
-
-// Revalidate to reset the clock
-graph.revalidate_memory(&id)?;
-// Now effective_confidence resets to the stored value
+```text
+effective = confidence - decay_rate × days since last validation     (clamped to 0..1)
 ```
 
-This prevents stale memories from dominating context. Old, unverified information naturally fades.
-
-## Session Recording
+A memory that nobody validates loses confidence over time, so old information stops outranking new information. `revalidate_memory` sets the validation time to now:
 
 ```rust
-// Track sessions in the graph
+let still_valid = graph.revalidate_memory(&id)?;   // false when the id does not exist
+```
+
+## Session recording
+
+```rust
 graph.record_session(
     "session-abc123",
-    Some("gpt-5.3-chat-latest"),
-    15, // turns
+    Some("my-provider/my-model"),   // the model, optional
+    15,                             // turns
 )?;
 ```
 
-## Graph Statistics
+The schema defines `PRODUCED` edges from sessions to memories (see the storage layout below).
+
+## Statistics
 
 ```rust
 let stats = graph.stats();
@@ -122,66 +131,60 @@ println!("Topics: {}", stats.topic_count);
 println!("Relationships: {}", stats.relationship_count);
 ```
 
-## Schema Versioning
+## Schema versions
 
-The graph auto-migrates on open:
+The database is checked when it is opened, and migrated when needed. `schema_version` reports the state:
 
 ```rust
-use cersei_memory::graph_migrate::VersionCheck;
+use bricks::memory::graph::VersionCheck;
 
-let version = graph.schema_version();
-match version {
-    VersionCheck::Current(v) => println!("Schema v{v} — up to date"),
-    VersionCheck::NeedsMigration { from, to } => println!("Migrating v{from} → v{to}"),
-    VersionCheck::Unknown => println!("New database"),
+match graph.schema_version() {
+    VersionCheck::UpToDate => println!("schema is current"),
+    VersionCheck::NeedsMigration { from, to } => println!("schema v{from} to v{to} needed"),
+    VersionCheck::CodeBehind { graph_version, code_version } => {
+        println!("database v{graph_version} is newer than this code (v{code_version})")
+    }
 }
 ```
 
-Migrations are sequential and idempotent. v0→v1 adds session tracking. v1→v2 adds confidence decay fields.
+Migrations run in order. Version 2 adds the decay fields (`last_validated_at`, `decay_rate`, `embedding_model_version`) to memories, and version 3 adds the structured memory nodes used by the long-term memory.
 
-## Integration with MemoryManager
+## Using it with an agent
 
-In production, use `MemoryManager` to compose graph + flat files + CLAUDE.md:
+`GraphMemory` is not a conversation memory, so it cannot be passed to `Agent::builder().memory(...)`. Put recalled text into the system prompt yourself. `MemoryManager::build_context()` returns the project's `CLAUDE.md` instructions and the `MEMORY.md` index of the memory files. It does not include graph recall, so add graph results to the prompt with `recall`:
 
 ```rust
-use cersei_memory::manager::MemoryManager;
+use bricks::memory::manager::MemoryManager;
+use std::path::Path;
 
-let mut mm = MemoryManager::new("./project");
-mm = mm.with_graph(Path::new("./memory.db"))?;
+let mm = MemoryManager::new(Path::new("./project"))
+    .with_graph(Path::new("./memory.db"))?;
 
-// Build context for system prompt (composes all layers)
-let context = mm.build_context();
-// Returns: combined string from graph recall + memdir files + CLAUDE.md hierarchy
+let context: String = mm.build_context();                 // CLAUDE.md instructions and MEMORY.md index
+let recalled = mm.recall("coding style preferences", 5);  // graph memories for this question
 
-// Use in agent
 let agent = Agent::builder()
-    .memory(mm)
-    // ...
+    .provider(bricks::provider_from_config(None, "my-provider/my-model")?)
+    .tools(bricks::tools::coding())
+    .system_prompt(format!(
+        "You are a coding agent.\n\n{context}\n\nKnown preferences:\n{}",
+        recalled.join("\n")
+    ))
     .build()?;
 ```
 
-## Graph Node Types
+## Storage layout
 
-| Node | Properties | Description |
-|------|-----------|-------------|
-| `Memory` | content, type, confidence, created_at, last_validated_at, decay_rate | A stored memory entry |
-| `Session` | session_id, created_at, model, turns | A recorded agent session |
-| `Topic` | name | A tag/category for grouping memories |
+| Node | Properties | Meaning |
+|------|-----------|---------|
+| `Memory` | `content`, `mem_type`, `confidence`, `created_at`, `updated_at`, `last_validated_at`, `decay_rate`, `embedding_model_version` | A stored memory |
+| `Session` | `session_id`, `started_at`, `model`, `turns` | A recorded session |
+| `Topic` | `name` | A tag shared by memories |
 
-## Edge Types
+| Edge | From → To | Meaning |
+|------|-----------|---------|
+| `RELATES_TO` | Memory → Memory | A link with a `relationship` name and a `weight` |
+| `TAGGED` | Topic → Memory | The memory belongs to the topic |
+| `PRODUCED` | Session → Memory | The session produced the memory |
 
-| Edge | From → To | Description |
-|------|-----------|-------------|
-| `RELATES_TO` | Memory → Memory | Semantic relationship between memories |
-| `TAGGED` | Memory → Topic | Memory belongs to a topic/category |
-
-## Performance
-
-| Operation | Time | Notes |
-|-----------|------|-------|
-| Store memory | ~120us | Write + index |
-| Recall (text search) | ~98us | Indexed lookup |
-| By topic | ~50us | Edge traversal |
-| By type | ~60us | Indexed filter |
-| Stats | ~30us | Aggregate counts |
-| Context build | ~45us | Compose all layers |
+Benchmarks of this store are not in this recipe. The repository does not hold a dated measurement report for it.
