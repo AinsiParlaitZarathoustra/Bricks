@@ -1,11 +1,9 @@
 // One light line per tool call, and the one-line trace of a resolved approval.
 // Shared by the timeline and the sub-agent inspector. Pure functions only.
 
-import { DECIDED_BY_LABEL, DECISION_LABEL } from '../format';
+import { DECIDED_BY_LABEL, DECISION_LABEL, formatDuration } from '../format';
 import type { DecidedBy, Decision } from '$lib/ipc/engine';
 import type { ToolApproval } from '$lib/ipc/bindings/ToolApproval';
-
-const NUMBER = new Intl.NumberFormat('fr-FR');
 
 /** What the line says about a call. */
 export type ToolLineState = 'running' | 'done' | 'failed' | 'interrupted';
@@ -39,10 +37,10 @@ export function toolLineState(call: ToolCallFacts, interrupted: boolean): ToolLi
 	return 'failed';
 }
 
-/** Duration in milliseconds, `« 6 100 ms »`; `null` while running or when the engine gave none. */
+/** Compact elapsed time; `null` when the engine gave no valid duration. */
 export function formatToolDuration(ms: number | undefined): string | null {
 	if (ms === undefined || !Number.isFinite(ms) || ms < 0) return null;
-	return `${NUMBER.format(Math.round(ms))} ms`;
+	return formatDuration(ms);
 }
 
 /** The trace that replaces a resolved approval: `Autorisé · Bash · par vous`. */

@@ -1,6 +1,7 @@
 <script lang="ts">
   // One light line for a tool call: no card, no arguments, no output. Used by the
   // timeline and by the sub-agent inspector.
+  import type { Snippet } from 'svelte'
   import CircleCheck from '@lucide/svelte/icons/circle-check'
   import CircleStop from '@lucide/svelte/icons/circle-stop'
   import CircleX from '@lucide/svelte/icons/circle-x'
@@ -12,9 +13,10 @@
     name: string
     state: ToolLineState
     durationMs?: number
+    children?: Snippet
   }
 
-  let { name, state, durationMs }: Props = $props()
+  let { name, state, durationMs, children }: Props = $props()
 
   /** Shown once the call has finished, and only when the engine gave a duration. */
   const duration = $derived(state === 'running' ? null : formatToolDuration(durationMs))
@@ -31,7 +33,8 @@
     <CircleStop class="size-3.5 shrink-0 text-warning" aria-hidden="true" />
   {/if}
   <span class="min-w-0 truncate font-mono text-foreground">{name}</span>
-  <span class="shrink-0">{TOOL_LINE_LABEL[state]}</span>
+  {@render children?.()}
+  <span class={state === 'done' || state === 'failed' ? 'sr-only' : 'shrink-0'}>{TOOL_LINE_LABEL[state]}</span>
   {#if duration}
     <span class="ml-auto shrink-0 whitespace-nowrap tabular-nums">{duration}</span>
   {/if}

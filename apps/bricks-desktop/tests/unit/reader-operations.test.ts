@@ -38,6 +38,17 @@ describe('modes', () => {
 		await settle();
 	});
 
+	it('SVG has a read-only preview while JavaScript stays source-only', async () => {
+        const { reader } = setup({ [`${PROJECT}/plot.svg`]: ['<svg/>'], [`${PROJECT}/script.js`]: ['alert(1)'] });
+        const svg = reader.open({ ...target, path: 'plot.svg' });
+        expect(svg.modes).toEqual(['source', 'preview']);
+        expect(reader.setMode(svg.id, 'preview')).toBe(true);
+        const js = reader.open({ ...target, path: 'script.js' });
+        expect(js.modes).toEqual(['source']);
+        expect(reader.setMode(js.id, 'preview')).toBe(false);
+        await settle();
+    });
+
 	it('the source is shown by default, and the preview once chosen', async () => {
 		const { reader } = setup({ [`${PROJECT}/docs/a.md`]: ['# a'] });
 		const tab = reader.open({ ...target, path: 'docs/a.md' });

@@ -24,7 +24,9 @@
 {:else if item.kind === 'approval'}
   <ApprovalCard approval={item.approval} resolved={item.resolved} {conversation} />
 {:else if item.kind === 'edit'}
-  <EditRow {item} {conversation} />
+  {#if item.agentId || !conversation.items.some(entry => entry.kind === 'tool' && entry.toolCallId === item.toolCallId && entry.runId === item.runId)}
+    <EditRow {item} {conversation} />
+  {/if}
 {:else if item.kind === 'notice'}
   <NoticeLine {item} />
 {:else if item.kind === 'run_end'}

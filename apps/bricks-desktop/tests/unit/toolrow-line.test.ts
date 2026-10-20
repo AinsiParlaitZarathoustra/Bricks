@@ -66,10 +66,10 @@ describe('toolLineState', () => {
 });
 
 describe('formatToolDuration', () => {
-	it('formats milliseconds with French grouping', () => {
-		expect(plain(formatToolDuration(6_100))).toBe('6 100 ms');
-		expect(formatToolDuration(42.4)).toBe('42 ms');
-		expect(formatToolDuration(0)).toBe('0 ms');
+	it('formats seconds and subsecond durations', () => {
+		expect(plain(formatToolDuration(6_100))).toBe('6s');
+		expect(formatToolDuration(42.4)).toBe('42ms');
+		expect(formatToolDuration(0)).toBe('0ms');
 	});
 
 	it('gives nothing when the engine reported no duration', () => {
@@ -78,8 +78,13 @@ describe('formatToolDuration', () => {
 		expect(formatToolDuration(-5)).toBeNull();
 	});
 
-	it('never converts to seconds or minutes', () => {
-		expect(plain(formatToolDuration(90_000))).toBe('90 000 ms');
+	it('converts longer durations to minutes and hours', () => {
+		expect(plain(formatToolDuration(90_000))).toBe('1m 30s');
+		expect(formatToolDuration(2_000)).toBe('2s');
+		expect(formatToolDuration(109_000)).toBe('1m 49s');
+		expect(formatToolDuration(5_088_000)).toBe('1h 24m 48s');
+		expect(formatToolDuration(60_000)).toBe('1m');
+		expect(formatToolDuration(3_600_000)).toBe('1h');
 	});
 });
 
@@ -123,7 +128,7 @@ describe('tool calls in a reducer-built timeline', () => {
 		);
 		const item = onlyTool(conv);
 		expect(stateOf(conv, item)).toBe('done');
-		expect(plain(formatToolDuration(item.durationMs))).toBe('6 100 ms');
+		expect(plain(formatToolDuration(item.durationMs))).toBe('6s');
 	});
 
 	it('a call still running has no duration and reads as running', () => {

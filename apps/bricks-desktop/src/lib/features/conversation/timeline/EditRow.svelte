@@ -7,7 +7,7 @@
   import { reader } from '$lib/state/reader.svelte'
   import { CHANGE_KIND_LABEL } from '../format'
 
-  let { item, conversation }: { item: EditItem; conversation: Conversation } = $props()
+  let { item, conversation, inline = false }: { item: EditItem; conversation: Conversation; inline?: boolean } = $props()
 
   const agentName = $derived.by(() => {
     if (!item.agentId) return null
@@ -31,7 +31,7 @@
 
 <ul
   aria-label={agentName ? `Fichiers modifiés par ${agentName}` : 'Fichiers modifiés'}
-  class="flex flex-col gap-0.5 rounded-md border border-border bg-white px-2.5 py-1.5 text-[13px] dark:bg-card"
+  class={inline ? 'contents' : 'flex flex-col gap-0.5 py-0.5 text-[13px]'}
 >
   {#each item.files as file, i (`${file.absolute ?? file.path}#${i}`)}
     <li class="flex min-w-0 items-center gap-2">

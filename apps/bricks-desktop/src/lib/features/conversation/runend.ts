@@ -3,7 +3,7 @@
 // allows them. Pure: unit-tested (tests/unit/runend-summary.test.ts).
 import type { RunInfo } from '$lib/state/conversation.svelte'
 import type { RunOutcome } from '$lib/ipc/engine'
-import { OUTCOME_LABEL, terminationLabel } from './format'
+import { OUTCOME_LABEL, terminationLabel, formatDuration } from './format'
 import { formatToolDuration } from './timeline/toolLine'
 
 export interface RunEndSummary {
@@ -13,9 +13,9 @@ export interface RunEndSummary {
   label: string
   /** Milliseconds between the engine's start and finish timestamps; `null` when one is missing. */
   durationMs: number | null
-  /** The duration formatted for display (« 762 ms »), `null` when unknown. */
+  /** The duration formatted for display (« 1m 49s »), `null` when unknown. */
   duration: string | null
-  /** The time worked, as `MM:SS` (`HH:MM:SS` from an hour); `null` when unknown. */
+  /** Compact time worked; `null` when unknown. */
   worked: string | null
   /**
    * Edit operations of the run, summed per line. `null` unless every edited file
@@ -29,19 +29,10 @@ export interface RunEndSummary {
   error: string | null
 }
 
-/**
- * The time a run worked, from the engine's timestamps: `MM:SS` under an hour,
- * `HH:MM:SS` from an hour (hours may pass 24). Seconds are cut, not rounded:
- * 762 ms is `00:00`. `null` when the time is unknown or negative.
- */
+/** Compact elapsed time from the engine; `null` when unknown or invalid. */
 export function formatWorked(ms: number | null): string | null {
   if (ms === null || !Number.isFinite(ms) || ms < 0) return null
-  const total = Math.floor(ms / 1000)
-  const hours = Math.floor(total / 3600)
-  const minutes = Math.floor((total % 3600) / 60)
-  const seconds = total % 60
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return hours > 0 ? `${pad(hours)}:${pad(minutes)}:${pad(seconds)}` : `${pad(minutes)}:${pad(seconds)}`
+  return formatDuration(ms)
 }
 
 export function runEndSummary(run: RunInfo | undefined): RunEndSummary {

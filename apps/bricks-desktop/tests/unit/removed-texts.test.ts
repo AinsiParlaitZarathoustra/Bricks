@@ -120,16 +120,17 @@ describe('text direction and links', () => {
 			.filter((f) => readFileSync(new URL(`../../src/${f}`, import.meta.url), 'utf8').includes('{@html'))
 			.sort();
 		// Message blocks come from the Markdown document (sanitizeMarkdown/sanitizeKatex);
-		// diagrams from renderMermaid (sanitizeSvg).
+		// diagrams use a sanitized SVG inside an opaque, scriptless iframe.
 		expect(withHtml).toEqual([
 			'lib/features/conversation/markdown/MarkdownView.svelte',
-			'lib/features/conversation/markdown/MermaidBlock.svelte',
 			'lib/features/reader/ReaderPanel.svelte',
 		]);
 		expect(src('lib/features/conversation/markdown/MarkdownView.svelte')).toContain('MarkdownDocument');
 		expect(src('lib/features/conversation/timeline/AssistantMessage.svelte')).toContain('MarkdownView');
 		expect(src('lib/features/conversation/markdown/sanitize.ts')).toContain('DOMPurify.sanitize');
-		expect(src('lib/features/conversation/markdown/mermaid.ts')).toContain('sanitizeSvg');
+		expect(src('lib/features/conversation/markdown/svg-viewer.ts')).toContain('sanitizeSvg');
+		expect(src('lib/features/conversation/markdown/SvgViewer.svelte')).toContain('sandbox=""');
+		expect(src('lib/features/conversation/markdown/svg-viewer.ts')).toContain("script-src 'none'");
 	});
 
 	it('user messages never go through Markdown or HTML: they are built from text parts', () => {

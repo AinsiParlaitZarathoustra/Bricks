@@ -2322,7 +2322,7 @@ async fn ensure_budget(
         let fits = match decision {
             BudgetDecision::Fits => return Ok(status),
             BudgetDecision::Preflight(why) => {
-                match preflight(agent, &model, request, &status, &why, tx, cancel).await? {
+                match preflight(agent, &model, request, &status, &why, cancel).await? {
                     Some(st) => return Ok(st),
                     None => false,
                 }
@@ -2373,7 +2373,6 @@ async fn preflight(
     request: &CompletionRequest,
     status: &ContextStatus,
     why: &str,
-    tx: &mpsc::Sender<AgentEvent>,
     cancel: &tokio_util::sync::CancellationToken,
 ) -> Result<Option<ContextStatus>> {
     let limit = status.input_limit.saturating_sub(status.margin);
@@ -2398,14 +2397,7 @@ async fn preflight(
                     ctx.record_count(model, &RequestView::of(request), n);
                     ctx.status(model, &RequestView::of(request))
                 };
-                send(
-                    agent,
-                    Some(tx),
-                    AgentEvent::Status(format!(
-                        "Pre-flight ({why}): counted {n} input tokens, budget {limit}."
-                    )),
-                )
-                .await;
+                tracing::debug!("Pre-flight ({why}): counted {n} input tokens, budget {limit}.");
                 return Ok((n <= limit).then_some(st));
             }
             Ok(None) => {}
@@ -2420,16 +2412,11 @@ async fn preflight(
     let est = agent.context.lock().estimator(model);
     let full = est.request(request.system.as_deref(), &request.tools, &request.messages);
     let central = full.tokens.max(status.context_used.tokens);
-    send(
-        agent,
-        Some(tx),
-        AgentEvent::Status(format!(
-            "Pre-flight ({why}): estimated ~{central} input tokens (up to ~{}), budget {limit}{}.",
-            full.upper.max(status.context_used.upper_bound),
-            note.map(|n| format!("; {n}")).unwrap_or_default()
-        )),
-    )
-    .await;
+    tracing::debug!(
+        "Pre-flight ({why}): estimated ~{central} input tokens (up to ~{}), budget {limit}{}.",
+        full.upper.max(status.context_used.upper_bound),
+        note.map(|n| format!("; {n}")).unwrap_or_default()
+    );
     Ok((central <= limit).then(|| status.clone()))
 }
 

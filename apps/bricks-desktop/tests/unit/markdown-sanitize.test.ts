@@ -462,3 +462,51 @@ describe('exportableSvg', () => {
 		expect(out.match(/<\?xml/g)?.length).toBe(1);
 	});
 });
+
+
+// The same real DOMPurify instance as the SVG profile tests above.
+const { svgFrame, mermaidSvg, SVG_CSP, MAX_SVG_LENGTH } = await import('../../src/lib/features/conversation/markdown/svg-viewer');
+const { defaultDiagramSettings } = await import('../../src/lib/features/diagrams/settings');
+
+describe('isolated SVG documents', () => {
+  const options = defaultDiagramSettings().diagramViewer;
+  it('removes scripts, foreign HTML, event handlers, external resources and all links before display/export', () => {
+    const hostile = `<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script><foreignObject><iframe src="https://evil.test"></iframe></foreignObject><image href="https://evil.test/x"/><a href="https://evil.test"><text onclick="alert(1)">Label</text></a><animate attributeName="x" from="0" to="1"/></svg>`;
+    const frame = svgFrame(hostile, options, 'light');
+    expect(frame.svg).toMatch(/^<svg/);
+    expect(frame.svg).not.toMatch(/script|foreignObject|iframe|https:|onclick|<a\b|<animate/i);
+    expect(frame.document).toContain(SVG_CSP);
+    expect(frame.document).toContain('user-select:none!important');
+    expect(frame.document).toContain('animation:none!important');
+  });
+  it('prevents diagram CSS overriding disabled animations or selection, and toggles native tooltips', () => {
+    const svg = '<svg><title>Safe tooltip</title><style>#x{user-select:text!important;animation:spin 1s infinite}</style><text id="x" style="user-select:text!important;animation:spin 1s infinite">label</text></svg>';
+    const locked = svgFrame(svg, options, 'light');
+    expect(locked.svg).toContain('<title>Safe tooltip</title>');
+    expect(locked.svg).not.toMatch(/user-select:|animation:/);
+    const changed = svgFrame(svg, { ...options, allowTooltips: false, allowSelection: true }, 'dark');
+    expect(changed.svg).not.toContain('<title>');
+    expect(changed.document).toContain('user-select:text!important');
+    expect(changed.document).toContain('color-scheme:dark');
+  });
+  it('decodes Mermaid sandbox output as inert data then sanitizes it', () => {
+    const payload = '<body><svg><text>Été</text><script>alert(1)</script></svg></body>';
+    const encoded = btoa(String.fromCharCode(...new TextEncoder().encode(payload)));
+    const result = mermaidSvg(`<iframe src="data:text/html;charset=UTF-8;base64,${encoded}" sandbox="allow-popups"></iframe>`);
+    expect(result).toContain('Été');
+    expect(result).not.toMatch(/iframe|script|sandbox/);
+    expect(mermaidSvg('<iframe src="https://evil.test"></iframe>')).toBe('');
+    expect(mermaidSvg('<iframe src="data:text/html;charset=UTF-8;base64,***"/>')).toBe('');
+    expect(svgFrame('x'.repeat(MAX_SVG_LENGTH + 1), options, 'light').svg).toBe('');
+  });
+  it('reports the natural size of the drawing, so its height is a maximum and not a fixed box', () => {
+    expect(svgFrame('<svg viewBox="0 0 240 120"><rect width="10" height="10"/></svg>', options, 'light').size).toEqual({ width: 240, height: 120 });
+    expect(svgFrame('<svg width="80" height="40"><rect width="10" height="10"/></svg>', options, 'light').size).toEqual({ width: 80, height: 40 });
+    expect(svgFrame('<svg width="100%"><rect width="10" height="10"/></svg>', options, 'light').size).toBeNull();
+  });
+  it('lets the app background show through for the app theme only', () => {
+    const svg = '<svg viewBox="0 0 10 10"><rect width="10" height="10"/></svg>';
+    expect(svgFrame(svg, options, 'dark', 'transparent').document).toContain('background:transparent');
+    expect(svgFrame(svg, options, 'dark').document).toContain('background:#111827');
+  });
+});

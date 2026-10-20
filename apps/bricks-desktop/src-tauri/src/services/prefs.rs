@@ -95,6 +95,11 @@ fn parse_fields(bytes: &[u8], file: &std::path::Path) -> Preferences {
 ///   even when it has a legacy `terminal_height`: the interface derives the
 ///   ratio from it once, then saves it here.
 fn sanitize(mut p: Preferences) -> Preferences {
+    // These capabilities cannot be enabled by editing the preferences file or IPC.
+    p.diagrams.diagram_viewer.allow_links = false;
+    p.diagrams.diagram_viewer.allow_animations = false;
+    p.diagrams.diagram_viewer.allow_edit = false;
+    p.diagrams.diagram_viewer.allow_java_script = false;
     p.left_width = p.left_width.clamp(*WIDTH.start(), *WIDTH.end());
     p.right_width = p.right_width.clamp(*WIDTH.start(), *WIDTH.end());
     p.terminal_height = p
@@ -291,5 +296,73 @@ mod tests {
         assert_eq!(saved["left_width"], 300);
         assert_eq!(saved["terminal_ratio"], serde_json::Value::Null);
         assert_eq!(saved["colors"]["light"]["accent"], serde_json::Value::Null);
+    }
+    #[test]
+    fn diagrams_default_to_the_requested_sandbox_configuration() {
+        let value = serde_json::to_value(Preferences::default().diagrams).unwrap();
+        assert_eq!(
+            value["mermaid"],
+            serde_json::json!({"securityLevel":"sandbox","theme":"forest","look":"classic"})
+        );
+        assert_eq!(
+            value["diagramViewer"],
+            serde_json::json!({
+                "followAppTheme":true,"allowZoom":true,"allowPan":true,"allowFullscreen":true,
+                "allowDownload":true,"allowCopy":true,"allowTooltips":true,"allowLinks":false,
+                "allowSelection":false,"allowAnimations":false,"allowEdit":false,"allowJavaScript":false
+            })
+        );
+    }
+
+    #[test]
+    fn diagram_preferences_round_trip_but_cannot_enable_active_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("preferences.json");
+        let mut prefs = Preferences::default();
+        prefs.diagrams.mermaid.theme = crate::contract::MermaidTheme::Dark;
+        prefs.diagrams.mermaid.security_level = crate::contract::MermaidSecurityLevel::Loose;
+        let viewer = &mut prefs.diagrams.diagram_viewer;
+        viewer.allow_zoom = false;
+        viewer.allow_selection = true;
+        viewer.allow_links = true;
+        viewer.allow_java_script = true;
+        viewer.allow_animations = true;
+        viewer.allow_edit = true;
+        PrefsStore::at(file.clone()).set(prefs).unwrap();
+        let saved = PrefsStore::at(file).get();
+        assert_eq!(
+            saved.diagrams.mermaid.security_level,
+            crate::contract::MermaidSecurityLevel::Loose
+        );
+        assert!(matches!(
+            saved.diagrams.mermaid.theme,
+            crate::contract::MermaidTheme::Dark
+        ));
+        let viewer = saved.diagrams.diagram_viewer;
+        assert!(!viewer.allow_zoom);
+        assert!(viewer.allow_selection);
+        assert!(
+            !viewer.allow_java_script
+                && !viewer.allow_links
+                && !viewer.allow_animations
+                && !viewer.allow_edit
+        );
+    }
+
+    #[test]
+    fn unknown_diagram_themes_fall_back_without_losing_other_preferences() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("preferences.json");
+        std::fs::write(
+            &file,
+            r#"{"left_width":310,"diagrams":{"mermaid":{"theme":"invented"}}}"#,
+        )
+        .unwrap();
+        let prefs = PrefsStore::at(file).get();
+        assert_eq!(prefs.left_width, 310);
+        assert!(matches!(
+            prefs.diagrams.mermaid.theme,
+            crate::contract::MermaidTheme::Forest
+        ));
     }
 }

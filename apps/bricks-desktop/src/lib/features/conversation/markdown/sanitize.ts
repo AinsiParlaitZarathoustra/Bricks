@@ -238,14 +238,15 @@ const SVG_CONFIG: Config = {
  */
 export function sanitizeSvg(svg: string): string {
   if (!svgPurifier || !svg) return ''
-  // An inert document: nothing in the markup loads or runs while it is parsed.
-  const parsed = new DOMParser().parseFromString(svg, 'text/html')
+  // Template contents stay inert: no scripts, frame loads or image fetches while inspecting SVG.
+  const parsed = document.createElement('template')
+  parsed.innerHTML = svg
   const css: string[] = []
-  for (const style of parsed.body.querySelectorAll('style')) {
+  for (const style of parsed.content.querySelectorAll('style')) {
     css.push(neutralizeCss(style.textContent ?? ''))
     style.remove()
   }
-  const body = run(svgPurifier, parsed.body.innerHTML, SVG_CONFIG)
+  const body = run(svgPurifier, parsed.innerHTML, SVG_CONFIG)
   const diagramCss = css.join('\n').trim()
   if (diagramCss === '' || !/^<svg\b/i.test(body)) return body
   return body.replace(/^<svg\b[^>]*>/i, (open) => `${open}<style>${diagramCss}</style>`)

@@ -5,6 +5,7 @@
   // operations of that file (each patch on its own, never merged).
   import X from '@lucide/svelte/icons/x'
   import DiffView from '$lib/features/changes/DiffView.svelte'
+  import SvgViewer from '$lib/features/conversation/markdown/SvgViewer.svelte'
   import MarkdownView from '$lib/features/conversation/markdown/MarkdownView.svelte'
   import DiffStat from '$lib/layout/DiffStat.svelte'
   import type { Conversation } from '$lib/state/conversation.svelte'
@@ -29,7 +30,7 @@
     { id: 'changes', label: 'Modifications' },
   ]
   function available(tab: ReaderTab, mode: ReaderTab['mode']): boolean {
-    if (mode === 'preview') return tab.isMarkdown
+    if (mode === 'preview') return tab.isMarkdown || tab.isSvg
     if (mode === 'changes') return tab.operations.length > 0
     return true
   }
@@ -154,7 +155,15 @@
               </p>
             {/if}
             {#key active.id}
-              <MarkdownView source={active.window.lines.join('\n')} idPrefix={prefixOf(active)} />
+              {#if active.isSvg}
+                {#if active.window.truncated}
+                  <p class="text-xs text-muted-foreground">Le fichier SVG doit être entièrement chargé pour afficher son aperçu.</p>
+                {:else}
+                  <SvgViewer svg={active.window.lines.join('\n')} title={active.title} fileName={active.title} />
+                {/if}
+              {:else}
+                <MarkdownView source={active.window.lines.join('\n')} idPrefix={prefixOf(active)} />
+              {/if}
             {/key}
           </div>
         {:else}

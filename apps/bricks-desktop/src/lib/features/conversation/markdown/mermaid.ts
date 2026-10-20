@@ -6,7 +6,8 @@
 // Bounds: MAX_SOURCE_LENGTH characters (checked before Mermaid sees the text),
 // MAX_EDGES edges per diagram (Mermaid's own limit).
 
-import { sanitizeSvg } from './sanitize'
+import { mermaidSvg } from './svg-viewer'
+import type { MermaidLook, MermaidSecurityLevel, MermaidTheme } from '$lib/features/diagrams/settings'
 
 /** Longest source given to Mermaid, in characters (Mermaid's maxTextSize). */
 export const MAX_SOURCE_LENGTH = 20000
@@ -23,7 +24,12 @@ type MermaidConfig = Parameters<MermaidApi['initialize']>[0]
 export interface MermaidRenderOptions {
   /** Unique id of the SVG (Mermaid's id): letters, digits, `-` and `_`. */
   id: string
-  theme: 'light' | 'dark'
+  /** `app`: Bricks's own colours in `mode`; otherwise one of Mermaid's themes. */
+  theme: 'app' | MermaidTheme
+  /** The application mode, for the `app` theme. */
+  mode?: 'light' | 'dark'
+  look?: MermaidLook
+  securityLevel?: MermaidSecurityLevel
   fontFamily: string
   /** Colours of the application theme: background, foreground, card, border, primary, muted. */
   colors?: Record<string, string>
@@ -108,7 +114,7 @@ function dropInteraction(line: string): string {
 // ─── Theme and configuration ─────────────────────────────────────────────────
 
 /** Keys of the palette; `chart1`…`chart5` are the series colours of charts, pies and branches. */
-const PALETTE: Record<MermaidRenderOptions['theme'], Record<string, string>> = {
+const PALETTE: Record<'light' | 'dark', Record<string, string>> = {
   light: {
     background: '#ffffff',
     foreground: '#1f2328',
@@ -202,7 +208,7 @@ export function readableText(fills: string[], candidates: string[]): string {
  * the five `chart` keys, and the label colours that read on them.
  */
 export function themeVariables(
-  theme: MermaidRenderOptions['theme'],
+  theme: 'light' | 'dark',
   colors: Record<string, string>,
   fontFamily: string,
 ): Record<string, unknown> {
@@ -294,26 +300,35 @@ const SECURE_KEYS = [
   'logLevel',
   'theme',
   'themeVariables',
+  'look',
   'fontFamily',
 ]
 
-function mermaidConfig(
-  theme: MermaidRenderOptions['theme'],
-  colors: Record<string, string>,
-  fontFamily: string,
-): MermaidConfig {
+interface RenderSettings {
+  theme: MermaidRenderOptions['theme']
+  mode: 'light' | 'dark'
+  look: MermaidLook
+  securityLevel: MermaidSecurityLevel
+  fontFamily: string
+  colors: Record<string, string>
+}
+
+function mermaidConfig(settings: RenderSettings): MermaidConfig {
+  const { theme } = settings
+  const app = theme === 'app'
   return {
     startOnLoad: false,
-    securityLevel: 'strict',
+    securityLevel: settings.securityLevel,
     htmlLabels: false,
     maxTextSize: MAX_SOURCE_LENGTH,
     maxEdges: MAX_EDGES,
     suppressErrorRendering: true,
     logLevel: 'fatal',
     secure: SECURE_KEYS,
-    theme: 'base',
-    fontFamily,
-    themeVariables: themeVariables(theme, colors, fontFamily),
+    theme: theme === 'app' ? 'base' : theme,
+    look: settings.look,
+    fontFamily: settings.fontFamily,
+    ...(app ? { themeVariables: themeVariables(settings.mode, settings.colors, settings.fontFamily) } : {}),
   }
 }
 
@@ -327,8 +342,9 @@ let appliedKey: string | null = null
 export function loadMermaid(): Promise<MermaidApi> {
   loading ??= import('mermaid')
     .then(({ default: mermaid }) => {
-      mermaid.initialize(mermaidConfig('light', {}, DEFAULT_FONT))
-      appliedKey = JSON.stringify(['light', DEFAULT_FONT, {}])
+      const settings: RenderSettings = { theme: 'app', mode: 'light', look: 'classic', securityLevel: 'sandbox', fontFamily: DEFAULT_FONT, colors: {} }
+      mermaid.initialize(mermaidConfig(settings))
+      appliedKey = JSON.stringify(settings)
       return mermaid
     })
     .catch((error: unknown) => {
@@ -342,10 +358,10 @@ export function loadMermaid(): Promise<MermaidApi> {
  * Mermaid reads its theme when it is initialized, not per render: it is
  * initialized again only when the theme, the font or the colours change.
  */
-function applyTheme(mermaid: MermaidApi, theme: MermaidRenderOptions['theme'], colors: Record<string, string>, fontFamily: string) {
-  const key = JSON.stringify([theme, fontFamily, colors])
+function applyTheme(mermaid: MermaidApi, settings: RenderSettings) {
+  const key = JSON.stringify(settings)
   if (key === appliedKey) return
-  mermaid.initialize(mermaidConfig(theme, colors, fontFamily))
+  mermaid.initialize(mermaidConfig(settings))
   appliedKey = key
 }
 
@@ -371,17 +387,12 @@ function shortMessage(error: unknown): string {
 /** Mermaid leaves its working nodes in the document after a failed render; they go. */
 function removeLeftovers(id: string) {
   if (typeof document === 'undefined') return
-  for (const leftover of [document.getElementById(id), document.getElementById(`d${id}`)]) {
+  for (const leftover of [document.getElementById(id), document.getElementById(`d${id}`), document.getElementById(`i${id}`)]) {
     leftover?.remove()
   }
 }
 
-async function renderOnce(source: string, options: {
-  id: string
-  theme: MermaidRenderOptions['theme']
-  fontFamily: string
-  colors: Record<string, string>
-}): Promise<MermaidResult> {
+async function renderOnce(source: string, options: RenderSettings & { id: string }): Promise<MermaidResult> {
   let mermaid: MermaidApi
   try {
     mermaid = await loadMermaid()
@@ -391,9 +402,10 @@ async function renderOnce(source: string, options: {
   const prepared = neutralizeMermaid(source)
   if (prepared.trim() === '') return { error: 'Diagramme vide' }
   try {
-    applyTheme(mermaid, options.theme, options.colors, options.fontFamily)
+    const { theme, mode, look, securityLevel, fontFamily, colors } = options
+    applyTheme(mermaid, { theme, mode, look, securityLevel, fontFamily, colors })
     const { svg } = await mermaid.render(options.id, prepared)
-    const clean = sanitizeSvg(svg)
+    const clean = mermaidSvg(svg)
     return clean === '' ? { error: 'Rendu vide' } : { svg: clean }
   } catch (error) {
     return { error: shortMessage(error) }
@@ -416,10 +428,13 @@ export function renderMermaid(source: string, opts: MermaidRenderOptions): Promi
   const settings = {
     id: opts.id,
     theme: opts.theme,
+    mode: opts.mode ?? 'light',
+    look: opts.look ?? 'classic',
+    securityLevel: opts.securityLevel ?? 'sandbox',
     fontFamily: safeFont(opts.fontFamily),
     colors: safeColors(opts.colors),
   }
-  const key = JSON.stringify([settings.id, source, settings.theme, settings.fontFamily, settings.colors])
+  const key = JSON.stringify([source, settings])
   const cached = opts.cache?.get(key)
   if (cached !== undefined) return Promise.resolve({ svg: cached })
   return serialized(async () => {

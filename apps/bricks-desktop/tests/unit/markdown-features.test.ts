@@ -352,7 +352,7 @@ describe('mermaid blocks while streaming', () => {
 })
 
 describe('mermaid rendering', () => {
-  const options = { theme: 'light' as const, fontFamily: 'sans-serif' }
+  const options = { theme: 'app' as const, mode: 'light' as const, fontFamily: 'sans-serif' }
 
   it('two messages rendering at once give their diagrams distinct ids', async () => {
     await Promise.all([
@@ -360,6 +360,18 @@ describe('mermaid rendering', () => {
       renderMermaid(SOURCE, { ...options, id: 'm-beta-b0-1' }),
     ])
     expect(mermaidApi.render.mock.calls.map((call) => call[0])).toEqual(['m-alpha-b0-1', 'm-beta-b0-1'])
+  })
+
+  it('uses the selected sandbox theme and style while neutralizing diagram overrides', async () => {
+    await renderMermaid('%%{init:{"securityLevel":"loose"}}%%\nflowchart TD\nA-->B\nclick A "https://evil.test"', { theme: 'forest', look: 'handDrawn', fontFamily: 'sans-serif', id: 'm-sandbox-config' })
+    expect(mermaidApi.initialize).toHaveBeenLastCalledWith(expect.objectContaining({ securityLevel: 'sandbox', theme: 'forest', look: 'handDrawn', startOnLoad: false, htmlLabels: false }))
+    const source = (mermaidApi.render.mock.calls.at(-1) as unknown as [string, string])[1]
+    expect(source).not.toMatch(/securityLevel|click A|%%\{/)
+  })
+
+  it('applies the security level chosen in the settings, and the app colours for the app theme', async () => {
+    await renderMermaid(SOURCE, { theme: 'app', mode: 'dark', securityLevel: 'strict', fontFamily: 'sans-serif', id: 'm-strict-app', colors: { background: '#101010', foreground: '#f0f0f0' } })
+    expect(mermaidApi.initialize).toHaveBeenLastCalledWith(expect.objectContaining({ securityLevel: 'strict', theme: 'base', themeVariables: expect.objectContaining({ background: '#101010' }) }))
   })
 
   it('an identifier outside the allowed pattern is refused before rendering', async () => {

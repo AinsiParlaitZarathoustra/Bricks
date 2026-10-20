@@ -129,6 +129,7 @@ export class ReaderTab {
   /** The path sent to Rust for every window of this tab. */
   readonly request: string
   readonly isMarkdown: boolean
+  readonly isSvg: boolean
 
   /** The canonical absolute path once Rust has read the file; until then the path asked. */
   fullPath = $state('')
@@ -157,6 +158,7 @@ export class ReaderTab {
     this.title = baseName(init.path) || baseName(init.request)
     this.id = `${init.sessionId}|${init.agentId}|${init.request}`
     this.isMarkdown = MARKDOWN.test(init.path)
+    this.isSvg = /\.svg$/i.test(init.path)
     this.opsOf = opsOf
     this.fullPath = init.request
     this.keys = [init.request]
@@ -175,7 +177,7 @@ export class ReaderTab {
   /** The modes this file offers: source always, preview for Markdown, changes when edited. */
   get modes(): ReaderMode[] {
     const modes: ReaderMode[] = ['source']
-    if (this.isMarkdown) modes.push('preview')
+    if (this.isMarkdown || this.isSvg) modes.push('preview')
     if (this.operations.length > 0) modes.push('changes')
     return modes
   }

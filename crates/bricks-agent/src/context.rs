@@ -570,6 +570,7 @@ impl ContextManager {
         if sent_version != self.version {
             return false;
         }
+        self.last_invalidation = None;
         self.measurement = Some(Measurement {
             model: model.selection.clone(),
             version: self.version,
@@ -584,6 +585,7 @@ impl ContextManager {
 
     /// Record a count from a counting endpoint for exactly `request`.
     pub fn record_count(&mut self, model: &ModelView, request: &RequestView, tokens: u64) {
+        self.last_invalidation = None;
         self.measurement = Some(Measurement {
             model: model.selection.clone(),
             version: self.version,
@@ -946,6 +948,36 @@ mod tests {
             mgr.context_used(&m, &view(&msgs, &tools)).provenance,
             Provenance::Estimated
         );
+    }
+
+    #[test]
+    fn only_current_measurements_clear_the_invalidation() {
+        let mut mgr = ContextManager::default();
+        let m = model(100_000, 8_000, None, true);
+        let msgs = vec![Message::user("go")];
+        let req = view(&msgs, &[]);
+        let old_version = mgr.version();
+        mgr.invalidate("compaction");
+
+        // Missing usage and responses sent before the rewrite cannot clear it.
+        assert!(!mgr.record_response(&m, &req, &Usage::default(), None));
+        assert!(!mgr.record_response_sent(&m, &req, &usage(5_000, 0, 0, 10), None, old_version));
+        assert_eq!(mgr.last_invalidation.as_deref(), Some("compaction"));
+
+        assert!(mgr.record_response(&m, &req, &usage(5_000, 0, 0, 10), None));
+        assert!(mgr.last_invalidation.is_none());
+
+        mgr.invalidate("another compaction");
+        assert!(mgr.last_invalidation.is_some());
+        mgr.record_count(&m, &req, 5_000);
+        assert!(mgr.last_invalidation.is_none());
+
+        // If a later frame change forces estimation, the old rewrite stays cleared.
+        let mut changed = req;
+        changed.system = Some("Different instructions");
+        let st = mgr.status(&m, &changed);
+        assert_eq!(st.context_used.provenance, Provenance::Estimated);
+        assert!(!st.notes.iter().any(|n| n.contains("estimated since:")));
     }
 
     #[test]

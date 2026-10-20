@@ -482,28 +482,22 @@ async fn a_blocked_count_falls_back_to_the_local_estimate_after_30_s() {
     let mut stream = agent.run_stream("hello");
     let start = tokio::time::Instant::now();
     let mut notes = Vec::new();
-    let mut fallback_at = None;
     let output = loop {
         match stream.next().await.expect("open") {
-            AgentEvent::Status(m) => {
-                if m.contains("local estimate used") {
-                    fallback_at = Some(start.elapsed());
-                }
-                notes.push(m)
-            }
+            AgentEvent::Status(m) => notes.push(m),
             AgentEvent::Complete(o) => break o,
             AgentEvent::Error(e) => panic!("{e}"),
             _ => {}
         }
     };
     assert_eq!(output.text(), "answer");
-    let note = notes
-        .iter()
-        .find(|m| m.contains("local estimate used"))
-        .expect("the fallback is reported");
-    assert!(note.contains("no answer within 30 s"), "{note}");
-    assert!(!note.to_lowercase().contains("key"), "{note}");
-    let at = fallback_at.unwrap();
+    assert!(
+        !notes
+            .iter()
+            .any(|m| m.contains("Pre-flight") || m.contains("local estimate used")),
+        "pre-flight diagnostics stay out of the UI: {notes:?}"
+    );
+    let at = start.elapsed();
     assert!(
         at >= Duration::from_secs(30) && at < Duration::from_secs(31),
         "{at:?}"

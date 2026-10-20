@@ -1,25 +1,25 @@
-// The time a run worked, as the « bilan » shows it: MM:SS under an hour, HH:MM:SS from an hour.
+// The time a run worked, as the « bilan » shows it: compact units.
 import { describe, expect, it } from 'vitest';
 import { formatWorked, runEndSummary } from '../../src/lib/features/conversation/runend';
 import type { RunInfo } from '../../src/lib/state/conversation.svelte';
 
 describe('formatWorked', () => {
-	it('cuts the seconds, never rounds them', () => {
-		expect(formatWorked(762)).toBe('00:00');
-		expect(formatWorked(132_386)).toBe('02:12');
-		expect(formatWorked(59_000)).toBe('00:59');
-		expect(formatWorked(59_999)).toBe('00:59');
+	it('keeps milliseconds below a second and truncates longer durations', () => {
+		expect(formatWorked(762)).toBe('762ms');
+		expect(formatWorked(132_386)).toBe('2m 12s');
+		expect(formatWorked(59_000)).toBe('59s');
+		expect(formatWorked(59_999)).toBe('59s');
 	});
 
-	it('is MM:SS up to one hour excluded, and HH:MM:SS from one hour', () => {
-		expect(formatWorked(60_000)).toBe('01:00');
-		expect(formatWorked(3_599_000)).toBe('59:59');
-		expect(formatWorked(3_600_000)).toBe('01:00:00');
-		expect(formatWorked(3_723_000)).toBe('01:02:03');
+	it('uses seconds, minutes and hours', () => {
+		expect(formatWorked(60_000)).toBe('1m');
+		expect(formatWorked(3_599_000)).toBe('59m 59s');
+		expect(formatWorked(3_600_000)).toBe('1h');
+		expect(formatWorked(3_723_000)).toBe('1h 2m 3s');
 	});
 
 	it('goes past a day in hours', () => {
-		expect(formatWorked(25 * 3_600_000 + 5_000)).toBe('25:00:05');
+		expect(formatWorked(25 * 3_600_000 + 5_000)).toBe('25h 5s');
 	});
 
 	it('is null when the time is absent, negative or not a number', () => {
@@ -46,7 +46,7 @@ describe('runEndSummary carries the time worked', () => {
 		}) as unknown as RunInfo;
 
 	it('shows the worked time from the engine timestamps', () => {
-		expect(runEndSummary(run(1_000 + 132_386)).worked).toBe('02:12');
+		expect(runEndSummary(run(1_000 + 132_386)).worked).toBe('2m 12s');
 	});
 
 	it('shows no worked time without the end, or with an end before the start', () => {

@@ -1,5 +1,6 @@
 <script lang="ts">
 	// Approval policy of the desktop's tools (`Preferences.tool_approval`). The engine applies it.
+	import DiagramSettings from './DiagramSettings.svelte';
 	import { app } from '$lib/state/app.svelte';
 	import * as Select from '$lib/components/ui/select';
 	import { Label } from '$lib/components/ui/label';
@@ -26,6 +27,7 @@
 	}
 </script>
 
+<div class="flex flex-col gap-6">
 <div class="flex flex-col gap-3">
 	<Label for={`${uid}-approval`} class="text-[13px] font-semibold text-foreground">Approbation des outils</Label>
 	<Select.Root type="single" value={app.prefs.tool_approval} onValueChange={choose}>
@@ -43,4 +45,7 @@
 			Le réglage n’a pas été enregistré : {failure}
 		</p>
 	{/if}
+</div>
+
+  <DiagramSettings />
 </div>

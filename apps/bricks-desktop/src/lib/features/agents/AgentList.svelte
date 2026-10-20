@@ -51,7 +51,7 @@
 				>
 					<span class="flex min-w-0 items-center gap-2">
 						<span class="min-w-0 flex-1 truncate text-sm font-medium">{agent.spawn.profile}</span>
-						<StatusDot status={view.dot} label={view.label} showLabel class="shrink-0" />
+						<StatusDot status={view.dot} label={view.label} showLabel={view.dot !== 'success' && view.dot !== 'error'} class="shrink-0" />
 					</span>
 					<span class="line-clamp-2 text-xs text-pretty text-muted-foreground">
 						{agent.spawn.description || agent.spawn.task}

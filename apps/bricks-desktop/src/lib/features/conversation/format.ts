@@ -97,12 +97,13 @@ export function summarizeInput(name: string, input: unknown): string {
 
 export function formatDuration(ms: number | undefined): string {
   if (ms === undefined || !Number.isFinite(ms) || ms < 0) return '—'
-  if (ms < 1000) return `${Math.round(ms)} ms`
-  const seconds = ms / 1000
-  if (seconds < 60) return `${numberFormat.format(seconds)} s`
-  const minutes = Math.floor(seconds / 60)
-  const rest = Math.floor(seconds - minutes * 60)
-  return `${minutes} min ${rest} s`
+  if (ms < 1000) return `${Math.round(ms)}ms`
+  const total = Math.floor(ms / 1000)
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const seconds = total % 60
+  return [hours && `${hours}h`, minutes && `${minutes}m`, (seconds || total === 0) && `${seconds}s`]
+    .filter(Boolean).join(' ')
 }
 
 export function formatBytes(bytes: number): string {

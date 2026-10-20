@@ -144,12 +144,12 @@ function filesGroup(conv: Conversation, item: RunEndItem): string | null {
 }
 
 describe('run-end card: one compact header and closed groups from the real run data', () => {
-	it('reads « Terminé · A travaillé MM:SS » with no turn count, no model id and no « Durée : » prefix', () => {
+	it('reads « Terminé · A travaillé 1m 49s » with no turn count, no model id and no « Durée : » prefix', () => {
 		const { conv, item } = runOf({ outcome: 'succeeded', at: T0 + 762 }, [
 			{ path: 'src/calcul.ts', kind: 'modify', added: 120, removed: 24 },
 		]);
 		const text = card(conv, item);
-		expect(summaryLine(conv, item)).toBe('Terminé · A travaillé 00:00');
+		expect(summaryLine(conv, item)).toBe('Terminé · A travaillé 762ms');
 		expect(filesGroup(conv, item)).toMatch(/^1 fichier modifié \+120 −24 calcul\.ts/);
 		// The group is closed by default.
 		expect(render(RunEndCard, { props: { item, conversation: conv } }).body).toContain('aria-expanded="false"');
@@ -164,26 +164,26 @@ describe('run-end card: one compact header and closed groups from the real run d
 			{ path: 'a.ts', kind: 'modify', added: 2, removed: 1 },
 			{ path: 'img.png', kind: 'create', added: 0, removed: 0, binary: true },
 		]);
-		expect(summaryLine(conv, item)).toBe('Terminé · A travaillé 00:00');
+		expect(summaryLine(conv, item)).toBe('Terminé · A travaillé 900ms');
 		expect(filesGroup(conv, item)).toMatch(/^2 fichiers modifiés \+2 −1 a\.ts/);
 		expect(card(conv, item)).toContain('img.png binaire');
 	});
 
 	it('shows no files group when the run edited nothing', () => {
 		const { conv, item } = runOf({ outcome: 'succeeded', at: T0 + 40 }, []);
-		expect(summaryLine(conv, item)).toBe('Terminé · A travaillé 00:00');
+		expect(summaryLine(conv, item)).toBe('Terminé · A travaillé 40ms');
 		expect(filesGroup(conv, item)).toBeNull();
 	});
 
 	it('keeps the failed state and its error, and the cancelled state without a second sentence', () => {
 		const failed = runOf({ outcome: 'failed', error: 'quota dépassé', at: T0 + 120 }, []);
 		const failedText = card(failed.conv, failed.item);
-		expect(summaryLine(failed.conv, failed.item)).toBe('Échec · A travaillé 00:00');
+		expect(summaryLine(failed.conv, failed.item)).toBe('Échec · A travaillé 120ms');
 		expect(failedText).toContain('Erreur : quota dépassé');
 
 		const cancelled = runOf({ outcome: 'cancelled', at: T0 + 120 }, []);
 		const cancelledText = card(cancelled.conv, cancelled.item);
-		expect(summaryLine(cancelled.conv, cancelled.item)).toBe('Annulé · A travaillé 00:00');
+		expect(summaryLine(cancelled.conv, cancelled.item)).toBe('Annulé · A travaillé 120ms');
 		expect(cancelledText).not.toMatch(/Erreur|Motif/);
 	});
 });

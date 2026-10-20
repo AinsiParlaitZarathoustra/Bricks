@@ -452,6 +452,8 @@ async fn preflight_uses_a_configured_counting_endpoint() {
     let (url, seen) = serve(vec![
         Reply::json(200, json!({ "input_tokens": 321 })),
         anthropic_text("counted", 321),
+        Reply::json(200, json!({ "input_tokens": 350 })),
+        anthropic_text("counted again", 350),
     ]);
     let toml = format!(
         r#"
@@ -482,6 +484,7 @@ max_output_tokens = 4000
         .env(|_| Some("test-key".into()))
         .build()
         .unwrap();
+    let (log, on_event) = events();
     let dir = raw_dir();
     let agent = Agent::builder()
         .provider(provider)
@@ -491,20 +494,32 @@ max_output_tokens = 4000
             ..Default::default()
         })
         .raw_output_dir(dir.path())
+        .on_event(on_event)
         .build()
         .unwrap();
     agent.run("hello").await.unwrap();
+    agent.run("hello again").await.unwrap();
+    assert!(
+        !log.lock()
+            .unwrap()
+            .iter()
+            .any(|e| matches!(e, AgentEvent::Status(s) if s.contains("Pre-flight")))
+    );
     let seen = seen.lock().unwrap();
     assert_eq!(seen[0].path, "/v1/messages/count_tokens");
     let count_body: Value = serde_json::from_str(&seen[0].body).unwrap();
     assert!(count_body.get("max_tokens").is_none() && count_body.get("stream").is_none());
     assert_eq!(count_body["messages"][0]["role"], "user");
     assert_eq!(seen[1].path, "/v1/messages");
+    assert_eq!(seen.len(), 4);
+    assert_eq!(seen[2].path, "/v1/messages/count_tokens");
+    assert_eq!(seen[3].path, "/v1/messages");
 }
 
 #[tokio::test]
 async fn an_unconfigured_counting_route_is_never_called() {
-    let (url, seen) = serve(vec![chat_text("ok", None)]);
+    let (url, seen) = serve(vec![chat_text("ok", None), chat_text("ok again", None)]);
+    let (log, on_event) = events();
     let dir = raw_dir();
     let agent = Agent::builder()
         .provider(common::provider(&url, "chat_completions", 100_000))
@@ -513,11 +528,19 @@ async fn an_unconfigured_counting_route_is_never_called() {
             ..Default::default()
         })
         .raw_output_dir(dir.path())
+        .on_event(on_event)
         .build()
         .unwrap();
     agent.run("hello").await.unwrap();
+    agent.run("hello again").await.unwrap();
+    assert!(
+        !log.lock()
+            .unwrap()
+            .iter()
+            .any(|e| matches!(e, AgentEvent::Status(s) if s.contains("Pre-flight")))
+    );
     let seen = seen.lock().unwrap();
-    assert_eq!(seen.len(), 1);
+    assert_eq!(seen.len(), 2);
     assert_eq!(seen[0].path, "/v1/chat/completions");
 }
 

@@ -34,10 +34,10 @@ const file = (path: string, added: number, removed: number, binary = false): Fil
 });
 
 describe('runEndSummary: the state and the duration', () => {
-	it('a succeeded run reads Terminé with its duration in milliseconds', () => {
+	it('a succeeded run reads Terminé with its duration in compact units', () => {
 		const s = runEndSummary(run({ outcome: 'succeeded', finishedAt: T0 + 762 }));
 		expect(s).toMatchObject({ outcome: 'succeeded', label: 'Terminé', durationMs: 762 });
-		expect(s.duration).toBe('762 ms');
+		expect(s.duration).toBe('762ms');
 	});
 
 	it('uses each state label and keeps Annulé, Échec and Incomplet', () => {
@@ -55,9 +55,9 @@ describe('runEndSummary: the state and the duration', () => {
 		expect(runEndSummary(run({ outcome: 'succeeded', finishedAt: T0 - 1 })).durationMs).toBeNull();
 	});
 
-	it('keeps long durations in milliseconds', () => {
+	it('keeps long durations in compact units', () => {
 		const long = runEndSummary(run({ outcome: 'succeeded', finishedAt: T0 + 12_400 })).duration;
-		expect(long?.replace(/\s/g, ' ')).toBe('12 400 ms');
+		expect(long?.replace(/\s/g, ' ')).toBe('12s');
 	});
 });
 

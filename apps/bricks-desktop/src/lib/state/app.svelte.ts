@@ -16,6 +16,7 @@ import type {
 } from '$lib/ipc/client'
 import type { Command, Envelope, ModelChoice } from '$lib/ipc/engine'
 import { Conversation, type Draft } from './conversation.svelte'
+import { defaultDiagramSettings } from '$lib/features/diagrams/settings'
 import { reader } from './reader.svelte'
 
 export const DEFAULT_PREFERENCES: Preferences = {
@@ -31,6 +32,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   tool_approval: 'standard',
   colors: { light: { accent: null, background: null, panel: null }, dark: { accent: null, background: null, panel: null } },
   terminal_ratio: null,
+  diagrams: defaultDiagramSettings(),
 }
 
 export type RightView = 'context' | 'changes' | 'reader'

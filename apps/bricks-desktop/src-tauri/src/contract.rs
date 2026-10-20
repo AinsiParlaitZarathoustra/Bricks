@@ -334,6 +334,96 @@ pub struct PtyInfo {
 
 // ─── Preferences ─────────────────────────────────────────────────────────────
 
+/// Rendering choices owned by Bricks, never by an agent's diagram directives.
+#[derive(Debug, Clone, Serialize, Deserialize, TS, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct DiagramSettings {
+    pub mermaid: MermaidSettings,
+    pub diagram_viewer: DiagramViewerSettings,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(default, rename_all = "camelCase")]
+pub struct MermaidSettings {
+    pub security_level: MermaidSecurityLevel,
+    pub theme: MermaidTheme,
+    pub look: MermaidLook,
+}
+
+impl Default for MermaidSettings {
+    fn default() -> Self {
+        Self {
+            security_level: MermaidSecurityLevel::Sandbox,
+            theme: MermaidTheme::Forest,
+            look: MermaidLook::Classic,
+        }
+    }
+}
+
+/// Mermaid's `securityLevel`, chosen by the user (sandbox by default).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "lowercase")]
+pub enum MermaidSecurityLevel {
+    Sandbox,
+    Strict,
+    Antiscript,
+    Loose,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum MermaidTheme {
+    Default,
+    Base,
+    Dark,
+    Forest,
+    Neutral,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum MermaidLook {
+    Classic,
+    HandDrawn,
+    Neo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[serde(default, rename_all = "camelCase")]
+pub struct DiagramViewerSettings {
+    pub follow_app_theme: bool,
+    pub allow_zoom: bool,
+    pub allow_pan: bool,
+    pub allow_fullscreen: bool,
+    pub allow_download: bool,
+    pub allow_copy: bool,
+    pub allow_tooltips: bool,
+    pub allow_links: bool,
+    pub allow_selection: bool,
+    pub allow_animations: bool,
+    pub allow_edit: bool,
+    pub allow_java_script: bool,
+}
+
+impl Default for DiagramViewerSettings {
+    fn default() -> Self {
+        Self {
+            follow_app_theme: true,
+            allow_zoom: true,
+            allow_pan: true,
+            allow_fullscreen: true,
+            allow_download: true,
+            allow_copy: true,
+            allow_tooltips: true,
+            allow_links: false,
+            allow_selection: false,
+            allow_animations: false,
+            allow_edit: false,
+            allow_java_script: false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(default)]
 pub struct Preferences {
@@ -355,6 +445,7 @@ pub struct Preferences {
     /// Terminal pane share of the centre column, 0.1–0.8.
     /// `None`: not set yet — derived once from the legacy `terminal_height`.
     pub terminal_ratio: Option<f32>,
+    pub diagrams: DiagramSettings,
 }
 
 impl Default for Preferences {
@@ -372,6 +463,7 @@ impl Default for Preferences {
             tool_approval: ToolApproval::Standard,
             colors: ThemeColors::default(),
             terminal_ratio: None,
+            diagrams: DiagramSettings::default(),
         }
     }
 }
