@@ -171,7 +171,7 @@ The permission level is the one each tool declares in code (`permission_level()`
 
 | Tool | Permission | Description |
 |------|-----------|-------------|
-| `SendMessageTool` | None | Send messages between agents. |
+| `SendMessageTool` | Execute | Send a message to a running sub-agent of the session, through the agent runtime's router (the same delivery as `AgentControl message`). Without a runtime, nothing is sent. |
 | `TaskCreateTool` | None | Create a long-running background task. |
 | `TaskGetTool` | None | Get task status. |
 | `TaskUpdateTool` | None | Update a running task. |

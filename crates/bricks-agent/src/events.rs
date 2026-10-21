@@ -295,6 +295,24 @@ impl Drop for AgentStream {
     }
 }
 
+/// Why a message was not queued for a run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InjectRefusal {
+    /// Nothing but whitespace.
+    Empty,
+    /// Over [`MAX_INJECTED_BYTES`].
+    TooLarge,
+    /// [`MAX_PENDING_MESSAGES`] are already waiting.
+    QueueFull,
+    /// The run has ended: nothing would read it.
+    Finished,
+}
+
+/// Messages waiting for the next model request, at most.
+pub const MAX_PENDING_MESSAGES: usize = 32;
+/// One injected message, at most (UTF-8 bytes).
+pub const MAX_INJECTED_BYTES: usize = 16 * 1024;
+
 #[derive(Default)]
 struct ControlState {
     messages: Vec<String>,
@@ -313,6 +331,32 @@ impl StreamControls {
             inner: Default::default(),
             cancel,
         }
+    }
+
+    /// Queue a message for the next model request, or say why not. Checked
+    /// under the same lock as the end of the run, so an accepted message is
+    /// always read (the run continues for it) and a refused one never is.
+    pub(crate) fn try_inject(&self, message: String) -> std::result::Result<(), InjectRefusal> {
+        if message.trim().is_empty() {
+            return Err(InjectRefusal::Empty);
+        }
+        if message.len() > MAX_INJECTED_BYTES {
+            return Err(InjectRefusal::TooLarge);
+        }
+        let mut inner = self.inner.lock();
+        if inner.finished || self.cancel.is_cancelled() {
+            return Err(InjectRefusal::Finished);
+        }
+        if inner.messages.len() >= MAX_PENDING_MESSAGES {
+            return Err(InjectRefusal::QueueFull);
+        }
+        inner.messages.push(message);
+        Ok(())
+    }
+
+    /// Messages accepted and not read yet.
+    pub(crate) fn pending_messages(&self) -> usize {
+        self.inner.lock().messages.len()
     }
 
     pub(crate) fn drain_messages(&self) -> Vec<String> {

@@ -124,6 +124,21 @@ export interface RunEndItem {
   runId: string
 }
 
+/**
+ * One sub-agent in the thread, where it was launched (after the parent's call),
+ * and again in a later run that resumed it. The agent itself lives in
+ * `Conversation.agents`; this item only places it.
+ */
+export interface AgentItem {
+  kind: 'agent'
+  id: string
+  runId?: string
+  agentId: string
+  /** The parent's tool call that launched (or resumed) it. */
+  toolCallId?: string
+  execution: number
+}
+
 export type TimelineItem =
   | UserItem
   | AssistantItem
@@ -132,6 +147,7 @@ export type TimelineItem =
   | EditItem
   | NoticeItem
   | RunEndItem
+  | AgentItem
 
 /**
  * Line sums of the applied edits of one file in one run (operations, not a net
@@ -175,6 +191,19 @@ export interface CommandEvidence {
   output: string | null
 }
 
+/** What a run's response cost: the engine's total of the run, live or from its record. */
+export interface RunUsageView {
+  input: number
+  output: number
+  cacheRead: number
+  /** Estimated USD; `null` when no price was known (unknown, never zero). */
+  costUsd: number | null
+  /** The cost is a lower bound: some consumed category had no price. */
+  partial: boolean
+  /** `false` while sub-agents still run: the total is replaced when they end. */
+  final: boolean
+}
+
 export interface RunInfo {
   runId: string
   prompt: string
@@ -196,6 +225,8 @@ export interface RunInfo {
   commands: CommandEvidence[]
   /** `finishedAt - startedAt` when both are known and in order; `null` otherwise. */
   workedMs: number | null
+  /** The response's cost; `null` when no total is known (an older record). */
+  usage: RunUsageView | null
 }
 
 export interface AgentToolCall {
@@ -215,6 +246,8 @@ export interface AgentInfo {
   endedAt?: number
   tools: AgentToolCall[]
   result?: AgentResult
+  /** The current execution: 1 at launch, one more for each resume. */
+  execution: number
 }
 
 export interface DraftAttachment {
@@ -226,11 +259,19 @@ export interface DraftAttachment {
   /** Object URL / data URL for an image preview. */
   previewUrl?: string
   error?: string
+  /** The copy's id: the attachment is a copy owned by the draft, then the conversation. */
+  attachmentId?: string
+  /** Being copied: the message cannot be sent yet. */
+  importing?: boolean
+  /** The conversation the copy was moved to (once a send promoted it). */
+  sessionId?: string
 }
 
 export interface Draft {
   text: string
   attachments: DraftAttachment[]
+  /** The draft's copies folder in the app (set by the first import). */
+  draftId?: string
   /** Skills to activate with the next message (`Prompt.skills`). */
   skills: string[]
 }
@@ -342,6 +383,19 @@ function isEngineSkillActivation(text: string): boolean {
   return t.startsWith('<skill_activation id="') && t.endsWith('</skill_activation>')
 }
 
+/** The cost of a stored run, from its record; `null` for a record written before usage was kept. */
+function usageOfRecord(usage: NonNullable<RunRecord['usage']> | null): RunUsageView | null {
+  if (!usage) return null
+  return {
+    input: usage.input_tokens,
+    output: usage.output_tokens,
+    cacheRead: usage.cache_read_input_tokens,
+    costUsd: usage.cost_usd ?? null,
+    partial: usage.partial,
+    final: usage.final_total,
+  }
+}
+
 /** The summary of a stored run, from its record. */
 function storedRun(record: RunRecord, prompt: string): RunInfo {
   const fileSummaries: RunFileSummary[] = record.files.map((f) => ({
@@ -382,6 +436,7 @@ function storedRun(record: RunRecord, prompt: string): RunInfo {
       output: c.output ?? null,
     })),
     workedMs: workedOf(record.started_at, finishedAt),
+    usage: usageOfRecord(record.usage),
   }
 }
 
@@ -515,8 +570,10 @@ export class Conversation {
           endedAt: TERMINAL_AGENT_STATES.includes(r.state) ? r.updated_at_ms : undefined,
           tools: [],
           result: r.result,
+          execution: r.execution ?? 1,
         }),
       )
+      this.placeAgent(r.info.agent_id, r.info.root_run_id, r.info.tool_call_id ?? undefined, r.execution ?? 1)
     }
     for (const cs of changesets) if (!this.changesets.has(cs.id)) this.changesets.set(cs.id, reactive(cs))
   }
@@ -687,6 +744,24 @@ export class Conversation {
             }
             break
           }
+        }
+      }
+      // The copies the message was sent with, kept by the desktop: shown again on
+      // its own item (an image by its preview, read from the copy).
+      if (msg.role === 'user' && msg.attachments?.length) {
+        const infos: AttachmentInfo[] = msg.attachments.map((a) => ({
+          kind: a.kind,
+          path: a.name,
+          bytes: a.size,
+          attachment_id: a.id,
+        }))
+        if (own) {
+          own.attachments = own.attachments.filter((x) => x.kind !== 'image' || !infos.some((i) => i.kind === 'image'))
+          own.attachments.push(...infos)
+        } else {
+          own = { kind: 'user', id: localId('u'), text: '', attachments: infos }
+          items.push(own)
+          userItemIds.set(userIndex, own.id)
         }
       }
     }
@@ -942,12 +1017,25 @@ export class Conversation {
             state: 'created',
             spawnedAt: env.at,
             tools: [],
+            execution: 1,
           }),
         )
+        this.placeAgent(env.agent.agent_id, env.agent.root_run_id, env.agent.tool_call_id ?? undefined, 1)
         break
       case 'agent_state': {
         const a = this.agents.get(env.agent_id)
-        if (a) {
+        const execution = env.execution ?? 1
+        if (a && execution > a.execution) {
+          // A resume: the same identity starts a new execution, timed from now.
+          a.execution = execution
+          a.spawnedAt = env.at
+          a.endedAt = undefined
+          a.result = undefined
+          a.tools = []
+          this.placeAgent(a.id, env.run_id ?? a.spawn.root_run_id, undefined, execution)
+        }
+        // A state of an older execution is stale: it changes nothing.
+        if (a && execution === a.execution) {
           a.state = env.state
           a.reason = env.reason
           if (TERMINAL_AGENT_STATES.includes(env.state)) a.endedAt = env.at
@@ -976,7 +1064,7 @@ export class Conversation {
       }
       case 'agent_finished': {
         const a = this.agents.get(env.result.agent_id)
-        if (a) {
+        if (a && (env.result.execution ?? 1) === a.execution) {
           a.result = env.result
           a.endedAt ??= env.at
         }
@@ -996,9 +1084,22 @@ export class Conversation {
       case 'skills_trust_resolved':
         this.skillsTrust = null
         break
-      case 'run_usage':
+      case 'run_usage': {
         this.runUsages.set(env.root_run_id, env)
+        const run = this.runs.get(env.root_run_id)
+        // Each total replaces the run's cost; a provisional one never replaces a final one.
+        if (run && !(run.usage?.final && !env.final_total)) {
+          run.usage = {
+            input: env.total.input_tokens,
+            output: env.total.output_tokens,
+            cacheRead: env.total.cache_read_input_tokens,
+            costUsd: env.total.cost_usd ?? null,
+            partial: env.total.cost_estimate?.partial ?? false,
+            final: env.final_total,
+          }
+        }
         break
+      }
       case 'memory_recalled':
         this.memory.lastRecall = {
           at: env.at,
@@ -1112,6 +1213,7 @@ export class Conversation {
       fileSummaries: [],
       commands: [],
       workedMs: null,
+      usage: null,
     }))
     if (!live) return
     this.runningRunId = runId
@@ -1279,6 +1381,38 @@ export class Conversation {
     this.items.push(item)
     // Return the proxied element so later appends are reactive.
     return this.items.at(-1) as AssistantItem
+  }
+
+  /**
+   * Places a sub-agent in the thread once per execution: right after the parent's
+   * call that launched it (after its siblings of the same call), or, for a resume,
+   * where the thread is now. A reopened agent without its call goes before the end
+   * of its run.
+   */
+  private placeAgent(agentId: string, runId: string | undefined, toolCallId: string | undefined, execution: number) {
+    const id = execution === 1 ? `agent-${agentId}` : `agent-${agentId}-e${execution}`
+    if (this.items.some((i) => i.id === id)) return
+    const item: AgentItem = { kind: 'agent', id, runId, agentId, toolCallId, execution }
+    const call = toolCallId ? this.items.findIndex((i) => i.kind === 'tool' && i.toolCallId === toolCallId) : -1
+    if (call >= 0) {
+      let at = call + 1
+      while (at < this.items.length) {
+        const next = this.items[at]
+        if (next.kind !== 'agent' || next.toolCallId !== toolCallId) break
+        at += 1
+      }
+      this.items.splice(at, 0, item)
+      return
+    }
+    if (execution === 1 && runId) {
+      const end = this.items.findIndex((i) => i.kind === 'run_end' && i.runId === runId)
+      if (end >= 0) {
+        this.items.splice(end, 0, item)
+        return
+      }
+    }
+    this.closeAssistant()
+    this.items.push(item)
   }
 
   /**

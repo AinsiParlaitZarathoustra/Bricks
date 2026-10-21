@@ -2,6 +2,7 @@
 // is shipped in the product. Shapes follow src/lib/ipc/engine.ts and the generated
 // bindings (src/lib/ipc/bindings).
 import type { OpenedSession } from '../../src/lib/ipc/client';
+import type { RunUsageRecord } from '../../src/lib/ipc/bindings/RunUsageRecord';
 import type {
 	AgentResult,
 	ContextStatus,
@@ -27,6 +28,26 @@ export const ZERO_USAGE: Usage = {
 	cache_read_input_tokens: 0,
 	reasoning_tokens: 0
 };
+
+/** A usage with the given counters; every other counter is zero and no price is known. */
+export function usageOf(overrides: Partial<Usage> = {}): Usage {
+	return { ...ZERO_USAGE, ...overrides };
+}
+
+/** The usage of a stored run, as the desktop writes it: a final total with a price. */
+export function usageRecord(overrides: Partial<RunUsageRecord> = {}): RunUsageRecord {
+	return {
+		input_tokens: 1_500,
+		output_tokens: 300,
+		cache_read_input_tokens: 0,
+		cache_creation_input_tokens: 0,
+		cost_usd: 0.42,
+		partial: false,
+		final_total: true,
+		pending_agents: 0,
+		...overrides
+	};
+}
 
 const CONTEXT: ContextStatus = {
 	context_used: {

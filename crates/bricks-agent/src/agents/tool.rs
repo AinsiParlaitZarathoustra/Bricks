@@ -53,7 +53,7 @@ fn item_schema(spawner: &AgentSpawner) -> Value {
         "model": { "type": "string", "description": "`inherit` (default), `auto`, or `provider_id/model_id`." },
         "reasoning": { "type": "string", "description": "`inherit` (default) or a reasoning profile id of that model." },
         "context": { "type": "string", "description": "Extra context passed explicitly (bounded); the sub-agent sees nothing else of this conversation." },
-        "isolation": { "type": "string", "enum": ["auto", "shared", "worktree"], "description": "`auto` (default): the shared workspace for one foreground sub-agent, a git worktree for background or parallel ones." }
+        "isolation": { "type": "string", "enum": ["auto", "shared", "worktree"], "description": "`auto` (default) or `worktree`: its own git worktree, since sub-agents run in parallel (outside a git repository, choose `shared`); `shared`: this workspace, one writer at a time." }
     })
 }
 
@@ -83,7 +83,7 @@ fn render_spawned(s: Spawned) -> ToolResult {
                 .iter()
                 .map(|h| {
                     format!(
-                        "- {} ({}, {}{}) admitted in the background: {}",
+                        "- {} ({}, {}{}): {}",
                         h.agent_id,
                         h.profile,
                         h.isolation,
@@ -96,7 +96,7 @@ fn render_spawned(s: Spawned) -> ToolResult {
                 })
                 .collect();
             ToolResult::success(format!(
-                "{} sub-agent(s) started in the background. Follow them with AgentControl (status, wait, result, cancel); their ChangeSets with inspect_changes / apply_changes.\n{}",
+                "{} sub-agent(s) started; they work in parallel while you go on. Follow them with AgentControl: `wait` for their results, `result`, `status`, `message` to guide a running one, `resume` to continue an ended one, `cancel`; their ChangeSets with inspect_changes / apply_changes.\n{}",
                 hs.len(),
                 lines.join("\n")
             ))
@@ -125,9 +125,9 @@ impl Tool for NativeAgentTool {
     fn description(&self) -> &str {
         "Delegate one self-contained task to a sub-agent that works in a fresh context (it does \
          not see this conversation) with your permissions and tools, optionally as a specialist \
-         profile, model or reasoning profile. Foreground (default): you wait for its compact \
-         result. `background: true`: you get a handle at once (AgentControl to follow it). Use it \
-         when a task is substantial and separable; do small tasks yourself."
+         profile, model or reasoning profile. It always runs in parallel: you get its id at once \
+         and go on; `AgentControl wait` gives its compact result when you need it. Use it when a \
+         task is substantial and separable; do small tasks yourself."
     }
 
     fn permission_level(&self) -> PermissionLevel {
@@ -139,9 +139,7 @@ impl Tool for NativeAgentTool {
     }
 
     fn input_schema(&self) -> Value {
-        let mut props = item_schema(&self.spawner);
-        props["background"] = json!({ "type": "boolean", "description": "Return a handle at once; the sub-agent goes on (default false)." });
-        json!({ "type": "object", "properties": props, "required": ["task"] })
+        json!({ "type": "object", "properties": item_schema(&self.spawner), "required": ["task"] })
     }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> ToolResult {
@@ -154,13 +152,12 @@ impl Tool for NativeAgentTool {
                 ));
             }
         };
-        let background = req.background.unwrap_or(false);
         match self
             .spawner
             .spawn_batch(
                 vec![req],
                 BatchOptions {
-                    background,
+                    background: true,
                     fail_fast: false,
                     batch: false,
                 },
@@ -189,8 +186,10 @@ impl AgentsTool {
 #[serde(deny_unknown_fields)]
 struct AgentsInput {
     agents: Vec<AgentSpawnRequest>,
+    /// Former foreground choice: accepted and ignored (always parallel).
     #[serde(default)]
-    background: bool,
+    #[allow(dead_code)]
+    background: Option<bool>,
     #[serde(default)]
     fail_fast: bool,
 }
@@ -203,10 +202,10 @@ impl Tool for AgentsTool {
 
     fn description(&self) -> &str {
         "Delegate several independent, self-contained tasks to sub-agents that run at the same \
-         time (as capacity allows), each in a fresh context with your permissions and tools; \
-         parallel writers each get their own git worktree, and their changes come back as \
-         ChangeSets to inspect and apply. Foreground (default): all results, in the order asked. \
-         `background: true`: handles at once. `fail_fast`: the first failure cancels the others."
+         time (as capacity allows; the others wait in line), each in a fresh context with your \
+         permissions and tools; parallel writers each get their own git worktree, and their \
+         changes come back as ChangeSets to inspect and apply. You get their ids at once; \
+         `AgentControl wait` gives each result. `fail_fast`: the first failure cancels the others."
     }
 
     fn permission_level(&self) -> PermissionLevel {
@@ -224,10 +223,8 @@ impl Tool for AgentsTool {
                 "agents": {
                     "type": "array",
                     "minItems": 1,
-                    "maxItems": self.spawner.settings().max_batch,
                     "items": { "type": "object", "properties": item_schema(&self.spawner), "required": ["task"] }
                 },
-                "background": { "type": "boolean", "description": "Return handles at once (default false)." },
                 "fail_fast": { "type": "boolean", "description": "Cancel the others when one fails (default false)." }
             },
             "required": ["agents"]
@@ -241,18 +238,12 @@ impl Tool for AgentsTool {
                 return ToolResult::error(format!("Invalid input: {e}. Nothing was started."));
             }
         };
-        if i.agents.iter().any(|a| a.background.is_some()) {
-            return ToolResult::error(
-                "`background` is set for the whole batch, not per agent (use Agent for one \
-                 background sub-agent). Nothing was started.",
-            );
-        }
         match self
             .spawner
             .spawn_batch(
                 i.agents,
                 BatchOptions {
-                    background: i.background,
+                    background: true,
                     fail_fast: i.fail_fast,
                     batch: true,
                 },
@@ -263,6 +254,47 @@ impl Tool for AgentsTool {
             Err(e) => ToolResult::error(e.to_string()),
             Ok(s) => render_spawned(s),
         }
+    }
+}
+
+/// The answer of `message`: what really happened, never a false « sent ».
+fn render_message(id: &str, outcome: super::runtime::MessageOutcome) -> ToolResult {
+    match message_text(id, outcome) {
+        Ok(t) => ToolResult::success(t),
+        Err(t) => ToolResult::error(t),
+    }
+}
+
+/// The text of a message outcome: `Ok` when it was queued.
+pub(crate) fn message_text(
+    id: &str,
+    outcome: super::runtime::MessageOutcome,
+) -> Result<String, String> {
+    use super::runtime::MessageOutcome as M;
+    use crate::events::InjectRefusal as R;
+    match outcome {
+        M::Accepted { message_id, pending } => Ok(format!(
+            "message {message_id} queued for {id}: it reads it at its next step ({pending} \
+             waiting)."
+        )),
+        M::Unknown | M::OutOfScope => {
+            Err(format!("no sub-agent `{id}` in your scope; nothing was sent."))
+        }
+        M::NotRunning(state) => Err(format!(
+            "{id} is {}: nothing reads messages now; nothing was sent (use resume to continue \
+             an ended sub-agent).",
+            state.as_str()
+        )),
+        M::Refused(R::Empty) => Err("the message is empty; nothing was sent.".into()),
+        M::Refused(R::TooLarge) => Err(format!(
+            "the message is over {} bytes; nothing was sent.",
+            crate::events::MAX_INJECTED_BYTES
+        )),
+        M::Refused(R::QueueFull) => Err(format!(
+            "{id} already has {} messages waiting; nothing was sent.",
+            crate::events::MAX_PENDING_MESSAGES
+        )),
+        M::Refused(R::Finished) => Err(format!("{id} has just ended; nothing was sent.")),
     }
 }
 
@@ -287,6 +319,12 @@ struct ControlInput {
     changeset_id: Option<String>,
     #[serde(default)]
     timeout_ms: Option<u64>,
+    /// `message`: the text for the running sub-agent.
+    #[serde(default)]
+    message: Option<String>,
+    /// `resume`: what the ended sub-agent should do now.
+    #[serde(default)]
+    prompt: Option<String>,
 }
 
 const MAX_WAIT_MS: u64 = 600_000;
@@ -343,9 +381,12 @@ impl Tool for AgentControlTool {
 
     fn description(&self) -> &str {
         "Follow and control your sub-agents: `list`, `status`/`result` (agent_id), `wait` \
-         (agent_id, timeout_ms), `cancel` (agent_id, with its descendants); and their ChangeSets: \
-         `inspect_changes`, `apply_changes` (to your working tree; a conflict writes nothing), \
-         `discard_changes` (changeset_id or agent_id). Reading never starts a model request."
+         (agent_id, timeout_ms), `message` (agent_id, message: read by the running sub-agent at \
+         its next step), `resume` (agent_id, prompt: an ended sub-agent continues its own \
+         conversation, same profile, model and tools), `cancel` (agent_id, with its descendants); \
+         and their ChangeSets: `inspect_changes`, `apply_changes` (to your working tree; a \
+         conflict writes nothing), `discard_changes` (changeset_id or agent_id). Reading never \
+         starts a model request."
     }
 
     fn permission_level(&self) -> PermissionLevel {
@@ -356,7 +397,7 @@ impl Tool for AgentControlTool {
     fn permission_level_for(&self, input: &Value) -> PermissionLevel {
         match input["action"].as_str().unwrap_or("") {
             "list" | "status" | "result" | "wait" | "inspect_changes" => PermissionLevel::ReadOnly,
-            "cancel" => PermissionLevel::Execute,
+            "cancel" | "message" | "resume" => PermissionLevel::Execute,
             _ => PermissionLevel::Write,
         }
     }
@@ -369,8 +410,10 @@ impl Tool for AgentControlTool {
         json!({
             "type": "object",
             "properties": {
-                "action": { "type": "string", "enum": ["list", "status", "result", "wait", "cancel", "inspect_changes", "apply_changes", "discard_changes"] },
-                "agent_id": { "type": "string", "description": "Required for status, result, wait, cancel; or to find an agent's ChangeSet." },
+                "action": { "type": "string", "enum": ["list", "status", "result", "wait", "message", "resume", "cancel", "inspect_changes", "apply_changes", "discard_changes"] },
+                "agent_id": { "type": "string", "description": "Required for status, result, wait, message, resume, cancel; or to find an agent's ChangeSet." },
+                "message": { "type": "string", "description": "message: the text for the running sub-agent (bounded)." },
+                "prompt": { "type": "string", "description": "resume: what the ended sub-agent should do now." },
                 "changeset_id": { "type": "string", "description": "For inspect/apply/discard (or give agent_id)." },
                 "timeout_ms": { "type": "integer", "minimum": 1, "maximum": MAX_WAIT_MS, "description": "wait: how long (default 60000 ms); a timeout stops nothing." }
             },
@@ -461,9 +504,32 @@ impl Tool for AgentControlTool {
                     }
                 }
             },
+            "message" => match need_agent(&i.agent_id) {
+                Err(e) => e,
+                Ok(id) => {
+                    let text = i.message.clone().unwrap_or_default();
+                    render_message(&id, rt.send_message(&id, who.as_deref(), text))
+                }
+            },
+            "resume" => match need_agent(&i.agent_id) {
+                Err(e) => e,
+                Ok(id) => {
+                    let prompt = i.prompt.clone().unwrap_or_default();
+                    match self.spawner.resume(&id, &prompt, ctx, who.as_deref()).await {
+                        Ok(info) => ToolResult::success(format!(
+                            "{id} resumed (execution {}): it continues its own conversation in \
+                             parallel. Use wait for its result.",
+                            rt.execution(&id).unwrap_or(1)
+                        ))
+                        .with_metadata(serde_json::to_value(&info).unwrap_or(Value::Null)),
+                        Err(e) => ToolResult::error(e.to_string()),
+                    }
+                }
+            },
             "cancel" => match need_agent(&i.agent_id) {
                 Err(e) => e,
                 Ok(id) => {
+                    rt.mark_stopped(&id);
                     let n = rt.cancel(&id);
                     ToolResult::success(format!(
                         "cancellation requested for {id} and its descendants ({n} running)."

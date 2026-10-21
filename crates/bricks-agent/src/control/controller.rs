@@ -539,6 +539,9 @@ fn build_agent(
         // The session agent records its usage in its root runs' ledger and
         // sees the session's sub-agents.
         ext.insert(crate::agents::RuntimeHandle(Arc::clone(sp.runtime())));
+        ext.insert(bricks_tools::send_message::MessageRouterHandle(Arc::new(
+            crate::agents::runtime::RuntimeRouter(Arc::clone(sp.runtime())),
+        )));
     }
     let mut b = Agent::builder()
         .provider_boxed(provider)
@@ -1020,6 +1023,7 @@ impl Controller {
         action: &str,
         agent_id: Option<String>,
         changeset_id: Option<String>,
+        message: Option<String>,
     ) -> (bool, String) {
         let rt = sp.runtime();
         let wd = self.agent().working_dir().to_path_buf();
@@ -1049,8 +1053,21 @@ impl Controller {
                 },
                 None => (false, "unknown sub-agent".into()),
             },
+            // The user writes to a running sub-agent: the same queue as
+            // `AgentControl message` (the user sees every instance).
+            "message" => match rec(&agent_id) {
+                Some(r) => match crate::agents::tool::message_text(
+                    &r.info.agent_id,
+                    rt.send_message(&r.info.agent_id, None, message.unwrap_or_default()),
+                ) {
+                    Ok(t) => (true, t),
+                    Err(t) => (false, t),
+                },
+                None => (false, "unknown sub-agent".into()),
+            },
             "cancel" => match rec(&agent_id) {
                 Some(r) => {
+                    rt.mark_stopped(&r.info.agent_id);
                     let n = rt.cancel(&r.info.agent_id);
                     (true, format!("cancellation requested ({n} running)"))
                 }
@@ -1404,6 +1421,7 @@ impl Controller {
                 ref agent_id,
                 ref changeset_id,
                 ref job_id,
+                ref message,
             } => {
                 if action == "jobs" || action == "stop_job" {
                     let this = self.clone();
@@ -1423,11 +1441,15 @@ impl Controller {
                     );
                 };
                 let this = self.clone();
-                let (action, agent_id, changeset_id) =
-                    (action.clone(), agent_id.clone(), changeset_id.clone());
+                let (action, agent_id, changeset_id, message) = (
+                    action.clone(),
+                    agent_id.clone(),
+                    changeset_id.clone(),
+                    message.clone(),
+                );
                 tokio::spawn(async move {
                     let (ok, text) = this
-                        .agent_control(&sp, &action, agent_id, changeset_id)
+                        .agent_control(&sp, &action, agent_id, changeset_id, message)
                         .await;
                     let ev = Event::AgentControlResult { action, ok, text };
                     this.inner.queue.push(None, ev, None).await;
@@ -1879,6 +1901,9 @@ impl Controller {
             agent.clone(),
             token.clone(),
         ));
+        agent
+            .extensions
+            .insert(crate::runner::RootRunHint(run_id.clone()));
         let result = crate::runner::run_prepared(&agent, &converted.input, tx, token.clone()).await;
         self.inner.broker.end_run();
         // Every event of the run is in the channel now (the agent keeps a
@@ -2372,10 +2397,12 @@ pub(crate) fn sub_agent_event(e: crate::agents::SubAgentEvent) -> Event {
             agent_id,
             state,
             reason,
+            execution,
         } => Event::AgentState {
             agent_id,
             state,
             reason,
+            execution,
         },
         S::ToolStarted {
             agent_id,

@@ -1,12 +1,13 @@
-//! The session's agent runtime: admission (depth, cumulative total, active
-//! slots, bounded queue), the instances and their results, and the usage
-//! ledger of each root run.
+//! The session's agent runtime: admission (depth, active slots, bounded
+//! queue), the instances and their results, and the usage ledger of each
+//! root run.
 //!
 //! Definitions:
-//! * depth: the session's agent is 0, its children 1, their children 2;
-//! * `max_total_per_run`: descendants **admitted** for one root run,
-//!   cumulatively (finished ones still count);
-//! * `max_concurrent`: active descendants. A slot is held while a child
+//! * depth: the session's agent is 0, its children 1, their children 2 (a
+//!   protection against runaway recursion, not a count of tasks);
+//! * no cumulative cap: any number of tasks may run one after the other;
+//! * `max_concurrent`: active descendants, every entry included (launch,
+//!   batch, resume, at any depth). A slot is held while a child
 //!   generates or runs tools; it is **released while the child waits for
 //!   its own children** (and taken back before it continues), so a chain
 //!   root → child → grandchild works with `max_concurrent = 1`. The
@@ -34,10 +35,8 @@ use tokio_util::sync::CancellationToken;
 pub struct Limits {
     pub max_concurrent: usize,
     pub max_depth: u32,
-    pub max_total_per_run: u32,
     pub max_queued: usize,
     pub admission_timeout: Duration,
-    pub max_batch: usize,
     /// Headless: how long to wait for background children after the answer.
     pub background_drain: Duration,
 }
@@ -46,7 +45,6 @@ pub struct Limits {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AdmissionError {
     DepthExceeded { depth: u32, max: u32 },
-    TotalExceeded { admitted: u32, asked: u32, max: u32 },
     QueueFull { max: usize },
     Timeout { ms: u64 },
     Cancelled,
@@ -58,14 +56,6 @@ impl std::fmt::Display for AdmissionError {
             Self::DepthExceeded { depth, max } => write!(
                 f,
                 "AgentDepthExceeded: a sub-agent at depth {depth} is beyond [agents] max_depth = {max}"
-            ),
-            Self::TotalExceeded {
-                admitted,
-                asked,
-                max,
-            } => write!(
-                f,
-                "AgentTotalExceeded: {admitted} sub-agent(s) already admitted in this run, {asked} more asked, [agents] max_total_per_run = {max}"
             ),
             Self::QueueFull { max } => write!(
                 f,
@@ -87,7 +77,6 @@ pub struct Scheduler {
     slots: Arc<Semaphore>,
     queued: AtomicUsize,
     peak_active: AtomicUsize,
-    totals: Mutex<HashMap<String, u32>>,
 }
 
 /// Admission figures, for metrics and inspectors.
@@ -106,7 +95,6 @@ impl Scheduler {
             limits,
             queued: AtomicUsize::new(0),
             peak_active: AtomicUsize::new(0),
-            totals: Mutex::new(HashMap::new()),
         })
     }
 
@@ -120,15 +108,10 @@ impl Scheduler {
         }
     }
 
-    /// Admitted descendants of a root run so far.
-    pub fn admitted(&self, root: &str) -> u32 {
-        self.totals.lock().get(root).copied().unwrap_or(0)
-    }
-
-    /// Check the depth of `n` new children of an agent at `parent_depth`,
-    /// and reserve them on the root run's total, atomically (a batch
-    /// either fits whole or is refused whole).
-    pub fn reserve(&self, root: &str, parent_depth: u32, n: u32) -> Result<(), AdmissionError> {
+    /// Check the depth of `n` new children of an agent at `parent_depth`
+    /// (a batch fits whole or is refused whole). There is no cumulative cap:
+    /// the slots and the bounded queue pace them.
+    pub fn reserve(&self, _root: &str, parent_depth: u32, _n: u32) -> Result<(), AdmissionError> {
         let depth = parent_depth + 1;
         if depth > self.limits.max_depth {
             return Err(AdmissionError::DepthExceeded {
@@ -136,26 +119,7 @@ impl Scheduler {
                 max: self.limits.max_depth,
             });
         }
-        let mut totals = self.totals.lock();
-        let admitted = totals.get(root).copied().unwrap_or(0);
-        if admitted + n > self.limits.max_total_per_run {
-            return Err(AdmissionError::TotalExceeded {
-                admitted,
-                asked: n,
-                max: self.limits.max_total_per_run,
-            });
-        }
-        totals.insert(root.to_string(), admitted + n);
         Ok(())
-    }
-
-    /// Give back reservations that never started (a batch refused after
-    /// reservation, before any child existed).
-    pub fn unreserve(&self, root: &str, n: u32) {
-        let mut totals = self.totals.lock();
-        if let Some(t) = totals.get_mut(root) {
-            *t = t.saturating_sub(n);
-        }
     }
 
     /// An activity slot: at once if free, else in the bounded queue (fair,
@@ -315,6 +279,23 @@ pub struct InstanceRecord {
     pub background: bool,
     /// Durable metadata: milliseconds since the Unix epoch.
     pub updated_at_ms: u64,
+    /// The current execution of this identity: 1 at launch, one more for
+    /// each resume. Events, results and waits belong to one execution.
+    #[serde(default = "first_execution")]
+    pub execution: u32,
+    /// What the launch actually used, to resume it with the same profile,
+    /// model, tools and workspace (never a secret). Absent for instances
+    /// launched before it existed: those cannot be resumed faithfully.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch: Option<super::spawn::LaunchRecord>,
+    /// Stopped by an explicit cancel: a later message is refused, a resume
+    /// must be asked for explicitly.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stopped: bool,
+}
+
+fn first_execution() -> u32 {
+    1
 }
 
 struct Live {
@@ -322,6 +303,31 @@ struct Live {
     done: tokio::sync::watch::Receiver<bool>,
     done_tx: tokio::sync::watch::Sender<bool>,
     handle: Option<tokio::task::JoinHandle<()>>,
+    /// The running execution's message queue, while it runs.
+    controls: Option<Arc<crate::events::StreamControls>>,
+}
+
+/// The answer to a message sent to a sub-agent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MessageOutcome {
+    /// Queued for its next model request (not read yet).
+    Accepted { message_id: String, pending: usize },
+    Unknown,
+    OutOfScope,
+    /// Ended (or not started yet): nothing would read it.
+    NotRunning(InstanceState),
+    Refused(crate::events::InjectRefusal),
+}
+
+/// Why a resume was refused before anything started.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResumeRefusal {
+    Unknown,
+    OutOfScope,
+    /// Still running (or queued): send it a message instead.
+    NotEnded(InstanceState),
+    /// Another resume of the same identity already started.
+    Busy,
 }
 
 /// Events of the runtime that are not tied to a run (background children
@@ -456,15 +462,42 @@ impl AgentRuntime {
     }
 
     /// A previous process's instances that never ended are marked
-    /// interrupted; nothing is restarted, no old pid is touched.
+    /// interrupted; nothing is restarted, no old pid is touched. A record
+    /// that cannot be read is reported and left out, and the original file is
+    /// kept as a `.bak` before the next save replaces it.
     fn recover(&self) {
         let Some(path) = &self.manifest else { return };
         let Ok(text) = std::fs::read_to_string(path) else {
             return;
         };
-        let Ok(mut records) = serde_json::from_str::<Vec<InstanceRecord>>(&text) else {
-            return;
-        };
+        let mut records = Vec::new();
+        let mut unreadable = false;
+        match serde_json::from_str::<Vec<serde_json::Value>>(&text) {
+            Ok(items) => {
+                for item in items {
+                    match serde_json::from_value::<InstanceRecord>(item) {
+                        Ok(r) => records.push(r),
+                        Err(e) => {
+                            unreadable = true;
+                            tracing::warn!(error = %e, "an agent record cannot be read and is left out");
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                unreadable = true;
+                tracing::warn!(error = %e, "the agent manifest cannot be read");
+            }
+        }
+        if unreadable {
+            let backup = path.with_extension(format!("json.{}.bak", now_ms()));
+            match std::fs::copy(path, &backup) {
+                Ok(_) => {
+                    tracing::warn!(backup = %backup.display(), "the original manifest is kept there")
+                }
+                Err(e) => tracing::warn!(error = %e, "the original manifest could not be kept"),
+            }
+        }
         for r in records.iter_mut() {
             if !r.state.is_terminal() {
                 r.state = InstanceState::Interrupted;
@@ -499,6 +532,7 @@ impl AgentRuntime {
                 done,
                 done_tx,
                 handle: None,
+                controls: None,
             },
         );
         self.records.lock().push(InstanceRecord {
@@ -508,8 +542,133 @@ impl AgentRuntime {
             result: None,
             background,
             updated_at_ms: now_ms(),
+            execution: 1,
+            launch: None,
+            stopped: false,
         });
         self.save();
+    }
+
+    /// The identity's details once known (its worktree, branch, skills)
+    /// and what its execution uses: `status` and the manifest stay true.
+    pub fn update_launch(
+        &self,
+        info: &SpawnInfo,
+        launch: Option<super::spawn::LaunchRecord>,
+    ) {
+        {
+            let mut recs = self.records.lock();
+            if let Some(r) = recs.iter_mut().find(|r| r.info.agent_id == info.agent_id) {
+                r.info = info.clone();
+                if launch.is_some() {
+                    r.launch = launch;
+                }
+                r.updated_at_ms = now_ms();
+            }
+        }
+        self.save();
+    }
+
+    /// The current execution of an identity.
+    pub fn execution(&self, id: &str) -> Option<u32> {
+        self.records
+            .lock()
+            .iter()
+            .find(|r| r.info.agent_id == id)
+            .map(|r| r.execution)
+    }
+
+    /// The message queue of the running execution `execution` (or none).
+    pub(crate) fn set_controls(
+        &self,
+        id: &str,
+        execution: u32,
+        controls: Option<Arc<crate::events::StreamControls>>,
+    ) {
+        if self.execution(id) != Some(execution) {
+            return;
+        }
+        if let Some(l) = self.live.lock().get_mut(id) {
+            l.controls = controls;
+        }
+    }
+
+    /// Queue a message for a running sub-agent, after checking that
+    /// `viewer` may reach it. The answer says what really happened: an
+    /// accepted message is read at its next model request.
+    pub fn send_message(&self, id: &str, viewer: Option<&str>, text: String) -> MessageOutcome {
+        let state = match self.record(id) {
+            None => return MessageOutcome::Unknown,
+            Some(r) => r.state,
+        };
+        if !self.visible_to(id, viewer) {
+            return MessageOutcome::OutOfScope;
+        }
+        let controls = self.live.lock().get(id).and_then(|l| l.controls.clone());
+        let Some(controls) = controls else {
+            return MessageOutcome::NotRunning(state);
+        };
+        match controls.try_inject(text) {
+            Ok(()) => MessageOutcome::Accepted {
+                message_id: format!("msg_{}", &uuid::Uuid::new_v4().simple().to_string()[..12]),
+                pending: controls.pending_messages(),
+            },
+            Err(crate::events::InjectRefusal::Finished) => MessageOutcome::NotRunning(state),
+            Err(e) => MessageOutcome::Refused(e),
+        }
+    }
+
+    /// Start a new execution of an ended identity, atomically: of two
+    /// concurrent resumes, one starts. The record is queued again with a
+    /// fresh cancellation token (from the session) and a fresh end signal;
+    /// its previous result stays in its stored transcript.
+    pub fn begin_resume(
+        &self,
+        id: &str,
+        viewer: Option<&str>,
+    ) -> Result<(u32, CancellationToken), ResumeRefusal> {
+        if !self.visible_to(id, viewer) {
+            return Err(if self.record(id).is_some() {
+                ResumeRefusal::OutOfScope
+            } else {
+                ResumeRefusal::Unknown
+            });
+        }
+        let cancel = self.session_token.child_token();
+        let (done_tx, done) = tokio::sync::watch::channel(false);
+        let execution = {
+            let mut recs = self.records.lock();
+            let mut live = self.live.lock();
+            let Some(r) = recs.iter_mut().find(|r| r.info.agent_id == id) else {
+                return Err(ResumeRefusal::Unknown);
+            };
+            if !r.state.is_terminal() {
+                return Err(ResumeRefusal::NotEnded(r.state));
+            }
+            // The previous execution must be over, not only marked so.
+            if live.get(id).is_some_and(|l| !*l.done.borrow()) {
+                return Err(ResumeRefusal::Busy);
+            }
+            r.execution += 1;
+            r.state = InstanceState::Queued;
+            r.reason = None;
+            r.result = None;
+            r.stopped = false;
+            r.updated_at_ms = now_ms();
+            live.insert(
+                id.to_string(),
+                Live {
+                    cancel: cancel.clone(),
+                    done,
+                    done_tx,
+                    handle: None,
+                    controls: None,
+                },
+            );
+            r.execution
+        };
+        self.save();
+        Ok((execution, cancel))
     }
 
     pub fn attach_task(&self, id: &str, handle: tokio::task::JoinHandle<()>) {
@@ -539,21 +698,40 @@ impl AgentRuntime {
         changed
     }
 
+    /// The end of one execution. A late end of an older execution (its
+    /// identity was resumed since) changes nothing.
     pub fn finish(&self, id: &str, result: AgentResult) {
-        {
+        let current = {
             let mut recs = self.records.lock();
-            if let Some(r) = recs.iter_mut().find(|r| r.info.agent_id == id)
-                && r.result.is_none()
-            {
-                r.result = Some(result);
-                r.updated_at_ms = now_ms();
+            match recs.iter_mut().find(|r| r.info.agent_id == id) {
+                Some(r) if r.execution == result.execution => {
+                    if r.result.is_none() {
+                        r.result = Some(result);
+                        r.updated_at_ms = now_ms();
+                    }
+                    true
+                }
+                _ => false,
             }
+        };
+        if !current {
+            return;
         }
         self.save();
-        if let Some(l) = self.live.lock().get(id) {
+        if let Some(l) = self.live.lock().get_mut(id) {
+            l.controls = None;
             let _ = l.done_tx.send(true);
         }
         self.maybe_final_usage(id);
+    }
+
+    /// An explicit stop: a later message is refused, nothing resumes it
+    /// unless a resume is asked for.
+    pub fn mark_stopped(&self, id: &str) {
+        let mut recs = self.records.lock();
+        if let Some(r) = recs.iter_mut().find(|r| r.info.agent_id == id) {
+            r.stopped = true;
+        }
     }
 
     pub fn record(&self, id: &str) -> Option<InstanceRecord> {
@@ -743,6 +921,25 @@ impl AgentRuntime {
 #[derive(Clone)]
 pub struct RuntimeHandle(pub Arc<AgentRuntime>);
 
+/// `SendMessage` delivers through the runtime: the same queue, scope and
+/// bounds as `AgentControl message`.
+pub struct RuntimeRouter(pub Arc<AgentRuntime>);
+
+impl bricks_tools::send_message::MessageRouter for RuntimeRouter {
+    fn deliver(
+        &self,
+        sender: &bricks_tools::Extensions,
+        to: &str,
+        content: String,
+    ) -> Result<String, String> {
+        let viewer = sender
+            .get::<super::spawn::AgentIdentity>()
+            .filter(|i| i.parent_id.is_some())
+            .map(|i| i.agent_id.clone());
+        super::tool::message_text(to, self.0.send_message(to, viewer.as_deref(), content))
+    }
+}
+
 /// The section of a git patch (`git diff` output) that concerns `path`: each
 /// section starts with a `diff --git a/<old> b/<new>` line.
 fn patch_section(patch: &str, path: &str) -> Option<String> {
@@ -770,62 +967,29 @@ fn patch_section(patch: &str, path: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    fn limits(max_concurrent: usize, max_depth: u32, max_total: u32, max_queued: usize) -> Limits {
+    fn limits(max_concurrent: usize, max_depth: u32, _unused: u32, max_queued: usize) -> Limits {
         Limits {
             max_concurrent,
             max_depth,
-            max_total_per_run: max_total,
             max_queued,
             admission_timeout: Duration::from_secs(5),
-            max_batch: 8,
             background_drain: Duration::from_secs(5),
         }
     }
 
     #[test]
-    fn depth_and_cumulative_total_are_checked_atomically() {
-        let s = Scheduler::new(limits(4, 2, 5, 8));
-        assert!(s.reserve("r", 0, 3).is_ok());
-        // A batch either fits whole or is refused whole.
-        assert_eq!(
-            s.reserve("r", 0, 3),
-            Err(AdmissionError::TotalExceeded {
-                admitted: 3,
-                asked: 3,
-                max: 5
-            })
-        );
-        assert_eq!(s.admitted("r"), 3);
+    fn only_the_depth_is_checked_and_there_is_no_cumulative_cap() {
+        let s = Scheduler::new(limits(4, 2, 0, 8));
+        // Any number of batches, one after the other: the slots pace them.
+        for _ in 0..40 {
+            assert!(s.reserve("r", 0, 3).is_ok());
+        }
         // Grandchildren (depth 2) allowed, depth 3 refused.
         assert!(s.reserve("r", 1, 1).is_ok());
         assert_eq!(
             s.reserve("r", 2, 1),
             Err(AdmissionError::DepthExceeded { depth: 3, max: 2 })
         );
-        // Another root run has its own total.
-        assert!(s.reserve("other", 0, 5).is_ok());
-        // Rollback of a refused batch.
-        s.unreserve("r", 1);
-        assert_eq!(s.admitted("r"), 3);
-    }
-
-    #[test]
-    fn concurrent_reservations_never_exceed_the_total() {
-        let s = Scheduler::new(limits(4, 2, 10, 8));
-        let ok = std::sync::Arc::new(AtomicUsize::new(0));
-        std::thread::scope(|sc| {
-            for _ in 0..16 {
-                let s = &s;
-                let ok = &ok;
-                sc.spawn(move || {
-                    if s.reserve("r", 0, 3).is_ok() {
-                        ok.fetch_add(1, Ordering::SeqCst);
-                    }
-                });
-            }
-        });
-        assert_eq!(ok.load(Ordering::SeqCst), 3, "3 batches of 3 fit in 10");
-        assert_eq!(s.admitted("r"), 9);
     }
 
     #[tokio::test]
@@ -1001,6 +1165,47 @@ mod tests {
         assert!(rt.pending(None).is_empty(), "nothing is restarted");
     }
 
+    /// One record that cannot be read does not cost the others, and the
+    /// original manifest is kept as a backup before the next save.
+    #[test]
+    fn an_unreadable_record_keeps_the_others_and_the_original_file() {
+        let d = tempfile::tempdir().unwrap();
+        let manifest = d.path().join("manifest.json");
+        let ws = Arc::new(super::super::workspace::WorkspaceManager::new(
+            None,
+            Default::default(),
+        ));
+        let rt = AgentRuntime::new(limits(2, 2, 10, 4), Arc::clone(&ws), Some(manifest.clone()));
+        let info: SpawnInfo = serde_json::from_value(serde_json::json!({
+            "agent_id": "agent_x", "root_run_id": "run_1", "profile": "p", "profile_source": "s",
+            "profile_revision": "r", "model": {"requested": "inherit", "applied": "m"},
+            "reasoning": {"requested": "inherit", "applied": "(none)"},
+            "workspace": "/w", "isolation": "shared", "task": "t", "created_at": "now"
+        }))
+        .unwrap();
+        rt.register(info, true, CancellationToken::new());
+        rt.set_state("agent_x", InstanceState::Running, None);
+        drop(rt);
+        let mut items: Vec<serde_json::Value> =
+            serde_json::from_str(&std::fs::read_to_string(&manifest).unwrap()).unwrap();
+        items.push(serde_json::json!({"info": "unreadable"}));
+        let original = serde_json::to_string(&items).unwrap();
+        std::fs::write(&manifest, &original).unwrap();
+
+        let rt = AgentRuntime::new(limits(2, 2, 10, 4), ws, Some(manifest));
+        assert_eq!(
+            rt.record("agent_x").unwrap().state,
+            InstanceState::Interrupted
+        );
+        let backups: Vec<PathBuf> = std::fs::read_dir(d.path())
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.to_string_lossy().ends_with(".bak"))
+            .collect();
+        assert_eq!(backups.len(), 1, "{backups:?}");
+        assert_eq!(std::fs::read_to_string(&backups[0]).unwrap(), original);
+    }
+
     #[test]
     fn usage_is_counted_once_per_response() {
         let ws = Arc::new(super::super::workspace::WorkspaceManager::new(
@@ -1048,5 +1253,165 @@ mod tests {
         );
         assert_eq!(patch_section(patch, "missing.rs"), None);
         assert_eq!(patch_section("", "x.rs"), None);
+    }
+
+    fn info_of(id: &str) -> SpawnInfo {
+        serde_json::from_value(serde_json::json!({
+            "agent_id": id, "root_run_id": "run_1", "parent_id": "main_1",
+            "profile": "p", "profile_source": "s", "profile_revision": "r",
+            "model": {"requested": "inherit", "applied": "m"},
+            "reasoning": {"requested": "inherit", "applied": "(none)"},
+            "workspace": "/w", "isolation": "shared", "task": "t", "created_at": "now",
+            "depth": 1
+        }))
+        .unwrap()
+    }
+
+    fn runtime(manifest: Option<PathBuf>) -> Arc<AgentRuntime> {
+        let ws = Arc::new(super::super::workspace::WorkspaceManager::new(
+            None,
+            Default::default(),
+        ));
+        AgentRuntime::new(limits(4, 3, 10, 4), ws, manifest)
+    }
+
+    /// The end of an older execution, arriving after a resume, finishes
+    /// nothing: the new execution keeps its state and its result.
+    #[test]
+    fn a_late_end_of_an_older_execution_does_not_finish_the_new_one() {
+        let rt = runtime(None);
+        rt.register(info_of("agent_x"), false, CancellationToken::new());
+        rt.set_state("agent_x", InstanceState::Running, None);
+        let mut first = AgentResult::lost(&info_of("agent_x"));
+        first.status = "completed".into();
+        first.error = None;
+        rt.finish("agent_x", first.clone());
+        rt.set_state("agent_x", InstanceState::Completed, None);
+        let (exec, _cancel) = rt.begin_resume("agent_x", None).unwrap();
+        assert_eq!(exec, 2);
+        // Still the first execution's late end: ignored.
+        rt.finish("agent_x", first);
+        let r = rt.record("agent_x").unwrap();
+        assert_eq!(r.execution, 2);
+        assert_eq!(r.state, InstanceState::Queued);
+        assert!(r.result.is_none(), "the new execution has no result yet");
+        // A second resume while this one is not over: refused.
+        assert_eq!(
+            rt.begin_resume("agent_x", None).err(),
+            Some(ResumeRefusal::NotEnded(InstanceState::Queued))
+        );
+        // Its own end counts.
+        let mut own = AgentResult::lost(&info_of("agent_x"));
+        own.execution = 2;
+        own.status = "completed".into();
+        own.error = None;
+        rt.finish("agent_x", own);
+        let r = rt.record("agent_x").unwrap();
+        assert_eq!(r.result.as_ref().map(|x| x.execution), Some(2));
+    }
+
+    /// `SendMessage` goes through the router: a running child receives it
+    /// (queued), a sibling's child is out of scope, an unknown or ended agent
+    /// is refused and nothing is reported as sent.
+    #[test]
+    fn sendmessage_through_the_router_reaches_a_running_child_and_refuses_otherwise() {
+        use bricks_tools::send_message::MessageRouter;
+        let rt = runtime(None);
+        rt.register(info_of("agent_c"), false, CancellationToken::new());
+        rt.set_state("agent_c", InstanceState::Running, None);
+        let controls = Arc::new(crate::events::StreamControls::new(CancellationToken::new()));
+        rt.set_controls("agent_c", 1, Some(Arc::clone(&controls)));
+        let router = RuntimeRouter(Arc::clone(&rt));
+        let session = bricks_tools::Extensions::default();
+        let ok = router
+            .deliver(&session, "agent_c", "hello".into())
+            .expect("queued");
+        assert!(ok.contains("queued for agent_c"), "{ok}");
+        assert_eq!(controls.pending_messages(), 1);
+        // A sibling, another sub-agent of the session: out of scope.
+        rt.register(info_of("agent_sib"), false, CancellationToken::new());
+        let sibling = bricks_tools::Extensions::default();
+        sibling.insert(super::super::spawn::AgentIdentity {
+            agent_id: "agent_sib".into(),
+            parent_id: Some("main_1".into()),
+            root_run_id: "run_1".into(),
+        });
+        let err = router
+            .deliver(&sibling, "agent_c", "nope".into())
+            .unwrap_err();
+        assert!(err.contains("nothing was sent"), "{err}");
+        assert_eq!(controls.pending_messages(), 1, "nothing added");
+        // Unknown.
+        assert!(
+            router
+                .deliver(&session, "agent_nope", "x".into())
+                .unwrap_err()
+                .contains("nothing was sent")
+        );
+        // Ended: refused, nothing reads it.
+        rt.finish("agent_c", AgentResult::lost(&info_of("agent_c")));
+        let err = router
+            .deliver(&session, "agent_c", "late".into())
+            .unwrap_err();
+        assert!(err.contains("nothing was sent"), "{err}");
+        assert_eq!(controls.pending_messages(), 1);
+    }
+
+    /// A manifest written by an earlier version, with a termination kind this
+    /// version does not know, loads: the record is kept as historical and the
+    /// file is not replaced by a backup.
+    #[test]
+    fn an_unknown_termination_kind_loads_as_historical_and_is_not_wiped() {
+        let d = tempfile::tempdir().unwrap();
+        let manifest = d.path().join("manifest.json");
+        let mut result = serde_json::to_value(AgentResult::lost(&info_of("agent_old"))).unwrap();
+        result["status"] = "incomplete".into();
+        result["termination"] = serde_json::json!({"kind": "max_turns", "limit": 30});
+        let record = serde_json::json!({
+            "info": info_of("agent_old"),
+            "state": "incomplete",
+            "background": false,
+            "updated_at_ms": 1,
+            "result": result,
+        });
+        std::fs::write(&manifest, serde_json::to_string(&vec![record]).unwrap()).unwrap();
+        let rt = runtime(Some(manifest.clone()));
+        let r = rt.record("agent_old").expect("the record is kept");
+        assert_eq!(r.state, InstanceState::Incomplete, "not interrupted");
+        assert_eq!(
+            r.result.unwrap().termination,
+            Some(crate::Termination::Historical {
+                kind: "max_turns".into()
+            })
+        );
+        let on_disk: Vec<serde_json::Value> =
+            serde_json::from_str(&std::fs::read_to_string(&manifest).unwrap()).unwrap();
+        assert_eq!(on_disk.len(), 1, "not wiped");
+        assert_eq!(on_disk[0]["result"]["termination"]["kind"], "max_turns");
+        let backups = std::fs::read_dir(d.path())
+            .unwrap()
+            .filter(|e| e.as_ref().unwrap().path().to_string_lossy().ends_with(".bak"))
+            .count();
+        assert_eq!(backups, 0, "readable: no backup needed");
+    }
+
+    /// The admission window is the configured one, measured on a controlled
+    /// clock; an expired admission leaves nothing reserved.
+    #[tokio::test(start_paused = true)]
+    async fn an_admission_window_of_sixty_seconds_expires_exactly_and_releases_nothing() {
+        let s = Scheduler::new(Limits {
+            admission_timeout: Duration::from_secs(60),
+            ..limits(1, 3, 10, 4)
+        });
+        let never = CancellationToken::new();
+        let holder = s.acquire(&never, || {}).await.unwrap();
+        let t0 = tokio::time::Instant::now();
+        let r = s.acquire(&never, || {}).await;
+        assert_eq!(r.err(), Some(AdmissionError::Timeout { ms: 60_000 }));
+        assert_eq!(t0.elapsed(), Duration::from_secs(60));
+        assert_eq!(s.stats().queued, 0);
+        drop(holder);
+        assert_eq!(s.stats().active, 0);
+        assert!(s.acquire(&never, || {}).await.is_ok());
     }
 }

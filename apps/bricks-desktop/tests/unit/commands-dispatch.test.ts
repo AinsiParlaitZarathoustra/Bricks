@@ -62,6 +62,7 @@ function fakeHost(options: Options = {}) {
 		},
 		openPicker: (picker) => rec('openPicker', picker),
 		open: (view, args) => rec('open', view, args),
+		openAgent: (agentId) => rec('openAgent', agentId),
 		attachmentBlocks() {
 			rec('attachmentBlocks');
 			return options.attachment ?? { blocks: [] };
@@ -248,13 +249,14 @@ describe('agent_control', () => {
 		expect(r.names()).toEqual(['parse']);
 	});
 
-	it('/agents status opens the instance view, then sends the status command', async () => {
+	it('/agents status opens the sub-agent inspector, then sends the status command', async () => {
 		const r = await run({
 			session: 'sess-1',
 			action: engine({ type: 'agent_control', action: 'status', agent_id: 'ag-1' })
 		});
-		expect(r.names()).toEqual(['parse', 'open', 'mark', 'send']);
-		expect(r.calls[1]).toEqual({ name: 'open', args: ['agent_instances', { action: 'status', agentId: 'ag-1' }] });
+		expect(r.names()).toEqual(['parse', 'openAgent', 'mark', 'send']);
+		expect(r.calls[1]).toEqual({ name: 'openAgent', args: ['ag-1'] });
+		expect(r.calls.some((c) => c.name === 'open')).toBe(false);
 	});
 
 	it('/jobs stop opens the jobs view, then sends the stop', async () => {

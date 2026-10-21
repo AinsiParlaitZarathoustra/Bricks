@@ -25,6 +25,7 @@
   const summary = $derived(runEndSummary(run))
   const worked = $derived(formatWorked(run?.workedMs ?? null))
 
+
   const TONE: Record<RunOutcome, string> = {
     succeeded: 'text-success',
     incomplete: 'text-warning',

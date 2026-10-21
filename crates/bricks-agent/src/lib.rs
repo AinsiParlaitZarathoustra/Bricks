@@ -71,15 +71,10 @@ impl UserInput {
 /// Why a run that returned stopped. A cancelled or failed run returns an
 /// error instead; every variant here except [`Termination::Completed`] is
 /// an incomplete run, whose history and partial results are kept.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Termination {
     /// The model gave its final answer with no tool call left to run.
     Completed,
-    /// Historical: a run stopped by a turn limit. Turn limits were removed
-    /// in 0.4.8; this is kept only so that results and events stored before
-    /// can still be read. No run produces it any more.
-    MaxTurns { limit: u32 },
     /// The answer was cut by the output-token limit, and the `continuations`
     /// allowed after a cut ran out.
     OutputTruncated { continuations: u32 },
@@ -90,6 +85,86 @@ pub enum Termination {
     ContentFiltered,
     /// The model returned neither text nor a tool call.
     EmptyResponse,
+    /// A stored end whose `kind` this version does not know, written by an
+    /// earlier version and produced by no run any more. It is read as an
+    /// interrupted, incomplete end, never as a success, and it keeps the
+    /// `kind` it was stored with.
+    Historical { kind: String },
+}
+
+/// The stored form of a [`Termination`]: an object whose `kind` names the
+/// variant. A `kind` this version does not know is read as
+/// [`Termination::Historical`].
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum StoredTermination {
+    Completed,
+    OutputTruncated {
+        continuations: u32,
+    },
+    NoProgress {
+        repeats: u32,
+    },
+    ContentFiltered,
+    EmptyResponse,
+    /// Any other kind.
+    #[serde(other)]
+    Other,
+}
+
+/// The stored form of [`Termination::Historical`]: its kind only.
+#[derive(serde::Serialize)]
+struct StoredHistorical<'a> {
+    kind: &'a str,
+}
+
+impl serde::Serialize for Termination {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        let stored = match self {
+            Termination::Completed => StoredTermination::Completed,
+            Termination::OutputTruncated { continuations } => StoredTermination::OutputTruncated {
+                continuations: *continuations,
+            },
+            Termination::NoProgress { repeats } => {
+                StoredTermination::NoProgress { repeats: *repeats }
+            }
+            Termination::ContentFiltered => StoredTermination::ContentFiltered,
+            Termination::EmptyResponse => StoredTermination::EmptyResponse,
+            Termination::Historical { kind } => {
+                return StoredHistorical { kind }.serialize(serializer);
+            }
+        };
+        stored.serialize(serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Termination {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        use serde::de::Error;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let stored = StoredTermination::deserialize(&value).map_err(D::Error::custom)?;
+        Ok(match stored {
+            StoredTermination::Completed => Termination::Completed,
+            StoredTermination::OutputTruncated { continuations } => {
+                Termination::OutputTruncated { continuations }
+            }
+            StoredTermination::NoProgress { repeats } => Termination::NoProgress { repeats },
+            StoredTermination::ContentFiltered => Termination::ContentFiltered,
+            StoredTermination::EmptyResponse => Termination::EmptyResponse,
+            StoredTermination::Other => Termination::Historical {
+                kind: value
+                    .get("kind")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+            },
+        })
+    }
 }
 
 impl Termination {
@@ -102,9 +177,6 @@ impl Termination {
     pub fn describe(&self) -> String {
         match self {
             Termination::Completed => "completed".into(),
-            Termination::MaxTurns { limit } => {
-                format!("stopped at the turn limit ({limit}) before a final answer")
-            }
             Termination::OutputTruncated { continuations } => format!(
                 "the answer was cut by the output-token limit ({continuations} continuation(s) allowed)"
             ),
@@ -115,6 +187,9 @@ impl Termination {
                 "the provider stopped the answer (content filter)".into()
             }
             Termination::EmptyResponse => "the model returned an empty response".into(),
+            Termination::Historical { kind } => {
+                format!("interrupted: stored by an earlier version as `{kind}`, not a final answer")
+            }
         }
     }
 }
@@ -1233,13 +1308,36 @@ mod tests {
 mod termination_history_tests {
     use super::Termination;
 
-    /// Results stored before 0.4.8 may say a run stopped at its turn
-    /// limit: they are still read (no run produces it any more).
+    /// Results stored by an earlier version still load. A kind this version
+    /// does not know is read as a historical, interrupted end, never as a
+    /// success; the kinds it knows keep their fields.
     #[test]
-    fn a_stored_turn_limit_termination_is_still_read() {
+    fn a_stored_termination_of_an_unknown_kind_is_still_read() {
+        // Historical data: a stop written before 0.4.8.
         let t: Termination = serde_json::from_str(r#"{"kind":"max_turns","limit":50}"#).unwrap();
-        assert_eq!(t, Termination::MaxTurns { limit: 50 });
+        assert_eq!(
+            t,
+            Termination::Historical {
+                kind: "max_turns".into()
+            }
+        );
         assert!(!t.is_completed());
-        assert!(t.describe().contains("turn limit"));
+        assert!(t.describe().starts_with("interrupted"));
+        assert_eq!(
+            serde_json::to_string(&t).unwrap(),
+            r#"{"kind":"max_turns"}"#
+        );
+
+        let done: Termination = serde_json::from_str(r#"{"kind":"completed"}"#).unwrap();
+        assert!(done.is_completed());
+        let cut: Termination =
+            serde_json::from_str(r#"{"kind":"no_progress","repeats":5}"#).unwrap();
+        assert_eq!(cut, Termination::NoProgress { repeats: 5 });
+        assert_eq!(
+            serde_json::to_string(&cut).unwrap(),
+            r#"{"kind":"no_progress","repeats":5}"#
+        );
+        assert!(serde_json::from_str::<Termination>(r#"{"kind":"no_progress"}"#).is_err());
+        assert!(serde_json::from_str::<Termination>(r#"{"limit":3}"#).is_err());
     }
 }

@@ -239,9 +239,10 @@ describe('stored runs', () => {
 			{ root_run_id: RUN_1, agent_id: null, tool_call_id: 'tc-1', name: 'Bash', command: 'npm test', status: 'failure', is_error: true, duration_ms: 9_000, output: 'échec', job_id: null },
 		],
 		assistant_text: 'Fait.',
+		usage: null,
 		...overrides,
 	});
-	const user = { role: 'user' as const, blocks: [{ type: 'text' as const, text: 'Lance' }] };
+	const user = { role: 'user' as const, attachments: [], blocks: [{ type: 'text' as const, text: 'Lance' }] };
 
 	it('the commands and files come from the record, and the time worked too', () => {
 		const conv = openConversation(openedSession({ history: [user], run_records: [record()] }));

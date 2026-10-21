@@ -8,6 +8,7 @@
   import NoticeLine from './NoticeLine.svelte'
   import RunEndCard from './RunEndCard.svelte'
   import ResponseCopy from './ResponseCopy.svelte'
+  import AgentLine from './AgentLine.svelte'
 
   let { item, conversation }: { item: TimelineItem; conversation: Conversation } = $props()
 
@@ -16,7 +17,7 @@
 </script>
 
 {#if item.kind === 'user'}
-  <UserMessage {item} />
+  <UserMessage {item} {conversation} />
 {:else if item.kind === 'assistant'}
   <AssistantMessage {item} {conversation} />
 {:else if item.kind === 'tool'}
@@ -31,6 +32,8 @@
   <NoticeLine {item} />
 {:else if item.kind === 'run_end'}
   <RunEndCard {item} {conversation} />
+{:else if item.kind === 'agent'}
+  <AgentLine {item} {conversation} />
 {/if}
 
 {#if response && response.complete && response.copyText.trim()}

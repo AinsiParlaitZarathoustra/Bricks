@@ -262,7 +262,7 @@ pub struct AgentOutput {
     },
     termination: {
       type: 'Termination',
-      description: 'How the run ended: Completed, OutputTruncated, NoProgress, ContentFiltered, EmptyResponse (MaxTurns is historical; no run produces it). Use is_complete() for a final answer.',
+      description: 'How the run ended: Completed, OutputTruncated, NoProgress, ContentFiltered, EmptyResponse. A stored end of another kind (for example `max_turns`, written before 0.4.8) is read as `Historical { kind }`: an incomplete end, never a success. No run produces it. Use is_complete() for a final answer.',
       required: true,
     },
   }}

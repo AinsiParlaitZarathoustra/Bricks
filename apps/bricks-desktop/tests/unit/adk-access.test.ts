@@ -9,7 +9,6 @@ describe('adkAccess: right panel menu', () => {
 		expect(new Set(views).size).toBe(views.length);
 		expect([...views].sort()).toEqual(
 			[
-				'agent_instances',
 				'agents',
 				'config',
 				'context',
@@ -22,6 +21,10 @@ describe('adkAccess: right panel menu', () => {
 				'tools'
 			].sort()
 		);
+	});
+
+	it('no longer offers the removed sub-agents list', () => {
+		expect(adkAccessViews() as string[]).not.toContain('agent_instances');
 	});
 
 	it('keeps group headings and item labels non-empty and free of duplicated labels', () => {
@@ -41,7 +44,8 @@ describe('adkAccess: right panel menu', () => {
 		const label = (view: string) =>
 			ADK_ACCESS_GROUPS.flatMap((g) => g.items).find((i) => i.view === view)?.label;
 		expect(label('session')).toBe('Session');
-		expect(label('agent_instances')).toBe('Sous-agents');
+		// The sub-agents list is gone: sub-agents open from their line in the thread.
+		expect(label('agent_instances')).toBeUndefined();
 		expect(label('agents')).toBe('Profils d’agents');
 		expect(label('jobs')).toBe('Tâches de fond');
 		expect(label('search')).toBe('Recherche dans le code');

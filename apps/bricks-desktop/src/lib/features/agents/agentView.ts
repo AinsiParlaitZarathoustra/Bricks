@@ -46,6 +46,71 @@ export function agentDurationMs(agent: AgentInfo, now: number): number {
 
 export { formatDuration } from '../conversation/format';
 
+function baseName(path: unknown): string | null {
+	if (typeof path !== 'string' || path.trim() === '') return null;
+	return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+}
+
+function field(input: unknown, ...keys: string[]): unknown {
+	if (typeof input !== 'object' || input === null) return undefined;
+	const record = input as Record<string, unknown>;
+	for (const key of keys) if (record[key] !== undefined) return record[key];
+	return undefined;
+}
+
+/** What one running tool call is doing, from its name and input only. */
+function toolAction(name: string, input: unknown): string {
+	const file = baseName(field(input, 'file_path', 'path'));
+	switch (name) {
+		case 'Read':
+			return file ? `Lecture de ${file}` : 'Lecture';
+		case 'Write':
+		case 'Edit':
+		case 'ApplyPatch':
+			return file ? `Modification de ${file}` : 'Modification';
+		case 'Glob':
+		case 'Grep':
+		case 'Search':
+			return 'Recherche dans le code';
+		case 'Bash': {
+			const command = field(input, 'command');
+			return typeof command === 'string' && command.trim() !== '' ? `Commande : ${command.trim()}` : 'Commande';
+		}
+		case 'WebFetch':
+		case 'WebSearch':
+			return 'Recherche sur le web';
+		case 'Agent':
+		case 'Agents':
+			return 'Délégation à un sous-agent';
+		case 'AgentControl':
+			return 'Suivi de ses sous-agents';
+		default:
+			return name;
+	}
+}
+
+/**
+ * The second line of an agent in the thread: what it is doing now, from the
+ * tool calls the engine reported as running (nothing is guessed or counted
+ * beyond them), or what it waits for. `null` when there is nothing to say.
+ */
+export function agentAction(agent: AgentInfo, awaitingApproval: boolean): string | null {
+	if (!isLive(agent.state)) return null;
+	if (awaitingApproval) return 'En attente d’autorisation';
+	if (agent.state === 'queued' || agent.state === 'waiting_admission' || agent.state === 'created') {
+		return agent.reason === 'preparing its worktree' ? 'Préparation de son espace de travail…' : null;
+	}
+	const running = agent.tools.filter((t) => t.status === 'running');
+	if (running.length === 0) return null;
+	if (running.length === 1) return `${toolAction(running[0].name, running[0].input)}…`;
+	const names = new Set(running.map((t) => t.name));
+	if (names.size === 1 && (names.has('Read') || names.has('Edit') || names.has('Write'))) {
+		const verb = names.has('Read') ? 'Lecture' : 'Modification';
+		return `${verb} de ${running.length} fichiers…`;
+	}
+	return `${running.length} outils en cours…`;
+}
+
 const TIME = new Intl.DateTimeFormat('fr-FR', {
 	hour: '2-digit',
 	minute: '2-digit',
@@ -81,6 +146,8 @@ export function controlDoneLabel(action: string): string {
 	switch (action) {
 		case 'cancel':
 			return 'Arrêt demandé.';
+		case 'message':
+			return 'Message transmis : l’agent le lit à sa prochaine étape.';
 		case 'apply_changes':
 			return 'Modifications appliquées.';
 		case 'discard_changes':
@@ -95,6 +162,8 @@ export function controlFailedLabel(action: string): string {
 	switch (action) {
 		case 'cancel':
 			return 'Arrêt impossible';
+		case 'message':
+			return 'Message non transmis';
 		case 'apply_changes':
 			return 'Application impossible';
 		case 'discard_changes':
@@ -113,14 +182,13 @@ export function terminationLabel(t: Termination | undefined): string | null {
 	switch (t.kind) {
 		case 'completed':
 			return 'Terminé normalement';
-		case 'max_turns':
-			return `Limite de tours atteinte (${String(t.limit)})`;
 		case 'output_truncated':
 			return `Sortie tronquée (${String(t.continuations)} continuation(s))`;
 		case 'no_progress':
 			return `Aucun progrès (${String(t.repeats)} répétitions)`;
 		default:
-			return String(t.kind);
+			// A kind of an earlier version: interrupted, never a success.
+			return 'fin interrompue (ancienne session)';
 	}
 }
 

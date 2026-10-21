@@ -12,10 +12,8 @@ fn limits(max_concurrent: usize, max_queued: usize, window: Duration) -> Limits 
     Limits {
         max_concurrent,
         max_depth: 3,
-        max_total_per_run: 10,
         max_queued,
         admission_timeout: window,
-        max_batch: 8,
         background_drain: Duration::from_secs(5),
     }
 }
@@ -145,15 +143,17 @@ async fn two_concurrent_waits_of_one_child_never_deadlock_on_its_own_slot() {
     }
 }
 
-/// The windows and the drain as configured: 30 s admission, a drain of 0
-/// (background children cancelled at once), and an explicit value read as
-/// given. Shown with the config reader, not by waiting.
+/// The windows and the drain as configured: 60 s admission, 16 slots, a
+/// drain that waits for sub-agents still running (they now always run in
+/// parallel), and an explicit value read as given. Shown with the config
+/// reader, not by waiting.
 #[test]
-fn the_defaults_are_30_seconds_of_admission_and_no_drain() {
+fn the_defaults_are_16_slots_60_seconds_of_admission_and_a_waiting_drain() {
     let d = bricks_agent::BricksConfig::from_texts(None, &[]);
-    assert_eq!(d.agents.admission_timeout_ms, 30_000);
-    assert_eq!(d.agents.background_drain_ms, 0);
-    assert_eq!(d.agents.max_concurrent, 8);
+    assert_eq!(d.agents.admission_timeout_ms, 60_000);
+    assert_eq!(d.agents.background_drain_ms, 600_000);
+    assert_eq!(d.agents.max_concurrent, 16);
+    assert_eq!(d.agents.summary_chars, 10_000);
     let explicit = bricks_agent::BricksConfig::from_texts(
         Some("[agents]\nadmission_timeout_ms = 1500\nbackground_drain_ms = 600000\n"),
         &[],

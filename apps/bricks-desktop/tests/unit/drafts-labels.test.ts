@@ -179,7 +179,7 @@ describe('commands and run labels', () => {
 });
 
 describe('command labels on user messages', () => {
-	const analyse = { role: 'user', blocks: [{ type: 'text', text: 'Analyse' }] } as HistoryMessage;
+	const analyse = { role: 'user', attachments: [], blocks: [{ type: 'text', text: 'Analyse' }] } as HistoryMessage;
 
 	it('a label that arrives before its message is applied when the message is created', () => {
 		const conv = new Conversation(openedSession(), PROJECT_ID);
@@ -232,9 +232,9 @@ describe('command labels on user messages', () => {
 	it('reopened history: labels match by prompt, in order, at most once, and none is invented', () => {
 		const history: HistoryMessage[] = [
 			analyse,
-			{ role: 'assistant', blocks: [{ type: 'text', text: 'ok' }] },
+			{ role: 'assistant', attachments: [], blocks: [{ type: 'text', text: 'ok' }] },
 			analyse,
-			{ role: 'user', blocks: [{ type: 'text', text: 'Autre' }] }
+			{ role: 'user', attachments: [], blocks: [{ type: 'text', text: 'Autre' }] }
 		];
 		const conv = new Conversation(
 			openedSession({
@@ -256,7 +256,7 @@ describe('labels by user_index: the index among ALL user-role messages', () => {
 	const user = (...blocks: HistoryMessage['blocks']) => ({ role: 'user', blocks }) as HistoryMessage;
 	const text = (value: string) => user({ type: 'text', text: value } as HistoryMessage['blocks'][number]);
 	const reply = (value: string) =>
-		({ role: 'assistant', blocks: [{ type: 'text', text: value }] }) as HistoryMessage;
+		({ role: 'assistant', attachments: [], blocks: [{ type: 'text', text: value }] }) as HistoryMessage;
 	const activation = `<skill_activation id="act_1" name="wrangler" source="user" revision="r1">
 --- instructions ---
 Use the wrangler CLI.

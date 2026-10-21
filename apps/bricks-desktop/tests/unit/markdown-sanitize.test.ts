@@ -396,7 +396,7 @@ describe('Mermaid bounds and neutralizing', () => {
 		expect(mermaidSourceError('x'.repeat(MAX_SOURCE_LENGTH + 1))).toMatch(/trop long/);
 		const result = await renderMermaid('x'.repeat(MAX_SOURCE_LENGTH + 1), {
 			id: 'mmd-big',
-			theme: 'light',
+			theme: 'app', mode: 'light',
 			fontFamily: 'sans-serif'
 		});
 		expect('error' in result && result.error).toMatch(/trop long/);
@@ -405,7 +405,7 @@ describe('Mermaid bounds and neutralizing', () => {
 	it('refuses an invalid identifier', async () => {
 		const result = await renderMermaid('flowchart TD\nA-->B', {
 			id: 'bad id!',
-			theme: 'light',
+			theme: 'app', mode: 'light',
 			fontFamily: 'sans-serif'
 		});
 		expect('error' in result && result.error).toMatch(/Identifiant/);

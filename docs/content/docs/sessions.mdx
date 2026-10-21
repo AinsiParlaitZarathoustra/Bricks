@@ -179,7 +179,14 @@ The desktop application also keeps one record per run in
 its shell commands and its file changes, which the message history does not
 hold. A record is written again when a run changes after it ended (a
 background job or a sub-agent finishing later). Deleting a session removes
-its file.
+its file. Each record also holds the usage of the response (tokens and cost);
+see [Data Flow](/docs/data-flow#run-records-bricks-desktop).
+
+The desktop also keeps the copies of the files attached to the messages in
+`<bricks_home>/sessions/<session_id>.files/`, beside the session's `.jsonl`
+file: the copies in `attachments/` and `attachments.jsonl`, which lists the
+runs sent with copies. Deleting the session deletes this folder with them.
+See [Multimodal Input](/docs/multimodal#attachments-in-bricks-desktop).
 
 ### Soft Delete (Tombstones)
 

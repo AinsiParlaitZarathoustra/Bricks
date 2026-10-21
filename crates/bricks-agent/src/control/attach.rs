@@ -16,6 +16,7 @@ use super::protocol::{AttachmentInfo, Prompt, PromptBlock};
 use crate::UserInput;
 use base64::Engine as _;
 use bricks_types::{ContentBlock, ImageSource};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 /// Bounds of what one submission attaches.
@@ -66,6 +67,41 @@ fn image_media_type(path: &Path) -> Option<&'static str> {
     })
 }
 
+/// Opens `abs` to read its content and returns the handle with the size the
+/// opened file has. The type is checked first: a folder is refused with its
+/// own message, and so is anything that is not a regular file (a pipe would
+/// block the read). The check is repeated on the handle that is read.
+fn open_regular_file(abs: &Path, path: &str) -> Result<(std::fs::File, u64), String> {
+    let describe = |e: std::io::Error| {
+        format!(
+            "cannot attach `{path}`: {e} (resolved to {})",
+            abs.display()
+        )
+    };
+    let meta = std::fs::metadata(abs).map_err(describe)?;
+    if meta.is_dir() {
+        return Err(format!("`{path}` is a folder: attach it as a folder"));
+    }
+    if !meta.is_file() {
+        return Err(format!("`{path}` is not a regular file"));
+    }
+    let file = std::fs::File::open(abs).map_err(describe)?;
+    let opened = file.metadata().map_err(describe)?;
+    if !opened.is_file() {
+        return Err(format!("`{path}` is not a regular file"));
+    }
+    Ok((file, opened.len()))
+}
+
+/// Reads at most `limit` bytes from the opened file, never more.
+fn read_at_most(file: std::fs::File, limit: u64, path: &str) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
+    file.take(limit)
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("cannot read `{path}`: {e}"))?;
+    Ok(bytes)
+}
+
 /// Convert a prompt. Errors name the block that could not be attached.
 pub fn convert(
     prompt: &Prompt,
@@ -86,35 +122,39 @@ pub fn convert(
             }
             PromptBlock::File { path } => {
                 let abs = resolve(working_dir, path);
-                let bytes = std::fs::read(&abs).map_err(|e| {
-                    format!(
-                        "cannot attach `{path}`: {e} (resolved to {})",
-                        abs.display()
-                    )
-                })?;
-                if std::fs::metadata(&abs).map(|m| m.is_dir()).unwrap_or(false) {
-                    return Err(format!("`{path}` is a folder: attach it as a folder"));
-                }
-                let sha = bricks_tools::preview::sha256_hex(&bytes);
-                let size = bytes.len() as u64;
-                let content = String::from_utf8(bytes).map_err(|_| {
-                    format!("`{path}` is not UTF-8 text; attach images as images, or let the agent read it")
-                })?;
-                let mut note = None;
-                let mut shown = content.as_str();
+                let (file, size) = open_regular_file(&abs, path)?;
                 let budget = limits
                     .max_file_bytes
                     .min(limits.max_total_bytes.saturating_sub(total));
-                if size > budget {
-                    let mut cut = budget as usize;
-                    while cut > 0 && !content.is_char_boundary(cut) {
-                        cut -= 1;
+                // One byte past the budget tells that the file is cut: the rest
+                // of a large file is never read.
+                let read = read_at_most(file, budget + 1, path)?;
+                let cut = size > budget || read.len() as u64 > budget;
+                let kept = if cut {
+                    read.len().min(budget as usize)
+                } else {
+                    read.len()
+                };
+                let shown = match std::str::from_utf8(&read[..kept]) {
+                    Ok(text) => text,
+                    // A cut may split a character: the whole characters are kept.
+                    Err(e) if cut && e.error_len().is_none() => {
+                        std::str::from_utf8(&read[..e.valid_up_to()]).unwrap_or_default()
                     }
-                    shown = &content[..cut];
-                    note = Some(format!(
-                        "first {cut} of {size} bytes attached (limit); the agent can read the rest"
-                    ));
-                }
+                    Err(_) => {
+                        return Err(format!(
+                            "`{path}` is not UTF-8 text; attach images as images, or let the agent read it"
+                        ));
+                    }
+                };
+                // The digest covers the captured text, as the history keeps it.
+                let sha = bricks_tools::preview::sha256_hex(shown.as_bytes());
+                let note = cut.then(|| {
+                    format!(
+                        "first {} of {size} bytes attached (limit); the agent can read the rest",
+                        shown.len()
+                    )
+                });
                 total += shown.len() as u64;
                 blocks.push(ContentBlock::Text {
                     text: format!(
@@ -179,17 +219,20 @@ pub fn convert(
                 let media = image_media_type(&abs).ok_or_else(|| {
                     format!("`{path}`: unsupported image type (png, jpeg, gif or webp)")
                 })?;
-                let meta = std::fs::metadata(&abs)
-                    .map_err(|e| format!("cannot attach image `{path}`: {e}"))?;
-                if meta.len() > limits.max_image_bytes {
+                let (file, size) = open_regular_file(&abs, path)?;
+                if size > limits.max_image_bytes {
                     return Err(format!(
-                        "image `{path}` is {} bytes; the limit is {}",
-                        meta.len(),
+                        "image `{path}` is {size} bytes; the limit is {}",
                         limits.max_image_bytes
                     ));
                 }
-                let bytes = std::fs::read(&abs)
-                    .map_err(|e| format!("cannot attach image `{path}`: {e}"))?;
+                let bytes = read_at_most(file, limits.max_image_bytes + 1, path)?;
+                if bytes.len() as u64 > limits.max_image_bytes {
+                    return Err(format!(
+                        "image `{path}` grew past the limit of {} bytes while it was read",
+                        limits.max_image_bytes
+                    ));
+                }
                 let sha = bricks_tools::preview::sha256_hex(&bytes);
                 blocks.push(ContentBlock::Image {
                     source: ImageSource {
@@ -343,5 +386,47 @@ mod tests {
                 .unwrap_err()
                 .contains("unsupported image")
         );
+    }
+
+    #[test]
+    fn a_large_file_is_read_only_up_to_its_budget() {
+        let dir = tempfile::tempdir().unwrap();
+        // 3 MB of two-byte characters: the budget is read, and the file is not.
+        std::fs::write(dir.path().join("huge.txt"), "é".repeat(1_500_000)).unwrap();
+        let prompt = Prompt {
+            blocks: vec![PromptBlock::File {
+                path: "huge.txt".into(),
+            }],
+            skills: Vec::new(),
+        };
+        let c = convert(&prompt, dir.path(), AttachLimits::default()).unwrap();
+        let note = c.attachments[0].note.as_deref().expect("cut note");
+        assert!(note.starts_with("first 262144 of 3000000 bytes"), "{note}");
+        assert_eq!(c.attachments[0].bytes, 3_000_000, "the size is the file's");
+        let ContentBlock::Text { text } = &c.input.attachments[0] else {
+            panic!()
+        };
+        assert!(text.contains("truncated=\"true\""));
+        assert!(text.len() < 262_400, "only the budget is sent");
+    }
+
+    #[test]
+    fn a_folder_or_a_missing_file_is_refused_by_its_type_first() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        let as_file = Prompt {
+            blocks: vec![PromptBlock::File { path: "src".into() }],
+            skills: Vec::new(),
+        };
+        let err = convert(&as_file, dir.path(), AttachLimits::default()).unwrap_err();
+        assert!(err.contains("is a folder"), "{err}");
+        let missing = Prompt {
+            blocks: vec![PromptBlock::File {
+                path: "nope.txt".into(),
+            }],
+            skills: Vec::new(),
+        };
+        let err = convert(&missing, dir.path(), AttachLimits::default()).unwrap_err();
+        assert!(err.contains("nope.txt"), "{err}");
     }
 }

@@ -262,6 +262,10 @@ fn raw_tool_result(raw: &[Message], id: &str) -> Option<String> {
     })
 }
 
+/// The id the next run of the session agent takes as its root run id (set by
+/// the controller before each run).
+pub(crate) struct RootRunHint(pub String);
+
 /// Append to the active history and to the raw history.
 fn push_message(agent: &Agent, msg: Message) {
     agent.raw_history.lock().push(msg.clone());
@@ -883,7 +887,14 @@ async fn run_loop(
     // it), and where its sub-agents report.
     {
         let current = agent.extensions.get::<crate::agents::AgentIdentity>();
-        let run_id = format!("run_{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
+        // The run's id as its starter knows it (the controller's run id), so
+        // usage totals, sub-agents and records name the same run; a fresh one
+        // otherwise.
+        let run_id = agent
+            .extensions
+            .get::<RootRunHint>()
+            .map(|h| h.0.clone())
+            .unwrap_or_else(|| format!("run_{}", &uuid::Uuid::new_v4().simple().to_string()[..12]));
         let identity = match current {
             Some(i) if i.parent_id.is_some() => (*i).clone(),
             Some(i) => crate::agents::AgentIdentity {

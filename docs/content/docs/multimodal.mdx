@@ -105,6 +105,43 @@ println!("{}", response.message.get_all_text());
 
 The same message also works through the `Agent` runner via `AgentBuilder::with_messages`.
 
+## Attachments in Bricks Desktop
+
+The desktop attaches files to the composer by paste, by the file picker, by a native drop, or by the `/file`, `/folder` and `/image` commands. All of them go through one import, which **copies the file** when it is added and names the copy with an opaque id. Moving, editing or deleting the original afterwards does not change the copy.
+
+The content is recognised from its bytes, never from its name:
+
+| Content | Limit | Sent as |
+| --- | --- | --- |
+| UTF-8 text | copy of at most 2 MiB | a `file` block: the text, wrapped in `<attached_file>` with its path, size and SHA-256 |
+| PNG, JPEG, GIF or WebP | at most 5 MiB | an `image` block |
+| Folder | not copied; it stays a reference | a bounded listing: at most 300 entries, 4 levels deep, `.gitignore` respected |
+
+Any other format is refused at import, with a message that names it: PDF, Word, Excel and PowerPoint files, ZIP archives and other binaries. The desktop does not read PDF files yet, even though the library can send them.
+
+When a message is sent, the engine reads each text copy from the opened file, up to 256 KiB per file and 1 MiB per message. A longer text is cut and marked `truncated="true"`; the agent can read the rest with its tools. An image over 5 MiB, or a file that grows past its limit while it is read, is refused and nothing is sent.
+
+### Where the copies are kept
+
+The copies live under the Bricks home (`~/.bricks` by default, or `BRICKS_HOME`):
+
+* **Before sending**, a copy belongs to its draft: `desktop/drafts/<draft_id>/attachments/<attachment_id>-<name>`.
+* **At sending**, once the conversation exists, the copies of the draft are moved, one rename each, into `sessions/<session_id>.files/attachments/`. Deleting the conversation deletes that folder with its copies.
+
+The conversation folder also holds `attachments.jsonl`, one line per run that was sent with copies. It is how the conversation shows the copies again on their message, with image previews, after a switch or a restart. A copy that is no longer on disk is not shown. Messages of conversations from before this record show no attachment.
+
+A copy can be removed from a draft at any time. A copy in a conversation can be removed only while no sent message refers to it.
+
+Bounds and cleanup:
+
+* a draft holds at most 50 MiB of copies and a conversation at most 200 MiB; an import over the bound is refused;
+* at startup, a draft untouched for 24 hours is removed, and a move interrupted by a crash is finished, or dropped when its conversation no longer exists. Conversation copies are never removed by age;
+* the global folder `desktop/attachments` written by earlier versions is purged after 7 days. Its files are not moved into conversations, because nothing records which conversation they belonged to.
+
+### Images and the model
+
+An image is sent as an image block only when the model of the conversation declares `image` in its `input_modalities` (see `providers.toml` in [Providers](/docs/providers)). Otherwise the send is refused before anything is sent, no user turn is added, and the attachment shows the refusal: remove the image or switch model. A model that the catalog does not know is left to the engine, which refuses it on its own.
+
 
 ## Runnable examples
 

@@ -426,15 +426,15 @@ Send an event to another session or agent.
 
 ### SendMessage
 
-Send a message to another agent or session.
+Send a message to one of your running sub-agents. It is the same delivery as `AgentControl message` (see [Sub-agent tools](#sub-agent-tools)): the sub-agent reads it at its next model request, never between a tool call and its result. Refusals are explicit (unknown or out of scope, not running, empty, over 16 KiB, 32 messages already waiting); nothing is reported as sent when it was not. Without an agent runtime in the session, nothing is sent.
 
-**Permission:** None
+**Permission:** Execute
 
 <TypeTable
   type={{
     to: {
       type: 'string',
-      description: 'Target session or agent ID.',
+      description: 'The sub-agent ID (`agent_…`).',
       required: true,
     },
     content: {
@@ -584,22 +584,36 @@ Remove a git worktree and return to the original working directory.
 
 ### Sub-agent tools
 
-`Agent` (one sub-agent), `Agents` (up to `[agents] max_batch` at once),
-`AgentControl` (handles, results, cancellation and ChangeSets) and
-`AgentProfiles` (list and search the profiles) are native tools. The CLI and
-the controller register them when `[agents] enabled` is true (the default).
-They are not in `bricks::tools::all()`, and the library type `AgentTool` stays
-for embedders.
+`Agent` (one sub-agent), `Agents` (several), `AgentControl` (ids, results,
+messages, resumes, cancellation and ChangeSets) and `AgentProfiles` (list and
+search the profiles) are native tools. The CLI and the controller register
+them when `[agents] enabled` is true (the default). They are not in
+`bricks::tools::all()`, and the library type `AgentTool` stays for embedders.
+
+Sub-agents always run in parallel. `Agent` and `Agents` return their ids at
+once; `AgentControl wait` and `result` give the results. There is no
+`background` parameter.
 
 **Permission:** `Agent` and `Agents`: Execute. Allowing one allows that
 delegation only: each child's own tool calls go through the policy one by one.
 `AgentControl`: ReadOnly for `list`, `status`, `result`, `wait` and
-`inspect_changes`, Execute for `cancel`, Write for `apply_changes` and
-`discard_changes`. `AgentProfiles`: ReadOnly.
+`inspect_changes`, Execute for `message`, `resume` and `cancel`, Write for
+`apply_changes` and `discard_changes`. `AgentProfiles`: ReadOnly.
 
-Their parameters, the limits (`max_depth`, `max_concurrent`, `max_batch`,
-`admission_timeout_ms` = 30000) and the isolation rules are in
-`docs/agents.md` in the repository.
+The `AgentControl` actions, by their parameters:
+
+| action | parameters | effect |
+|---|---|---|
+| `list`, `status`, `result` | `agent_id` (`status`, `result`) | instances visible to the caller; state; the kept result |
+| `wait` | `agent_id`, `timeout_ms` (default 60000, at most 600000) | waits for the end; a timeout cancels nothing |
+| `message` | `agent_id`, `message` | queues a message for a running sub-agent (see `SendMessage`) |
+| `resume` | `agent_id`, `prompt` | starts a new execution of an ended sub-agent, with its launch's profile, model, tools, skills and workspace |
+| `cancel` | `agent_id` | cancels it and its descendants |
+| `inspect_changes`, `apply_changes`, `discard_changes` | `changeset_id` or `agent_id` | a ChangeSet of an isolated sub-agent |
+
+Their parameters, the limits (`max_depth`, `max_concurrent` = 16, `max_queued`
+= 64, `admission_timeout_ms` = 60000, `summary_chars` = 10000) and the
+isolation rules are in `docs/agents.md` in the repository.
 
 ## Other
 
@@ -714,7 +728,7 @@ Search for available tools by keyword.
 
 | Level | Tools |
 |-------|-------|
-| **None** (18) | EnterPlanMode, ExitPlanMode, TodoWrite, CronList, Sleep, SendMessage, TaskCreate, TaskGet, TaskUpdate, TaskList, TaskStop, TaskOutput, AskUserQuestion, SyntheticOutput, Config, Skill, ToolSearch |
+| **None** (16) | EnterPlanMode, ExitPlanMode, TodoWrite, CronList, Sleep, TaskCreate, TaskGet, TaskUpdate, TaskList, TaskStop, TaskOutput, AskUserQuestion, SyntheticOutput, Config, Skill, ToolSearch |
 | **ReadOnly** (5) | Read, Glob, Grep, WebFetch, WebSearch |
 | **Write** (5) | Write, Edit, NotebookEdit, EnterWorktree, ExitWorktree |
-| **Execute** (5) | Bash, PowerShell, CronCreate, CronDelete, RemoteTrigger |
+| **Execute** (6) | Bash, PowerShell, CronCreate, CronDelete, RemoteTrigger, SendMessage |

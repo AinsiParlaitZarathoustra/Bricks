@@ -1,34 +1,22 @@
-//! SendMessage tool: inter-agent message passing.
+//! SendMessage tool: a message to a running sub-agent of this session.
+//!
+//! The tool only adapts: delivery, scope checks and bounds belong to the
+//! agent runtime ([`MessageRouter`], installed by the runtime in the agent's
+//! extensions). Without a router nothing is sent, and the tool says so.
 
 use super::*;
 use serde::Deserialize;
 
-/// Global inbox registry keyed by session_id.
-static INBOX_REGISTRY: once_cell::sync::Lazy<dashmap::DashMap<String, Vec<InboxMessage>>> =
-    once_cell::sync::Lazy::new(dashmap::DashMap::new);
-
-#[derive(Debug, Clone, serde::Serialize)]
-pub struct InboxMessage {
-    pub from: String,
-    pub content: String,
-    pub timestamp: String,
+/// Delivers a message to an agent by its id, checking that the sender may
+/// reach it. `Ok` is what really happened (queued, with its id); `Err` why
+/// nothing was sent.
+pub trait MessageRouter: Send + Sync {
+    fn deliver(&self, sender: &Extensions, to: &str, content: String) -> std::result::Result<String, String>;
 }
 
-/// Drain all pending messages for a session.
-pub fn drain_inbox(session_id: &str) -> Vec<InboxMessage> {
-    INBOX_REGISTRY
-        .remove(session_id)
-        .map(|(_, v)| v)
-        .unwrap_or_default()
-}
-
-/// Peek at pending messages without consuming them.
-pub fn peek_inbox(session_id: &str) -> Vec<InboxMessage> {
-    INBOX_REGISTRY
-        .get(session_id)
-        .map(|v| v.clone())
-        .unwrap_or_default()
-}
+/// The router of the session, in the agent's extensions.
+#[derive(Clone)]
+pub struct MessageRouterHandle(pub Arc<dyn MessageRouter>);
 
 pub struct SendMessageTool;
 
@@ -38,10 +26,11 @@ impl Tool for SendMessageTool {
         "SendMessage"
     }
     fn description(&self) -> &str {
-        "Send a message to another agent or session by ID."
+        "Send a message to one of your running sub-agents by its id (the same as \
+         `AgentControl message`): it reads it at its next step."
     }
     fn permission_level(&self) -> PermissionLevel {
-        PermissionLevel::None
+        PermissionLevel::Execute
     }
     fn category(&self) -> ToolCategory {
         ToolCategory::Orchestration
@@ -51,7 +40,7 @@ impl Tool for SendMessageTool {
         serde_json::json!({
             "type": "object",
             "properties": {
-                "to": { "type": "string", "description": "Target session/agent ID" },
+                "to": { "type": "string", "description": "The sub-agent's id (agent_…)" },
                 "content": { "type": "string", "description": "Message content" }
             },
             "required": ["to", "content"]
@@ -70,19 +59,15 @@ impl Tool for SendMessageTool {
             Ok(i) => i,
             Err(e) => return e,
         };
-
-        let msg = InboxMessage {
-            from: ctx.session_id.clone(),
-            content: input.content.clone(),
-            timestamp: chrono::Utc::now().to_rfc3339(),
+        let Some(router) = ctx.extensions.get::<MessageRouterHandle>() else {
+            return ToolResult::error(
+                "no agent runtime in this session: there is no sub-agent to reach; nothing was sent.",
+            );
         };
-
-        INBOX_REGISTRY
-            .entry(input.to.clone())
-            .or_default()
-            .push(msg);
-
-        ToolResult::success(format!("Message sent to '{}'", input.to))
+        match router.0.deliver(&ctx.extensions, &input.to, input.content) {
+            Ok(text) => ToolResult::success(text),
+            Err(text) => ToolResult::error(text),
+        }
     }
 }
 
@@ -90,34 +75,61 @@ impl Tool for SendMessageTool {
 mod tests {
     use super::*;
     use crate::permissions::AllowAll;
+    use parking_lot::Mutex;
 
-    fn test_ctx() -> ToolContext {
+    fn test_ctx(ext: Extensions) -> ToolContext {
         ToolContext {
             working_dir: std::env::temp_dir(),
             session_id: "agent-a".into(),
             permissions: Arc::new(AllowAll),
             cost_tracker: Arc::new(CostTracker::new()),
             mcp_manager: None,
-            extensions: Extensions::default(),
+            extensions: ext,
+        }
+    }
+
+    struct Recorder(Mutex<Vec<(String, String)>>);
+    impl MessageRouter for Recorder {
+        fn deliver(&self, _: &Extensions, to: &str, content: String) -> std::result::Result<String, String> {
+            if to == "agent_gone" {
+                return Err("agent_gone has ended; nothing was sent.".into());
+            }
+            self.0.lock().push((to.into(), content));
+            Ok(format!("message queued for {to}"))
         }
     }
 
     #[tokio::test]
-    async fn test_send_and_receive() {
-        let tool = SendMessageTool;
-        tool.execute(
-            serde_json::json!({"to": "agent-b", "content": "Hello B!"}),
-            &test_ctx(),
-        )
-        .await;
+    async fn without_a_router_nothing_is_claimed_sent() {
+        let r = SendMessageTool
+            .execute(
+                serde_json::json!({"to": "agent-b", "content": "Hello B!"}),
+                &test_ctx(Extensions::default()),
+            )
+            .await;
+        assert!(r.is_error, "{}", r.content);
+        assert!(r.content.contains("nothing was sent"));
+    }
 
-        let msgs = peek_inbox("agent-b");
-        assert_eq!(msgs.len(), 1);
-        assert_eq!(msgs[0].from, "agent-a");
-        assert_eq!(msgs[0].content, "Hello B!");
-
-        let drained = drain_inbox("agent-b");
-        assert_eq!(drained.len(), 1);
-        assert!(peek_inbox("agent-b").is_empty());
+    #[tokio::test]
+    async fn the_router_decides_and_its_answer_is_returned() {
+        let rec = Arc::new(Recorder(Mutex::new(Vec::new())));
+        let ext = Extensions::default();
+        ext.insert(MessageRouterHandle(rec.clone()));
+        let ok = SendMessageTool
+            .execute(
+                serde_json::json!({"to": "agent_b", "content": "Hello"}),
+                &test_ctx(ext.clone()),
+            )
+            .await;
+        assert!(!ok.is_error && ok.content.contains("queued"));
+        assert_eq!(rec.0.lock().as_slice(), &[("agent_b".to_string(), "Hello".to_string())]);
+        let gone = SendMessageTool
+            .execute(
+                serde_json::json!({"to": "agent_gone", "content": "Hello"}),
+                &test_ctx(ext),
+            )
+            .await;
+        assert!(gone.is_error && gone.content.contains("nothing was sent"));
     }
 }

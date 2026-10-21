@@ -226,9 +226,11 @@ impl Default for AgentSettings {
     }
 }
 
+/// The `[agent]` table as read from the file. Its unknown keys are removed
+/// by the configuration loader before it is read (see `bricks_config`).
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct FileAgent {
+pub(crate) struct FileAgent {
     model: Option<String>,
     reasoning: Option<String>,
     max_tokens: Option<u32>,

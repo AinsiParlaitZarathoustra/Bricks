@@ -68,6 +68,7 @@ function fakeHost(action: SlashAction, options: Options = {}) {
 		},
 		openPicker: (picker) => rec('openPicker', picker),
 		open: (view, args) => rec('open', view, args),
+		openAgent: (agentId) => rec('openAgent', agentId),
 		attachmentBlocks() {
 			rec('attachmentBlocks');
 			return options.attachment ?? { blocks: [] };
@@ -343,10 +344,10 @@ describe('engine Command: desktop effect of each type', () => {
 		expect(sendsOfType(reload.calls, 'reload_agent_profiles')).toBe(1);
 	});
 
-	it('/agents running lists the instances in the open session only', async () => {
+	it('/agents running sends the list to the open session only, opening no view', async () => {
 		const fake = fakeHost(engine({ type: 'agent_control', action: 'list' }));
 		await runSlashLine('/agents running', fake.host);
-		expect(fake.calls.find((c) => c.name === 'open')?.args[0]).toBe('agent_instances');
+		expect(fake.calls.some((c) => c.name === 'open' || c.name === 'openAgent')).toBe(false);
 		expect(sendsOfType(fake.calls, 'agent_control')).toBe(1);
 
 		const closed = fakeHost(engine({ type: 'agent_control', action: 'list' }), { session: null });

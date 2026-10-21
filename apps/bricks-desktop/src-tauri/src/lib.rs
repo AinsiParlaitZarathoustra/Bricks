@@ -43,6 +43,15 @@ pub fn run() {
             commands::sessions::session_command,
             commands::sessions::session_snapshot,
             commands::sessions::attachment_save,
+            // Attachment copies: drafts, promotion into a session, paths, preview (Sprint 14.7 Lot C)
+            commands::attachments::attachment_import_bytes,
+            commands::attachments::attachment_import_path,
+            commands::attachments::discard_draft_attachment,
+            commands::attachments::discard_session_attachment,
+            commands::attachments::discard_draft,
+            commands::attachments::promote_draft,
+            commands::attachments::session_attachment_paths,
+            commands::attachments::attachment_preview,
             // Change journal (Haiku 1)
             commands::changes::change_log_list,
             commands::changes::change_log_diff,

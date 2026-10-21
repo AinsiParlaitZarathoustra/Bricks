@@ -7,8 +7,8 @@ description: Renamed crates and import paths, the removed delegation and multi-e
 
 The Rust SDK was called Cersei. It is now the **Bricks ADK**: the facade crate
 is `bricks`, and the other crates use the `bricks-` prefix. This page is the
-single reference for the rename and for the behaviour changes of Sprint 14.6
-that a client, an embedder or a script must follow. The change list is in the
+single reference for the rename and for the behaviour changes of Sprints 14.6
+and 14.7 that a client, an embedder or a script must follow. The change list is in the
 changelog (`docs/content/docs/changelog.mdx`) and in the root `CHANGELOG.md`.
 
 Nothing is converted automatically. Old sessions and recorded histories stay
@@ -182,8 +182,7 @@ through its exports.
 
 | Setting | Before | Now | What changes for you |
 |---|---|---|---|
-| `[agents] background_drain_ms` | `600000` | `0` | A headless `bricks run` no longer waits for background sub-agents after its answer. Those still running are cancelled at once, and the run exits with code `6`. Set `600000` to keep the wait. |
-| `[agents] admission_timeout_ms` | `600000` | `30000` | A child that waits for a slot gets `AgentAdmissionTimeout` after 30 s. Raise it to keep the old wait. |
+| `[agents] admission_timeout_ms` | `600000` | `60000` | A child that waits for a slot, or for a shared workspace's writer, gets `AgentAdmissionTimeout` after 60 s. Raise it to keep the old wait. |
 | `[agent] retry_after_max_wait_ms` | (none) | `60000` | A provider's `Retry-After` longer than this is not waited for: no retry is sent, and the run fails with a message that names the key. `0` never waits for one. Raise it to keep waiting. |
 
 `[web.search] max_retry_wait_ms` is unchanged. It bounds only the single
@@ -248,7 +247,52 @@ have to change, and events and sessions written at 5 read as before (an absent
   written, cut to 512 KiB, with `patch_truncated`). `binary` is now set for a
   binary file, which has no patch (it was always false before).
 
-## 11. Checklist
+## 11. Sub-agents run in parallel
+
+`Agent` and `Agents` have no foreground mode. Every sub-agent runs in
+parallel, and the call returns its id at once. A client or a script must:
+
+* **Read results with `AgentControl`.** The result is not in the reply of
+  `Agent` or `Agents`. Call `AgentControl` with `wait` (`agent_id`,
+  `timeout_ms`), then `result`; or read `agent_finished` from the event
+  stream. Code that expected the result in the reply must change.
+* **Remove `background`.** The parameter is gone from `Agent` and `Agents`
+  (and from each `Agents` entry). A call that still sends it is accepted and
+  the field is ignored.
+* **Remove `max_turns`.** Turn limits are gone from every active surface: the
+  `max_turns` argument of `Agent` and `Agents` (an unknown field: the call is
+  refused), the keys `[agent] max_turns`, `[agents] default_max_turns`,
+  `max_turns_cap` and a profile's `max_turns` (unknown keys: ignored and
+  reported as a diagnostic), and the `--max-turns` option of `tbench-agent`
+  (an unknown argument). A stored result that says `max_turns` is read as a
+  historical end, never as a success. In Rust, `Termination::Historical { kind }`
+  replaces `Termination::MaxTurns`: a `match` on `Termination` must handle it.
+* **Remove `max_batch` and `max_total_per_run`.** Neither applies any more.
+  The number of `Agents` entries is not capped, and the descendants of a run
+  are not counted cumulatively: children beyond `max_concurrent` wait in the
+  queue, which is bounded by `max_queued`. The two keys are unknown keys now.
+* **Check the isolation.** Each sub-agent gets its own git worktree by default
+  (`isolation: auto`). Outside a git repository a worktree launch is refused
+  before anything starts; pass `isolation: "shared"` to work in place, with one
+  writer at a time.
+
+The new settings:
+
+| setting | value | what it bounds |
+|---|---|---|
+| `[agents] max_concurrent` | `16` | sub-agents working at once in the session: launches, batches, resumes, at any depth |
+| `[agents] max_queued` | `64` | children waiting for a slot; beyond it, `AgentQueueFull` |
+| `[agents] summary_chars` | `10000` | characters of a sub-agent's answer returned to its parent, the ellipsis included |
+| `[agents] background_drain_ms` | `600000` | headless: sub-agents still running after the answer get this long, then are cancelled, and the run exits with code `6` |
+
+`AgentControl` gains `message` (send a message to a running sub-agent) and
+`resume` (start a new execution of an ended one, under the same id, with its
+launch's profile, model, tools, skills and workspace). `SendMessage` sends the
+same message. `agent_state` and the result of `agent_finished` carry
+`execution`, which counts 1 at launch and one more for each resume. These are
+additive: a client that ignores them needs no change.
+
+## 12. Checklist
 
 1. Rename the dependency and the imports (`cersei` → `bricks`, `cersei_*` →
    `bricks_*`), and add `bricks-tools` to crates that use `#[derive(Tool)]`.
@@ -261,3 +305,6 @@ have to change, and events and sessions written at 5 read as before (an absent
 6. Set `background_drain_ms`, `admission_timeout_ms` and
    `retry_after_max_wait_ms` explicitly where the old waits were needed, and
    handle exit code `6` in headless scripts.
+7. Read sub-agent results with `AgentControl` `wait` and `result`, and remove
+   `background`, `max_turns`, `max_batch` and `max_total_per_run` from calls,
+   configuration and profiles.

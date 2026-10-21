@@ -33,9 +33,9 @@ export const TERMINAL_AGENT_STATES: readonly InstanceState[] = [
   'interrupted',
 ]
 
+/** A stored end of an earlier version (any kind this version does not know) is read as interrupted. */
 export type Termination =
   | { kind: 'completed' }
-  | { kind: 'max_turns'; limit: number }
   | { kind: 'output_truncated'; continuations: number }
   | { kind: 'no_progress'; repeats: number }
   | { kind: string; [k: string]: unknown }
@@ -131,6 +131,8 @@ export interface AttachmentInfo {
   kind: string
   path: string
   bytes: number
+  /** The copy kept by the desktop in the conversation, when it was imported. */
+  attachment_id?: string
   sha256?: string
   note?: string
 }
@@ -187,6 +189,8 @@ export interface InstanceRecord {
   result?: AgentResult
   background: boolean
   updated_at_ms: number
+  /** The current execution (1 at launch, one more for each resume). */
+  execution?: number
 }
 
 export interface CommandRun {
@@ -213,6 +217,8 @@ export interface AgentResult {
   duration_ms: number
   model: string
   [k: string]: unknown
+  /** The execution this result ends (absent: 1). */
+  execution?: number
 }
 
 export interface ChangedFile {
@@ -390,7 +396,14 @@ export type Event =
       elapsed_ms: number
     }
   | { type: 'agent_spawned'; agent: SpawnInfo }
-  | { type: 'agent_state'; agent_id: string; state: InstanceState; reason?: string }
+  | {
+      type: 'agent_state'
+      agent_id: string
+      state: InstanceState
+      reason?: string
+      /** The execution this state belongs to (absent: 1). */
+      execution?: number
+    }
   | {
       type: 'agent_tool_started'
       agent_id: string

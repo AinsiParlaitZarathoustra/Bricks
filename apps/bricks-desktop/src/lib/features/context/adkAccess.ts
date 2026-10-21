@@ -35,7 +35,6 @@ export const ADK_ACCESS_GROUPS: readonly AdkAccessGroup[] = [
 	{
 		label: 'Agents',
 		items: [
-			{ view: 'agent_instances', label: 'Sous-agents' },
 			{ view: 'agents', label: 'Profils d’agents' },
 			{ view: 'jobs', label: 'Tâches de fond' }
 		]

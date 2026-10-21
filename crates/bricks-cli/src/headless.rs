@@ -228,6 +228,7 @@ impl Human {
                 agent_id,
                 state,
                 reason: Some(reason),
+                ..
             } => {
                 let _ = writeln!(err, "  ⤷ {agent_id} {}: {reason}", state.as_str());
             }

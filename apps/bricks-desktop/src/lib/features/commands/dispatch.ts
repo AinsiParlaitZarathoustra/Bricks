@@ -55,6 +55,8 @@ export interface SlashHost {
   setEffort(profile: string | null): Promise<string | null>
   openPicker(picker: 'model' | 'effort'): void
   open(view: InspectorView, args?: InspectorState['args']): void
+  /** Opens a sub-agent's inspector (its line in the thread is the same agent). */
+  openAgent?(agentId: string): void
   /** Attachments of the draft as prompt blocks, or the reason they cannot be sent. */
   attachmentBlocks(): { blocks: PromptBlock[] } | { error: string }
   resume(sessionId: string): Promise<string | null>
@@ -287,8 +289,8 @@ async function agentControl(
   if (sid === null) return refused('Ouvrez une conversation pour utiliser cette commande.')
   if (action === 'jobs' || action === 'stop_job') {
     host.open('jobs', { action, jobId: command.job_id })
-  } else {
-    host.open('agent_instances', { action, agentId: command.agent_id })
+  } else if (command.agent_id) {
+    host.openAgent?.(command.agent_id)
   }
   return sendTo(host, sid, command, NO_WATCH)
 }

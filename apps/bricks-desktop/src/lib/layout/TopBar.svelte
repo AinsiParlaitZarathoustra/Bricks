@@ -13,6 +13,8 @@
 		title?: Snippet;
 		/** Right slot: actions, rendered before the panel toggles. */
 		actions?: Snippet;
+		/** Last slot, after the panel toggles (the « Plus » menu). */
+		trailing?: Snippet;
 		/** Visibility of the left panel. Its toggle sits at the top left, shown only when onToggleLeft is set. */
 		leftPressed?: boolean;
 		onToggleLeft?: () => void;
@@ -32,6 +34,7 @@
 	let {
 		title,
 		actions,
+		trailing,
 		leftPressed = false,
 		onToggleLeft,
 		rightPressed = false,
@@ -126,6 +129,12 @@
 						onclick={onToggleReader}
 					/>
 				{/if}
+			</div>
+		{/if}
+
+		{#if trailing}
+			<div class="ml-1 flex shrink-0 items-center">
+				{@render trailing()}
 			</div>
 		{/if}
 	</div>

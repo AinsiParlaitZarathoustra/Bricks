@@ -33,14 +33,14 @@ describe('one copy action per response in the timeline', () => {
 
   it('offers one copy per exchange when reopening history without run ids', () => {
     const conversation = new Conversation(openedSession({ history: [
-      { role: 'user', blocks: [{ type: 'text', text: 'Teste' }] },
-      { role: 'assistant', blocks: [
+      { role: 'user', attachments: [], blocks: [{ type: 'text', text: 'Teste' }] },
+      { role: 'assistant', attachments: [], blocks: [
         { type: 'text', text: 'Je vérifie.' },
         { type: 'tool_use', id: 't1', name: 'Bash', input: {} }
       ] },
-      { role: 'assistant', blocks: [{ type: 'text', text: 'Résultat final.' }] },
-      { role: 'user', blocks: [{ type: 'text', text: 'Merci' }] },
-      { role: 'assistant', blocks: [{ type: 'text', text: 'Avec plaisir.' }] }
+      { role: 'assistant', attachments: [], blocks: [{ type: 'text', text: 'Résultat final.' }] },
+      { role: 'user', attachments: [], blocks: [{ type: 'text', text: 'Merci' }] },
+      { role: 'assistant', attachments: [], blocks: [{ type: 'text', text: 'Avec plaisir.' }] }
     ] }), PROJECT_ID);
     expect(copyButtons(conversation)).toBe(2);
   });

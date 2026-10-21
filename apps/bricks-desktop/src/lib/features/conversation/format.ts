@@ -135,10 +135,6 @@ export function terminationLabel(termination: Termination | undefined): string |
   switch (termination.kind) {
     case 'completed':
       return null
-    case 'max_turns': {
-      const limit = numberField(termination, 'limit')
-      return limit === null ? 'limite de tours atteinte' : `limite de ${limit} tours atteinte`
-    }
     case 'output_truncated': {
       const n = numberField(termination, 'continuations')
       return n === null ? 'sortie tronquée' : `sortie tronquée après ${n} continuation${n > 1 ? 's' : ''}`
@@ -148,7 +144,8 @@ export function terminationLabel(termination: Termination | undefined): string |
       return n === null ? 'aucun progrès détecté' : `aucun progrès détecté (${n} répétitions)`
     }
     default:
-      return `motif : ${termination.kind}`
+      // A kind of an earlier version: interrupted, never a success.
+      return 'fin interrompue (ancienne session)'
   }
 }
 

@@ -16,9 +16,10 @@
 
 use super::io_error;
 use super::run_labels::{append_line, check_session_id};
-use crate::contract::{IpcResult, RunCommand, RunFile, RunRecord};
+use crate::contract::{IpcResult, RunCommand, RunFile, RunRecord, RunUsageRecord};
 use bricks_agent::control::{Envelope, Event, RunOutcome, WrittenFile, cap_text};
 use bricks_tools::preview::ChangeKind;
+use bricks_types::Usage;
 use parking_lot::Mutex;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
@@ -170,6 +171,21 @@ fn command_of(input: &serde_json::Value) -> String {
         .to_string()
 }
 
+/// The usage record of a run, from the engine's total of it (`run_usage`).
+fn usage_record(total: &Usage, pending_agents: usize, final_total: bool) -> RunUsageRecord {
+    let estimate = total.cost_estimate.as_ref();
+    RunUsageRecord {
+        input_tokens: total.input_tokens,
+        output_tokens: total.output_tokens,
+        cache_read_input_tokens: total.cache_read_input_tokens,
+        cache_creation_input_tokens: total.cache_creation_input_tokens,
+        cost_usd: total.cost_usd,
+        partial: estimate.is_some_and(|e| e.partial || !e.unpriced.is_empty()),
+        final_total,
+        pending_agents: u32::try_from(pending_agents).unwrap_or(u32::MAX),
+    }
+}
+
 /// A background job started by a command, until it is matched to one.
 struct JobSeen {
     job_id: String,
@@ -201,6 +217,8 @@ pub struct RunBuilder {
     /// Text segments of the answer, in order.
     segments: Vec<String>,
     current: String,
+    /// The engine's total of the run, replaced by each newer one.
+    usage: Option<RunUsageRecord>,
 }
 
 impl RunBuilder {
@@ -221,6 +239,7 @@ impl RunBuilder {
             jobs: Vec::new(),
             segments: Vec::new(),
             current: String::new(),
+            usage: None,
         }
     }
 
@@ -273,7 +292,22 @@ impl RunBuilder {
             files: self.files.clone(),
             commands: self.commands.clone(),
             assistant_text: self.answer_text(),
+            usage: self.usage.clone(),
         }
+    }
+
+    /// The engine's total replaces the run's usage: it already holds the
+    /// session agent and every sub-agent, so nothing is added. A provisional
+    /// total never replaces a final one. Returns `true` when the usage changed.
+    fn set_usage(&mut self, usage: RunUsageRecord) -> bool {
+        if self.usage.as_ref() == Some(&usage) {
+            return false;
+        }
+        if self.usage.as_ref().is_some_and(|u| u.final_total) && !usage.final_total {
+            return false;
+        }
+        self.usage = Some(usage);
+        true
     }
 
     fn text(&mut self, text: &str) {
@@ -625,6 +659,12 @@ impl Recorder {
                 run.finish(outcome_name(*outcome), at);
                 true
             }
+            Event::RunUsage {
+                total,
+                pending_agents,
+                final_total,
+                ..
+            } => run.set_usage(usage_record(total, *pending_agents, *final_total)),
             _ => false,
         };
         (changed && run.is_finished()).then_some(run_id)
@@ -658,6 +698,8 @@ impl Recorder {
                 Some(root_run_id.clone())
             }
             Event::JobFinished { job_id, .. } => self.jobs.get(job_id).cloned(),
+            // The engine totals each root run: its usage is the run's own.
+            Event::RunUsage { root_run_id, .. } => Some(root_run_id.clone()),
             _ => env.run_id.clone(),
         }
     }
@@ -678,6 +720,7 @@ impl Recorder {
 mod tests {
     use super::*;
     use bricks_agent::control::{Envelope, Event, SCHEMA_VERSION};
+    use bricks_types::CostEstimate;
 
     fn record(run: &str, text: &str, at: i64) -> RunRecord {
         RunRecord {
@@ -690,6 +733,7 @@ mod tests {
             files: vec![],
             commands: vec![],
             assistant_text: text.into(),
+            usage: None,
         }
     }
 
@@ -755,6 +799,7 @@ mod tests {
         assert_eq!(listed[0].user_index, None);
         assert!(listed[0].commands.is_empty() && listed[0].files.is_empty());
         assert_eq!(listed[0].assistant_text, "");
+        assert_eq!(listed[0].usage, None, "a record without usage has none");
     }
 
     #[test]
@@ -1159,5 +1204,282 @@ mod tests {
         let (cut, truncated) = cap_text(&"é".repeat(COMMAND_OUTPUT_BYTES), COMMAND_OUTPUT_BYTES);
         assert!(truncated);
         assert!(cut.len() <= COMMAND_OUTPUT_BYTES);
+    }
+
+    /// The engine's `run_usage` event of a root run, its total holding `input`
+    /// input tokens (output a quarter of it, 300 cached tokens).
+    fn run_usage(
+        root: &str,
+        input: u64,
+        cost: Option<f64>,
+        partial: bool,
+        pending: usize,
+        final_total: bool,
+    ) -> Event {
+        let total = Usage {
+            input_tokens: input,
+            output_tokens: input / 4,
+            cache_read_input_tokens: 300,
+            cost_usd: cost,
+            cost_estimate: cost.map(|usd| CostEstimate {
+                amount_usd: usd,
+                tariff: "default".into(),
+                partial,
+                unpriced: vec![],
+            }),
+            ..Default::default()
+        };
+        Event::RunUsage {
+            root_run_id: root.into(),
+            own: Box::new(total.clone()),
+            descendants: Box::new(Usage::default()),
+            total: Box::new(total),
+            pending_agents: pending,
+            final_total,
+        }
+    }
+
+    fn run_ended() -> Event {
+        Event::RunFinished {
+            outcome: RunOutcome::Succeeded,
+            failure: None,
+            error: None,
+            termination: None,
+            text: String::new(),
+            turns: 1,
+            approvals_unsatisfied: vec![],
+        }
+    }
+
+    #[test]
+    fn a_provisional_usage_is_replaced_by_the_final_total_and_kept_through_the_end() {
+        let mut rec = Recorder::default();
+        started(&mut rec, "run-1");
+        assert_eq!(
+            rec.observe(&env(
+                1,
+                Some("run-1"),
+                run_usage("run-1", 1_000, Some(0.2), false, 1, false)
+            )),
+            None,
+            "a run not yet ended is not written"
+        );
+        rec.observe(&env(
+            2,
+            Some("run-1"),
+            run_usage("run-1", 1_500, Some(0.3), false, 0, true),
+        ));
+        assert_eq!(
+            rec.observe(&env(3, Some("run-1"), run_ended())).as_deref(),
+            Some("run-1")
+        );
+        let usage = rec
+            .run("run-1")
+            .unwrap()
+            .to_record(None)
+            .usage
+            .expect("usage kept");
+        assert_eq!(
+            (
+                usage.input_tokens,
+                usage.cost_usd,
+                usage.final_total,
+                usage.pending_agents
+            ),
+            (1_500, Some(0.3), true, 0)
+        );
+        // A provisional total arriving after the final one does not replace it.
+        assert_eq!(
+            rec.observe(&env(
+                4,
+                Some("run-1"),
+                run_usage("run-1", 900, Some(0.1), false, 1, false)
+            )),
+            None
+        );
+        let usage = rec.run("run-1").unwrap().to_record(None).usage.unwrap();
+        assert_eq!(usage.input_tokens, 1_500);
+    }
+
+    #[test]
+    fn a_late_total_after_the_end_rewrites_the_record_and_an_unchanged_one_does_not() {
+        let mut rec = Recorder::default();
+        started(&mut rec, "run-1");
+        rec.observe(&env(
+            1,
+            Some("run-1"),
+            run_usage("run-1", 1_000, Some(0.2), false, 1, false),
+        ));
+        assert_eq!(
+            rec.observe(&env(2, Some("run-1"), run_ended())).as_deref(),
+            Some("run-1")
+        );
+        assert!(
+            !rec.run("run-1")
+                .unwrap()
+                .to_record(None)
+                .usage
+                .unwrap()
+                .final_total
+        );
+        // A sub-agent ends after the run: the final total arrives on no run envelope.
+        let late = rec.observe(&env(
+            3,
+            None,
+            run_usage("run-1", 1_400, Some(0.28), false, 0, true),
+        ));
+        assert_eq!(
+            late.as_deref(),
+            Some("run-1"),
+            "the late total changes the ended run's record"
+        );
+        let usage = rec.run("run-1").unwrap().to_record(None).usage.unwrap();
+        assert_eq!(
+            (usage.input_tokens, usage.cost_usd, usage.final_total),
+            (1_400, Some(0.28), true)
+        );
+        assert_eq!(
+            rec.observe(&env(
+                4,
+                None,
+                run_usage("run-1", 1_400, Some(0.28), false, 0, true)
+            )),
+            None,
+            "the same total again changes nothing"
+        );
+    }
+
+    #[test]
+    fn the_engine_total_is_taken_as_it_is_and_never_added_again() {
+        // The total already holds the session agent (own) and its sub-agents (descendants).
+        let own = Usage {
+            input_tokens: 1_000,
+            output_tokens: 100,
+            cost_usd: Some(0.25),
+            cost_estimate: Some(CostEstimate {
+                amount_usd: 0.25,
+                tariff: "default".into(),
+                partial: false,
+                unpriced: vec![],
+            }),
+            ..Default::default()
+        };
+        let descendants = Usage {
+            input_tokens: 500,
+            output_tokens: 50,
+            cost_usd: Some(0.5),
+            cost_estimate: Some(CostEstimate {
+                amount_usd: 0.5,
+                tariff: "default".into(),
+                partial: false,
+                unpriced: vec![],
+            }),
+            ..Default::default()
+        };
+        let mut total = own.clone();
+        total.merge(&descendants);
+        let event = Event::RunUsage {
+            root_run_id: "run-1".into(),
+            own: Box::new(own),
+            descendants: Box::new(descendants),
+            total: Box::new(total),
+            pending_agents: 0,
+            final_total: true,
+        };
+        let mut rec = Recorder::default();
+        started(&mut rec, "run-1");
+        rec.observe(&env(1, Some("run-1"), event.clone()));
+        rec.observe(&env(2, Some("run-1"), event));
+        let usage = rec.run("run-1").unwrap().to_record(None).usage.unwrap();
+        assert_eq!((usage.input_tokens, usage.output_tokens), (1_500, 150));
+        assert_eq!(
+            usage.cost_usd,
+            Some(0.75),
+            "the parent and its children are counted once"
+        );
+    }
+
+    #[test]
+    fn an_unknown_cost_stays_unknown_and_a_partial_estimate_is_flagged() {
+        let mut rec = Recorder::default();
+        started(&mut rec, "run-1");
+        rec.observe(&env(
+            1,
+            Some("run-1"),
+            run_usage("run-1", 1_000, None, false, 0, false),
+        ));
+        let usage = rec.run("run-1").unwrap().to_record(None).usage.unwrap();
+        assert_eq!(
+            (usage.cost_usd, usage.partial),
+            (None, false),
+            "no price is unknown, not zero"
+        );
+        rec.observe(&env(
+            2,
+            Some("run-1"),
+            run_usage("run-1", 2_000, Some(0.01), true, 0, false),
+        ));
+        let usage = rec.run("run-1").unwrap().to_record(None).usage.unwrap();
+        assert_eq!((usage.cost_usd, usage.partial), (Some(0.01), true));
+    }
+
+    #[test]
+    fn the_usage_of_a_resumed_agent_goes_to_the_root_run_of_the_event() {
+        let mut rec = Recorder::default();
+        started(&mut rec, "run-1");
+        rec.observe(&env(
+            1,
+            Some("run-1"),
+            run_usage("run-1", 1_000, Some(0.2), false, 0, true),
+        ));
+        rec.observe(&env(2, Some("run-1"), run_ended()));
+        rec.start("run-2", Some(1), "reprends", 2_000);
+        // The later run's total, whatever run id the envelope carries.
+        rec.observe(&env(
+            3,
+            Some("run-1"),
+            run_usage("run-2", 300, Some(0.05), false, 0, true),
+        ));
+        let first = rec.run("run-1").unwrap().to_record(None).usage.unwrap();
+        let second = rec.run("run-2").unwrap().to_record(None).usage.unwrap();
+        assert_eq!(
+            first.input_tokens, 1_000,
+            "the earlier run keeps its own total"
+        );
+        assert_eq!(
+            second.input_tokens, 300,
+            "the resumed agent counts in the later run only"
+        );
+    }
+
+    #[test]
+    fn a_stored_usage_is_read_back_and_a_record_without_one_has_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = RunRecordStore::at(dir.path().join("run-records"));
+        let mut kept = record("run_a", "un", 1);
+        kept.usage = Some(RunUsageRecord {
+            input_tokens: 10,
+            output_tokens: 2,
+            cache_read_input_tokens: 5,
+            cache_creation_input_tokens: 1,
+            cost_usd: None,
+            partial: true,
+            final_total: false,
+            pending_agents: 2,
+        });
+        store.append("s1", &kept).unwrap();
+        // A line written before usage existed.
+        let file = dir.path().join("run-records").join("s1.jsonl");
+        let old = r#"{"version":1,"run_id":"run_b","user_index":1,"started_at":2,"finished_at":7,"outcome":"succeeded","files":[],"commands":[],"assistant_text":"deux"}"#;
+        let mut text = std::fs::read_to_string(&file).unwrap();
+        text.push_str(&format!("{old}\n"));
+        std::fs::write(&file, text).unwrap();
+        let listed = store.list("s1").unwrap();
+        assert_eq!(
+            listed[0].usage, kept.usage,
+            "an unknown cost is read back as unknown"
+        );
+        assert_eq!(listed[1].usage, None);
+        assert_eq!(listed[1].assistant_text, "deux");
     }
 }

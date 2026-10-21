@@ -77,3 +77,23 @@ In the app, with a test project:
   Précédentes/Suivantes past 400 lines), Aperçu for Markdown, Modifications with one patch per operation;
   a path outside the project is refused.
 - Reasoning reads « Réfléchit »; added and removed lines are clearly green and red in both themes.
+
+### Sub-agents in the thread, attachments copied per conversation
+
+Automated: `crates/bricks-agent/tests/{agents,agents_runtime,admission_window}.rs`, `src/events.rs` and
+`src/agents/runtime.rs` (tests), `src-tauri/src/services/{attachments,attachment_runs,run_records}.rs`
+(tests), `tests/unit/{run-cost,conversation,agent-*}.test.ts`.
+
+In the app, with a test project:
+
+- A request that launches several sub-agents: one line each in the thread (dot, profile, description,
+  duration), no `+N −N`; the second line follows the running tool; the dot stops pulsing at the end.
+- A line opens the inspector: Résultat, Fichiers modifiés, Commandes open, Détails closed, no cost; a
+  message sent to a running agent is answered by it; a message to an ended agent is refused.
+- One « Coût de la réponse » line per response, provisional while sub-agents run, kept after a restart.
+- No sub-agent list in the right panel; « Plus » is the last button of the top bar, after Lecteur.
+- Environment: icons for project, folder and Git, no model or reasoning rows; Contexte is one bar.
+- Paste, pick and drop a file and an image: chips show the copy; move or delete the original before
+  sending: the message still carries it; the image is shown again after reopening the conversation;
+  a PDF is refused at once.
+- Window at 1440 × 900 and at its minimum 800 × 560, light and dark.

@@ -355,16 +355,10 @@ async fn run() {
                 &ctx,
             )
             .await;
-        check!("SendMessage delivers", !r.is_error);
-        let msgs = bricks_tools::send_message::peek_inbox("worker-1");
+        // Outside an agent runtime there is no recipient: nothing is claimed sent.
         check!(
-            "Inbox has message",
-            msgs.len() == 1 && msgs[0].content == "Start task"
-        );
-        let drained = bricks_tools::send_message::drain_inbox("worker-1");
-        check!(
-            "Drain clears inbox",
-            drained.len() == 1 && bricks_tools::send_message::peek_inbox("worker-1").is_empty()
+            "SendMessage refuses without a recipient",
+            r.is_error && r.content.contains("nothing was sent")
         );
         println!();
     }

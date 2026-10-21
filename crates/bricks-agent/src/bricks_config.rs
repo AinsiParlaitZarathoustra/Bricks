@@ -105,16 +105,19 @@ impl BricksConfig {
         let Some((name, text)) = toml else {
             return c;
         };
-        // Turn limits were removed (0.4.8): their old keys are ignored and
-        // reported, never passed on; every other key is checked as before.
-        let (cleaned, removed) = without_removed_turn_keys(text);
-        for key in removed {
-            c.diagnostics.push(format!(
-                "{name}: {key}: turn limits were removed in 0.4.8; this setting is ignored — \
-                 remove it"
-            ));
+        // A key these tables do not know is ignored and reported, and the
+        // rest of the table is read: their type refuses unknown keys, which
+        // would otherwise reset the whole table to its defaults.
+        let (cleaned, mut unknown) =
+            without_unknown_keys::<crate::control::settings::FileAgent>(text, "agent");
+        let (cleaned, more) =
+            without_unknown_keys::<crate::agents::DelegationSettings>(&cleaned, "agents");
+        unknown.extend(more);
+        for key in unknown {
+            c.diagnostics
+                .push(format!("{name}: unknown key ignored: {key}"));
         }
-        let text = cleaned.as_ref();
+        let text = cleaned.as_str();
         match policy_from_bricks_toml(text) {
             Ok(p) => c.context = p,
             Err(e) => c
@@ -192,36 +195,41 @@ impl BricksConfig {
     }
 }
 
-/// A whole table, when present.
-/// The keys of the former turn limits, by table.
-const REMOVED_TURN_KEYS: &[(&str, &str)] = &[
-    ("agent", "max_turns"),
-    ("agents", "default_max_turns"),
-    ("agents", "max_turns_cap"),
-];
-
-/// `text` without the former turn-limit keys, and the keys found
-/// (`[table] key`). A text that does not parse is returned as it is (its
-/// error is reported by the section parsers).
-fn without_removed_turn_keys(text: &str) -> (std::borrow::Cow<'_, str>, Vec<String>) {
+/// `text` without the keys of `[table]` that `T` does not know, and their
+/// names (`[table] key`). The keys are removed one at a time, so that `T`
+/// reads the rest of the table. A text that does not parse is returned as it
+/// is, and so is an error that is not about an unknown key: the section
+/// parsers report those.
+fn without_unknown_keys<T: serde::de::DeserializeOwned>(
+    text: &str,
+    table: &str,
+) -> (String, Vec<String>) {
     let Ok(mut doc) = toml::from_str::<toml::Value>(text) else {
-        return (text.into(), Vec::new());
+        return (text.to_string(), Vec::new());
     };
     let mut found = Vec::new();
-    for (table, key) in REMOVED_TURN_KEYS {
-        if let Some(t) = doc.get_mut(*table).and_then(|t| t.as_table_mut())
-            && t.remove(*key).is_some()
-        {
-            found.push(format!("[{table}] {key}"));
-        }
+    while let Some(section) = doc.get(table).cloned()
+        && let Err(e) = section.try_into::<T>()
+        && let Some(key) = unknown_field_named(&e.to_string())
+        && let Some(t) = doc.get_mut(table).and_then(|t| t.as_table_mut())
+        && t.remove(&key).is_some()
+    {
+        found.push(format!("[{table}] {key}"));
     }
     if found.is_empty() {
-        return (text.into(), found);
+        return (text.to_string(), found);
     }
     match toml::to_string(&doc) {
-        Ok(t) => (t.into(), found),
-        Err(_) => (text.into(), found),
+        Ok(t) => (t, found),
+        Err(_) => (text.to_string(), found),
     }
+}
+
+/// The name in serde's `unknown field `name`, expected …` message.
+fn unknown_field_named(message: &str) -> Option<String> {
+    const PREFIX: &str = "unknown field `";
+    let rest = &message[message.find(PREFIX)? + PREFIX.len()..];
+    Some(rest[..rest.find('`')?].to_string())
 }
 
 fn table_from_bricks_toml<T: serde::de::DeserializeOwned>(
@@ -330,14 +338,17 @@ mod tests {
         );
     }
 
-    /// Turn limits were removed (0.4.8): their former keys are ignored and
-    /// reported; nothing else is relaxed.
+    /// An unknown key of `[agent]` or `[agents]` is ignored and reported;
+    /// the rest of the table, and the other sections, are read as usual. A
+    /// key of an earlier version (`max_turns`, kept here as data) is one of
+    /// them.
     #[test]
-    fn former_turn_limits_are_ignored_with_a_diagnostic() {
+    fn unknown_keys_of_the_agent_tables_are_ignored_and_reported() {
         let c = BricksConfig::from_texts(
             Some(
-                "[agent]\nmodel = \"p/m\"\nmax_turns = 1\n\n\
-                 [agents]\ndefault_max_turns = 0\nmax_turns_cap = 3\nmax_depth = 3\n",
+                "[agent]\nmodel = \"p/m\"\nmax_turns = 1\nspeed = 2\n\n\
+                 [permissions]\nwrite = \"allow\"\n\n\
+                 [agents]\nmax_depth = 3\nlimit_of_things = 0\n",
             ),
             &[],
         );
@@ -346,35 +357,35 @@ mod tests {
             Some("p/m"),
             "the rest of [agent] is read"
         );
+        assert_eq!(
+            c.permissions.write,
+            crate::control::settings::Action::Allow,
+            "[permissions] is not reset by an unknown key of [agent]"
+        );
         assert_eq!(c.agents.max_depth, 3, "the rest of [agents] is read");
         assert_eq!(c.diagnostics.len(), 3, "{:#?}", c.diagnostics);
         for key in [
             "[agent] max_turns",
-            "[agents] default_max_turns",
-            "[agents] max_turns_cap",
+            "[agent] speed",
+            "[agents] limit_of_things",
         ] {
             assert!(
                 c.diagnostics
                     .iter()
-                    .any(|d| d.contains(key) && d.contains("removed") && d.contains("remove it")),
+                    .any(|d| d.ends_with(key) && d.contains("unknown key ignored")),
                 "{key}: {:#?}",
                 c.diagnostics
             );
         }
-        // Other keys are still checked.
-        let c = BricksConfig::from_texts(Some("[agent]\nmax_turns = 5\nbogus = 1\n"), &[]);
+        // A wrong value is still reported, with the table's defaults.
+        let c = BricksConfig::from_texts(Some("[agent]\nmax_tokens = \"many\"\n"), &[]);
+        assert_eq!(c.agent, crate::control::AgentSettings::default());
         assert!(
-            c.diagnostics.iter().any(|d| d.contains("unknown field")),
+            c.diagnostics.iter().any(|d| d.contains("[agent]:")),
             "{:#?}",
             c.diagnostics
         );
-        let c = BricksConfig::from_texts(Some("[agents]\nmax_turns_cap = 5\nbogus = 1\n"), &[]);
-        assert!(
-            c.diagnostics.iter().any(|d| d.contains("unknown field")),
-            "{:#?}",
-            c.diagnostics
-        );
-        // A file without them says nothing.
+        // A file without unknown keys says nothing.
         assert!(
             BricksConfig::from_texts(Some("[agent]\nmodel = \"p/m\"\n"), &[])
                 .diagnostics
@@ -431,8 +442,6 @@ mod tests {
             let known = [
                 "max_concurrent",
                 "max_depth",
-                "max_total_per_run",
-                "max_batch",
                 "max_queued",
                 "admission_timeout_ms",
                 "background_drain_ms",
@@ -465,7 +474,7 @@ mod tests {
             "{out}"
         );
         assert_eq!(c.agent.retry_after_max_wait_ms, 60_000, "{out}");
-        assert_eq!(out.matches(" = ").count(), 17, "{out}");
+        assert_eq!(out.matches(" = ").count(), 15, "{out}");
     }
 
     #[test]

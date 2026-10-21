@@ -18,11 +18,12 @@
 //! The frontmatter must open the file (`---` on the first line, an optional
 //! BOM before it) and close on a line that is exactly `---`. It is parsed
 //! with `serde-saphyr` under a small budget (depth, nodes, aliases, scalar
-//! bytes), unknown and duplicate keys are refused, tags are not executed,
-//! nothing is interpolated from the environment.
+//! bytes), unknown keys are ignored and reported, duplicate keys are refused,
+//! tags are not executed, nothing is interpolated from the environment.
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 /// Largest profile file.
@@ -190,14 +191,13 @@ pub struct AgentProfile {
     /// The Markdown body, verbatim.
     pub instructions: String,
     pub source: ProfileSource,
-    /// Things worth saying about a valid profile (a former key that is
+    /// Things worth saying about a valid profile (an unknown key that is
     /// ignored), reported as diagnostics by the registry.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<String>,
 }
 
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct Frontmatter {
     name: String,
     description: String,
@@ -213,11 +213,11 @@ struct Frontmatter {
     isolation: Option<String>,
     #[serde(default)]
     background: Option<bool>,
-    /// Former turn limit (removed in 0.4.8): accepted, ignored, reported.
-    #[serde(default)]
-    max_turns: Option<serde_json::Value>,
     #[serde(default)]
     skills: Option<Vec<String>>,
+    /// Keys this version does not know: ignored, and reported as notes.
+    #[serde(flatten)]
+    unknown: BTreeMap<String, serde::de::IgnoredAny>,
 }
 
 /// A profile name: 1–64 of `a-z`, `0-9`, `_`, `-`, starting with a letter
@@ -318,12 +318,11 @@ pub fn parse_profile(text: &str, source: ProfileSource) -> Result<AgentProfile, 
         }
     }
     let isolation = Isolation::parse(f.isolation.as_deref().unwrap_or("auto"))?;
-    let mut notes = Vec::new();
-    if f.max_turns.is_some() {
-        notes.push(
-            "max_turns: turn limits were removed in 0.4.8; this key is ignored — remove it".into(),
-        );
-    }
+    let notes = f
+        .unknown
+        .keys()
+        .map(|key| format!("unknown key ignored: {key}"))
+        .collect();
     let skills = f.skills.unwrap_or_default();
     if skills.len() > 32 {
         return Err("more than 32 skills".into());
@@ -394,18 +393,27 @@ mod tests {
         assert_eq!(parse_profile(&crlf, src()).unwrap().name, "inspecteur");
     }
 
+    /// An unknown key is ignored and reported; the profile stays valid and
+    /// the other keys are checked as before. A profile written before 0.4.8
+    /// (its `max_turns` is kept here as data) is one of them.
     #[test]
-    fn a_former_turn_limit_is_ignored_and_reported() {
+    fn an_unknown_key_is_ignored_and_reported() {
         let with = |extra: &str| format!("---\nname: a\ndescription: d\n{extra}---\nbody\n");
-        for v in ["40", "0", "100000", "\"many\""] {
-            let p = parse_profile(&with(&format!("max_turns: {v}\n")), src()).unwrap();
-            assert_eq!(p.notes.len(), 1, "{v}");
-            assert!(p.notes[0].contains("removed") && p.notes[0].contains("remove it"));
+        for extra in [
+            "max_turns: 40\n",
+            "max_turns: \"many\"\n",
+            "colour: red\n",
+            "colour: [1, 2]\n",
+        ] {
+            let p = parse_profile(&with(extra), src()).unwrap();
+            assert_eq!(p.notes.len(), 1, "{extra}");
+            assert!(p.notes[0].starts_with("unknown key ignored: "), "{extra}");
         }
-        // Only that key: the others are checked as before.
-        let e = parse_profile(&with("max_turns: 40\ncolour: red\n"), src()).unwrap_err();
-        assert!(e.contains("unknown field"), "{e}");
-        let e = parse_profile(&with("max_turns: 4\nmax_turns: 5\n"), src()).unwrap_err();
+        let p = parse_profile(&with("colour: red\nmax_turns: 40\n"), src()).unwrap();
+        assert_eq!(p.notes.len(), 2, "{:?}", p.notes);
+        let e = parse_profile(&with("max_turns: 40\nmodel: gpt\n"), src()).unwrap_err();
+        assert!(e.contains("provider_id/model_id"), "{e}");
+        let e = parse_profile(&with("colour: red\ncolour: blue\n"), src()).unwrap_err();
         assert!(e.to_lowercase().contains("duplicate"), "{e}");
     }
 
@@ -418,7 +426,6 @@ mod tests {
             ("model: gpt\n", "provider_id/model_id"),
             ("reasoning: \"very high\"\n", "reasoning"),
             ("isolation: vm\n", "isolation"),
-            ("colour: red\n", "unknown field"),
             ("name: b\n", "duplicate"),
             ("skills: [\" \"]\n", "empty"),
         ] {

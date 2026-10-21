@@ -14,11 +14,33 @@ use bricks_agent::system_prompt::{
     SYSTEM_PROMPT_DYNAMIC_BOUNDARY, SystemPromptOptions, build_system_prompt,
 };
 use bricks_memory::{LongTermMemory, MaintenanceReport, MemoryTurn, RecalledContext};
-use bricks_provider::CompletionRequest;
+use bricks_provider::{CompletionRequest, Provider};
 use serde_json::json;
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
+
+#[allow(dead_code)]
+mod common;
+
+/// The scripted models; each waits for the sub-agents it was given (as a
+/// model would).
+struct Follow(Arc<ScriptedCatalog>, Arc<common::follow::Waited>, Arc<AtomicBool>);
+
+impl ModelCatalog for Follow {
+    fn models(&self) -> Vec<ModelChoice> {
+        self.0.models()
+    }
+    fn build(&self, selection: &str, reasoning: Option<&str>) -> Result<Box<dyn Provider>, String> {
+        Ok(Box::new(common::follow::FollowHandles {
+            inner: self.0.build(selection, reasoning)?,
+            selection: selection.to_string(),
+            waited: Arc::clone(&self.1),
+            enabled: Arc::clone(&self.2),
+        }))
+    }
+}
 
 const REFERENCE: &str = include_str!("fixtures/bricks_foundation.txt");
 
@@ -133,7 +155,11 @@ async fn run(agents: bool, replies: Vec<Reply>) -> Vec<CompletionRequest> {
     bricks.agent.model = Some("test/a".into());
     let mut cfg = EngineConfig::new(
         &wd,
-        ScriptedCatalog::new(&["a"], script.clone()),
+        Arc::new(Follow(
+            ScriptedCatalog::new(&["a"], script.clone()),
+            Arc::new(common::follow::Waited::default()),
+            Arc::new(AtomicBool::new(true)),
+        )),
         bricks,
         wd.join(".sessions"),
     );
@@ -180,7 +206,11 @@ async fn the_session_and_its_child_send_the_foundation_with_their_own_bullets() 
     let reqs = run(
         true,
         vec![
-            Reply::tool("c1", "Agent", json!({"task": "Look.", "profile": "marker"})),
+            Reply::tool(
+                "c1",
+                "Agent",
+                json!({"task": "Look.", "profile": "marker", "isolation": "shared"}),
+            ),
             Reply::text("child result"),
             Reply::text("done"),
         ],

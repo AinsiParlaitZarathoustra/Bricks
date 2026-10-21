@@ -16,10 +16,12 @@ Use the wrangler CLI for Workers.
 
 const user = (...texts: string[]): HistoryMessage => ({
 	role: 'user',
+	attachments: [],
 	blocks: texts.map((text) => ({ type: 'text', text }))
 });
 const assistant = (text: string): HistoryMessage => ({
 	role: 'assistant',
+	attachments: [],
 	blocks: [{ type: 'text', text }]
 });
 

@@ -13,7 +13,6 @@ export type InspectorView =
   | 'mcp'
   | 'config'
   | 'agents'
-  | 'agent_instances'
   | 'skills'
   | 'jobs'
   | 'changeset'
@@ -35,6 +34,16 @@ class UiStore {
   picker = $state<ComposerPicker>(null)
   /** The settings dialog (opened from the left panel footer). */
   settingsOpen = $state(false)
+  /** The sub-agent whose inspector is open (from its line in the thread). */
+  agentId = $state<string | null>(null)
+
+  openAgent(id: string) {
+    this.agentId = id
+  }
+
+  closeAgent() {
+    this.agentId = null
+  }
 
   open(view: InspectorView, args: InspectorState['args'] = {}) {
     this.inspector = { view, args }

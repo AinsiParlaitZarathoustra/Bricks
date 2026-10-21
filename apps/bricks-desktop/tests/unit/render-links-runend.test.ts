@@ -127,12 +127,12 @@ function card(conv: Conversation, item: RunEndItem): string {
 }
 
 /**
- * The header line only: the card text before the reason, the error and the two groups
- * (« N fichiers modifiés », « N commandes exécutées »).
+ * The header line only: the card text before the cost line, the reason, the error and the
+ * two groups (« N fichiers modifiés », « N commandes exécutées »).
  */
 function summaryLine(conv: Conversation, item: RunEndItem): string {
 	return card(conv, item)
-		.split(/Motif :|Erreur :|\d+ fichiers? modifiés?|\d+ commandes? exécutées?/)[0]
+		.split(/Coût de la réponse|Motif :|Erreur :|\d+ fichiers? modifiés?|\d+ commandes? exécutées?/)[0]
 		.trim();
 }
 
@@ -144,7 +144,7 @@ function filesGroup(conv: Conversation, item: RunEndItem): string | null {
 }
 
 describe('run-end card: one compact header and closed groups from the real run data', () => {
-	it('reads « Terminé · A travaillé 1m 49s » with no turn count, no model id and no « Durée : » prefix', () => {
+	it('reads « Terminé · A travaillé 762ms » with no turn count, no model id and no « Durée : » prefix', () => {
 		const { conv, item } = runOf({ outcome: 'succeeded', at: T0 + 762 }, [
 			{ path: 'src/calcul.ts', kind: 'modify', added: 120, removed: 24 },
 		]);

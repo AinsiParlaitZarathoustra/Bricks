@@ -142,6 +142,11 @@ carried over.
 Deleting a session removes all of these files. Sessions and their formats are
 described in `docs/cli.md` in the repository.
 
+In Bricks Desktop, the copies of the files sent in a session are kept in
+`<session>.files/` beside its `.jsonl` file. The copies are moved there when
+the message is sent, and the folder is removed with the session. See
+[Multimodal Input](/docs/multimodal#attachments-in-bricks-desktop).
+
 ## Run records (Bricks Desktop)
 
 Bricks Desktop keeps, for each run that ends, its answer text, its shell
@@ -161,3 +166,26 @@ sub-agent (`agent_id`, absent for the session agent) and the tool call
 (`tool_call_id`). The counters of a file (`added`, `removed`, `operations`)
 are cumulative sums of the applied operations, not a net Git diff: a file
 changed twice counts both changes.
+
+Each record also has `usage`, the cost of the response:
+
+* the tokens of the root run (input, output, cache read and cache write). This
+  is the engine's `run_usage` total of the run: the session agent's responses
+  and those of all its sub-agents, each response counted once. A sub-agent's
+  result is never added a second time;
+* `cost_usd`, the estimated cost in USD. It is unknown, not zero, when no price
+  was known: the field is then absent or `null`. `partial` marks a lower bound,
+  when a consumed category had no price;
+* `final_total`: `false` while sub-agents still run. The total is then
+  provisional, and `pending_agents` counts the sub-agents still running. When
+  the last one ends, the record is written again with the final total. A later
+  total replaces the usage of the record, except that a provisional total never
+  replaces a final one;
+* a record written before usage was kept has none. Its cost is shown as
+  unavailable, never as zero.
+
+The desktop shows one cost line per response, marked as provisional while the
+total may still change, and as partial when it is a lower bound.
+
+The copies of a run's attachments are not in this file: they are listed in
+`<session>.files/attachments.jsonl`, next to the session's copies.

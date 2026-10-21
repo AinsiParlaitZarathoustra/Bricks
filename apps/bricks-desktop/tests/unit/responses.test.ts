@@ -206,8 +206,8 @@ describe('responses: one copy per answer, from the live events', () => {
 });
 
 describe('responses: stored history', () => {
-	const user = (text: string): HistoryMessage => ({ role: 'user', blocks: [{ type: 'text', text }] });
-	const assistant = (...blocks: HistoryMessage['blocks']): HistoryMessage => ({ role: 'assistant', blocks });
+	const user = (text: string): HistoryMessage => ({ role: 'user', attachments: [], blocks: [{ type: 'text', text }] });
+	const assistant = (...blocks: HistoryMessage['blocks']): HistoryMessage => ({ role: 'assistant', attachments: [], blocks });
 
 	it('a history without metadata is copyable per user message, with no invented summary', () => {
 		const conv = openConversation(
@@ -215,7 +215,7 @@ describe('responses: stored history', () => {
 				history: [
 					user('Question'),
 					assistant({ type: 'text', text: 'Réponse A' }, { type: 'tool_use', id: 'x', name: 'Read', input: {} }),
-					{ role: 'user', blocks: [{ type: 'tool_result', tool_use_id: 'x', content: 'ok', is_error: false }] },
+					{ role: 'user', attachments: [], blocks: [{ type: 'tool_result', tool_use_id: 'x', content: 'ok', is_error: false }] },
 					assistant({ type: 'text', text: 'Réponse B' }),
 					user('Autre'),
 				],
@@ -239,6 +239,7 @@ describe('responses: stored history', () => {
 			files: [],
 			commands: [],
 			assistant_text: 'Texte du dossier',
+			usage: null,
 		};
 		const conv = openConversation(
 			openedSession({
@@ -271,6 +272,7 @@ describe('responses: stored history', () => {
 			files: [],
 			commands: [],
 			assistant_text: 'Orphelin',
+			usage: null,
 		};
 		const conv = openConversation(
 			openedSession({ history: [user('Seconde'), assistant({ type: 'text', text: 'Visible' })], run_records: [record] }),

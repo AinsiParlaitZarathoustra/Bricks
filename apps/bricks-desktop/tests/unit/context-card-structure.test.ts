@@ -9,30 +9,42 @@ const src = (path: string) => readFileSync(new URL(`../../src/${path}`, import.m
 const CARD = 'lib/features/context/ContextCard.svelte';
 const RING = 'lib/features/context/ContextGauge.svelte';
 
-describe('context card: exact labels and no removed wording', () => {
+describe('context card: compact, one share, one meter, no session block', () => {
 	const card = src(CARD);
 
-	it('keeps the title, the session block and its row labels', () => {
+	it('keeps the title and reads the share and the figures from contextGauge and formatCompact', () => {
 		expect(card).toContain('<SectionCard title="Contexte">');
-		expect(card).toContain('Consommation session');
-		for (const label of ['Entrée', 'Sortie', 'Cache', 'Requêtes', 'Coût']) {
-			expect(card, label).toContain(`>${label}</dt>`);
-		}
+		expect(card).toContain('contextGauge(conversation.context ?? null, conversation.contextStale ?? false)');
+		expect(card).toContain('formatPercent(gauge.percent)');
+		expect(card).toContain('formatCompact(gauge.used)');
+		expect(card).toContain('formatCompact(gauge.total)');
 	});
 
-	it('shows the context line from contextLine, with no approximation sign', () => {
-		expect(card).toContain('contextLine(status, stale)');
+	it('shows one meter bar with its role and its value, and an unknown share as a dash', () => {
+		expect(card).toContain('role="meter"');
+		expect(card).toContain("aria-label=\"Contexte utilisé\"");
+		expect(card).toContain("gauge.percent === null ? '—' : formatPercent(gauge.percent)");
+		expect(card).toContain("'inconnu'");
+	});
+
+	it('has no approximation sign', () => {
 		expect(card).not.toContain('≈');
 	});
 
-	it('does not keep the removed wordings of the card', () => {
-		const removed = ['Écriture du cache', 'Raisonnement', 'non tarifé', 'Consommation cumulée'];
+	it('has no session consumption block and none of its row labels', () => {
+		const removed = [
+			'Consommation session',
+			'Consommation cumulée',
+			'Écriture du cache',
+			'Raisonnement',
+			'non tarifé',
+			'Requêtes',
+			'Montant partiel',
+			'non mesuré',
+		];
 		expect(removed.filter((t) => card.includes(t))).toEqual([]);
-	});
-
-	it('reads the cost as a measured amount or « non mesuré », and says when it is partial', () => {
-		expect(card).toContain('non mesuré');
-		expect(card).toContain('Montant partiel : certaines réponses n’ont pas de prix');
+		expect(card).not.toContain('<dt');
+		expect(card).not.toContain('contextLine(');
 	});
 });
 

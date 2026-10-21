@@ -19,6 +19,7 @@
 </script>
 
 <div
+  aria-busy={attachment.importing ? 'true' : undefined}
   class="flex max-w-full items-center gap-2 rounded-md border bg-muted/60 py-1 pr-1 pl-1.5 text-sm"
   class:border-transparent={error === null}
   class:border-destructive={error !== null}
@@ -38,6 +39,8 @@
     <p class="max-w-56 truncate" title={attachment.path || attachment.name}>{attachment.name}</p>
     {#if error}
       <p class="text-xs text-destructive" role="alert">{error}</p>
+    {:else if attachment.importing}
+      <p class="text-xs text-muted-foreground">Copie…</p>
     {/if}
   </div>
 

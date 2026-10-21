@@ -368,6 +368,10 @@ pub enum Event {
         state: crate::agents::InstanceState,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
+        /// The execution of the identity this state belongs to: 1 at launch,
+        /// one more for each resume. A state of an older execution is stale.
+        #[serde(default = "crate::agents::spawn::first_execution")]
+        execution: u32,
     },
     /// A sub-agent's tool call started (its text is never streamed).
     AgentToolStarted {
@@ -725,6 +729,9 @@ pub enum Command {
         /// For `jobs` (list the session's jobs) and `stop_job`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         job_id: Option<String>,
+        /// For `message`: the text for the running sub-agent (bounded).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
     },
     /// List the skills (all candidates, 20 per page, filtered by `query`);
     /// answered by `skills`. Accepted at any time.

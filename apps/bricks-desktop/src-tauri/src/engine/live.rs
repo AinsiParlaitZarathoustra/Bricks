@@ -4,9 +4,10 @@
 
 use super::hub::Hub;
 use crate::contract::{
-    ChangeFile, ChangeRecord, DesktopEvent, HistoryMessage, OpenedSession, RunLabel, RunRecord,
-    SessionItem,
+    AttachmentRef, ChangeFile, ChangeRecord, DesktopEvent, HistoryMessage, OpenedSession,
+    RunLabel, RunRecord, SessionItem,
 };
+use crate::services::attachment_runs::{self, RunAttachments};
 use crate::services::changes::{NewChange, StoredPatch, new_record_id};
 use crate::services::conversations::{history_message, path_text};
 use crate::services::now_ms;
@@ -83,6 +84,8 @@ struct Expected {
     /// The user-role messages before the run, counted while it could not
     /// yet run (`None` when the submit was not made while idle).
     base: Option<u32>,
+    /// The copies of attachments the submit carries: kept with the run it starts.
+    attachments: Vec<AttachmentRef>,
 }
 
 /// A labelled run, from its start to its end.
@@ -136,7 +139,12 @@ impl OpenSession {
     /// its label (the one typed for it, if any), so the `run_started` it
     /// starts takes that label; a refused submit leaves nothing behind. Other
     /// commands ignore the label.
-    pub async fn send(&self, command: Command, label: Option<String>) -> Result<(), String> {
+    pub async fn send(
+        &self,
+        command: Command,
+        label: Option<String>,
+        attachments: Vec<AttachmentRef>,
+    ) -> Result<(), String> {
         if !matches!(command, Command::Submit { .. }) {
             return self.controller.send(command);
         }
@@ -149,7 +157,10 @@ impl OpenSession {
         } else {
             Some(run_labels::user_count(&self.controller.history().await))
         };
-        self.live.lock().expected.push_back(Expected { label, base });
+        self.live
+            .lock()
+            .expected
+            .push_back(Expected { label, base, attachments });
         let sent = self.controller.send(command);
         if sent.is_err() {
             // Refused: nothing started. The record just pushed is the newest.
@@ -177,13 +188,17 @@ impl OpenSession {
     /// `last_seq` are read together, so the view can drop the channel events
     /// it already has.
     pub async fn opened(&self) -> OpenedSession {
-        let history: Vec<HistoryMessage> = self
-            .controller
-            .history()
-            .await
-            .iter()
-            .map(history_message)
-            .collect();
+        let messages = self.controller.history().await;
+        let mut history: Vec<HistoryMessage> = messages.iter().map(history_message).collect();
+        // The copies each user message was sent with, to show them again.
+        let files = files_dir(&self.sessions_dir, &self.session_id);
+        let runs = {
+            let files = files.clone();
+            tauri::async_runtime::spawn_blocking(move || attachment_runs::load(&files))
+                .await
+                .unwrap_or_default()
+        };
+        attachment_runs::link_history(&messages, &mut history, &runs, &files);
         let (recent_events, last_seq) = {
             let live = self.live.lock();
             let mut recent: Vec<serde_json::Value> = live.ring_head.iter().cloned().collect();
@@ -334,6 +349,7 @@ pub fn ingest(hub: &Arc<Hub>, entry: &Arc<OpenSession>, env: Envelope) {
     let mut count_messages = false;
     let mut change = None;
     let mut run_label = None;
+    let mut attachment_record = None;
     let mut record = None;
     {
         let mut live = entry.live.lock();
@@ -350,6 +366,21 @@ pub fn ingest(hub: &Arc<Hub>, entry: &Arc<OpenSession>, env: Envelope) {
                 live.running_label = None;
                 let expected = live.expected.pop_front();
                 let base = expected.as_ref().and_then(|e| e.base);
+                // The copies the submit carried are kept with the run it started.
+                let copies = expected
+                    .as_ref()
+                    .map(|e| e.attachments.clone())
+                    .unwrap_or_default();
+                if let (Some(base), Some(run_id), false) =
+                    (base, env.run_id.clone(), copies.is_empty())
+                {
+                    attachment_record = Some(RunAttachments {
+                        run_id,
+                        base,
+                        prompt: prompt.clone(),
+                        refs: copies,
+                    });
+                }
                 if let Some(run_id) = env.run_id.as_deref() {
                     live.recorder.start(run_id, base, prompt, env.at);
                 }
@@ -429,6 +460,20 @@ pub fn ingest(hub: &Arc<Hub>, entry: &Arc<OpenSession>, env: Envelope) {
     if let Some(pending) = run_label {
         spawn_label(hub.clone(), entry.clone(), pending);
     }
+    if let Some(attached) = attachment_record {
+        spawn_attachment_record(entry, attached);
+    }
+}
+
+/// Appends the copies a run started with to the session's record, off the
+/// event task. A session deleted meanwhile keeps no record: nothing is created.
+fn spawn_attachment_record(entry: &OpenSession, record: RunAttachments) {
+    let files = files_dir(&entry.sessions_dir, &entry.session_id);
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Err(e) = attachment_runs::append(&files, &record) {
+            eprintln!("bricks-desktop: attachments of a message : {}", e.message);
+        }
+    });
 }
 
 /// Keeps an envelope for redisplay. A finished run keeps `RING_CAPACITY`

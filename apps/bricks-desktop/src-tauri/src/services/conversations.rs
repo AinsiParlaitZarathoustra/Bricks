@@ -21,7 +21,11 @@ pub fn history_message(m: &Message) -> HistoryMessage {
         MessageContent::Text(text) => vec![HistoryBlock::Text { text: text.clone() }],
         MessageContent::Blocks(blocks) => blocks.iter().filter_map(history_block).collect(),
     };
-    HistoryMessage { role, blocks }
+    HistoryMessage {
+        role,
+        blocks,
+        attachments: Vec::new(),
+    }
 }
 
 fn history_block(b: &ContentBlock) -> Option<HistoryBlock> {

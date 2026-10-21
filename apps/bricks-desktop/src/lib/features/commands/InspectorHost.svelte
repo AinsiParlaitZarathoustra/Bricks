@@ -11,7 +11,6 @@
   import CostView from '$lib/features/inspect/CostView.svelte'
   import ClearView from '$lib/features/inspect/ClearView.svelte'
   import AgentProfilesView from '$lib/features/catalog/AgentProfilesView.svelte'
-  import AgentInstancesView from '$lib/features/catalog/AgentInstancesView.svelte'
   import SkillsView from '$lib/features/catalog/SkillsView.svelte'
   import JobsView from '$lib/features/catalog/JobsView.svelte'
   import ChangesetView from '$lib/features/catalog/ChangesetView.svelte'
@@ -31,7 +30,6 @@
     cost: { title: 'Consommation', component: CostView },
     clear: { title: 'Vider le contexte', component: ClearView },
     agents: { title: 'Profils d’agents', component: AgentProfilesView },
-    agent_instances: { title: 'Sous-agents', component: AgentInstancesView },
     skills: { title: 'Skills', component: SkillsView },
     jobs: { title: 'Tâches de fond', component: JobsView },
     changeset: { title: 'Modifications isolées', component: ChangesetView },

@@ -10,9 +10,8 @@ pub const USAGE: i32 = 2;
 pub const APPROVAL: i32 = 3;
 /// The answer was delivered, but the long-term memory maintenance failed.
 pub const MEMORY: i32 = 4;
-/// The run stopped at a limit before a final answer (turns, output tokens,
-/// no progress, content filter, empty response); the partial answer was
-/// printed.
+/// The run stopped before a final answer (output tokens, no progress,
+/// content filter, empty response); the partial answer was printed.
 pub const INCOMPLETE: i32 = 5;
 /// The answer was delivered, but a background sub-agent did not complete
 /// (incomplete, failed, cancelled, or stopped at the drain deadline).

@@ -52,22 +52,18 @@ pub struct DelegationSettings {
     pub max_concurrent: usize,
     /// Deepest generation: the session's agent is 0, its children 1.
     pub max_depth: u32,
-    /// Descendants admitted per root run, cumulatively.
-    pub max_total_per_run: u32,
-    /// `auto` (shared for one foreground child, a worktree for background
-    /// or parallel children), `shared` or `worktree`.
+    /// `auto` (a worktree for each sub-agent, since they run in parallel),
+    /// `shared` or `worktree`.
     pub default_isolation: String,
-    /// Children per `Agents` call.
-    pub max_batch: usize,
     /// Children waiting for a slot at most.
     pub max_queued: usize,
     /// How long a child may wait for a slot. Expired, the child is refused
     /// with `AgentAdmissionTimeout` and nothing is left reserved.
     pub admission_timeout_ms: u64,
-    /// Headless: how long background children may run after the main run
-    /// finished (counted from that end, and concurrent with the memory
-    /// maintenance). What is still running then is cancelled. `0`: cancelled
-    /// at once.
+    /// Headless: how long sub-agents still running may go on after the
+    /// main run finished (counted from that end, and concurrent with the
+    /// memory maintenance); the run waits for them. What is still running
+    /// then is cancelled and reported. `0`: cancelled at once.
     pub background_drain_ms: u64,
     /// Bytes of profile skills preloaded into a child, in total. A profile
     /// whose skills exceed it is refused (nothing is cut).
@@ -82,15 +78,13 @@ impl Default for DelegationSettings {
             reasoning_aliases: BTreeMap::new(),
             max_context_chars: 16_000,
             catalog_size: 30,
-            summary_chars: 4_000,
-            max_concurrent: 8,
+            summary_chars: 10_000,
+            max_concurrent: 16,
             max_depth: 2,
-            max_total_per_run: 32,
             default_isolation: "auto".into(),
-            max_batch: 8,
-            max_queued: 32,
-            admission_timeout_ms: 30_000,
-            background_drain_ms: 0,
+            max_queued: 64,
+            admission_timeout_ms: 60_000,
+            background_drain_ms: 600_000,
             skills_max_bytes: 24_000,
         }
     }
@@ -143,11 +137,6 @@ pub struct AgentSpawnRequest {
     /// Extra context passed explicitly (bounded).
     #[serde(default)]
     pub context: Option<String>,
-    /// Former turn limit (removed in 0.4.8). Never used: a request that
-    /// still sends it is refused with a migration message.
-    #[doc(hidden)]
-    #[serde(default, rename = "max_turns", skip_serializing)]
-    pub legacy_max_turns: Option<serde_json::Value>,
     /// Run in the background (a handle is returned at once).
     #[serde(default)]
     pub background: Option<bool>,
@@ -297,6 +286,42 @@ pub struct AgentResult {
     /// The profile's skills as loaded (known once the child is built).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skills: Vec<SkillLoad>,
+    /// The execution this result ends (1 at launch, more after resumes).
+    #[serde(default = "first_execution")]
+    pub execution: u32,
+}
+
+pub(crate) fn first_execution() -> u32 {
+    1
+}
+
+/// What a launch really used, kept with the instance so a resume runs with
+/// the same profile, model, reasoning, tools, skills and workspace. Names,
+/// revisions and paths only: never a secret value.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LaunchRecord {
+    /// The profile's name, source and revision (a resume refuses a profile
+    /// changed since).
+    pub profile: String,
+    pub profile_source: String,
+    pub profile_revision: String,
+    /// The model selection and reasoning profile applied.
+    pub model: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<String>,
+    /// The tools the child had, by name.
+    pub tools: Vec<String>,
+    /// Skills loaded with the profile: name and revision.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills: Vec<SkillLoad>,
+    /// `shared` or `worktree`, and where it worked.
+    pub isolation: String,
+    pub workspace: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    /// Its permissions: the parent's policy, scoped to this agent (asked
+    /// again at each call; never widened by a resume).
+    pub permissions: String,
 }
 
 impl AgentResult {
@@ -324,6 +349,7 @@ impl AgentResult {
             changeset: None,
             branch: info.branch.clone(),
             skills: info.skills.clone(),
+            execution: 1,
         }
     }
 }
@@ -338,6 +364,10 @@ pub enum SubAgentEvent {
         state: InstanceState,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
+        /// The execution this state belongs to (1 at launch, more after
+        /// resumes).
+        #[serde(default = "first_execution")]
+        execution: u32,
     },
     ToolStarted {
         agent_id: String,
@@ -726,6 +756,52 @@ struct Prepared {
     skills: Vec<bricks_skills::Activation>,
 }
 
+/// What a child takes from the context of the agent that starts it.
+fn parent_ctx(ctx: &ToolContext, depth: u32) -> ParentCtx {
+    ParentCtx {
+        skills: ctx
+            .extensions
+            .get::<bricks_tools::skill_tool::SkillSession>()
+            .map(|s| s.access.clone()),
+        working_dir: ctx.working_dir.clone(),
+        permissions: Arc::clone(&ctx.permissions),
+        mcp_manager: ctx.mcp_manager.clone(),
+        semantic: ctx
+            .extensions
+            .get::<bricks_tools::code_scout::SemanticHandle>()
+            .map(|h| (*h).clone()),
+        web: ctx
+            .extensions
+            .get::<bricks_tools::web_runtime::WebRuntime>()
+            .map(|w| (*w).clone()),
+        depth,
+        sink: ctx.extensions.get::<SubAgentSink>().map(|s| (*s).clone()),
+        jobs: ctx
+            .extensions
+            .get::<bricks_tools::jobs::JobsHandle>()
+            .map(|j| (*j).clone()),
+    }
+}
+
+/// How an execution starts: a launch (execution 1), or a resume that
+/// continues the stored conversation, in its worktree when it still exists.
+#[derive(Clone)]
+struct ChildStart {
+    execution: u32,
+    history: Option<Vec<bricks_types::Message>>,
+    worktree: Option<(PathBuf, Option<String>)>,
+}
+
+impl ChildStart {
+    fn launch() -> Self {
+        Self {
+            execution: 1,
+            history: None,
+            worktree: None,
+        }
+    }
+}
+
 /// What a child task takes from its parent's context.
 #[derive(Clone)]
 struct ParentCtx {
@@ -760,11 +836,13 @@ fn now_rfc3339() -> String {
     chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
 }
 
+/// At most `max` characters (Unicode scalar values), the ellipsis of a
+/// cut text included; whether it was cut.
 fn shorten(s: &str, max: usize) -> (String, bool) {
     if s.chars().count() <= max {
         (s.to_string(), false)
     } else {
-        let mut t: String = s.chars().take(max).collect();
+        let mut t: String = s.chars().take(max.saturating_sub(1)).collect();
         t.push('…');
         (t, true)
     }
@@ -774,10 +852,8 @@ fn limits_of(s: &DelegationSettings) -> super::runtime::Limits {
     super::runtime::Limits {
         max_concurrent: s.max_concurrent.max(1),
         max_depth: s.max_depth,
-        max_total_per_run: s.max_total_per_run,
         max_queued: s.max_queued,
         admission_timeout: std::time::Duration::from_millis(s.admission_timeout_ms),
-        max_batch: s.max_batch.max(1),
         background_drain: std::time::Duration::from_millis(s.background_drain_ms),
     }
 }
@@ -875,6 +951,7 @@ impl AgentSpawner {
                     agent_id: id.to_string(),
                     state,
                     reason,
+                    execution: self.runtime.execution(id).unwrap_or(1),
                 },
             );
         }
@@ -897,13 +974,6 @@ impl AgentSpawner {
         ext: &bricks_tools::Extensions,
         batch_background: Option<bool>,
     ) -> Result<Prepared, SpawnError> {
-        if req.legacy_max_turns.is_some() {
-            return Err(SpawnError::Invalid(
-                "`max_turns` was removed in 0.4.8: sub-agents have no turn limit. Send the \
-                 request again without it."
-                    .into(),
-            ));
-        }
         if subagent::is_blank(&req.task) {
             return Err(SpawnError::Invalid(
                 "`task` is empty: give the sub-agent a precise, self-contained task.".into(),
@@ -1049,14 +1119,14 @@ impl AgentSpawner {
         if reqs.is_empty() {
             return Err(SpawnError::Invalid("`agents` is empty.".into()));
         }
-        let max_batch = self.settings.max_batch.max(1);
-        if reqs.len() > max_batch {
-            return Err(SpawnError::Invalid(format!(
-                "{} agents asked; at most {max_batch} per call ([agents] max_batch).",
-                reqs.len()
-            )));
-        }
-        let batch_bg = opts.batch.then_some(opts.background);
+        // A parallel launch (every launch from the tools) is a background
+        // child whatever the request or the profile says: its own worktree
+        // under `auto`, the session's cancellation, awaited by a headless run.
+        let batch_bg = if opts.background {
+            Some(true)
+        } else {
+            opts.batch.then_some(opts.background)
+        };
         let mut prepared = Vec::with_capacity(reqs.len());
         for (i, r) in reqs.iter().enumerate() {
             match self.prepare(r, &ctx.extensions, batch_bg) {
@@ -1098,31 +1168,19 @@ impl AgentSpawner {
         } else {
             None
         };
+        // Parallel writers need their own worktrees: outside a git
+        // repository that is refused here, before anything starts, rather
+        // than several agents silently writing in the same folder.
+        if let Some(Err(e)) = &snapshot {
+            return Err(SpawnError::Refused(format!(
+                "{e}. Sub-agents run in parallel, each in its own git worktree; here, pass \
+                 `isolation: \"shared\"` to let them work in this folder (one writer at a \
+                 time). Nothing was started."
+            )));
+        }
 
-        let sink = ctx.extensions.get::<SubAgentSink>().map(|s| (*s).clone());
-        let pctx = ParentCtx {
-            skills: ctx
-                .extensions
-                .get::<bricks_tools::skill_tool::SkillSession>()
-                .map(|s| s.access.clone()),
-            working_dir: ctx.working_dir.clone(),
-            permissions: Arc::clone(&ctx.permissions),
-            mcp_manager: ctx.mcp_manager.clone(),
-            semantic: ctx
-                .extensions
-                .get::<bricks_tools::code_scout::SemanticHandle>()
-                .map(|h| (*h).clone()),
-            web: ctx
-                .extensions
-                .get::<bricks_tools::web_runtime::WebRuntime>()
-                .map(|w| (*w).clone()),
-            depth,
-            sink: sink.clone(),
-            jobs: ctx
-                .extensions
-                .get::<bricks_tools::jobs::JobsHandle>()
-                .map(|j| (*j).clone()),
-        };
+        let pctx = parent_ctx(ctx, depth);
+        let sink = pctx.sink.clone();
         let run_token = subagent::run_token(&ctx.extensions).unwrap_or_default();
         let call_id = ctx
             .extensions
@@ -1177,7 +1235,7 @@ impl AgentSpawner {
             let child_info = info.clone();
             let handle = tokio::spawn(async move {
                 let r = this
-                    .run_one(p, child_info, iso, reasoning, snap, pc, cancel)
+                    .run_one(p, child_info, iso, reasoning, snap, pc, cancel, ChildStart::launch())
                     .await;
                 let _ = tx.send(r);
             });
@@ -1199,6 +1257,30 @@ impl AgentSpawner {
         }
 
         if opts.background || handles_info.iter().all(|i| i.background) {
+            // `fail_fast` in parallel: the first child that does not complete
+            // cancels the others of its batch.
+            if opts.fail_fast && ids.len() > 1 {
+                let runtime = Arc::clone(&self.runtime);
+                tokio::spawn(async move {
+                    use futures::stream::{FuturesUnordered, StreamExt};
+                    let mut pending: FuturesUnordered<_> = receivers
+                        .into_iter()
+                        .enumerate()
+                        .map(|(i, rx)| async move { (i, rx.await) })
+                        .collect();
+                    while let Some((i, r)) = pending.next().await {
+                        if r.as_ref().is_ok_and(|r| r.status == "completed") {
+                            continue;
+                        }
+                        for (j, id) in ids.iter().enumerate() {
+                            if j != i {
+                                runtime.cancel(id);
+                            }
+                        }
+                        break;
+                    }
+                });
+            }
             return Ok(Spawned::Handles(handles_info));
         }
 
@@ -1242,6 +1324,183 @@ impl AgentSpawner {
         Ok(Spawned::Results(final_results))
     }
 
+    /// A new execution of an ended sub-agent, under the same identity: its
+    /// stored conversation continues with `prompt`, with the profile, model,
+    /// reasoning, tools, skills and workspace of its launch, through the same
+    /// admission as a launch. Refused, before anything starts, when any of
+    /// these is no longer the same or available. Returns at once, like a
+    /// launch; `AgentControl wait` waits for it.
+    pub async fn resume(
+        self: &Arc<Self>,
+        id: &str,
+        prompt: &str,
+        ctx: &ToolContext,
+        viewer: Option<&str>,
+    ) -> Result<SpawnInfo, SpawnError> {
+        if subagent::is_blank(prompt) {
+            return Err(SpawnError::Invalid(
+                "`prompt` is empty: say what the sub-agent should do now.".into(),
+            ));
+        }
+        let rec = self
+            .runtime
+            .record(id)
+            .filter(|_| self.runtime.visible_to(id, viewer))
+            .ok_or_else(|| SpawnError::Refused(format!("no sub-agent `{id}` in your scope.")))?;
+        if !rec.state.is_terminal() {
+            return Err(SpawnError::Refused(format!(
+                "`{id}` is still {}: send it a message instead.",
+                rec.state.as_str()
+            )));
+        }
+        let Some(launch) = rec.launch.clone() else {
+            return Err(SpawnError::Refused(format!(
+                "`{id}` was started before resumes were recorded: its result can be read, but \
+                 it cannot be resumed faithfully."
+            )));
+        };
+        // The same profile, not a newer one under the same name.
+        let profile = if launch.profile == neutral_profile().name
+            && launch.profile_revision == neutral_profile().source.revision
+        {
+            neutral_profile()
+        } else {
+            let p = self.profiles.snapshot().get(&launch.profile).map_err(|e| {
+                SpawnError::Refused(format!("`{id}` cannot be resumed: {e}."))
+            })?;
+            if p.source.revision != launch.profile_revision {
+                return Err(SpawnError::Refused(format!(
+                    "`{id}` cannot be resumed: profile `{}` changed since its launch.",
+                    launch.profile
+                )));
+            }
+            p
+        };
+        // The same tools: a tool gone since is a refusal, never a silent
+        // change of what the agent can do.
+        let mut available: Vec<String> = subagent::child_tools((self.tools)(), &[])
+            .iter()
+            .map(|t| t.name().to_string())
+            .collect();
+        available.extend(
+            ["Agent", "Agents", "AgentControl", "AgentProfiles"].map(String::from),
+        );
+        if let Some(missing) = launch.tools.iter().find(|t| !available.contains(t)) {
+            return Err(SpawnError::Refused(format!(
+                "`{id}` cannot be resumed: its tool `{missing}` is no longer available."
+            )));
+        }
+        let skills = self.profile_skills(&profile, &ctx.extensions)?;
+        for was in &launch.skills {
+            let same = skills.iter().any(|a| {
+                a.name == was.name && Some(&a.revision) == was.revision.as_ref()
+            });
+            if !same {
+                return Err(SpawnError::Refused(format!(
+                    "`{id}` cannot be resumed: its skill `{}` changed or is no longer available.",
+                    was.name
+                )));
+            }
+        }
+        let history = self
+            .stored_history(id)
+            .map_err(|e| SpawnError::Refused(format!("`{id}` cannot be resumed: {e}.")))?;
+        // Its worktree, when it still exists; a new one only when it never
+        // produced changes (nothing to lose). Changes applied or discarded
+        // are never brought back.
+        let iso = if launch.isolation == "worktree" {
+            Isolation::Worktree
+        } else {
+            Isolation::Shared
+        };
+        let worktree = match (iso, self.runtime.workspaces.worktree(id)) {
+            (Isolation::Worktree, Some(w)) if w.state != "removed" && w.cwd.is_dir() => {
+                Some((w.cwd.clone(), Some(w.branch.clone())))
+            }
+            (Isolation::Worktree, _)
+                if rec.result.as_ref().is_some_and(|r| r.changeset.is_some()) =>
+            {
+                return Err(SpawnError::Refused(format!(
+                    "`{id}` cannot be resumed: its changes were applied or discarded and its \
+                     worktree is gone."
+                )));
+            }
+            _ => None,
+        };
+        let snapshot = if iso == Isolation::Worktree && worktree.is_none() {
+            Some(
+                self.runtime
+                    .workspaces
+                    .snapshot(&ctx.working_dir)
+                    .await
+                    .map(Arc::new),
+            )
+        } else {
+            None
+        };
+
+        let (execution, cancel) = self.runtime.begin_resume(id, viewer).map_err(|e| {
+            SpawnError::Refused(match e {
+                super::runtime::ResumeRefusal::Busy => {
+                    format!("`{id}` is already being resumed.")
+                }
+                super::runtime::ResumeRefusal::NotEnded(s) => {
+                    format!("`{id}` is still {}: send it a message instead.", s.as_str())
+                }
+                _ => format!("no sub-agent `{id}` in your scope."),
+            })
+        })?;
+        // The new execution belongs to the run that resumed it (its usage,
+        // its cancellation with that run's session).
+        let mut info = rec.info.clone();
+        if let Some(parent) = ctx.extensions.get::<AgentIdentity>() {
+            info.root_run_id = parent.root_run_id.clone();
+        }
+        info.tool_call_id = ctx
+            .extensions
+            .get::<bricks_tools::CurrentToolCall>()
+            .map(|c| c.0.clone());
+        self.runtime.update_launch(&info, None);
+        let pc = parent_ctx(ctx, info.depth.saturating_sub(1));
+        self.set_state(
+            &pc.sink,
+            id,
+            InstanceState::Queued,
+            Some("resumed: waiting for a free slot".into()),
+        );
+        let resolved = Resolved {
+            model: rec.info.model.clone(),
+            reasoning: rec.info.reasoning.clone(),
+            warnings: Vec::new(),
+        };
+        let p = Prepared {
+            req: AgentSpawnRequest {
+                task: prompt.to_string(),
+                ..Default::default()
+            },
+            profile,
+            resolved,
+            background: true,
+            isolation: Some(iso),
+            skills,
+        };
+        let this = Arc::clone(self);
+        let reasoning = launch.reasoning.clone();
+        let start = ChildStart {
+            execution,
+            history: Some(history),
+            worktree,
+        };
+        let child_info = info.clone();
+        let handle = tokio::spawn(async move {
+            let _ = this
+                .run_one(p, child_info, iso, reasoning, snapshot, pc, cancel, start)
+                .await;
+        });
+        self.runtime.attach_task(id, handle);
+        Ok(info)
+    }
+
     /// One child, from its workspace to its terminal state.
     #[allow(clippy::too_many_arguments)]
     async fn run_one(
@@ -1253,12 +1512,15 @@ impl AgentSpawner {
         snapshot: Option<Result<Arc<super::workspace::Snapshot>, super::workspace::WsError>>,
         pc: ParentCtx,
         cancel: CancellationToken,
+        start: ChildStart,
     ) -> AgentResult {
         let started = Instant::now();
         let id = info.agent_id.clone();
         let sink = pc.sink.clone();
+        let execution = start.execution;
         let fail = |this: &Self, info: &SpawnInfo, status: &str, err: String| -> AgentResult {
-            let r = this.finish_without_run(info, &p.resolved, status, Some(err), started);
+            let mut r = this.finish_without_run(info, &p.resolved, status, Some(err), started);
+            r.execution = execution;
             let state = if status == "cancelled" {
                 InstanceState::Cancelled
             } else {
@@ -1271,9 +1533,19 @@ impl AgentSpawner {
             r
         };
 
-        // Workspace.
+        // Workspace: a resumed child keeps its worktree when it still exists.
         let mut cwd = pc.working_dir.clone();
-        if iso == Isolation::Worktree {
+        if let Some((dir, branch)) = &start.worktree {
+            cwd = dir.clone();
+            info.branch = branch.clone();
+            info.workspace = dir.display().to_string();
+        } else if iso == Isolation::Worktree {
+            self.set_state(
+                &sink,
+                &id,
+                InstanceState::Created,
+                Some("preparing its worktree".into()),
+            );
             let snap = match snapshot {
                 Some(Ok(s)) => s,
                 Some(Err(e)) => return fail(&self, &info, "failed", e.to_string()),
@@ -1360,7 +1632,10 @@ impl AgentSpawner {
             let s3 = sink.clone();
             let id3 = id.clone();
             let this3 = Arc::clone(&self);
-            let g = writers_for(&cwd)
+            // The same admission window as a slot: a writer that never
+            // leaves does not keep this child (and its slot) forever.
+            let window = self.runtime.scheduler.limits.admission_timeout;
+            let waited = tokio::time::timeout(window, writers_for(&cwd)
                 .acquire(&id, &cancel, move |holder| {
                     this3.emit(
                         &s3,
@@ -1370,10 +1645,27 @@ impl AgentSpawner {
                             reason: Some(format!(
                                 "another writer is active in this workspace ({holder})"
                             )),
+                            execution: this3.runtime.execution(&id3).unwrap_or(1),
                         },
                     );
-                })
+                }))
                 .await;
+            let g = match waited {
+                Ok(g) => g,
+                Err(_) => {
+                    drop(permit);
+                    return fail(
+                        &self,
+                        &info,
+                        "failed",
+                        format!(
+                            "AgentAdmissionTimeout: the workspace stayed held by another writer \
+                             for {} ms ([agents] admission_timeout_ms)",
+                            window.as_millis()
+                        ),
+                    );
+                }
+            };
             match g {
                 Some(g) => writer = Some((cwd.clone(), g)),
                 None => {
@@ -1396,7 +1688,8 @@ impl AgentSpawner {
         );
         self.set_state(&sink, &id, InstanceState::Starting, None);
 
-        let (child, skills) = match self
+        let applied_reasoning = reasoning.clone();
+        let (child, skills, tool_names) = match self
             .build_child(
                 &info,
                 &p.profile,
@@ -1409,6 +1702,7 @@ impl AgentSpawner {
                 iso,
                 &cancel,
                 Arc::clone(&lease),
+                start.history.clone(),
             )
             .await
         {
@@ -1433,6 +1727,22 @@ impl AgentSpawner {
             );
         }
         info.skills = skills;
+        // What `status` and a later resume read: the real workspace, branch,
+        // skills, and the launch as it ran (kept from the first execution).
+        let launch = (execution == 1).then(|| LaunchRecord {
+            profile: p.profile.name.clone(),
+            profile_source: p.profile.source.label.clone(),
+            profile_revision: p.profile.source.revision.clone(),
+            model: p.resolved.model.applied.clone(),
+            reasoning: applied_reasoning,
+            tools: tool_names,
+            skills: info.skills.clone(),
+            isolation: info.isolation.clone(),
+            workspace: info.workspace.clone(),
+            branch: info.branch.clone(),
+            permissions: "parent policy, scoped to this agent".into(),
+        });
+        self.runtime.update_launch(&info, launch);
 
         let prompt = match p.req.context.as_deref().filter(|c| !subagent::is_blank(c)) {
             Some(c) => format!(
@@ -1451,9 +1761,11 @@ impl AgentSpawner {
                 sink.clone(),
                 cancel.clone(),
                 started,
+                execution,
             )
             .await;
         r.skills = info.skills.clone();
+        r.execution = execution;
         lease.release().await;
 
         // The work of an isolated child: a ChangeSet (or nothing).
@@ -1509,6 +1821,7 @@ impl AgentSpawner {
         sink: Option<SubAgentSink>,
         cancel: CancellationToken,
         started: Instant,
+        execution: u32,
     ) -> AgentResult {
         let agent_id = info.agent_id.clone();
         self.set_state(&sink, &agent_id, InstanceState::Running, None);
@@ -1624,6 +1937,7 @@ impl AgentSpawner {
                         agent_id: id.clone(),
                         state: InstanceState::Cancelling,
                         reason: Some("cancellation requested".into()),
+                        execution: rt.execution(&id).unwrap_or(1),
                     };
                     if rt.has_session_sink() {
                         rt.emit(AgentEvent::SubAgent(ev));
@@ -1634,7 +1948,25 @@ impl AgentSpawner {
             })
         };
         let input = crate::UserInput::text(prompt);
-        let result = crate::runner::run_agent_streaming(&child, &input, tx).await;
+        // Its message queue, reachable by its identity while it runs:
+        // `AgentControl message` and `SendMessage` deliver there, at the next
+        // model request (never between a tool call and its result).
+        let run_cancel = child.begin_run();
+        let controls = Arc::new(crate::events::StreamControls::new(run_cancel.clone()));
+        self.runtime
+            .set_controls(&agent_id, execution, Some(Arc::clone(&controls)));
+        let policy = Arc::clone(&child.permission_policy);
+        let result = crate::runner::run_prepared_controlled(
+            &child,
+            &input,
+            tx,
+            run_cancel,
+            Some(Arc::clone(&controls)),
+            policy,
+        )
+        .await;
+        controls.finish();
+        self.runtime.set_controls(&agent_id, execution, None);
         cancel_watch.abort();
         let partial = subagent::partial_text(&child);
         // What it spent, also when it failed or was cancelled.
@@ -1674,7 +2006,8 @@ impl AgentSpawner {
         iso: Isolation,
         cancel: &CancellationToken,
         lease: Arc<super::runtime::ActivityLease>,
-    ) -> Result<(Agent, Vec<SkillLoad>), String> {
+        history: Option<Vec<bricks_types::Message>>,
+    ) -> Result<(Agent, Vec<SkillLoad>, Vec<String>), String> {
         // The parent's tools (rebuilt), and the delegation tools of this
         // runtime: recursion is bounded by the scheduler, not by removing
         // tools. Legacy delegation tools never pass.
@@ -1711,6 +2044,9 @@ impl AgentSpawner {
             ext.insert(j.clone());
         }
         ext.insert(super::runtime::RuntimeHandle(Arc::clone(&self.runtime)));
+        ext.insert(bricks_tools::send_message::MessageRouterHandle(Arc::new(
+            super::runtime::RuntimeRouter(Arc::clone(&self.runtime)),
+        )));
         // The profile's skills, as validated before the launch: whole, in
         // the system prompt (where compaction never removes them).
         let mut system = child_system_prompt(profile, &names, cwd);
@@ -1745,6 +2081,11 @@ impl AgentSpawner {
         if let Some(r) = reasoning {
             b = b.reasoning_profile(r);
         }
+        // A resumed child continues its own conversation: past tool calls
+        // stay results, nothing is run again.
+        if let Some(h) = history {
+            b = b.with_messages(h);
+        }
         if let Some(access) = &pc.skills {
             b = b.skills(access.clone()).preloaded_skills(preloaded);
         }
@@ -1754,16 +2095,42 @@ impl AgentSpawner {
         if let Some(m) = &pc.mcp_manager {
             agent.adopt_mcp(Arc::clone(m)).await;
         }
-        Ok((agent, skills))
+        Ok((agent, skills, names))
     }
 
+    /// The child's conversation as it continues (`<id>.json`, the active
+    /// history a resume starts from) and complete (`<id>.history.json`, the
+    /// raw history, never shortened). Written atomically.
     fn store_transcript(&self, id: &str, child: &Agent) -> Option<String> {
         let dir = self.artifacts_dir.as_ref()?;
         std::fs::create_dir_all(dir).ok()?;
-        let path = dir.join(format!("{id}.json"));
-        let body = serde_json::to_vec_pretty(&child.messages()).ok()?;
-        std::fs::write(&path, body).ok()?;
-        Some(path.display().to_string())
+        let write = |name: String, body: Vec<u8>| -> Option<()> {
+            let path = dir.join(&name);
+            let tmp = dir.join(format!("{name}.tmp"));
+            std::fs::write(&tmp, body).ok()?;
+            std::fs::rename(&tmp, &path).ok()
+        };
+        write(
+            format!("{id}.history.json"),
+            serde_json::to_vec_pretty(&child.raw_history()).ok()?,
+        );
+        write(
+            format!("{id}.json"),
+            serde_json::to_vec_pretty(&child.messages()).ok()?,
+        )?;
+        Some(dir.join(format!("{id}.json")).display().to_string())
+    }
+
+    /// The active history a resume continues, as stored at the end of the
+    /// last execution.
+    fn stored_history(&self, id: &str) -> Result<Vec<bricks_types::Message>, String> {
+        let dir = self
+            .artifacts_dir
+            .as_ref()
+            .ok_or("this session keeps no sub-agent transcripts")?;
+        let text = std::fs::read(dir.join(format!("{id}.json")))
+            .map_err(|_| format!("the transcript of `{id}` is missing"))?;
+        serde_json::from_slice(&text).map_err(|e| format!("the transcript of `{id}` is unreadable: {e}"))
     }
 
     fn finish_without_run(
@@ -1834,6 +2201,7 @@ impl AgentSpawner {
             changeset: None,
             branch: info.branch.clone(),
             skills: info.skills.clone(),
+            execution: 1,
         }
     }
 }

@@ -5,13 +5,14 @@
 //! through the [`hub`]. Conversations are opened, closed and changed in
 //! [`sessions`].
 
+pub mod attachments;
 pub mod catalog;
 pub mod hub;
 pub mod live;
 pub mod sessions;
 
 use crate::contract::{AppInfo, IpcErrorCode, IpcResult, ProviderInfo, ToolApproval};
-use crate::services::attachments;
+use crate::services::attachments as store;
 use crate::services::changes::ChangeJournal;
 use crate::services::conversations::path_text;
 use crate::services::error;
@@ -51,6 +52,9 @@ pub struct AppState {
     config_errors: Vec<String>,
     home: PathBuf,
     sessions_dir: PathBuf,
+    /// Drafts of attachments: the copies of what is not sent yet.
+    drafts_dir: PathBuf,
+    /// Pasted files of earlier versions (the seven-day purge applies only here).
     attachments_dir: PathBuf,
     pub(crate) projects: Arc<ProjectStore>,
     pub(crate) prefs: Arc<PrefsStore>,
@@ -104,6 +108,7 @@ impl AppState {
             approval,
             config_errors: projects.notes().to_vec(),
             sessions_dir: home.join("sessions"),
+            drafts_dir: desktop.join("drafts"),
             attachments_dir: desktop.join("attachments"),
             prefs: Arc::new(prefs),
             skills: Arc::new(SkillsCatalogStore::new(dirs::home_dir())),
@@ -176,8 +181,14 @@ impl AppState {
         Ok(path)
     }
 
+    /// The global folder of pasted files of earlier versions.
     pub(crate) fn attachments_dir(&self) -> &Path {
         &self.attachments_dir
+    }
+
+    /// `<bricks_home>/desktop/drafts`: the copies of what is not sent yet.
+    pub(crate) fn drafts_dir(&self) -> &Path {
+        &self.drafts_dir
     }
 
     pub(crate) fn sessions_dir(&self) -> &Path {
@@ -244,10 +255,17 @@ pub(crate) fn credentials_available(p: &ProviderConfig) -> bool {
 pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     use tauri::Manager;
     let state = AppState::load();
-    let dir = state.attachments_dir().to_path_buf();
-    // Old pasted files go, in the background: startup does not wait for them.
+    let legacy = state.attachments_dir().to_path_buf();
+    let drafts = state.drafts_dir().to_path_buf();
+    let sessions = state.sessions_dir().to_path_buf();
+    // Attachment upkeep runs in the background: startup does not wait for it.
+    // Order: an interrupted promotion is finished (or dropped) first, then the
+    // stale drafts go. Session copies are never swept. The global folder of
+    // earlier versions keeps its seven-day purge, and only there.
     tauri::async_runtime::spawn_blocking(move || {
-        attachments::remove_older_than(&dir, attachments::RETENTION);
+        store::recover_promotions(&drafts, &sessions);
+        store::sweep_drafts(&drafts, std::time::SystemTime::now(), store::DRAFT_RETENTION);
+        store::remove_older_than(&legacy, store::RETENTION);
     });
     app.manage(state);
     Ok(())

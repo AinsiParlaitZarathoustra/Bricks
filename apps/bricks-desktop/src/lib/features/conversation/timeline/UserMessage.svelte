@@ -3,11 +3,39 @@
   import Folder from '@lucide/svelte/icons/folder'
   import Image from '@lucide/svelte/icons/image'
   import { openUrl } from '@tauri-apps/plugin-opener'
-  import type { UserItem } from '$lib/state/conversation.svelte'
+  import type { Conversation, UserItem } from '$lib/state/conversation.svelte'
+  import type { AttachmentInfo } from '$lib/ipc/engine'
+  import { attachmentPreview } from '$lib/ipc/client'
   import { basename, formatBytes } from '../format'
   import { isOpenableUrl, messageParts } from '../links'
 
-  let { item }: { item: UserItem } = $props()
+  let { item, conversation = null }: { item: UserItem; conversation?: Conversation | null } = $props()
+
+  /** A copy kept by the desktop: `<id>-<name>` in the conversation's folder. */
+  const COPY = /^([0-9a-f]{32})-(.+)$/
+  function copyId(a: AttachmentInfo): string | null {
+    return a.attachment_id ?? COPY.exec(basename(a.path))?.[1] ?? null
+  }
+  function shownName(a: AttachmentInfo): string {
+    const name = basename(a.path)
+    return COPY.exec(name)?.[2] ?? name
+  }
+
+  // Previews of the images, read from the conversation's copies.
+  let previews = $state<Record<string, string>>({})
+  $effect(() => {
+    const sessionId = conversation?.sessionId
+    if (!sessionId) return
+    for (const a of item.attachments) {
+      const id = a.kind === 'image' ? copyId(a) : null
+      if (!id || previews[id]) continue
+      attachmentPreview('session', sessionId, id)
+        .then((p) => {
+          if (p.data_url) previews = { ...previews, [id]: p.data_url }
+        })
+        .catch(() => {})
+    }
+  })
 
   // The text is plain: its web addresses are link parts, rendered as markup.
   const parts = $derived(messageParts(item.text))
@@ -49,18 +77,22 @@
     <ul class="flex max-w-[85%] flex-wrap justify-end gap-1.5" aria-label="Pièces jointes">
       {#each item.attachments as attachment, i (`${i}:${attachment.path}`)}
         {@const size = formatBytes(attachment.bytes)}
+        {@const id = copyId(attachment)}
+        {@const preview = id ? previews[id] : undefined}
         <li
           class="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 text-xs text-card-foreground"
-          title={attachment.path}
+          title={shownName(attachment)}
         >
-          {#if attachment.kind === 'image'}
+          {#if preview}
+            <img src={preview} alt="" class="size-10 shrink-0 rounded object-cover" />
+          {:else if attachment.kind === 'image'}
             <Image class="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
           {:else if attachment.kind === 'folder'}
             <Folder class="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
           {:else}
             <File class="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
           {/if}
-          <span class="min-w-0 truncate">{basename(attachment.path)}</span>
+          <span class="min-w-0 truncate">{shownName(attachment)}</span>
           {#if size}<span class="shrink-0 text-muted-foreground">{size}</span>{/if}
           {#if attachment.note}<span class="shrink-0 text-muted-foreground">· {attachment.note}</span>{/if}
         </li>

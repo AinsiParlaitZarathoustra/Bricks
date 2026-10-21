@@ -16,6 +16,8 @@
   import ConversationTitle from '$lib/features/conversation/ConversationTitle.svelte'
   import Composer from '$lib/features/composer/Composer.svelte'
   import ContextPanel from '$lib/features/context/ContextPanel.svelte'
+  import PlusMenu from '$lib/features/context/PlusMenu.svelte'
+  import AgentInspectorHost from '$lib/features/agents/AgentInspectorHost.svelte'
   import ChangesPanel from '$lib/features/changes/ChangesPanel.svelte'
   import ReaderPanel from '$lib/features/reader/ReaderPanel.svelte'
   import { reader } from '$lib/state/reader.svelte'
@@ -127,6 +129,9 @@
           {#snippet title()}
             <ConversationTitle conversation={app.current} />
           {/snippet}
+          {#snippet trailing()}
+            <PlusMenu />
+          {/snippet}
         </TopBar>
       {/snippet}
       {#snippet left()}
@@ -170,5 +175,6 @@
   {/if}
   <SettingsDialog bind:open={ui.settingsOpen} />
   <InspectorHost />
+  <AgentInspectorHost />
   <Toaster richColors />
 </Tooltip.Provider>

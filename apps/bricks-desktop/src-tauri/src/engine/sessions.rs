@@ -354,9 +354,15 @@ impl AppState {
                 "pour changer de conversation, ouvrez-la : une session reste liée à son contrôleur",
             ));
         }
+        // A submit's attachment copies are checked here (an image needs a model
+        // with image input) and kept with the run it starts.
+        let copies = match &command {
+            Command::Submit { prompt } => self.submit_copies(&entry, prompt)?,
+            _ => Vec::new(),
+        };
         let label = display.as_deref().and_then(normalize_label);
         entry
-            .send(command, label)
+            .send(command, label, copies)
             .await
             .map_err(|reason| error(IpcErrorCode::Rejected, reason))
     }

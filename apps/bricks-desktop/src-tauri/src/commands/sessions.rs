@@ -1,7 +1,5 @@
 use crate::contract::*;
 use crate::engine::AppState;
-use crate::services::attachments;
-use crate::services::join_error;
 use tauri::State;
 
 #[tauri::command]
@@ -60,12 +58,11 @@ pub async fn session_snapshot(state: State<'_, AppState>, session_id: String) ->
     state.snapshot(&session_id)
 }
 
-/// Stores pasted/dropped bytes (base64) as an application-owned
-/// temporary file usable in a `PromptBlock::Image`/`File`.
+/// Compatibility: pasted bytes become a draft's copy, returned by its absolute
+/// path. The declared type is not trusted (the content decides) and the import
+/// limits apply. New callers use `attachment_import_bytes`.
 #[tauri::command]
 pub async fn attachment_save(state: State<'_, AppState>, name: String, media_type: String, data_base64: String) -> IpcResult<SavedAttachment> {
-    let dir = state.attachments_dir().to_path_buf();
-    tokio::task::spawn_blocking(move || attachments::save(&dir, &name, &media_type, &data_base64))
-        .await
-        .map_err(join_error)?
+    let _ = media_type;
+    state.save_pasted(name, data_base64).await
 }

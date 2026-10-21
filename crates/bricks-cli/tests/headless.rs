@@ -3,6 +3,7 @@
 
 mod common;
 
+use bricks_agent::control::protocol::SCHEMA_VERSION;
 use common::*;
 use serde_json::json;
 use std::time::{Duration, Instant};
@@ -33,7 +34,7 @@ fn json_output_is_complete_versioned_and_alone_on_stdout() {
         "{k:?}"
     );
     for (i, e) in evs.iter().enumerate() {
-        assert_eq!(e["schema"], 5);
+        assert_eq!(e["schema"], SCHEMA_VERSION);
         assert_eq!(e["seq"], i as u64 + 1, "contiguous");
         assert!(e["session_id"].is_string());
     }
@@ -60,8 +61,9 @@ fn json_output_is_complete_versioned_and_alone_on_stdout() {
 
 /// A run stopped before a final answer (here: no progress, the same
 /// failing call again and again) is reported as incomplete, with its own
-/// exit code: never as a success. A former `[agent] max_turns` is ignored
-/// (turn limits were removed) and said so; it never stops the run.
+/// exit code: never as a success. A key of an earlier version (`[agent]
+/// max_turns`, kept here as data) is ignored and said so; it never stops the
+/// run.
 #[test]
 fn a_run_without_a_final_answer_is_incomplete() {
     let same = || tool("c1", "Read", json!({"file_path": "absent.txt"}));
@@ -79,7 +81,7 @@ fn a_run_without_a_final_answer_is_incomplete() {
     assert!(
         opened["warnings"]
             .to_string()
-            .contains("turn limits were removed"),
+            .contains("unknown key ignored: [agent] max_turns"),
         "{opened}"
     );
     let fin: Vec<_> = evs.iter().filter(|e| e["type"] == "run_finished").collect();
@@ -352,7 +354,10 @@ fn skills_are_chosen_explicitly_and_project_skills_need_explicit_trust() {
         ]
     );
     for e in &evs {
-        assert_eq!(e["schema"], 5, "additions keep the schema version");
+        assert_eq!(
+            e["schema"], SCHEMA_VERSION,
+            "additions keep the schema version"
+        );
     }
     let body = m.seen.lock().unwrap()[0].to_string();
     let (i, j, k) = (
@@ -394,7 +399,7 @@ fn a_session_without_skills_works_and_lists_only_built_ins() {
 }
 
 /// A background sub-agent still running when the main run ends is cancelled
-/// at once (`[agents] background_drain_ms` defaults to 0): the run exits with
+/// at once when `[agents] background_drain_ms = 0` says so: the run exits with
 /// code 6 and reports the sub-agent as cancelled, without waiting out a drain.
 #[test]
 fn a_background_child_still_running_at_the_end_is_cancelled_at_once() {
@@ -409,7 +414,10 @@ fn a_background_child_still_running_at_the_end_is_cancelled_at_once() {
         ],
         HANG.into(),
     );
-    let p = Project::new(&m.url, "[permissions.tools]\nAgent = \"allow\"\n");
+    let p = Project::new(
+        &m.url,
+        "[permissions.tools]\nAgent = \"allow\"\n\n[agents]\nbackground_drain_ms = 0\n",
+    );
     let started = Instant::now();
     let out = p.run(
         &["run", "--non-interactive", "Lance un travail de fond"],
@@ -453,11 +461,11 @@ fn a_background_child_that_finishes_in_the_drain_completes_the_run() {
     assert_eq!(out.status.code(), Some(0), "{err}");
 }
 
-/// The drain says what it does before it does it: with the default `0`, the
-/// stderr line announces the cancellation (no wait is announced), and the
-/// cancelled sub-agent's usage and the final run usage are still reported.
+/// With `background_drain_ms = 0`, the drain says what it does before it does
+/// it: the stderr line announces the cancellation (no wait is announced), and
+/// the cancelled sub-agent's usage and the final run usage are still reported.
 #[test]
-fn the_default_drain_cancels_at_once_and_still_reports_the_final_usage() {
+fn drain_zero_cancels_at_once_and_still_reports_the_final_usage() {
     let m = model_with_children(
         vec![
             tool(
@@ -469,7 +477,10 @@ fn the_default_drain_cancels_at_once_and_still_reports_the_final_usage() {
         ],
         HANG.into(),
     );
-    let p = Project::new(&m.url, "[permissions.tools]\nAgent = \"allow\"\n");
+    let p = Project::new(
+        &m.url,
+        "[permissions.tools]\nAgent = \"allow\"\n\n[agents]\nbackground_drain_ms = 0\n",
+    );
     let started = Instant::now();
     let out = p.run(
         &[
@@ -510,6 +521,54 @@ fn the_default_drain_cancels_at_once_and_still_reports_the_final_usage() {
     for (i, e) in evs.iter().enumerate() {
         assert_eq!(e["seq"], i as u64 + 1);
     }
+}
+
+/// With the default drain (`[agents] background_drain_ms` is 600 000), a
+/// sub-agent still running at the end of the main run is waited for, and
+/// finishes: the run succeeds, after the sub-agent's answer.
+#[test]
+fn the_default_drain_waits_for_a_child_still_running_at_the_end() {
+    let m = model_with_children(
+        vec![
+            tool(
+                "a1",
+                "Agent",
+                json!({"description": "fond", "prompt": "Travail de fond", "isolation": "shared"}),
+            ),
+            text("Lancé."),
+        ],
+        slow(3_000, text("Fini.")),
+    );
+    let p = Project::new(&m.url, "[permissions.tools]\nAgent = \"allow\"\n");
+    let started = Instant::now();
+    let out = p.run(
+        &[
+            "run",
+            "--json",
+            "--non-interactive",
+            "Lance un travail de fond",
+        ],
+        None,
+    );
+    let err = String::from_utf8_lossy(&out.stderr).to_string();
+    assert_eq!(out.status.code(), Some(0), "{err}");
+    assert!(
+        started.elapsed() >= Duration::from_secs(3),
+        "{:?}",
+        started.elapsed()
+    );
+    let evs = envelopes(&out.stdout);
+    let fin = evs
+        .iter()
+        .find(|e| e["type"] == "agent_finished")
+        .expect("the sub-agent's end is reported");
+    assert_eq!(fin["result"]["status"], "completed", "{fin}");
+    let last = evs
+        .iter()
+        .rfind(|e| e["type"] == "run_usage")
+        .expect("usage");
+    assert_eq!(last["final_total"], true, "{last}");
+    assert_eq!(last["pending_agents"], 0, "{last}");
 }
 
 /// `[agents] background_drain_ms` set explicitly is the value the run waits

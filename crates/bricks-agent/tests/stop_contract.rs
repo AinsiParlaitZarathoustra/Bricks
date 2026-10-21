@@ -299,30 +299,6 @@ async fn empty_tasks_build_no_provider_and_send_nothing() {
             r.content
         );
     }
-    // Impossible limits.
-    let r = agent_tool
-        .execute(
-            json!({"description": "x", "prompt": "ok", "max_turns": 0}),
-            &c,
-        )
-        .await;
-    assert!(
-        r.is_error && r.content.contains("max_turns"),
-        "{}",
-        r.content
-    );
-    let r = agent_tool
-        .execute(
-            json!({"description": "x", "prompt": "ok", "max_turns": 10_000}),
-            &c,
-        )
-        .await;
-    // Turn limits were removed: the former argument is refused, explained.
-    assert!(
-        r.is_error && r.content.contains("was removed"),
-        "{}",
-        r.content
-    );
     // A model change would be silently ignored: refused instead.
     let r = agent_tool
         .execute(
@@ -428,7 +404,7 @@ async fn multi_step_work_goes_on_until_its_answer() {
 /// the former defaults (10 for the SDK, 50 for the CLI, 30/100 for
 /// sub-agents), then the answer ends the run.
 #[tokio::test]
-async fn there_is_no_turn_limit() {
+async fn a_run_goes_on_until_its_answer() {
     let mut steps: Vec<Step> = (1..=150)
         .map(|n| call(&format!("c{n}"), "Probe", json!({"n": n})))
         .collect();
@@ -719,7 +695,7 @@ async fn a_cancelled_run_starts_no_sub_agent() {
 /// The sub-agent of `AgentTool` passes no turn budget either: it works past
 /// its former default (10) and gives its answer.
 #[tokio::test]
-async fn agent_tool_has_no_turn_limit() {
+async fn agent_tool_goes_on_until_its_answer() {
     let dir = tempfile::tempdir().unwrap();
     let c = ctx(Arc::new(AllowAll), dir.path());
     let work = |n: usize| {

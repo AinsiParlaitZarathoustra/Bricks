@@ -38,13 +38,21 @@ export function Tag({ type }) {
 
 <Tag type="removed" /> **`delegate` and `MultiEdit` are removed.** The `delegate` tool and the `delegate` batch module (`run_batch`, `DelegateConfig`, …) are gone; use the native `Agent` and `Agents` tools, whose parameters differ. `MultiEdit` is gone; `Edit` takes `edits`. Stored histories still display both.
 
-<Tag type="changed" /> **Native sub-agent tools**: `Agent`, `Agents`, `AgentControl` and `AgentProfiles`, with background runs, worktrees with ChangeSets, and a bounded depth. `AgentTool` stays for embedders.
+<Tag type="changed" /> **Native sub-agent tools**: `Agent`, `Agents`, `AgentControl` and `AgentProfiles`. Sub-agents always run in parallel: the call returns their ids at once, and `AgentControl wait` and `result` give the results. Each one works in its own git worktree by default, with ChangeSets, and the depth is bounded. `AgentTool` stays for embedders.
+
+<Tag type="added" /> **Messages and resumes.** `AgentControl message` queues a message for a running sub-agent, read at its next model request; a refusal is explicit, and nothing is reported as sent. `AgentControl resume` starts a new execution of an ended sub-agent under the same id, with its launch's profile, model, tools, skills and workspace. `agent_state` and the result of `agent_finished` carry `execution`.
+
+<Tag type="removed" /> **Turn limits and per-run caps.** `max_turns` is gone from the `[agent]` and `[agents]` settings, from profiles, from `Agent` and `Agents`, and `tbench-agent --max-turns` is no longer accepted. `[agents] max_total_per_run`, `max_batch` and the `background` argument of `Agent` and `Agents` are removed. Old keys are unknown keys: ignored, with a diagnostic. A stored end of an unknown kind (`max_turns`) reads as `Historical { kind }`, an incomplete end, never a success.
+
+<Tag type="changed" /> **`SendMessage`** is an adapter of the same message delivery, and needs the `Execute` permission (it was `None`). It sends nothing without an agent runtime.
+
+<Tag type="changed" /> **Agent manifest.** A record that cannot be read is left out and the others are kept; the original manifest is kept as a `.bak` file before the next save.
 
 <Tag type="changed" /> **Edits.** No read is required before an edit (the read guard is removed). `Edit` applies several replacements in order and writes all or nothing. Writes hold a per-file lock, and a change is written only if the file still matches its approval; a hook that changes an input is decided again.
 
 <Tag type="changed" /> **`Bash` runs one process per command.** Calls of a session run side by side. The working directory, exported variables, functions and aliases of a command that ends normally carry over; non-exported variables and shell options do not.
 
-<Tag type="changed" /> **Waits and limits.** `[agents] background_drain_ms` defaults to `0` (a headless run exits with code 6 if background sub-agents are cut), `[agents] admission_timeout_ms` to `30000`, and the new `[agent] retry_after_max_wait_ms` (`60000`) bounds a provider's `Retry-After`. Process stops are awaited through kernel notifications, not polled. Language-server stderr is read to its end at shutdown, for at most 500 ms.
+<Tag type="changed" /> **Waits and limits.** `[agents] background_drain_ms` defaults to `600000` (a headless run waits for sub-agents still running, then cancels them and exits with code 6), `[agents] admission_timeout_ms` to `60000`, `[agents] max_concurrent` is `16`, `max_queued` `64`, `summary_chars` `10000` (exact, the ellipsis included), and the new `[agent] retry_after_max_wait_ms` (`60000`) bounds a provider's `Retry-After`. Process stops are awaited through kernel notifications, not polled. Language-server stderr is read to its end at shutdown, for at most 500 ms.
 
 <Tag type="changed" /> **JSONL schema 6.** `tool_finished` and `agent_tool_finished` gain `executed` and `status`; `agent_tool_finished` also gains `output` and `output_truncated`; `edit_applied` files gain `absolute`, `patch` and `patch_truncated`. See `docs/cli.md`.
 

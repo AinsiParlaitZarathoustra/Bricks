@@ -207,7 +207,7 @@ run.
 | 3 | a step needed an approval and nobody could give it |
 | 4 | the answer was delivered, but the long-term memory maintenance failed |
 | 5 | the run stopped at a limit before a final answer (`outcome = incomplete`); the partial answer was printed |
-| 6 | the answer was delivered, but background sub-agents did not complete: still running when `[agents] background_drain_ms` runs out (then cancelled), failed or cancelled; in text mode one line per agent is printed on stderr, with `--json` the `agent_finished` and `run_usage` events say it. The default is `background_drain_ms = 0`: background sub-agents still running at the end of the main run are cancelled at once |
+| 6 | the answer was delivered, but background sub-agents did not complete: still running when `[agents] background_drain_ms` runs out (then cancelled), failed or cancelled; in text mode one line per agent is printed on stderr, with `--json` the `agent_finished` and `run_usage` events say it. The default is `background_drain_ms = 600000`: sub-agents still running at the end of the main run are waited for up to that long, then cancelled |
 | 130 | cancelled (Ctrl+C) |
 
 ### When a run stops
@@ -225,11 +225,12 @@ continue has a visible cause and a bound:
 | transport errors (429, 5xx, network) | `notice` "Retrying in …" | 5 retries of one request with backoff; not turns; then `failed` |
 | request refused as too long | `compaction` | the context policy's `max_overflow_recoveries` per turn |
 
-A former `max_turns` (`[agent]`, `[agents] default_max_turns`,
-`max_turns_cap`, a profile's `max_turns`) is ignored and reported as a
-diagnostic when the session opens; nothing is rewritten in your files.
-A result stored before 0.4.8 may still say `max_turns`: it is read as
-such; no run produces it any more.
+Former keys (`[agent] max_turns`, `[agents] default_max_turns`,
+`max_turns_cap`, `max_batch`, `max_total_per_run`, a profile's `max_turns`)
+are unknown keys: they are ignored and reported as a diagnostic when the
+session opens; nothing is rewritten in your files. A result stored before
+0.4.8 may still say `max_turns`: it is read as a historical end (incomplete,
+never a success), with its kind kept; no run produces it any more.
 
 When the run stops at a limit, the history, partial answer and tool results are
 kept, every tool call has a result, and no tool is started afterwards. The
@@ -243,10 +244,12 @@ sub-agent tools themselves), are cancelled with the parent's run (which
 waits for their cleanup), and report `completed`, `incomplete`, `cancelled`
 or `failed` with their partial answer. In headless mode, starting sub-agents
 needs `Agent` / `Agents` allowed in `[permissions]` (`execute` tools);
-allowing them allows none of the children's own tools. Background sub-agents
-are drained after the answer, for at most `[agents] background_drain_ms`
-(`0` by default, so they are cancelled at once), then cancelled: exit code 6
-if any did not complete.
+allowing them allows none of the children's own tools. Sub-agents run in
+parallel: `Agent` and `Agents` return their ids at once, and `AgentControl`
+(`wait`, `result`, `message`, `resume`, `cancel`) follows them. In headless
+mode, sub-agents still running after the answer are waited for, for at most
+`[agents] background_drain_ms` (`600000` by default), then cancelled: exit
+code 6 if any did not complete.
 
 When a provider's `Retry-After` is longer than `[agent] retry_after_max_wait_ms`
 (`60000` by default), the run does not wait for it: no retry is sent, and the
@@ -293,14 +296,14 @@ Events (`type`):
 | `context_cleared` | `messages_removed` | |
 | `session_saved` | | |
 | `notice` | `message` | retries, configuration diagnostics, continuations after a cut answer, no-progress warnings |
-| `run_finished` | `outcome, failure?, error?, termination?, text, turns, approvals_unsatisfied?` | **exactly one per run**; `outcome`: `succeeded`, `incomplete`, `failed`, `cancelled`; `failure`: `approval_required`, `error`; `termination.kind`: `completed`, `output_truncated` (`continuations`), `no_progress` (`repeats`), `content_filtered`, `empty_response` (`max_turns` only in results stored before 0.4.8); `turns`: generation turns that got a response |
+| `run_finished` | `outcome, failure?, error?, termination?, text, turns, approvals_unsatisfied?` | **exactly one per run**; `outcome`: `succeeded`, `incomplete`, `failed`, `cancelled`; `failure`: `approval_required`, `error`; `termination.kind`: `completed`, `output_truncated` (`continuations`), `no_progress` (`repeats`), `content_filtered`, `empty_response`; a kind stored by an earlier version (`max_turns`, before 0.4.8) is kept as stored and is a historical end, never `completed`; `turns`: generation turns that got a response |
 | `memory_maintenance_started` | | after `run_finished` |
 | `memory_maintenance_finished` | `outcome, report?, error?` | `outcome`: `completed`, `cancelled`, `failed` |
 | `search_results` | `query, status, hits[{path, line, column, text}], omitted, notes?, elapsed_ms` | answer to `search`; `line`/`column` 1-based, column in characters; `status`: `complete`, `partial` (a limit was reached: absence proves nothing), `cancelled`, `error` |
 | `agent_spawned` | `agent{agent_id, parent_id?, root_run_id, tool_call_id?, batch_index?, background, depth, profile, profile_source, profile_revision, model{requested, applied, reason?}, reasoning{…}, workspace, isolation, branch?, task, created_at}` | a sub-agent was created (see `docs/agents.md`); `tool_call_id` is the parent's call |
-| `agent_state` | `agent_id, state, reason?` | `queued`, `waiting_admission`, `starting`, `running`, `cancelling`, then one of `completed`, `incomplete`, `failed`, `cancelled`, `interrupted` (found unfinished when the session reopened) |
+| `agent_state` | `agent_id, state, reason?, execution` | `queued`, `waiting_admission`, `starting`, `running`, `cancelling`, then one of `completed`, `incomplete`, `failed`, `cancelled`, `interrupted` (found unfinished when the session reopened) |
 | `agent_tool_started` / `agent_tool_finished` | `agent_id, tool_call_id, name, input` / `…, is_error, duration_ms, executed?, status?, output?, output_truncated?` | the sub-agent's tool calls (its text is never streamed); `output` is cut to 64 KiB |
-| `agent_finished` | `result{agent_id, profile, status, termination?, error?, summary, files_changed, commands, warnings, turns, usage, duration_ms, model, reasoning?, workspace, transcript?, changeset?, branch?, skills?}` | the compact result; its usage is not in the run's `usage` events (see `run_usage`) |
+| `agent_finished` | `result{agent_id, execution, profile, status, termination?, error?, summary, files_changed, commands, warnings, turns, usage, duration_ms, model, reasoning?, workspace, transcript?, changeset?, branch?, skills?}` | the compact result; its usage is not in the run's `usage` events (see `run_usage`) |
 | `agent_profiles` | `profiles[{name, description, scope, source, valid, error?, shadows}], total, page, diagnostics?` | answer to `list_agent_profiles` / `reload_agent_profiles` |
 | `changes_ready` | `changeset{id, agent_id, task, workspace, branch, base_sha, snapshot_id, baseline_tree, final_tree, files[{path, status, from?, added?, removed?, binary}], patch, patch_bytes, state, validations, note?}` | an isolated sub-agent ended with changes; nothing applied |
 | `changes_updated` | `changeset_id, state, files, detail?` | `applied`, `conflict` (nothing written), `discarded` |
@@ -351,7 +354,8 @@ views the frontends read do not carry them.
 {"type":"agent_control","action":"stop_job","job_id":"job_…"}
 ```
 
-`agent_control.action`: `list`, `status`, `result`, `cancel` (`agent_id`),
+`agent_control.action`: `list`, `status`, `result`, `message` (`agent_id`,
+`message`), `cancel` (`agent_id`),
 `inspect_changes`, `apply_changes`, `discard_changes` (`changeset_id`),
 `jobs`, `stop_job` (`job_id`). Frontends see every instance and job of the
 session.
@@ -372,7 +376,7 @@ Rules during a run:
   parallel.
 * `list_agent_profiles`, `reload_agent_profiles` and `agent_control` are
   accepted at any time; a reload does not change a running sub-agent.
-  `cancel` while idle cancels pending background sub-agents.
+  `cancel` while idle cancels the sub-agents still running.
 * `list_skills`, `reload_skills` and `trust_project_skills` are accepted at
   any time; a reload does not change instructions already active. A
   `submit` whose `prompt.skills` cannot all be used is refused.

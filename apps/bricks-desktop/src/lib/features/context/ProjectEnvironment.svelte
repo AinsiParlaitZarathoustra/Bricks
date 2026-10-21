@@ -9,6 +9,8 @@
 	import SectionCard from '$lib/layout/SectionCard.svelte';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import CopyIcon from '@lucide/svelte/icons/copy';
+	import FolderIcon from '@lucide/svelte/icons/folder';
+	import FolderKanbanIcon from '@lucide/svelte/icons/folder-kanban';
 	import GitBranchIcon from '@lucide/svelte/icons/git-branch';
 	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
 
@@ -107,20 +109,6 @@
 
 	onDestroy(() => clearTimeout(copyTimer));
 
-	const modelLabel = $derived.by(() => {
-		if (!conversation) return null;
-		return app.model(conversation.model)?.name ?? (conversation.model || 'Modèle inconnu');
-	});
-
-	const reasoningLabel = $derived.by(() => {
-		if (!conversation) return null;
-		const requested = conversation.reasoning ?? 'par défaut';
-		const effective = conversation.effectiveReasoning;
-		return effective && effective !== conversation.reasoning
-			? `${requested} (effectif : ${effective})`
-			: requested;
-	});
-
 	const pendingText = $derived.by(() => {
 		const change = conversation?.pendingChange;
 		if (!change) return null;
@@ -137,11 +125,17 @@
 />
 
 <SectionCard title="Environnement">
-	<dl class="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-3 gap-y-2 text-xs">
-		<dt class="text-muted-foreground">Projet</dt>
+	<dl class="grid grid-cols-[1rem_minmax(0,1fr)] items-start gap-x-2.5 gap-y-2 text-xs">
+		<dt class="flex h-4 items-center text-muted-foreground">
+			<FolderKanbanIcon class="size-3.5" aria-hidden="true" />
+			<span class="sr-only">Projet</span>
+		</dt>
 		<dd class="min-w-0 truncate font-medium" title={projectName}>{projectName}</dd>
 
-		<dt class="text-muted-foreground">Dossier</dt>
+		<dt class="flex h-4 items-center text-muted-foreground">
+			<FolderIcon class="size-3.5" aria-hidden="true" />
+			<span class="sr-only">Dossier</span>
+		</dt>
 		<dd class="flex min-w-0 items-center gap-1">
 			<span class="min-w-0 flex-1 truncate font-mono text-xs" title={projectPath}>{projectPath}</span>
 			<Button variant="ghost" size="icon-xs" aria-label="Copier le chemin du dossier" onclick={copyPath}>
@@ -153,7 +147,10 @@
 			</Button>
 		</dd>
 
-		<dt class="text-muted-foreground">Git</dt>
+		<dt class="flex h-4 items-center text-muted-foreground">
+			<GitBranchIcon class="size-3.5" aria-hidden="true" />
+			<span class="sr-only">Git</span>
+		</dt>
 		<dd class="min-w-0">
 			{#if projectMissing}
 				<span class="text-muted-foreground">Dossier introuvable.</span>
@@ -168,10 +165,7 @@
 				<span class="text-muted-foreground">Ce dossier n’est pas un dépôt Git.</span>
 			{:else}
 				<div class="flex min-w-0 flex-col gap-1">
-					<span class="flex min-w-0 items-center gap-1.5 font-mono">
-						<GitBranchIcon class="size-3.5 shrink-0" aria-hidden="true" />
-						<span class="truncate">{headLabel(gitView.status)}</span>
-					</span>
+					<span class="truncate font-mono">{headLabel(gitView.status)}</span>
 
 					{#if gitView.status.ahead > 0 || gitView.status.behind > 0}
 						<span class="flex flex-wrap gap-x-3 tabular-nums text-muted-foreground">
@@ -195,14 +189,6 @@
 				</div>
 			{/if}
 		</dd>
-
-		{#if conversation}
-			<dt class="text-muted-foreground">Modèle</dt>
-			<dd class="min-w-0 truncate" title={conversation.model}>{modelLabel}</dd>
-
-			<dt class="text-muted-foreground">Raisonnement</dt>
-			<dd class="min-w-0">{reasoningLabel}</dd>
-		{/if}
 	</dl>
 
 	{#if pendingText}

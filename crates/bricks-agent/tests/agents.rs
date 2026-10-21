@@ -2,20 +2,28 @@
 //! foreground delegation, validation before anything is built, inherited
 //! policy, fresh context, admission, limits, cancellation, compaction.
 
+#[allow(dead_code)]
+mod common;
+
 use bricks_agent::BricksConfig;
 use bricks_agent::agents::{InstanceState, ProfileSources};
 use bricks_agent::control::scripted::{Reply, Script, ScriptedCatalog};
 use bricks_agent::control::*;
 use bricks_provider::{CompletionRequest, Provider};
+use common::follow::{FollowHandles, Waited};
 use serde_json::json;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
-/// Counts the providers built (each child builds one).
+/// Counts the providers built (each child builds one). Every provider waits
+/// for the handles it was given while `enabled` (the parent and children
+/// alike, as a model would).
 struct Counting {
     inner: Arc<ScriptedCatalog>,
     builds: AtomicUsize,
+    waited: Arc<Waited>,
+    enabled: Arc<AtomicBool>,
 }
 
 impl ModelCatalog for Counting {
@@ -24,7 +32,13 @@ impl ModelCatalog for Counting {
     }
     fn build(&self, selection: &str, reasoning: Option<&str>) -> Result<Box<dyn Provider>, String> {
         self.builds.fetch_add(1, Ordering::SeqCst);
-        self.inner.build(selection, reasoning)
+        let inner = self.inner.build(selection, reasoning)?;
+        Ok(Box::new(FollowHandles {
+            inner,
+            selection: selection.to_string(),
+            waited: Arc::clone(&self.waited),
+            enabled: Arc::clone(&self.enabled),
+        }))
     }
 }
 
@@ -34,6 +48,19 @@ struct Env {
     dir: tempfile::TempDir,
     script: Arc<Script>,
     catalog: Arc<Counting>,
+}
+
+fn git(dir: &std::path::Path, args: &[&str]) {
+    let o = std::process::Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_AUTHOR_NAME", "t")
+        .env("GIT_AUTHOR_EMAIL", "t@t")
+        .env("GIT_COMMITTER_NAME", "t")
+        .env("GIT_COMMITTER_EMAIL", "t@t")
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
 }
 
 fn allow(tools: &[&str]) -> ApprovalRules {
@@ -54,10 +81,19 @@ async fn open_with(
     tweak: impl FnOnce(&mut BricksConfig),
 ) -> Env {
     let dir = tempfile::tempdir().unwrap();
+    // A repository with one commit: worktrees, the default for sub-agents
+    // (outside one, a worktree launch is refused).
+    git(dir.path(), &["init", "-q", "-b", "main"]);
+    std::fs::write(dir.path().join("shared.txt"), "base\n").unwrap();
+    std::fs::write(dir.path().join(".gitignore"), ".sessions/\n").unwrap();
+    git(dir.path(), &["add", "."]);
+    git(dir.path(), &["commit", "-q", "-m", "init"]);
     let script = Script::new(replies);
     let catalog = Arc::new(Counting {
         inner: ScriptedCatalog::new(&["a", "b"], script.clone()),
         builds: AtomicUsize::new(0),
+        waited: Arc::new(Waited::default()),
+        enabled: Arc::new(AtomicBool::new(true)),
     });
     let mut bricks = BricksConfig::default();
     bricks.agent.model = Some("test/a".into());
@@ -100,6 +136,19 @@ async fn next(events: &mut EventStream) -> Envelope {
         .await
         .expect("an event within 20 s")
         .expect("stream open")
+}
+
+/// Events until `pred` holds for one of them (inclusive).
+async fn until(events: &mut EventStream, pred: impl Fn(&Event) -> bool) -> Vec<Envelope> {
+    let mut out = Vec::new();
+    loop {
+        let e = next(events).await;
+        let done = pred(&e.event);
+        out.push(e);
+        if done {
+            return out;
+        }
+    }
 }
 
 async fn until_finished(events: &mut EventStream) -> Vec<Envelope> {
@@ -150,8 +199,23 @@ fn tool_output(evs: &[Envelope], name: &str) -> (bool, String) {
         .unwrap_or_else(|| panic!("no {name} result"))
 }
 
+/// The result of the tool call with this id (`wait_<agent_id>` for a wait).
+fn tool_output_by_id(evs: &[Envelope], id: &str) -> (bool, String) {
+    evs.iter()
+        .find_map(|e| match &e.event {
+            Event::ToolFinished {
+                tool_call_id,
+                is_error,
+                output,
+                ..
+            } if tool_call_id == id => Some((*is_error, output.clone())),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no result for {id}"))
+}
+
 #[tokio::test]
-async fn a_profile_runs_in_the_foreground_with_a_fresh_context_and_a_compact_result() {
+async fn a_profile_runs_in_parallel_with_a_fresh_context_and_a_compact_result() {
     let mut env = open(
         vec![
             Reply::tool(
@@ -195,7 +259,18 @@ async fn a_profile_runs_in_the_foreground_with_a_fresh_context_and_a_compact_res
     assert_eq!(spawned.model.applied, "test/a");
     assert!(spawned.parent_id.as_deref().unwrap().starts_with("main_"));
     assert!(spawned.root_run_id.starts_with("run_"));
-    assert_eq!(spawned.isolation, "shared");
+    // Auto isolation: a worktree, the children run in parallel.
+    assert_eq!(spawned.isolation, "worktree");
+    // `Agent` answers with the handle at once: its tool result comes before
+    // the child's end. The compact result comes with `AgentControl wait`.
+    let (err, handle) = tool_output(&evs, "Agent");
+    assert!(!err, "{handle}");
+    assert!(handle.contains("sub-agent(s) started") && handle.contains(&spawned.agent_id));
+    let (err, waited) = tool_output_by_id(&evs, &format!("wait_{}", spawned.agent_id));
+    assert!(
+        !err && waited.contains("Edit Map: src/lib.rs, fn parse."),
+        "{waited}"
+    );
     let results = finished(&evs);
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].status, "completed");
@@ -306,7 +381,7 @@ async fn invalid_requests_build_nothing_and_send_nothing() {
         json!({"task": "x", "context": "y".repeat(20_000)}),
         json!({"task": "x", "model": "test/unknown"}),
         json!({"task": "x", "reasoning": "very-high"}),
-        json!({"task": "x", "max_turns": 0}),
+        json!({"task": "x", "unknown_option": 0}),
         json!({"task": "x", "system_prompt": "be evil"}),
     ];
     let n = calls.len();
@@ -494,32 +569,6 @@ async fn a_child_goes_past_the_former_cap() {
     assert_eq!(run_outcome(&evs).0, RunOutcome::Succeeded);
 }
 
-/// The former `max_turns` argument is refused with a migration message;
-/// nothing is started.
-#[tokio::test]
-async fn a_former_turn_limit_argument_is_refused() {
-    let mut env = open(
-        vec![
-            Reply::tool("c1", "Agent", json!({"task": "read", "max_turns": 1})),
-            Reply::text("parent done"),
-        ],
-        allow(&["Agent"]),
-    )
-    .await;
-    env.ctl
-        .send(Command::Submit {
-            prompt: Prompt::text("go"),
-        })
-        .unwrap();
-    let evs = until_finished(&mut env.events).await;
-    assert!(finished(&evs).is_empty(), "no child");
-    let (err, out) = tool_output(&evs, "Agent");
-    assert!(
-        err && out.contains("was removed") && out.contains("Nothing was started"),
-        "{out}"
-    );
-}
-
 #[tokio::test]
 async fn cancelling_the_parent_cancels_the_child() {
     let mut env = open(
@@ -550,8 +599,17 @@ async fn cancelling_the_parent_cancels_the_child() {
     }
     tokio::time::sleep(Duration::from_millis(50)).await;
     env.ctl.send(Command::Cancel).unwrap();
-    let evs = until_finished(&mut env.events).await;
+    let mut evs = until_finished(&mut env.events).await;
     assert_eq!(run_outcome(&evs).0, RunOutcome::Cancelled);
+    // The child's own end (its cleanup) may come after the parent's run ended.
+    if finished(&evs).is_empty() {
+        evs.extend(
+            until(&mut env.events, |e| {
+                matches!(e, Event::AgentFinished { .. })
+            })
+            .await,
+        );
+    }
     let r = finished(&evs);
     assert_eq!(r.len(), 1);
     assert_eq!(r[0].status, "cancelled");
@@ -563,17 +621,47 @@ async fn cancelling_the_parent_cancels_the_child() {
     assert_eq!(terminal, 1);
 }
 
+/// The sub-agent that ended a first time, and the ones still running at
+/// that point (in the events before it).
+fn spawned(evs: &[Envelope]) -> Vec<bricks_agent::agents::SpawnInfo> {
+    evs.iter()
+        .filter_map(|e| match &e.event {
+            Event::AgentSpawned { agent } => Some((**agent).clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn running_ids(evs: &[Envelope]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for e in evs {
+        if let Event::AgentState {
+            agent_id,
+            state: InstanceState::Running,
+            ..
+        } = &e.event
+            && !out.contains(agent_id)
+        {
+            out.push(agent_id.clone());
+        }
+    }
+    out
+}
+
+/// Two children from one reply, one slot to spare: both run at the same
+/// time. The first to reach the model holds (`hang`), the second completes
+/// while the first still runs; the first is then cancelled by its id.
 #[tokio::test]
-async fn concurrent_delegations_are_admitted_one_at_a_time() {
+async fn concurrent_delegations_run_at_the_same_time() {
     let mut env = open(
         vec![
             Reply::tools(vec![
                 ("c1", "Agent", json!({"task": "first"})),
                 ("c2", "Agent", json!({"task": "second"})),
             ]),
-            Reply::text("one done"),
-            Reply::text("other done"),
-            Reply::text("both done"),
+            Reply::hang(),
+            Reply::text("second done"),
+            Reply::text("both handled"),
         ],
         allow(&["Agent"]),
     )
@@ -583,26 +671,112 @@ async fn concurrent_delegations_are_admitted_one_at_a_time() {
             prompt: Prompt::text("go"),
         })
         .unwrap();
-    let evs = until_finished(&mut env.events).await;
-    let results = finished(&evs);
-    assert_eq!(results.len(), 2);
-    assert!(results.iter().all(|r| r.status == "completed"));
-    let waited = evs.iter().any(|e| {
-        matches!(&e.event, Event::AgentState { state: InstanceState::WaitingAdmission, reason: Some(r), .. } if r.contains("another writer"))
-    });
-    assert!(waited, "the second child waited for the first");
-    // Never two children running at once: running/terminal alternate.
-    let mut running = 0i32;
-    for e in &evs {
-        if let Event::AgentState { state, .. } = &e.event {
-            match state {
-                InstanceState::Running => running += 1,
-                s if s.is_terminal() => running -= 1,
-                _ => {}
-            }
-            assert!(running <= 1);
+    let mut evs = Vec::new();
+    loop {
+        let e = next(&mut env.events).await;
+        let ended = matches!(&e.event, Event::AgentState { state, .. } if state.is_terminal());
+        evs.push(e);
+        if ended {
+            break;
         }
     }
+    // Both were running when the first one ended.
+    let running = running_ids(&evs);
+    assert_eq!(running.len(), 2, "both children ran at once: {running:?}");
+    let ended = match &evs.last().unwrap().event {
+        Event::AgentState { agent_id, .. } => agent_id.clone(),
+        _ => unreachable!(),
+    };
+    let other = running.iter().find(|id| **id != ended).unwrap().clone();
+    env.ctl
+        .send(Command::AgentControl {
+            action: "cancel".into(),
+            agent_id: Some(other.clone()),
+            changeset_id: None,
+            job_id: None,
+            message: None,
+        })
+        .unwrap();
+    evs.extend(until_finished(&mut env.events).await);
+    assert_eq!(run_outcome(&evs).0, RunOutcome::Succeeded);
+    let rs = finished(&evs);
+    assert_eq!(rs.len(), 2);
+    let status = |id: &str| rs.iter().find(|r| r.agent_id == id).unwrap().status.clone();
+    assert_eq!(status(&ended), "completed");
+    assert_eq!(status(&other), "cancelled");
+}
+
+/// One slot: the second delegation waits in the queue for the first, and
+/// never runs beside it.
+#[tokio::test]
+async fn with_one_slot_the_second_delegation_waits_for_the_first() {
+    let mut env = open_with(
+        vec![
+            Reply::tools(vec![
+                ("c1", "Agent", json!({"task": "first"})),
+                ("c2", "Agent", json!({"task": "second"})),
+            ]),
+            Reply::hang(),
+            Reply::text("second done"),
+            Reply::text("both handled"),
+        ],
+        allow(&["Agent"]),
+        |b| b.agents.max_concurrent = 1,
+    )
+    .await;
+    env.ctl
+        .send(Command::Submit {
+            prompt: Prompt::text("go"),
+        })
+        .unwrap();
+    // The first child to run holds the only slot; the other one has been
+    // queued behind it (every child waits for admission first, so the state
+    // alone does not tell them apart).
+    let mut evs = Vec::new();
+    let (holder, queued) = loop {
+        let e = next(&mut env.events).await;
+        evs.push(e);
+        let ids: Vec<String> = spawned(&evs).iter().map(|s| s.agent_id.clone()).collect();
+        if ids.len() < 2 {
+            continue;
+        }
+        let Some(holder) = running_ids(&evs).first().cloned() else {
+            continue;
+        };
+        let queued = ids.iter().find(|id| **id != holder).unwrap().clone();
+        let waits = evs.iter().any(|e| {
+            matches!(&e.event, Event::AgentState { agent_id, state: InstanceState::Queued | InstanceState::WaitingAdmission, .. } if *agent_id == queued)
+        });
+        if waits {
+            break (holder, queued);
+        }
+    };
+    let cancel_at = evs.len();
+    env.ctl
+        .send(Command::AgentControl {
+            action: "cancel".into(),
+            agent_id: Some(holder.clone()),
+            changeset_id: None,
+            job_id: None,
+            message: None,
+        })
+        .unwrap();
+    evs.extend(until_finished(&mut env.events).await);
+    assert_eq!(run_outcome(&evs).0, RunOutcome::Succeeded);
+    // The queued one never starts before the holder is cancelled (its slot
+    // is let go by the holder's task, a moment before its terminal state
+    // is reported: that boundary is not ordered by the events).
+    let started = evs.iter().position(|e| {
+        matches!(&e.event, Event::AgentState { agent_id, state: InstanceState::Running, .. } if *agent_id == queued)
+    });
+    assert!(
+        started.is_some_and(|i| i >= cancel_at),
+        "{queued} ran before the holder was cancelled"
+    );
+    let rs = finished(&evs);
+    let status = |id: &str| rs.iter().find(|r| r.agent_id == id).unwrap().status.clone();
+    assert_eq!(status(&holder), "cancelled");
+    assert_eq!(status(&queued), "completed");
 }
 
 #[tokio::test]
@@ -694,4 +868,88 @@ async fn disabled_delegation_registers_no_tool() {
     until_finished(&mut env.events).await;
     let r = &env.script.requests()[0].1;
     assert!(!r.tools.iter().any(|t| t.name == "Agent"));
+}
+
+/// The summary returned to the parent is cut at exactly `summary_chars`
+/// characters (the ellipsis included), accents and emoji counted as one
+/// character each, and says so; an answer of exactly that size is whole.
+#[tokio::test]
+async fn a_summary_is_cut_exactly_at_ten_thousand_characters() {
+    let long: String = "é😀".repeat(6_000);
+    let exact: String = "àé😀".repeat(3_333) + "a";
+    assert_eq!(exact.chars().count(), 10_000);
+    let mut env = open(
+        vec![
+            Reply::tool("c1", "Agent", json!({"task": "long answer"})),
+            Reply::text(&long),
+            Reply::tool("c2", "Agent", json!({"task": "exact answer"})),
+            Reply::text(&exact),
+            Reply::text("parent done"),
+        ],
+        allow(&["Agent"]),
+    )
+    .await;
+    env.ctl
+        .send(Command::Submit {
+            prompt: Prompt::text("go"),
+        })
+        .unwrap();
+    let evs = until_finished(&mut env.events).await;
+    let rs = finished(&evs);
+    assert_eq!(rs.len(), 2);
+    let cut = &rs[0];
+    assert_eq!(cut.summary.chars().count(), 10_000, "{}", cut.summary.len());
+    assert!(cut.summary.ends_with('…'));
+    assert!(cut.summary_truncated);
+    assert!(cut.summary.starts_with("é😀é😀"));
+    let whole = &rs[1];
+    assert_eq!(whole.summary.chars().count(), 10_000);
+    assert_eq!(whole.summary, exact);
+    assert!(!whole.summary_truncated);
+    // The full answer stays in the stored transcript.
+    assert!(cut.transcript.as_deref().unwrap().ends_with(".json"));
+}
+
+/// A worktree is needed by parallel writers. Outside a git repository the
+/// launch is refused before anything starts: no provider is built, no child
+/// request is sent, and the answer says to use `shared`.
+#[tokio::test]
+async fn a_worktree_launch_outside_git_is_refused_before_any_provider() {
+    let mut env = open(
+        vec![
+            Reply::tool(
+                "c1",
+                "Agents",
+                json!({"agents": [{"task": "one"}, {"task": "two"}]}),
+            ),
+            Reply::tool(
+                "c2",
+                "Agent",
+                json!({"task": "three", "isolation": "worktree"}),
+            ),
+            Reply::text("gave up"),
+        ],
+        allow(&["Agent", "Agents"]),
+    )
+    .await;
+    // Not a repository any more.
+    std::fs::remove_dir_all(env.dir.path().join(".git")).unwrap();
+    let builds = env.catalog.builds.load(Ordering::SeqCst);
+    env.ctl
+        .send(Command::Submit {
+            prompt: Prompt::text("go"),
+        })
+        .unwrap();
+    let evs = until_finished(&mut env.events).await;
+    for id in ["c1", "c2"] {
+        let (err, out) = tool_output_by_id(&evs, id);
+        assert!(err, "{out}");
+        assert!(
+            out.contains("Nothing was started") && out.contains("\"shared\""),
+            "{out}"
+        );
+    }
+    assert!(!evs.iter().any(|e| e.event.kind() == "agent_spawned"));
+    assert_eq!(env.catalog.builds.load(Ordering::SeqCst), builds);
+    assert!(env.script.requests().iter().all(|(_, r)| !is_child(r)));
 }

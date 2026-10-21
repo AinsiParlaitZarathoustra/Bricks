@@ -80,9 +80,17 @@ describe('runEndSummary: additions and deletions', () => {
 describe('runEndSummary: the reason and the error', () => {
 	it('gives the reason of an incomplete run from its termination', () => {
 		const s = runEndSummary(
+			run({ outcome: 'incomplete', finishedAt: T0 + 1, termination: { kind: 'no_progress', repeats: 5 } as RunInfo['termination'] })
+		);
+		expect(s.reason).toBe('aucun progrès détecté (5 répétitions)');
+	});
+
+	it('reads a stored end of an earlier version as interrupted, never as a success', () => {
+		// Historical data: a stop written before 0.4.8.
+		const s = runEndSummary(
 			run({ outcome: 'incomplete', finishedAt: T0 + 1, termination: { kind: 'max_turns', limit: 20 } as RunInfo['termination'] })
 		);
-		expect(s.reason).toBe('limite de 20 tours atteinte');
+		expect(s.reason).toBe('fin interrompue (ancienne session)');
 	});
 
 	it('gives the error of a failed run only', () => {

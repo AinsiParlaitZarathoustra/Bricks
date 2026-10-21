@@ -232,6 +232,12 @@ only the former is represented, and only where the table says so.
 (`application/pdf`) and any file (`*/*`). At least one type, written `type/subtype`,
 is required. Unchecking `document` removes `document_mime_types`.
 
+**Desktop attachments.** An image attached in Bricks Desktop is sent only to a
+model whose catalog entry declares `image`: for a known model without it, the
+send is refused before anything is sent. Attached files are copied at import. The desktop refuses
+PDF files at import, whatever the model declares. See
+`docs/content/docs/multimodal.mdx`, section "Attachments in Bricks Desktop".
+
 **What additional adapters or endpoints would be needed** (not built here):
 
 * video input — a native Gemini-style adapter, or a compatible endpoint with a

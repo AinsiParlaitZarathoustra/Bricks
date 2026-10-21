@@ -10,12 +10,19 @@
   import type { Conversation, Draft, DraftAttachment } from '$lib/state/conversation.svelte'
   import {
     appQuit,
-    attachmentSave,
+    attachmentImportBytes,
+    attachmentImportPath,
+    attachmentPreview,
+    discardDraftAttachment,
+    discardSessionAttachment,
+    promoteDraft,
+    sessionAttachmentPaths,
     errorMessage,
     pathKind,
     slashParse,
   } from '$lib/ipc/client'
   import type { SlashCommandInfo } from '$lib/ipc/bindings/SlashCommandInfo'
+  import type { ImportedAttachment } from '$lib/ipc/bindings/ImportedAttachment'
   import type { PromptBlock } from '$lib/ipc/engine'
   import ArrowUpIcon from '@lucide/svelte/icons/arrow-up'
   import SquareIcon from '@lucide/svelte/icons/square'
@@ -33,7 +40,7 @@
   import SkillPicker from './SkillPicker.svelte'
   import { selectionAfterRun, toggleSkill } from './skills'
   import { MentionFiles } from './mention-files.svelte'
-  import { mentionAt, mentionKind, projectEntryPath, removeMention, type MentionToken } from './mentions'
+  import { mentionAt, projectEntryPath, removeMention, type MentionToken } from './mentions'
   import type { ProjectFileEntry } from '$lib/ipc/bindings/ProjectFileEntry'
   import { slashRegistry } from '$lib/features/commands/slash-registry.svelte'
   import {
@@ -83,6 +90,7 @@
     for (const a of d.attachments) revoke(a)
     d.text = ''
     d.attachments = []
+    d.draftId = undefined
   }
 
   // ─── Model and effort ─────────────────────────────────────────────────────
@@ -125,13 +133,15 @@
   /** Why an attachment cannot be sent, or `null` when it can. */
   function chipError(a: DraftAttachment): string | null {
     if (a.error) return a.error
+    if (a.importing) return null
     if (a.kind === 'image' && !supportsImage) return NO_IMAGE_MESSAGE
     return null
   }
 
   const blocked = $derived(draft.attachments.some((a) => chipError(a) !== null))
+  const importing = $derived(draft.attachments.some((a) => a.importing))
   const hasContent = $derived(draft.text.trim() !== '' || draft.attachments.length > 0)
-  const canSend = $derived(editable && !running && !sending && saving === 0 && !blocked && hasContent)
+  const canSend = $derived(editable && !running && !sending && saving === 0 && !importing && !blocked && hasContent)
   /** A `/` line is run by the composer, never sent as a prompt (leading spaces do not count). */
   const isSlashLine = $derived(draft.text.trimStart().startsWith('/'))
   const slashReady = $derived(isSlashLine && editable && !sending && saving === 0)
@@ -154,6 +164,7 @@
 
   // ─── Attachments ──────────────────────────────────────────────────────────
 
+  /** A folder is sent by reference (its listing is read at send). */
   function toBlock(a: DraftAttachment): PromptBlock {
     switch (a.kind) {
       case 'image':
@@ -165,19 +176,77 @@
     }
   }
 
+  // Imports of one draft run one after the other: the first one creates the
+  // draft's folder, the next ones reuse it.
+  const importChains = new WeakMap<Draft, Promise<void>>()
+
+  /**
+   * Copies a file or pasted bytes into the draft (the app checks the type and size
+   * and owns the copy: the original can move or change afterwards). The chip shows
+   * the import; a refusal stays on its chip and the rest of the draft is kept.
+   */
+  function importInto(
+    target: Draft,
+    name: string,
+    kind: DraftAttachment['kind'],
+    run: (draftId: string | null) => Promise<ImportedAttachment>,
+    previewUrl?: string,
+  ) {
+    const id = crypto.randomUUID()
+    target.attachments.push({ id, kind, path: '', name, previewUrl, importing: true })
+    saving += 1
+    const previous = importChains.get(target) ?? Promise.resolve()
+    const next = previous.then(async () => {
+      try {
+        const imported = await run(target.draftId ?? null)
+        target.draftId ??= imported.draft_id
+        const chip = target.attachments.find((a) => a.id === id)
+        if (!chip) {
+          // Removed while it was being copied: its copy goes too.
+          void discardDraftAttachment(imported.draft_id, imported.attachment.id).catch(() => {})
+          return
+        }
+        chip.attachmentId = imported.attachment.id
+        chip.name = imported.attachment.name
+        chip.kind = imported.attachment.kind === 'image' ? 'image' : 'file'
+        chip.importing = false
+        if (chip.kind === 'image' && !chip.previewUrl) {
+          void attachmentPreview('draft', imported.draft_id, imported.attachment.id)
+            .then((p) => {
+              if (p.data_url) chip.previewUrl = p.data_url
+            })
+            .catch(() => {})
+        }
+      } catch (e) {
+        const chip = target.attachments.find((a) => a.id === id)
+        if (chip) {
+          chip.importing = false
+          chip.error = errorMessage(e)
+        }
+      } finally {
+        saving -= 1
+      }
+    })
+    importChains.set(target, next)
+  }
+
+  /** A path chosen, dropped or named: a folder is a reference, anything else a copy. */
+  function addPath(target: Draft, path: string, found: 'file' | 'folder') {
+    if (found === 'folder') {
+      if (target.attachments.some((a) => a.kind === 'folder' && a.path === path)) return
+      target.attachments.push({ id: crypto.randomUUID(), kind: 'folder', path, name: basename(path) })
+      return
+    }
+    importInto(target, basename(path), isImagePath(path) ? 'image' : 'file', (draftId) =>
+      attachmentImportPath(draftId, path),
+    )
+  }
+
   /** Items picked in the native dialog: the kind is known from the menu entry. */
   function addPicked(paths: string[], folder: boolean) {
     if (!editable || sending) return
     const target = draft
-    for (const path of paths) {
-      if (target.attachments.some((a) => a.path === path)) continue
-      target.attachments.push({
-        id: crypto.randomUUID(),
-        kind: folder ? 'folder' : isImagePath(path) ? 'image' : 'file',
-        path,
-        name: basename(path),
-      })
-    }
+    for (const path of paths) addPath(target, path, folder ? 'folder' : 'file')
   }
 
   /** Dropped items: folders and missing paths are told apart by `pathKind`. */
@@ -185,21 +254,18 @@
     if (!editable || sending) return
     const target = draft
     for (const path of paths) {
-      if (target.attachments.some((a) => a.path === path)) continue
-      const id = crypto.randomUUID()
-      const name = basename(path)
-      let attachment: DraftAttachment
+      let found: 'file' | 'folder' | 'missing'
       try {
-        const found = await pathKind(path)
-        attachment =
-          found === 'missing'
-            ? { id, kind: 'file', path, name, error: 'Élément introuvable.' }
-            : { id, kind: found === 'folder' ? 'folder' : isImagePath(path) ? 'image' : 'file', path, name }
+        found = await pathKind(path)
       } catch (e) {
-        attachment = { id, kind: 'file', path, name, error: errorMessage(e) }
+        target.attachments.push({ id: crypto.randomUUID(), kind: 'file', path, name: basename(path), error: errorMessage(e) })
+        continue
       }
-      // Checked again after the await: the same path may have been added meanwhile.
-      if (!target.attachments.some((a) => a.path === path)) target.attachments.push(attachment)
+      if (found === 'missing') {
+        target.attachments.push({ id: crypto.randomUUID(), kind: 'file', path, name: basename(path), error: 'Élément introuvable.' })
+        continue
+      }
+      addPath(target, path, found)
     }
   }
 
@@ -218,38 +284,16 @@
     if (kind === 'image' && !isImagePath(path)) {
       return `« ${path} » n’est pas une image (png, jpeg, gif, webp).`
     }
-    const target = draft
-    if (target.attachments.some((a) => a.path === path)) return null
-    target.attachments.push({
-      id: crypto.randomUUID(),
-      kind: found === 'folder' ? 'folder' : isImagePath(path) ? 'image' : 'file',
-      path,
-      name: basename(path),
-    })
+    addPath(draft, path, found)
     return null
   }
 
-  /** Saves a pasted image in the application's storage, then adds its chip. */
+  /** A pasted image: copied into the draft. */
   async function addImage(blob: Blob, name: string) {
-    // The draft this paste belongs to, even if the user switches meanwhile.
     const target = draft
-    const id = crypto.randomUUID()
-    const mediaType = blob.type || 'image/png'
-    saving += 1
-    try {
-      const saved = await attachmentSave(name, mediaType, await blobToBase64(blob))
-      target.attachments.push({
-        id,
-        kind: 'image',
-        path: saved.path,
-        name,
-        previewUrl: URL.createObjectURL(blob),
-      })
-    } catch (e) {
-      target.attachments.push({ id, kind: 'image', path: '', name, error: errorMessage(e) })
-    } finally {
-      saving -= 1
-    }
+    const preview = URL.createObjectURL(blob)
+    const data = await blobToBase64(blob)
+    importInto(target, name, 'image', (draftId) => attachmentImportBytes(draftId, name, data), preview)
   }
 
   function removeAttachment(id: string) {
@@ -258,6 +302,42 @@
     if (!gone) return
     revoke(gone)
     target.attachments = target.attachments.filter((a) => a.id !== id)
+    // Its copy is freed (a copy a sent message refers to is kept by the app).
+    if (gone.attachmentId && gone.sessionId) {
+      void discardSessionAttachment(gone.sessionId, gone.attachmentId).catch(() => {})
+    } else if (gone.attachmentId && target.draftId) {
+      void discardDraftAttachment(target.draftId, gone.attachmentId).catch(() => {})
+    }
+  }
+
+  /**
+   * The prompt blocks of the attachments, once their copies belong to the
+   * conversation: the draft's copies move into it, then are sent by their path
+   * there. Folders stay references.
+   */
+  async function attachmentBlocksFor(source: Draft, sessionId: string): Promise<PromptBlock[]> {
+    const copies = source.attachments.filter((a) => a.attachmentId)
+    if (copies.length > 0 && source.draftId && copies.some((a) => a.sessionId !== sessionId)) {
+      await promoteDraft(source.draftId, sessionId)
+      for (const a of copies) a.sessionId = sessionId
+    }
+    const paths = new Map<string, string>()
+    if (copies.length > 0) {
+      for (const r of await sessionAttachmentPaths(sessionId, copies.map((a) => a.attachmentId as string))) {
+        paths.set(r.id, r.path)
+      }
+    }
+    const blocks: PromptBlock[] = []
+    for (const a of source.attachments) {
+      if (!a.attachmentId) {
+        blocks.push(toBlock(a))
+        continue
+      }
+      const path = paths.get(a.attachmentId)
+      if (!path) throw new Error(`La copie de « ${a.name} » est introuvable : retirez-la et joignez-la de nouveau.`)
+      blocks.push({ kind: a.kind === 'image' ? 'image' : 'file', path })
+    }
+    return blocks
   }
 
   function onPaste(e: ClipboardEvent) {
@@ -273,14 +353,17 @@
     void addImage(file, name)
   }
 
-  /** True when a point (physical pixels, relative to the webview) is over the composer. */
+  /**
+   * True when a dropped point is over the composer. The native event gives physical
+   * pixels on some platforms and logical points on others (macOS): the point is
+   * accepted in either unit, so a Retina or a second screen does not move the target.
+   */
   function insideComposer(x: number, y: number): boolean {
     if (!rootEl) return false
     const r = rootEl.getBoundingClientRect()
     const scale = window.devicePixelRatio || 1
-    const px = x / scale
-    const py = y / scale
-    return px >= r.left && px <= r.right && py >= r.top && py <= r.bottom
+    const within = (px: number, py: number) => px >= r.left && px <= r.right && py >= r.top && py <= r.bottom
+    return within(x, y) || within(x / scale, y / scale)
   }
 
   function onDragDrop(event: DragDropEvent) {
@@ -430,11 +513,9 @@
       return
     }
     refusal = null
-    const text = draft.text.trim()
-    const blocks: PromptBlock[] = []
-    if (text) blocks.push({ kind: 'text', text })
-    for (const a of draft.attachments) blocks.push(toBlock(a))
-    const skills = [...draft.skills]
+    const source = draft
+    const text = source.text.trim()
+    const skills = [...source.skills]
 
     const sentAt = Date.now()
     sending = true
@@ -447,6 +528,22 @@
       const target = ensured.conversation
       const runsBefore = target.runs.size
       const sentText = target.draft.text
+      const blocks: PromptBlock[] = []
+      if (text) blocks.push({ kind: 'text', text })
+      try {
+        blocks.push(...(await attachmentBlocksFor(source, target.sessionId)))
+        // The conversation's draft holds the same chips, now owned by it.
+        if (target.draft !== source) {
+          target.draft.draftId = source.draftId
+          for (const a of target.draft.attachments) {
+            const same = source.attachments.find((b) => b.id === a.id)
+            if (same?.sessionId) a.sessionId = same.sessionId
+          }
+        }
+      } catch (e) {
+        refusal = errorMessage(e)
+        return
+      }
       const prompt = skills.length > 0 ? { blocks, skills } : { blocks }
       const error = await app.command(target.sessionId, { type: 'submit', prompt })
       if (error) {
@@ -643,9 +740,13 @@
     },
     openPicker: (picker) => ui.openPicker(picker),
     open: (view, args) => ui.open(view, args),
+    openAgent: (agentId) => ui.openAgent(agentId),
     attachmentBlocks() {
-      if (saving > 0) return { error: 'Attendez la fin de l’enregistrement de la pièce jointe.' }
+      if (saving > 0 || importing) return { error: 'Attendez la fin de la copie de la pièce jointe.' }
       if (blocked) return { error: 'Retirez les pièces jointes en erreur pour envoyer.' }
+      if (draft.attachments.some((a) => a.attachmentId)) {
+        return { error: 'Envoyez les fichiers joints avec un message, sans commande.' }
+      }
       return { blocks: draft.attachments.map(toBlock) }
     },
     resume: (sessionId) => app.resumeSession(sessionId),
@@ -801,21 +902,18 @@
     mentionIndex = 0
     moveCaret(next.caret)
     const path = projectEntryPath(root.path, entry.path)
-    if (target.attachments.some((a) => a.path === path)) return
-    const id = crypto.randomUUID()
-    const name = basename(path)
-    let attachment: DraftAttachment
+    let found: 'file' | 'folder' | 'missing'
     try {
-      const found = await pathKind(path)
-      attachment =
-        found === 'missing'
-          ? { id, kind: 'file', path, name, error: 'Élément introuvable.' }
-          : { id, kind: mentionKind(path, found), path, name }
+      found = await pathKind(path)
     } catch (e) {
-      attachment = { id, kind: 'file', path, name, error: errorMessage(e) }
+      target.attachments.push({ id: crypto.randomUUID(), kind: 'file', path, name: basename(path), error: errorMessage(e) })
+      return
     }
-    // Checked again after the await: the same path may have been added meanwhile.
-    if (!target.attachments.some((a) => a.path === path)) target.attachments.push(attachment)
+    if (found === 'missing') {
+      target.attachments.push({ id: crypto.randomUUID(), kind: 'file', path, name: basename(path), error: 'Élément introuvable.' })
+      return
+    }
+    addPath(target, path, found)
   }
 
   /** Keys handled while the `@` popover is open. Returns true when the key was used. */
@@ -1089,7 +1187,7 @@
       {/if}
 
       {#if saving > 0}
-        <p class="px-1 text-xs text-muted-foreground" role="status">Enregistrement de la pièce jointe…</p>
+        <p class="px-1 text-xs text-muted-foreground" role="status">Copie des pièces jointes…</p>
       {/if}
 
       <Textarea

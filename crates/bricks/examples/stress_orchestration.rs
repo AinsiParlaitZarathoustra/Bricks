@@ -314,31 +314,16 @@ async fn run() {
             session_id: "agent-alpha".into(),
             ..ctx.clone()
         };
-        send.execute(
-            serde_json::json!({"to": "agent-beta", "content": "Found 3 bugs"}),
-            &ctx_a,
-        )
-        .await;
-        send.execute(
-            serde_json::json!({"to": "agent-beta", "content": "All fixed now"}),
-            &ctx_a,
-        )
-        .await;
-
-        // Agent B receives
-        let msgs = bricks_tools::send_message::peek_inbox("agent-beta");
-        check!("2 messages queued", msgs.len() == 2);
+        // Outside an agent runtime there is no recipient: nothing is claimed sent.
+        let r = send
+            .execute(
+                serde_json::json!({"to": "agent-beta", "content": "Found 3 bugs"}),
+                &ctx_a,
+            )
+            .await;
         check!(
-            "Messages from alpha",
-            msgs.iter().all(|m| m.from == "agent-alpha")
-        );
-
-        // Drain
-        let drained = bricks_tools::send_message::drain_inbox("agent-beta");
-        check!("Drain returns all messages", drained.len() == 2);
-        check!(
-            "Inbox empty after drain",
-            bricks_tools::send_message::peek_inbox("agent-beta").is_empty()
+            "SendMessage refuses without a recipient",
+            r.is_error && r.content.contains("nothing was sent")
         );
 
         // Cross-session triggers

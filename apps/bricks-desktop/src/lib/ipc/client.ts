@@ -20,6 +20,11 @@ import type { PtyEvent } from './bindings/PtyEvent'
 import type { PtyInfo } from './bindings/PtyInfo'
 import type { PtyOpenRequest } from './bindings/PtyOpenRequest'
 import type { SavedAttachment } from './bindings/SavedAttachment'
+import type { AttachmentScope } from './bindings/AttachmentScope'
+import type { AttachmentRef } from './bindings/AttachmentRef'
+import type { AttachmentPreview } from './bindings/AttachmentPreview'
+import type { ImportedAttachment } from './bindings/ImportedAttachment'
+import type { ResolvedAttachment } from './bindings/ResolvedAttachment'
 import type { SessionItem } from './bindings/SessionItem'
 import type { SessionSearchHit } from './bindings/SessionSearchHit'
 import type { ProjectFileWindow } from './bindings/ProjectFileWindow'
@@ -48,6 +53,12 @@ export type * from './bindings/PtyEvent'
 export type * from './bindings/PtyInfo'
 export type * from './bindings/PtyOpenRequest'
 export type * from './bindings/SavedAttachment'
+export type * from './bindings/AttachmentKind'
+export type * from './bindings/AttachmentScope'
+export type * from './bindings/AttachmentRef'
+export type * from './bindings/AttachmentPreview'
+export type * from './bindings/ImportedAttachment'
+export type * from './bindings/ResolvedAttachment'
 export type * from './bindings/SearchMatch'
 export type * from './bindings/SessionItem'
 export type * from './bindings/SessionSearchHit'
@@ -145,8 +156,38 @@ export const sessionCommand = (sessionId: string, command: Command, display: str
   call<void>('session_command', { sessionId, command, display })
 export const sessionSnapshot = (sessionId: string) =>
   call<Snapshot>('session_snapshot', { sessionId })
+/** Compatibility: pasted bytes as a draft copy, by its absolute path. Use `attachmentImportBytes`. */
 export const attachmentSave = (name: string, mediaType: string, dataBase64: string) =>
   call<SavedAttachment>('attachment_save', { name, mediaType, dataBase64 })
+
+// ─── Attachment copies (drafts, sessions) ────────────────────────────────────
+// The desktop copies each attachment at import and keeps the copy under an
+// opaque id. The interface never chooses a destination: it names drafts and
+// sessions by id, and attachments by id. The type is found from the content.
+
+/** Imports pasted bytes (base64) into `draftId`, or into a new draft when it is null. */
+export const attachmentImportBytes = (draftId: string | null, name: string, dataBase64: string) =>
+  call<ImportedAttachment>('attachment_import_bytes', { draftId, name, dataBase64 })
+/** Imports the file at an absolute `path` into `draftId`, or into a new draft when it is null. */
+export const attachmentImportPath = (draftId: string | null, path: string) =>
+  call<ImportedAttachment>('attachment_import_path', { draftId, path })
+/** Frees the copy of a draft. */
+export const discardDraftAttachment = (draftId: string, attachmentId: string) =>
+  call<void>('discard_draft_attachment', { draftId, attachmentId })
+/** Removes a copy of a session, refused when a sent message refers to it. */
+export const discardSessionAttachment = (sessionId: string, attachmentId: string) =>
+  call<void>('discard_session_attachment', { sessionId, attachmentId })
+/** Removes a draft and its copies. */
+export const discardDraft = (draftId: string) => call<void>('discard_draft', { draftId })
+/** Moves a draft's copies into the session, before its submit. */
+export const promoteDraft = (draftId: string, sessionId: string) =>
+  call<AttachmentRef[]>('promote_draft', { draftId, sessionId })
+/** Absolute paths of a session's copies, in the order given: what a submit sends. */
+export const sessionAttachmentPaths = (sessionId: string, attachmentIds: string[]) =>
+  call<ResolvedAttachment[]>('session_attachment_paths', { sessionId, attachmentIds })
+/** A copy for display: an image as a data URL, a text as its beginning. */
+export const attachmentPreview = (scope: AttachmentScope, ownerId: string, attachmentId: string) =>
+  call<AttachmentPreview>('attachment_preview', { scope, ownerId, attachmentId })
 
 // ─── Change journal ──────────────────────────────────────────────────────────
 

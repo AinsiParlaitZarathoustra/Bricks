@@ -597,7 +597,7 @@ mod bricks_config_tests {
     /// `build_agent` / the replayer) have no turn budget: past the former
     /// default of 20, then the answer.
     #[tokio::test]
-    async fn the_runners_agents_have_no_turn_limit() {
+    async fn the_runners_agents_go_on_until_their_answer() {
         let work = tempfile::tempdir().unwrap();
         let calls = Arc::new(AtomicUsize::new(0));
         let c = calls.clone();

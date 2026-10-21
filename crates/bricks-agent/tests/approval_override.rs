@@ -6,15 +6,43 @@
 //! `ProfileSources` that points at the temporary folder: nothing is read
 //! from or written to the user's `~/.bricks`.
 
+#[allow(dead_code)]
+mod common;
+
 use bricks_agent::BricksConfig;
 use bricks_agent::agents::ProfileSources;
 use bricks_agent::control::scripted::{Reply, Script, ScriptedCatalog};
 use bricks_agent::control::*;
+use bricks_provider::Provider;
 use bricks_tools::PermissionLevel;
 use bricks_tools::permissions::{PermissionDecision, PermissionPolicy, PermissionRequest};
+use common::follow::{FollowHandles, Waited};
 use serde_json::json;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
+
+/// The scripted models; each waits for the sub-agents it was given (as a
+/// model would) while `enabled`.
+struct Follow {
+    inner: Arc<ScriptedCatalog>,
+    waited: Arc<Waited>,
+    enabled: Arc<AtomicBool>,
+}
+
+impl ModelCatalog for Follow {
+    fn models(&self) -> Vec<ModelChoice> {
+        self.inner.models()
+    }
+    fn build(&self, selection: &str, reasoning: Option<&str>) -> Result<Box<dyn Provider>, String> {
+        Ok(Box::new(FollowHandles {
+            inner: self.inner.build(selection, reasoning)?,
+            selection: selection.to_string(),
+            waited: Arc::clone(&self.waited),
+            enabled: Arc::clone(&self.enabled),
+        }))
+    }
+}
 
 struct Env {
     ctl: Controller,
@@ -39,7 +67,11 @@ fn allow(tools: &[&str]) -> ApprovalRules {
 async fn open(rules: ApprovalRules, mode: ApprovalMode) -> Env {
     let dir = tempfile::tempdir().unwrap();
     let script = Script::new(Vec::new());
-    let catalog = ScriptedCatalog::new(&["a", "b"], script.clone());
+    let catalog = Arc::new(Follow {
+        inner: ScriptedCatalog::new(&["a", "b"], script.clone()),
+        waited: Arc::new(Waited::default()),
+        enabled: Arc::new(AtomicBool::new(true)),
+    });
     let mut bricks = BricksConfig::default();
     bricks.agent.model = Some("test/a".into());
     bricks.permissions = rules;
@@ -307,7 +339,10 @@ async fn an_always_ask_session_grant_does_not_survive_a_return_to_standard() {
     assert_eq!(asked.len(), 1, "back to standard, the write is asked again");
     assert_eq!(asked[0].tool, "Write");
     let writes = results(&evs, "Write");
-    assert!(writes.len() == 1 && writes[0].0, "the refused write is an error result");
+    assert!(
+        writes.len() == 1 && writes[0].0,
+        "the refused write is an error result"
+    );
     assert!(!f2.exists(), "a refused write writes nothing");
 }
 
@@ -380,10 +415,11 @@ async fn a_running_sub_agent_takes_the_change_at_its_next_decision() {
     let mut env = open(allow(&["Agent"]), ApprovalMode::Standard).await;
     let f1 = env.dir.path().join("sous-1.txt");
     let f2 = env.dir.path().join("sous-2.txt");
+    // Shared with the parent's folder (no repository here): one writer.
     env.script.push(Reply::tool(
         "c1",
         "Agent",
-        json!({"task": "écrire deux fichiers"}),
+        json!({"task": "écrire deux fichiers", "isolation": "shared"}),
     ));
     env.script
         .push(Reply::tool("cw1", "Write", write_input(&f1)));

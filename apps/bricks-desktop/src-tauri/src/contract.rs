@@ -152,6 +152,10 @@ pub struct OpenedSession {
 pub struct HistoryMessage {
     pub role: HistoryRole,
     pub blocks: Vec<HistoryBlock>,
+    /// The attachments a user message was sent with, as copies the desktop
+    /// keeps in the session's folder (empty for other messages and older ones).
+    #[serde(default)]
+    pub attachments: Vec<AttachmentRef>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
@@ -208,6 +212,66 @@ pub struct SavedAttachment {
     pub media_type: String,
     #[ts(type = "number")]
     pub bytes: u64,
+}
+
+/// Kind of an attachment copy: an image sent as an image block, or UTF-8 text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum AttachmentKind {
+    Image,
+    Text,
+}
+
+/// Where an attachment copy is kept: a draft (not sent yet) or a session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum AttachmentScope {
+    Draft,
+    Session,
+}
+
+/// An attachment copy the desktop owns. The interface refers to it by `id`;
+/// it never chooses where the copy is kept.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct AttachmentRef {
+    /// Opaque id made by the desktop: 32 lowercase hexadecimal characters.
+    pub id: String,
+    /// The name the copy keeps: a safe file name.
+    pub name: String,
+    pub kind: AttachmentKind,
+    /// Type found from the content, never from the name.
+    pub mime: String,
+    #[ts(type = "number")]
+    pub size: u64,
+}
+
+/// The result of an import: the draft the copy belongs to (the id given, or a
+/// new one) and the copy.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct ImportedAttachment {
+    pub draft_id: String,
+    pub attachment: AttachmentRef,
+}
+
+/// The absolute path of a session copy, for the engine's submit.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct ResolvedAttachment {
+    pub id: String,
+    pub kind: AttachmentKind,
+    pub path: String,
+}
+
+/// A copy as the interface shows it. Reads are bounded: an image is returned
+/// whole (at most 5 MiB), a text up to its first 256 KiB.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct AttachmentPreview {
+    pub attachment: AttachmentRef,
+    /// Images: `data:<mime>;base64,…`.
+    pub data_url: Option<String>,
+    /// Texts: the beginning of the copy.
+    pub text: Option<String>,
+    /// The text is only its beginning.
+    pub truncated: bool,
 }
 
 // ─── Change journal (persistent, Bricks-recorded edits) ─────────────────────
@@ -862,6 +926,42 @@ pub struct RunRecord {
     /// a notice or an approval.
     #[serde(default)]
     pub assistant_text: String,
+    /// What the response cost: the engine's total of the run (its session
+    /// agent and every sub-agent). `None` for a record written before it was
+    /// kept, which is unavailable, never zero.
+    #[serde(default)]
+    pub usage: Option<RunUsageRecord>,
+}
+
+/// The usage of a run as the engine totals it (`run_usage`): the session
+/// agent's responses and its sub-agents', each counted once. The total is
+/// replaced when the engine sends a newer one; sub-agent results are never
+/// added again.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+pub struct RunUsageRecord {
+    #[ts(type = "number")]
+    pub input_tokens: u64,
+    #[ts(type = "number")]
+    pub output_tokens: u64,
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub cache_read_input_tokens: u64,
+    #[serde(default)]
+    #[ts(type = "number")]
+    pub cache_creation_input_tokens: u64,
+    /// The estimated cost in USD. `None` when no price was known: unknown,
+    /// never zero.
+    #[serde(default)]
+    pub cost_usd: Option<f64>,
+    /// The cost is a lower bound: some consumed category had no price.
+    #[serde(default)]
+    pub partial: bool,
+    /// `false` while sub-agents still run; a later version replaces this one.
+    #[serde(default)]
+    pub final_total: bool,
+    /// Sub-agents still running when the total was taken.
+    #[serde(default)]
+    pub pending_agents: u32,
 }
 
 /// The file changes of a run for one file: sums of its edit operations.

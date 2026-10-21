@@ -1,8 +1,8 @@
 //! tbench-agent — a purpose-built Terminal-Bench coding agent.
 //!
 //! A thin, fast binary over the Bricks SDK + AgentRL: a TB-specialized coding
-//! agent (Gemini 3.1 Pro by default) with the full IO/coding toolset, a high
-//! turn budget, and a verifier that trusts a real in-container test script when
+//! agent (Gemini 3.1 Pro by default) with the full IO/coding toolset, no turn
+//! limit, and a verifier that trusts a real in-container test script when
 //! one exists (enabling best-of-N / recovery), and otherwise runs a single
 //! strong attempt. File changes land in the working directory for grading.
 
@@ -65,11 +65,6 @@ struct Cli {
     #[arg(long, default_value_t = 2)]
     proposals: usize,
 
-    /// Removed in 0.4.8 (agents have no turn limit): refused with a
-    /// migration message, never applied.
-    #[arg(long, hide = true)]
-    max_turns: Option<String>,
-
     /// Emit a machine-readable JSON result line on stdout.
     #[arg(long)]
     json: bool,
@@ -121,21 +116,9 @@ fn configure_runner(
     runner.with_bricks_config(config).with_compression(level)
 }
 
-/// Options that no longer exist are refused before anything starts, with
-/// what to do instead.
-fn refuse_removed_options(cli: &Cli) -> anyhow::Result<()> {
-    if cli.max_turns.is_some() {
-        anyhow::bail!(
-            "--max-turns was removed in 0.4.8: agents have no turn limit; run again without it"
-        );
-    }
-    Ok(())
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    refuse_removed_options(&cli)?;
     let instruction = resolve_task(&cli)?;
 
     // Load the configuration and validate the selection up front, including
@@ -346,33 +329,5 @@ mod tests {
         assert!(applied.diagnostics.is_empty());
         assert!(applied.rules.get("cargo-test").is_some());
         assert!(applied.rules.get("mytool").is_none());
-    }
-}
-
-#[cfg(test)]
-mod removed_options_tests {
-    use super::*;
-
-    #[test]
-    fn the_former_turn_option_is_refused_and_hidden() {
-        let cli = Cli::try_parse_from(["tbench-agent", "--model", "p/m", "-p", "x"]).unwrap();
-        assert!(refuse_removed_options(&cli).is_ok());
-        let cli = Cli::try_parse_from([
-            "tbench-agent",
-            "--model",
-            "p/m",
-            "-p",
-            "x",
-            "--max-turns",
-            "80",
-        ])
-        .unwrap();
-        let e = refuse_removed_options(&cli).unwrap_err().to_string();
-        assert!(e.contains("was removed"), "{e}");
-        let mut help = Vec::new();
-        <Cli as clap::CommandFactory>::command()
-            .write_long_help(&mut help)
-            .unwrap();
-        assert!(!String::from_utf8(help).unwrap().contains("max-turns"));
     }
 }

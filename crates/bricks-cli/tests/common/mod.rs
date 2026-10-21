@@ -30,6 +30,11 @@ pub fn tool(id: &str, name: &str, args: Value) -> String {
 /// Never answers (cancellation tests).
 pub const HANG: &str = "HANG";
 
+/// `reply` (as [`text`] or [`tool`] gives it), sent after `ms` milliseconds.
+pub fn slow(ms: u64, reply: String) -> String {
+    format!("SLEEP:{ms}:{reply}")
+}
+
 pub struct Model {
     pub url: String,
     pub seen: Arc<Mutex<Vec<Value>>>,
@@ -92,10 +97,15 @@ fn serve(replies: Vec<String>, child: Option<String>) -> Model {
                     s2.lock().unwrap().push(v);
                 }
                 let raw = String::from_utf8_lossy(&buf[start..]);
-                let body = match &child {
+                let mut body = match &child {
                     Some(c) if raw.contains(SUB_AGENT_MARK) => c.clone(),
                     _ => replies.lock().unwrap().next().unwrap_or_else(|| text("ok")),
                 };
+                if let Some(rest) = body.strip_prefix("SLEEP:") {
+                    let (ms, reply) = rest.split_once(':').unwrap_or(("0", rest));
+                    std::thread::sleep(std::time::Duration::from_millis(ms.parse().unwrap_or(0)));
+                    body = reply.to_string();
+                }
                 if body == HANG {
                     std::thread::sleep(std::time::Duration::from_secs(60));
                     return;

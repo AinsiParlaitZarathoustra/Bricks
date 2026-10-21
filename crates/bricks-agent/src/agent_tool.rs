@@ -91,9 +91,6 @@ struct AgentInput {
     prompt: String,
     #[serde(default)]
     system_prompt: Option<String>,
-    /// Former turn limit (removed in 0.4.8): refused with a migration message.
-    #[serde(default)]
-    max_turns: Option<Value>,
     #[serde(default)]
     model: Option<String>,
 }
@@ -116,13 +113,6 @@ impl AgentTool {
             .is_some_and(|m| !subagent::is_blank(m))
         {
             return Err("`model` cannot be chosen here: a sub-agent uses its parent's model. Nothing was started.".into());
-        }
-        if input.max_turns.is_some() {
-            return Err(
-                "`max_turns` was removed in 0.4.8: sub-agents have no turn limit. \
-                 Nothing was started; call again without it."
-                    .into(),
-            );
         }
         let depth = subagent::depth_of(&ctx.extensions);
         if depth + 1 >= MAX_DEPTH {

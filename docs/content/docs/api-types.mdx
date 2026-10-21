@@ -122,7 +122,7 @@ pub enum StopReason {
 }
 ```
 
-The result of a whole run is `Termination` in `bricks-agent` (`Completed`, `OutputTruncated`, `NoProgress`, `ContentFiltered`, `EmptyResponse`; `MaxTurns` exists only to read results stored before 0.4.8, `crates/bricks-agent/src/lib.rs:78-96`).
+The result of a whole run is `Termination` in `bricks-agent` (`Completed`, `OutputTruncated`, `NoProgress`, `ContentFiltered`, `EmptyResponse`; `Historical { kind }` reads a stored end whose kind this version does not know, such as `max_turns` written before 0.4.8. It is an incomplete end, never a success, and no run produces it; `crates/bricks-agent/src/lib.rs`).
 
 ## StreamEvent
 

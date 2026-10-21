@@ -2,6 +2,7 @@
 //! journal, attachments (owner: Haiku 1). Each service owns one file kind
 //! under `<bricks_home>/desktop/` and writes it atomically.
 
+pub mod attachment_runs;
 pub mod attachments;
 pub mod changes;
 pub mod conversations;

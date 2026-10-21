@@ -5,6 +5,8 @@
 
 use bricks_provider::{ConfiguredProvider, ProviderRegistry};
 
+pub mod follow;
+
 /// A single-model provider speaking `protocol` (`chat_completions`,
 /// `responses` or `anthropic_messages`) against `endpoint`.
 /// `max_input_tokens` is the prompt budget the agent compacts against.
