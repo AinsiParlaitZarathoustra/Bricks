@@ -120,7 +120,7 @@
 					{:else}
 						<Folder class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 					{/if}
-					<span class="truncate text-[13px] font-medium">{project.name}</span>
+					<span class="truncate text-[12.5px] font-medium">{project.name}</span>
 				</button>
 
 				{#if project.missing}
@@ -159,7 +159,7 @@
 								{...props}
 								variant="ghost"
 								size="icon-sm"
-								class="shrink-0 text-muted-foreground"
+								class="shrink-0 text-muted-foreground opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
 								aria-label={`Actions pour le projet ${project.name}`}
 							>
 								<EllipsisVertical class="size-4" aria-hidden="true" />

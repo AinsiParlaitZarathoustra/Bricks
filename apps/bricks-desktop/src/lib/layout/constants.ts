@@ -7,11 +7,13 @@
 export const WIDE_BREAKPOINT = 1200;
 
 /**
- * Below this window width: both side panels become temporary Sheets.
+ * Below this window width: both side panels become temporary Sheets, so the
+ * conversation takes the whole window. It is above the window's minimum width
+ * (800 px), so a narrowed window reaches it.
  * Between NARROW_BREAKPOINT and WIDE_BREAKPOINT: the right panel becomes a
  * temporary Sheet and the left panel stays inline.
  */
-export const NARROW_BREAKPOINT = 800;
+export const NARROW_BREAKPOINT = 1000;
 
 /** Starting sizes used when the caller provides no saved preference. */
 export const LAYOUT_DEFAULTS = {

@@ -138,7 +138,7 @@
 		<li>
 			<div
 				class={cn(
-					'flex items-center gap-1 rounded-md pr-1 transition-colors',
+					'group flex items-center gap-1 rounded-md pr-1 transition-colors',
 					current ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'hover:bg-sidebar-accent/60'
 				)}
 			>
@@ -150,7 +150,7 @@
 							aria-label="Nouveau titre de la conversation"
 							maxlength={200}
 							autocomplete="off"
-							class="h-8 text-[13px]"
+							class="h-8 text-[12.5px]"
 							onkeydown={onRenameKey}
 							onblur={() => void endRename(true, false)}
 						/>
@@ -172,7 +172,7 @@
 						}}
 						onkeydown={(event) => onItemKeydown(event, session)}
 					>
-						<span class="min-w-0 flex-1 truncate text-[13px]">{displayTitle(session.title)}</span>
+						<span class="min-w-0 flex-1 truncate text-[12.5px]">{displayTitle(session.title)}</span>
 						{#if session.running}
 							<StatusDot status="running" label="Conversation en cours" />
 						{/if}
@@ -186,7 +186,7 @@
 								{...props}
 								variant="ghost"
 								size="icon-sm"
-								class="shrink-0 text-muted-foreground"
+								class="shrink-0 text-muted-foreground opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
 								aria-label={`Actions pour la conversation ${displayTitle(session.title)}`}
 							>
 								<EllipsisVertical class="size-4" aria-hidden="true" />
@@ -213,7 +213,7 @@
 			</div>
 		</li>
 	{/each}
-	{#if visible.length < sorted.length}
+	{#if limit !== undefined && sorted.length > limit && (showAll || visible.length < sorted.length)}
 		<li>
 			<button
 				type="button"
@@ -221,9 +221,9 @@
 					'w-full rounded-md py-1.5 pr-2 text-left text-xs text-muted-foreground transition-colors hover:bg-sidebar-accent/60 hover:text-foreground',
 					nested ? 'pl-8' : 'pl-2'
 				)}
-				onclick={() => (showAll = true)}
+				onclick={() => (showAll = !showAll)}
 			>
-				Afficher plus
+				{showAll ? 'Afficher moins' : 'Afficher plus'}
 			</button>
 		</li>
 	{/if}
