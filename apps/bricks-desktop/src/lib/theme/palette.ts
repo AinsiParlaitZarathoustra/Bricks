@@ -188,7 +188,7 @@ export const TOKENS: Record<ResolvedMode, TokenColors> = {
 		accentForeground: oklchToHex(0.985, 0.005, 85),
 		background: oklchToHex(0.985, 0.004, 85),
 		foreground: oklchToHex(0.235, 0.012, 60),
-		mutedForeground: oklchToHex(0.48, 0.012, 65),
+		mutedForeground: oklchToHex(0.52, 0.012, 65),
 		panel: oklchToHex(0.967, 0.007, 82),
 		panelForeground: oklchToHex(0.235, 0.012, 60)
 	},

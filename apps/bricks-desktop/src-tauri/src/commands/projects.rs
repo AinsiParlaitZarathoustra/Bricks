@@ -4,12 +4,18 @@ use crate::services::join_error;
 use std::sync::Arc;
 use tauri::State;
 
+/// The registered projects, then the built-in one of the conversations
+/// without a project.
 #[tauri::command]
 pub async fn projects_list(state: State<'_, AppState>) -> IpcResult<Vec<Project>> {
     let store = Arc::clone(&state.projects);
-    tokio::task::spawn_blocking(move || store.list())
-        .await
-        .map_err(join_error)
+    tokio::task::spawn_blocking(move || -> IpcResult<Vec<Project>> {
+        let mut projects = store.list();
+        projects.push(store.chats()?);
+        Ok(projects)
+    })
+    .await
+    .map_err(join_error)?
 }
 
 /// Registers a folder (chosen with the native dialog on the frontend).

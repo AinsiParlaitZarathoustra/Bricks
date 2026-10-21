@@ -368,6 +368,7 @@ export type Event =
     }
   | { type: 'context_cleared'; messages_removed: number }
   | { type: 'session_saved' }
+  | { type: 'title_changed'; title: string }
   | { type: 'notice'; message: string }
   | {
       type: 'run_finished'

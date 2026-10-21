@@ -29,7 +29,7 @@
   /** Reads the real Git state of the current project. Stale answers are dropped. */
   async function refresh() {
     const project = app.currentProject
-    if (!project || project.missing) {
+    if (!project || project.missing || project.chats) {
       view = null
       return
     }
@@ -75,6 +75,8 @@
 
 <svelte:window onfocus={onWindowFocus} />
 
+<!-- A conversation without a project has no folder or Git state to show. -->
+{#if !project?.chats}
 <div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
   {#if shown.kind === 'idle'}
     <p class="text-muted-foreground">Aucun projet sélectionné : créez-en un avec « Nouveau projet ».</p>
@@ -107,3 +109,4 @@
     </p>
   {/if}
 </div>
+{/if}

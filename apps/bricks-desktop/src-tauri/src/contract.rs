@@ -77,6 +77,8 @@ pub struct Project {
     pub last_opened_at: i64,
     /// The folder is gone or unreadable.
     pub missing: bool,
+    /// The built-in project of the conversations that belong to no project.
+    pub chats: bool,
 }
 
 // ─── Conversations ───────────────────────────────────────────────────────────

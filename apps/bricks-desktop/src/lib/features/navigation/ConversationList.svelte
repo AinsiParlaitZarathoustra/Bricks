@@ -11,12 +11,29 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import StatusDot from '$lib/layout/StatusDot.svelte';
 	import { cn } from '$lib/utils';
-	import { displayTitle, relativeDate } from './format';
-	import { createClock } from './clock.svelte';
+	import { displayTitle } from './format';
 
-	const clock = createClock();
+	interface Props {
+		projectId: string;
+		/** Accessible name of the list. */
+		label: string;
+		/** Conversations shown before « Afficher plus » (all when absent). */
+		limit?: number;
+		/** Indented under its project's row. */
+		nested?: boolean;
+	}
 
-	const sorted = $derived([...app.sessions].sort((a, b) => b.updated_at - a.updated_at));
+	let { projectId, label, limit, nested = false }: Props = $props();
+
+	let showAll = $state(false);
+
+	const sorted = $derived([...app.sessionsOf(projectId)].sort((a, b) => b.updated_at - a.updated_at));
+	// The shown conversation is always listed, even past the limit.
+	const visible = $derived(
+		showAll || limit === undefined
+			? sorted
+			: sorted.filter((s, i) => i < limit || s.id === app.currentSessionId)
+	);
 
 	// The list element, kept for keyboard navigation and focus restoration (not rendered from).
 	let listEl: HTMLElement | null = null;
@@ -63,7 +80,7 @@
 	async function endRename(save: boolean, refocus: boolean) {
 		const id = editingId;
 		if (!id) return;
-		const session = app.sessions.find((s) => s.id === id);
+		const session = sorted.find((s) => s.id === id);
 		const title = draft.trim();
 		editingId = null;
 		if (save && session && title && title !== session.title) {
@@ -115,8 +132,8 @@
 	}
 </script>
 
-<ul {@attach trackList} class="flex flex-col gap-0.5" aria-label="Conversations du projet">
-	{#each sorted as session (session.id)}
+<ul {@attach trackList} class="flex flex-col gap-0.5" aria-label={label}>
+	{#each visible as session (session.id)}
 		{@const current = session.id === app.currentSessionId}
 		<li>
 			<div
@@ -126,7 +143,7 @@
 				)}
 			>
 				{#if editingId === session.id}
-					<div class="min-w-0 flex-1 px-1.5 py-1">
+					<div class={cn('min-w-0 flex-1 py-1 pr-1.5', nested ? 'pl-7' : 'pl-1.5')}>
 						<Input
 							{@attach focusAndSelect}
 							bind:value={draft}
@@ -142,7 +159,10 @@
 					<button
 						type="button"
 						data-session-item={session.id}
-						class="flex min-w-0 flex-1 flex-col items-start gap-0.5 rounded-md px-2 py-1.5 text-left"
+						class={cn(
+							'flex min-w-0 flex-1 items-center gap-2 rounded-md py-1.5 pr-2 text-left',
+							nested ? 'pl-8' : 'pl-2'
+						)}
 						aria-current={current ? 'true' : undefined}
 						title={displayTitle(session.title)}
 						onclick={() => void app.openSession(session.id)}
@@ -152,13 +172,10 @@
 						}}
 						onkeydown={(event) => onItemKeydown(event, session)}
 					>
-						<span class="flex w-full min-w-0 items-center gap-2">
-							<span class="min-w-0 flex-1 truncate text-[13px] font-medium">{displayTitle(session.title)}</span>
-							{#if session.running}
-								<StatusDot status="running" label="Conversation en cours" />
-							{/if}
-						</span>
-						<span class="text-xs text-muted-foreground">{relativeDate(session.updated_at, clock.now)}</span>
+						<span class="min-w-0 flex-1 truncate text-[13px]">{displayTitle(session.title)}</span>
+						{#if session.running}
+							<StatusDot status="running" label="Conversation en cours" />
+						{/if}
 					</button>
 				{/if}
 
@@ -196,6 +213,20 @@
 			</div>
 		</li>
 	{/each}
+	{#if visible.length < sorted.length}
+		<li>
+			<button
+				type="button"
+				class={cn(
+					'w-full rounded-md py-1.5 pr-2 text-left text-xs text-muted-foreground transition-colors hover:bg-sidebar-accent/60 hover:text-foreground',
+					nested ? 'pl-8' : 'pl-2'
+				)}
+				onclick={() => (showAll = true)}
+			>
+				Afficher plus
+			</button>
+		</li>
+	{/if}
 </ul>
 
 <AlertDialog.Root bind:open={deleteOpen}>

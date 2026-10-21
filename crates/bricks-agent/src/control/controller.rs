@@ -160,6 +160,9 @@ pub struct EngineConfig {
     /// configuration, read at each decision (default: standard, which is
     /// the project's rules unchanged).
     pub approval_override: Arc<ApprovalOverride>,
+    /// Whether the model names a new session from its first prompt (default
+    /// false: the shortened prompt stays the title).
+    pub generated_titles: bool,
 }
 
 /// Where a session's skills come from, besides its project.
@@ -267,6 +270,7 @@ impl EngineConfig {
             project_loader: None,
             skills: None,
             approval_override: ApprovalOverride::new(ApprovalMode::Standard),
+            generated_titles: false,
         }
     }
 }
@@ -945,6 +949,44 @@ impl Controller {
         let mut m = self.inner.meta.lock();
         m.title = title.trim().to_string();
         m.save(&files_dir(&self.inner.cfg, &m.id))
+    }
+
+    /// Asks the model for the title of a session just named `provisional`
+    /// (its shortened first prompt), off the run. The answer replaces the
+    /// title only if it is still `provisional`: a rename meanwhile wins.
+    fn spawn_title(&self, agent: &Arc<Agent>, prompt: String, provisional: String) {
+        let provider = agent.provider();
+        let selection = self.inner.meta.lock().model.clone();
+        let profile = self
+            .inner
+            .cfg
+            .catalog
+            .models()
+            .into_iter()
+            .find(|m| m.selection == selection)
+            .and_then(|m| {
+                super::title::light_profile(m.profiles.iter().map(|p| p.id.as_str()))
+                    .map(str::to_string)
+            });
+        let inner = Arc::clone(&self.inner);
+        tokio::spawn(async move {
+            let Some(title) =
+                super::title::generate(provider.as_ref(), &prompt, profile.as_deref()).await
+            else {
+                return;
+            };
+            {
+                let mut m = inner.meta.lock();
+                if m.title != provisional || title == provisional {
+                    return;
+                }
+                m.title = title.clone();
+                if m.save(&files_dir(&inner.cfg, &m.id)).is_err() {
+                    return;
+                }
+            }
+            inner.queue.push(None, Event::TitleChanged { title }, None).await;
+        });
     }
 
     /// Wait until no run or session command is in progress (maintenance
@@ -1869,11 +1911,18 @@ impl Controller {
         let q = self.inner.queue.clone();
         let rid = Some(run_id.as_str());
         let prompt_text = converted.input.text.clone();
-        {
+        let provisional = {
             let mut m = self.inner.meta.lock();
+            let untitled = m.title.is_empty();
             m.title_from(&prompt_text);
             m.touch();
             let _ = m.save(&files_dir(&self.inner.cfg, &m.id));
+            (untitled && !m.title.is_empty()).then(|| m.title.clone())
+        };
+        if let Some(provisional) = provisional
+            && self.inner.cfg.generated_titles
+        {
+            self.spawn_title(&agent, prompt_text.clone(), provisional);
         }
         q.push(
             rid,

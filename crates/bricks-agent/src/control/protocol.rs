@@ -309,6 +309,11 @@ pub enum Event {
         messages_removed: usize,
     },
     SessionSaved,
+    /// The model named the session (its first title was the shortened
+    /// first prompt).
+    TitleChanged {
+        title: String,
+    },
     /// Something worth showing that is not an error (retries, configuration
     /// diagnostics, nudges).
     Notice {
@@ -535,6 +540,7 @@ impl Event {
             Event::ReasoningChanged { .. } => "reasoning_changed",
             Event::ContextCleared { .. } => "context_cleared",
             Event::SessionSaved => "session_saved",
+            Event::TitleChanged { .. } => "title_changed",
             Event::Notice { .. } => "notice",
             Event::RunFinished { .. } => "run_finished",
             Event::MemoryMaintenanceStarted => "memory_maintenance_started",

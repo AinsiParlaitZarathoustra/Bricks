@@ -4,7 +4,7 @@
 // never call the provider or recompute engine state themselves.
 
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
-import { SvelteMap } from 'svelte/reactivity'
+import { SvelteMap, SvelteSet } from 'svelte/reactivity'
 import * as ipc from '$lib/ipc/client'
 import type {
   AppInfo,
@@ -59,8 +59,11 @@ class AppStore {
   models = $state<ModelChoice[]>([])
   prefs = $state<Preferences>({ ...DEFAULT_PREFERENCES })
 
+  /** The registered projects, then the built-in one of the conversations without a project (`chats`). */
   projects = $state<Project[]>([])
   sessionsByProject = new SvelteMap<string, SessionItem[]>()
+  /** Projects whose conversations are folded away in the left panel. */
+  collapsedProjects = new SvelteSet<string>()
   conversations = new SvelteMap<string, Conversation>()
 
   currentProjectId = $state<string | null>(null)
@@ -85,6 +88,21 @@ class AppStore {
 
   get currentProject(): Project | null {
     return this.projects.find((p) => p.id === this.currentProjectId) ?? null
+  }
+
+  /** The registered project folders (the built-in one left out). */
+  get folders(): Project[] {
+    return this.projects.filter((p) => !p.chats)
+  }
+
+  /** The built-in project of the conversations without a project. */
+  get chatsProject(): Project | null {
+    return this.projects.find((p) => p.chats) ?? null
+  }
+
+  /** The conversations of a project, most recent first (as loaded). */
+  sessionsOf(projectId: string): SessionItem[] {
+    return this.sessionsByProject.get(projectId) ?? []
   }
 
   get current(): Conversation | null {
@@ -131,7 +149,10 @@ class AppStore {
         this.fail(e)
         return []
       })
-      const last = projects.find((p) => p.id === prefs.last_project_id && !p.missing)
+      // Every project shows its conversations: they are all loaded now.
+      await Promise.all(projects.filter((p) => !p.missing).map((p) => this.refreshSessions(p.id)))
+      const last =
+        projects.find((p) => p.id === prefs.last_project_id && !p.missing) ?? projects.find((p) => p.chats)
       if (last) {
         await this.selectProject(last.id)
         const sid = prefs.last_session_id
@@ -188,7 +209,8 @@ class AppStore {
     try {
       const project = await ipc.projectAdd(picked)
       this.projects = [project, ...this.projects.filter((p) => p.id !== project.id)]
-      await this.selectProject(project.id)
+      this.collapsedProjects.delete(project.id)
+      await this.newConversation(project.id)
       return project
     } catch (e) {
       this.fail(e)
@@ -204,7 +226,7 @@ class AppStore {
       this.drafts.delete(projectId)
       this.draftChoices.delete(projectId)
       if (this.currentProjectId === projectId) {
-        this.currentProjectId = null
+        this.currentProjectId = this.chatsProject?.id ?? null
         this.currentSessionId = null
       }
       return true
@@ -245,13 +267,18 @@ class AppStore {
   // ─── Conversations ────────────────────────────────────────────────────────
 
   /**
-   * « Nouvelle conversation »: shows the composer of the current project with
-   * its draft. No session is opened here (no IPC): the first valid send does
-   * it through `startConversation`. Repeated calls keep the same draft.
+   * « Nouvelle conversation »: shows the composer of a project (the current
+   * one by default) with its draft. No session is opened here: the first
+   * valid send does it through `startConversation`. Repeated calls keep the
+   * same draft.
    */
-  newConversation(): void {
-    const projectId = this.currentProjectId
+  async newConversation(projectId = this.currentProjectId): Promise<void> {
     if (!projectId) return
+    if (projectId !== this.currentProjectId) {
+      this.currentProjectId = projectId
+      this.setPrefs({ last_project_id: projectId })
+      void this.refreshSessions(projectId)
+    }
     const leaving = this.current
     // The next conversation's model defaults to the one being left (if configured).
     if (leaving && leaving.projectId === projectId) {
@@ -404,7 +431,10 @@ class AppStore {
   }
 
   private show(conv: Conversation) {
-    if (conv.projectId) this.currentProjectId = conv.projectId
+    if (conv.projectId) {
+      this.currentProjectId = conv.projectId
+      this.collapsedProjects.delete(conv.projectId)
+    }
     this.currentSessionId = conv.sessionId
     this.setPrefs({ last_project_id: conv.projectId, last_session_id: conv.sessionId })
   }

@@ -88,7 +88,7 @@
 		{/if}
 
 		{#if hasRightToggles}
-			<div role="group" aria-label="Affichage" class="ml-1 flex shrink-0 items-center gap-0.5 border-l border-border pl-2">
+			<div role="group" aria-label="Affichage" class="ml-1 flex shrink-0 items-center gap-0.5">
 				{#if onToggleRight}
 					<PanelToggle
 						ariaLabel="Panneau de droite"
@@ -98,6 +98,9 @@
 						icon={PanelRightIcon}
 						onclick={onToggleRight}
 					/>
+				{/if}
+				{#if onToggleRight && (onToggleTerminal || onToggleChanges || onToggleReader)}
+					<span aria-hidden="true" class="mx-1 h-8 w-px shrink-0 bg-border"></span>
 				{/if}
 				{#if onToggleTerminal}
 					<PanelToggle

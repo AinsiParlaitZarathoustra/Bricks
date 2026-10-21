@@ -188,7 +188,7 @@
       role="log"
       aria-live="off"
       aria-label="Échanges de la conversation"
-      class="mx-auto flex w-full max-w-3xl flex-col gap-4 px-4 py-4"
+      class="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6"
     >
       {#if hiddenCount > 0}
         <div class="flex justify-center">

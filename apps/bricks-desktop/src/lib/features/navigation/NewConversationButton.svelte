@@ -19,9 +19,9 @@
 		if (!app.hasProviders) {
 			return 'Aucun fournisseur configuré.';
 		}
-		const project = app.currentProject;
-		if (!project) return 'Choisissez un projet pour démarrer une conversation.';
-		if (project.missing) return 'Le dossier de ce projet est introuvable.';
+		const chats = app.chatsProject;
+		if (!chats) return 'Conversations indisponibles.';
+		if (chats.missing) return 'Le dossier des conversations est introuvable.';
 		return null;
 	});
 
@@ -31,7 +31,7 @@
 		if (blockedReason || starting) return;
 		starting = true;
 		try {
-			await app.newConversation();
+			await app.newConversation(app.chatsProject?.id);
 		} finally {
 			starting = false;
 		}

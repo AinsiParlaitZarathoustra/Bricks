@@ -3,6 +3,10 @@
 //! A project's id is derived from its canonical path, so forgetting a
 //! project and adding it again gives the same id, and its change journal
 //! is found again. The file is only ever rewritten whole, atomically.
+//!
+//! The conversations that belong to no project live in a built-in project,
+//! [`CHATS_PROJECT_ID`], never written in the file: its folder
+//! (`<bricks_home>/desktop/conversations`) holds one folder per conversation.
 
 use super::paths::{check_folder, desktop_dir, write_atomic};
 use super::{error, io_error, invalid, not_found, now_ms};
@@ -12,6 +16,9 @@ use std::path::{Path, PathBuf};
 
 const SCHEMA: u32 = 1;
 const MAX_NAME_CHARS: usize = 120;
+/// The built-in project of the conversations that belong to no project.
+pub const CHATS_PROJECT_ID: &str = "chats";
+const CHATS_NAME: &str = "Conversations";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct FileDoc {
@@ -33,6 +40,8 @@ struct StoredProject {
 /// whole file before it is reported as done.
 pub struct ProjectStore {
     file: PathBuf,
+    /// Folder of the built-in project (created on first use).
+    chats_dir: PathBuf,
     state: parking_lot::Mutex<State>,
     notes: Vec<String>,
 }
@@ -96,8 +105,13 @@ impl ProjectStore {
                 Vec::new()
             }
         };
+        let chats_dir = file
+            .parent()
+            .map(|d| d.join("conversations"))
+            .unwrap_or_else(|| PathBuf::from("conversations"));
         Self {
             file,
+            chats_dir,
             state: parking_lot::Mutex::new(State { projects, blocked }),
             notes,
         }
@@ -122,6 +136,9 @@ impl ProjectStore {
     }
 
     pub fn get(&self, id: &str) -> IpcResult<Project> {
+        if id == CHATS_PROJECT_ID {
+            return self.chats();
+        }
         let state = self.state.lock();
         state
             .projects
@@ -214,6 +231,47 @@ impl ProjectStore {
         let _ = self.save(&state);
     }
 
+    /// The built-in project of the conversations without a project; its
+    /// folder is created when missing.
+    pub fn chats(&self) -> IpcResult<Project> {
+        std::fs::create_dir_all(&self.chats_dir)
+            .map_err(|e| io_error(&format!("conversations ({})", self.chats_dir.display()), e))?;
+        let path = std::fs::canonicalize(&self.chats_dir).unwrap_or_else(|_| self.chats_dir.clone());
+        Ok(Project {
+            id: CHATS_PROJECT_ID.to_string(),
+            name: CHATS_NAME.to_string(),
+            path: path.display().to_string(),
+            added_at: 0,
+            last_opened_at: 0,
+            missing: check_folder(&path).is_err(),
+            chats: true,
+        })
+    }
+
+    /// A new, empty folder for a conversation without a project.
+    pub fn new_chat_dir(&self) -> IpcResult<PathBuf> {
+        let root = PathBuf::from(self.chats()?.path);
+        let stamp = now_ms();
+        for n in 0..100 {
+            let dir = root.join(if n == 0 { stamp.to_string() } else { format!("{stamp}-{n}") });
+            match std::fs::create_dir(&dir) {
+                Ok(()) => return Ok(dir),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(io_error("dossier de la conversation", e)),
+            }
+        }
+        Err(error(IpcErrorCode::Io, "aucun dossier libre pour la conversation"))
+    }
+
+    /// Whether `dir` is the own folder of a conversation without a project.
+    pub fn is_chat_dir(&self, dir: &Path) -> bool {
+        let (Ok(dir), Ok(root)) = (std::fs::canonicalize(dir), std::fs::canonicalize(&self.chats_dir))
+        else {
+            return false;
+        };
+        dir.parent() == Some(root.as_path())
+    }
+
     fn save(&self, state: &State) -> IpcResult<()> {
         if let Some(why) = &state.blocked {
             return Err(error(IpcErrorCode::Io, why.clone()));
@@ -244,6 +302,7 @@ fn view(p: &StoredProject) -> Project {
         added_at: p.added_at,
         last_opened_at: p.last_opened_at,
         missing: check_folder(Path::new(&p.path)).is_err(),
+        chats: false,
     }
 }
 
@@ -348,6 +407,22 @@ mod tests {
         assert!(s.notes()[0].contains("conservé"), "{:?}", s.notes());
         assert!(!file.exists());
         assert!(s.list().is_empty());
+    }
+
+    #[test]
+    fn conversations_without_a_project_get_their_own_folders() {
+        let root = tempfile::tempdir().unwrap();
+        let s = store(root.path());
+        let chats = s.get(CHATS_PROJECT_ID).unwrap();
+        assert!(chats.chats && !chats.missing);
+        assert!(s.list().is_empty(), "never listed with the registered projects");
+        let a = s.new_chat_dir().unwrap();
+        let b = s.new_chat_dir().unwrap();
+        assert_ne!(a, b);
+        assert!(s.is_chat_dir(&a) && s.is_chat_dir(&b));
+        assert!(!s.is_chat_dir(Path::new(&chats.path)));
+        assert!(!s.is_chat_dir(root.path()));
+        assert_eq!(s.remove(CHATS_PROJECT_ID).unwrap_err().code, IpcErrorCode::NotFound);
     }
 
     #[test]

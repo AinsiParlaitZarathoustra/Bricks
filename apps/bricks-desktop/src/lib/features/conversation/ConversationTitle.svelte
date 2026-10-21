@@ -12,11 +12,11 @@
   let draft = $state('')
   let inputEl = $state<HTMLInputElement | null>(null)
 
-  const projectName = $derived(
-    (conversation && app.projects.find((p) => p.id === conversation.projectId)?.name) ??
-      app.currentProject?.name ??
-      null,
+  // A conversation without a project shows no project name.
+  const project = $derived(
+    (conversation && app.projects.find((p) => p.id === conversation.projectId)) ?? app.currentProject,
   )
+  const projectName = $derived(project && !project.chats ? project.name : null)
   const title = $derived(conversation ? conversation.title.trim() || 'Nouvelle conversation' : 'Bricks')
 
   $effect(() => {

@@ -1,5 +1,5 @@
 <script lang="ts">
-	// Left panel: projects, conversations of the current project, and search.
+	// Left panel: projects with their conversations, the conversations without a project, and search.
 	// Entry point mounted by App.svelte with no props. All state lives in `app`.
 	import FolderPlus from '@lucide/svelte/icons/folder-plus';
 	import Settings from '@lucide/svelte/icons/settings';
@@ -19,7 +19,7 @@
 
 	/** While the query is not empty, the results replace the project and conversation lists. */
 	const searching = $derived(query.trim().length > 0);
-	const project = $derived(app.currentProject);
+	const chats = $derived(app.chatsProject);
 
 	async function addProject() {
 		if (adding) return;
@@ -55,19 +55,17 @@
 			{#if searching}
 				<SearchResults bind:query {allProjects} />
 			{:else}
-				<section class="flex flex-col gap-1 px-2">
-					<h2 class="px-2 text-xs font-medium text-muted-foreground">Projets</h2>
-					{#if app.projects.length > 0}
+				{#if app.folders.length > 0}
+					<section class="flex flex-col gap-1 px-2">
+						<h2 class="px-2 text-xs font-medium text-muted-foreground">Projets</h2>
 						<ProjectList />
-					{/if}
-				</section>
+					</section>
+				{/if}
 
-				{#if app.projects.length > 0}
+				{#if chats && app.sessionsOf(chats.id).length > 0}
 					<section class="flex flex-col gap-1 px-2">
 						<h2 class="px-2 text-xs font-medium text-muted-foreground">Conversations</h2>
-						{#if project && app.sessions.length > 0}
-							<ConversationList />
-						{/if}
+						<ConversationList projectId={chats.id} label="Conversations" />
 					</section>
 				{/if}
 			{/if}

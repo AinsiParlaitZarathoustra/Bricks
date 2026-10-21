@@ -202,6 +202,9 @@ impl AppState {
 
     /// The project whose folder is `dir` (the same folder, once canonical).
     pub(crate) fn project_id_of_dir(&self, dir: &Path) -> Option<String> {
+        if self.projects.is_chat_dir(dir) {
+            return Some(crate::services::projects::CHATS_PROJECT_ID.to_string());
+        }
         self.projects
             .list()
             .into_iter()

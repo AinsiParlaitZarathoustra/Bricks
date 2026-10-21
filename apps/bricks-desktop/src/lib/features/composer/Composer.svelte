@@ -129,6 +129,13 @@
   let refusal = $state<string | null>(null)
   let rootEl = $state<HTMLElement | null>(null)
   let editorEl = $state<HTMLTextAreaElement | null>(null)
+  let editorMultiline = $state(false)
+  let toolbarHeight = $state(0)
+
+  const capsule = $derived(
+    !editorMultiline && !draft.text.includes('\n') && toolbarHeight <= 36 &&
+    draft.attachments.length === 0 && draft.skills.length === 0 && !dragging && saving === 0,
+  )
 
   /** Why an attachment cannot be sent, or `null` when it can. */
   function chipError(a: DraftAttachment): string | null {
@@ -1080,6 +1087,19 @@
     el.style.height = 'auto'
     el.style.height = `${el.scrollHeight}px`
   })
+
+  // Measure wrapped lines too, including after a panel resize or a font change.
+  $effect(() => {
+    const el = editorEl
+    if (!el) return
+    const observer = new ResizeObserver(() => {
+      const style = getComputedStyle(el)
+      const padding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom)
+      editorMultiline = el.clientHeight > parseFloat(style.lineHeight) + padding + 1
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  })
 </script>
 
 <section
@@ -1113,7 +1133,9 @@
     {/if}
 
     <div
-      class="relative mt-1 flex flex-col gap-2 rounded-2xl border bg-card p-2 shadow-xs transition-colors focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/20"
+      class="relative mt-1 flex flex-col gap-2 border bg-card px-4 py-2 shadow-xs transition-colors focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/20"
+      class:rounded-full={capsule}
+      class:rounded-2xl={!capsule}
       class:border-ring={dragging}
       class:bg-accent={dragging}
     >
@@ -1214,7 +1236,7 @@
         class="max-h-[40vh] min-h-0 resize-none overflow-y-auto border-0 bg-transparent px-2 py-2 leading-5 text-start shadow-none focus-visible:ring-0 dark:bg-transparent"
       />
 
-      <div class="flex flex-wrap items-center gap-1">
+      <div bind:clientHeight={toolbarHeight} class="flex flex-wrap items-center gap-1">
         <AttachMenu
           disabled={!editable || sending}
           onPick={(paths, kind) => addPicked(paths, kind === 'folder')}
@@ -1246,9 +1268,14 @@
 
         <div class="ml-auto flex items-center gap-1">
           {#if running && !isSlashLine}
-            <Button variant="destructive" size="sm" onclick={cancel}>
+            <Button
+              size="icon"
+              class="relative -top-1 -left-1 rounded-full"
+              aria-label="Arrêter la génération"
+              title="Arrêter"
+              onclick={cancel}
+            >
               <SquareIcon aria-hidden="true" />
-              Arrêter
             </Button>
           {:else}
             <Tooltip.Root>
@@ -1257,6 +1284,7 @@
                   <Button
                     {...props}
                     size="icon"
+                    class="relative -top-1 -left-1 rounded-full"
                     aria-label="Envoyer le message"
                     disabled={!canSend && !slashReady}
                     onclick={send}

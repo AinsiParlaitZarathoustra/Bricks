@@ -34,7 +34,10 @@
 					<PendingApprovals {approvals} />
 				{/if}
 
-				<ProjectEnvironment {project} {conversation} />
+				<!-- A conversation without a project has no project folder to show. -->
+				{#if !project.chats}
+					<ProjectEnvironment {project} {conversation} />
+				{/if}
 
 				{#if conversation}
 					<ContextCard {conversation} />

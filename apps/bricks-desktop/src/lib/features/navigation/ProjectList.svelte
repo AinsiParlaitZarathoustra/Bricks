@@ -1,7 +1,9 @@
 <script lang="ts">
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import Folder from '@lucide/svelte/icons/folder';
+	import FolderOpen from '@lucide/svelte/icons/folder-open';
 	import Pencil from '@lucide/svelte/icons/pencil';
+	import Plus from '@lucide/svelte/icons/plus';
 	import Trash from '@lucide/svelte/icons/trash';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import type { Project } from '$lib/ipc/client';
@@ -14,7 +16,10 @@
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { cn } from '$lib/utils';
-	import { shortPath } from './format';
+	import ConversationList from './ConversationList.svelte';
+
+	/** Conversations listed under a project before « Afficher plus ». */
+	const SHOWN_PER_PROJECT = 5;
 
 	const uid = $props.id();
 
@@ -31,9 +36,15 @@
 	// Set when a menu item opens a dialog: the menu must not hand focus back to its trigger.
 	let keepFocus = false;
 
-	function select(project: Project) {
-		if (project.missing || project.id === app.currentProjectId) return;
-		void app.selectProject(project.id);
+	function toggle(project: Project) {
+		if (app.collapsedProjects.has(project.id)) app.collapsedProjects.delete(project.id);
+		else app.collapsedProjects.add(project.id);
+	}
+
+	function startConversation(project: Project) {
+		if (project.missing || !app.hasProviders) return;
+		app.collapsedProjects.delete(project.id);
+		void app.newConversation(project.id);
 	}
 
 	function onMenuClose(event: Event) {
@@ -83,32 +94,33 @@
 </script>
 
 <ul class="flex flex-col gap-0.5" aria-label="Projets">
-	{#each app.projects as project (project.id)}
-		{@const current = project.id === app.currentProjectId}
+	{#each app.folders as project (project.id)}
+		{@const expanded = !app.collapsedProjects.has(project.id)}
+		{@const drafting = project.id === app.currentProjectId && app.currentSessionId === null}
 		<li>
 			<div
 				class={cn(
-					'flex items-center gap-1 rounded-md pr-1 transition-colors',
-					current ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'hover:bg-sidebar-accent/60'
+					'group flex items-center gap-1 rounded-md pr-1 transition-colors',
+					drafting ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'hover:bg-sidebar-accent/60'
 				)}
 			>
 				<button
 					type="button"
 					class={cn(
-						'flex min-w-0 flex-1 items-start gap-2 rounded-md px-2 py-1.5 text-left',
+						'flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left',
 						project.missing && 'text-muted-foreground'
 					)}
-					aria-current={current ? 'true' : undefined}
-					aria-disabled={project.missing ? 'true' : undefined}
+					aria-expanded={expanded}
 					aria-describedby={project.missing ? `${uid}-${project.id}-missing` : undefined}
 					title={project.path}
-					onclick={() => select(project)}
+					onclick={() => toggle(project)}
 				>
-					<Folder class="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-					<span class="flex min-w-0 flex-col">
-						<span class="truncate text-[13px] font-medium">{project.name}</span>
-						<span class="truncate text-xs text-muted-foreground">{shortPath(project.path)}</span>
-					</span>
+					{#if expanded}
+						<FolderOpen class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+					{:else}
+						<Folder class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+					{/if}
+					<span class="truncate text-[13px] font-medium">{project.name}</span>
 				</button>
 
 				{#if project.missing}
@@ -126,6 +138,18 @@
 						</Tooltip.Trigger>
 						<Tooltip.Content side="right">Dossier introuvable</Tooltip.Content>
 					</Tooltip.Root>
+				{/if}
+
+				{#if !project.missing}
+					<Button
+						variant="ghost"
+						size="icon-sm"
+						class="shrink-0 text-muted-foreground opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
+						aria-label={`Nouvelle conversation dans ${project.name}`}
+						onclick={() => startConversation(project)}
+					>
+						<Plus class="size-4" aria-hidden="true" />
+					</Button>
 				{/if}
 
 				<DropdownMenu.Root>
@@ -155,6 +179,16 @@
 					</DropdownMenu.Content>
 				</DropdownMenu.Root>
 			</div>
+			{#if expanded && app.sessionsOf(project.id).length > 0}
+				<div class="mt-0.5">
+					<ConversationList
+						projectId={project.id}
+						label={`Conversations de ${project.name}`}
+						limit={SHOWN_PER_PROJECT}
+						nested
+					/>
+				</div>
+			{/if}
 		</li>
 	{/each}
 </ul>

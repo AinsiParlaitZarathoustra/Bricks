@@ -13,6 +13,7 @@ pub mod scripted;
 pub mod session;
 pub mod settings;
 pub mod slash;
+pub mod title;
 
 pub use approval::{ApprovalBroker, ApprovalGate, ApprovalRequest, DecidedBy, Decision};
 pub use controller::{

@@ -8,4 +8,8 @@ path: string, added_at: number, last_opened_at: number,
 /**
  * The folder is gone or unreadable.
  */
-missing: boolean, };
+missing: boolean, 
+/**
+ * The built-in project of the conversations that belong to no project.
+ */
+chats: boolean, };

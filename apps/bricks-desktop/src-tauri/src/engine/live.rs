@@ -406,7 +406,9 @@ pub fn ingest(hub: &Arc<Hub>, entry: &Arc<OpenSession>, env: Envelope) {
                 // is placed there, off this task.
                 run_label = live.running_label.take();
             }
-            Event::ModelChanged { .. } | Event::ReasoningChanged { .. } => refresh = true,
+            Event::ModelChanged { .. }
+            | Event::ReasoningChanged { .. }
+            | Event::TitleChanged { .. } => refresh = true,
             Event::EditApplied {
                 tool_call_id,
                 tool,

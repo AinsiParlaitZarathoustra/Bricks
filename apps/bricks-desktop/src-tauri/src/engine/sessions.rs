@@ -24,7 +24,7 @@ use bricks_agent::control::{
     list_sessions, list_sessions_in,
 };
 use bricks_memory::{JsonlMemory, Memory};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -59,11 +59,23 @@ impl AppState {
             ));
         }
         let registry = self.registry()?;
-        let mut cfg = bricks_config::engine_config(Path::new(&project.path), registry, true);
+        // A conversation without a project works in its own folder: a new
+        // one gets a fresh folder, a resumed one keeps its recorded folder.
+        let working_dir = match (project.chats, request.session_id.as_deref()) {
+            (false, _) => PathBuf::from(&project.path),
+            (true, None) => self.projects.new_chat_dir()?,
+            (true, Some(id)) => load_meta(self.sessions_dir(), id)
+                .await
+                .map(|m| m.working_dir)
+                .unwrap_or_else(|| PathBuf::from(&project.path)),
+        };
+        let fresh_dir = (project.chats && request.session_id.is_none()).then(|| working_dir.clone());
+        let mut cfg = bricks_config::engine_config(&working_dir, registry, true);
         // The catalog and the approval override are the application's: a
         // change of either reaches every session, at its next run.
         cfg.catalog = Arc::clone(&self.catalog) as Arc<dyn bricks_agent::control::ModelCatalog>;
         cfg.approval_override = Arc::clone(&self.approval);
+        cfg.generated_titles = true;
         // Sessions are stored under this application state's home (tests use
         // a temporary one), never the global default.
         cfg.sessions_dir = self.sessions_dir().to_path_buf();
@@ -76,9 +88,15 @@ impl AppState {
             model: request.model.clone(),
             reasoning: request.reasoning.clone(),
         };
-        let (controller, mut stream) = Controller::open(cfg, options)
-            .await
-            .map_err(open_error)?;
+        let (controller, mut stream) = match Controller::open(cfg, options).await {
+            Ok(opened) => opened,
+            Err(e) => {
+                if let Some(dir) = &fresh_dir {
+                    let _ = std::fs::remove_dir(dir);
+                }
+                return Err(open_error(e));
+            }
+        };
         let session_id = controller.session_id();
         let message_count = stored_message_count(self.sessions_dir(), &session_id).await;
         let created_at = load_meta(self.sessions_dir(), &session_id)
@@ -142,6 +160,11 @@ impl AppState {
         if !transcript.exists() && !files.exists() && !labelled {
             return Err(not_found("conversation inconnue"));
         }
+        // The own folder of a conversation without a project goes with it.
+        let chat_dir = load_meta(self.sessions_dir(), session_id)
+            .await
+            .map(|m| m.working_dir)
+            .filter(|d| self.projects.is_chat_dir(d));
         JsonlMemory::new(self.sessions_dir())
             .delete(session_id)
             .await
@@ -153,6 +176,11 @@ impl AppState {
         })
         .await
         .map_err(|e| error(IpcErrorCode::Internal, e.to_string()))??;
+        if let Some(dir) = chat_dir
+            && let Err(e) = std::fs::remove_dir_all(&dir)
+        {
+            eprintln!("bricks-desktop: dossier de conversation {} : {e}", dir.display());
+        }
         self.hub.publish(DesktopEvent::SessionDeleted {
             session_id: session_id.to_string(),
         });
@@ -216,10 +244,22 @@ impl AppState {
     /// folder) merged with the ones open now, most recent first.
     pub async fn sessions_list(&self, project_id: &str) -> IpcResult<Vec<SessionItem>> {
         let project = self.projects.get(project_id)?;
-        let scope = SessionScope::Workspace(PathBuf::from(&project.path));
-        let stored = list_sessions_in(self.sessions_dir(), &scope)
-            .await
-            .map_err(|e| io_error("conversations", e))?;
+        let stored = if project.chats {
+            let mut all = list_sessions(self.sessions_dir())
+                .await
+                .map_err(|e| io_error("conversations", e))?;
+            all.retain(|s| {
+                s.working_dir
+                    .as_deref()
+                    .is_some_and(|d| self.projects.is_chat_dir(d))
+            });
+            all
+        } else {
+            let scope = SessionScope::Workspace(PathBuf::from(&project.path));
+            list_sessions_in(self.sessions_dir(), &scope)
+                .await
+                .map_err(|e| io_error("conversations", e))?
+        };
         let open = self.entries_of_project(project_id);
         let mut items = Vec::new();
         for summary in &stored {

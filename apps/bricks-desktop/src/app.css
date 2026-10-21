@@ -59,12 +59,12 @@
 	--secondary: oklch(0.945 0.009 80);
 	--secondary-foreground: oklch(0.26 0.012 60);
 	--muted: oklch(0.95 0.007 80);
-	--muted-foreground: oklch(0.48 0.012 65);
+	--muted-foreground: oklch(0.52 0.012 65);
 	--accent: oklch(0.935 0.01 75);
 	--accent-foreground: oklch(0.235 0.012 60);
 	--destructive: oklch(0.5 0.18 27);
 	--destructive-foreground: oklch(0.985 0.005 85);
-	--border: oklch(0.905 0.008 80);
+	--border: oklch(0.93 0.008 80);
 	--input: oklch(0.6 0.008 80);
 	--ring: oklch(0.6 0.13 40);
 	--radius: 0.5rem;
@@ -81,7 +81,7 @@
 	--sidebar-primary-foreground: oklch(0.985 0.005 85);
 	--sidebar-accent: oklch(0.935 0.01 75);
 	--sidebar-accent-foreground: oklch(0.235 0.012 60);
-	--sidebar-border: oklch(0.905 0.008 80);
+	--sidebar-border: var(--border);
 	--sidebar-ring: oklch(0.6 0.13 40);
 
 	/* Bricks semantic colours */
