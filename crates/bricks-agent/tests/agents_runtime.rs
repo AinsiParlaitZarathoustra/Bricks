@@ -661,6 +661,7 @@ async fn a_chain_runs_with_a_single_slot() {
         true,
         |b| {
             b.agents.max_concurrent = 1;
+            b.agents.max_depth = 2;
         },
     )
     .await;
@@ -687,7 +688,7 @@ async fn a_chain_runs_with_a_single_slot() {
 
 #[tokio::test]
 async fn the_depth_limit_refuses_before_any_provider() {
-    // Depth: max_depth = 1, the child tries to start a sub-agent.
+    // Depth: the default max_depth = 1, the child tries to start a sub-agent.
     let mut env = open(
         vec![
             Reply::tool(
@@ -699,7 +700,7 @@ async fn the_depth_limit_refuses_before_any_provider() {
         ],
         allow(&["Agent"]),
         true,
-        |b| b.agents.max_depth = 1,
+        |_| {},
     )
     .await;
     let builds_before = env.shared.builds.load(Ordering::SeqCst);
@@ -850,7 +851,7 @@ async fn every_path_lets_a_child_go_on_until_its_answer() {
         ],
         allow(&["Agents", "Agent"]),
         true,
-        |_| {},
+        |b| b.agents.max_depth = 2,
     )
     .await;
     let evs = tokio::time::timeout(Duration::from_secs(120), submit(&mut env, "go"))
@@ -1404,7 +1405,7 @@ async fn nested_delegation_resolves_skills_the_same_way_and_the_parent_keeps_its
         ],
         allow(&["Agent", "Glob"]),
         true,
-        |_| {},
+        |b| b.agents.max_depth = 2,
         with_skills(true),
     )
     .await;

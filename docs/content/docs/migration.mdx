@@ -242,7 +242,7 @@ have to change, and events and sessions written at 5 read as before (an absent
 
 * `tool_finished` and `agent_tool_finished`: `executed` (`false` for a call
   that never ran) and `status`. `agent_tool_finished` also carries `output`,
-  cut to 64 KiB, with `output_truncated`.
+  cut to 96 KiB, with `output_truncated`.
 * `edit_applied`: each file's `absolute` path, its `patch` (the diff actually
   written, cut to 512 KiB, with `patch_truncated`). `binary` is now set for a
   binary file, which has no patch (it was always false before).
@@ -281,8 +281,9 @@ The new settings:
 | setting | value | what it bounds |
 |---|---|---|
 | `[agents] max_concurrent` | `16` | sub-agents working at once in the session: launches, batches, resumes, at any depth |
+| `[agents] max_depth` | `1` | generations below the session's agent: children only, no grandchildren by default; raise it to allow more |
 | `[agents] max_queued` | `64` | children waiting for a slot; beyond it, `AgentQueueFull` |
-| `[agents] summary_chars` | `10000` | characters of a sub-agent's answer returned to its parent, the ellipsis included |
+| `[agents] summary_chars` | `30000` | characters of a sub-agent's answer returned to its parent, the ellipsis included |
 | `[agents] background_drain_ms` | `600000` | headless: sub-agents still running after the answer get this long, then are cancelled, and the run exits with code `6` |
 
 `AgentControl` gains `message` (send a message to a running sub-agent) and

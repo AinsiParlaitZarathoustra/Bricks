@@ -440,6 +440,7 @@ mod tests {
             };
             let key = rest.split('=').next().unwrap_or("").trim();
             let known = [
+                "summary_chars",
                 "max_concurrent",
                 "max_depth",
                 "max_queued",
@@ -474,7 +475,7 @@ mod tests {
             "{out}"
         );
         assert_eq!(c.agent.retry_after_max_wait_ms, 60_000, "{out}");
-        assert_eq!(out.matches(" = ").count(), 15, "{out}");
+        assert_eq!(out.matches(" = ").count(), 16, "{out}");
     }
 
     #[test]

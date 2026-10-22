@@ -282,16 +282,19 @@ tools are not in its history: no compaction removes them.
 ## Recursion and limits
 
 A sub-agent has `Agent`, `Agents` and `AgentControl` too, up to
-`max_depth` generations (the session's agent is 0, its children 1). A
-launch deeper than that is refused before anything starts. There is no
+`max_depth` generations (the session's agent is 0, its children 1). The
+default `max_depth = 1` means children only: a child cannot start its own
+children (`AgentDepthExceeded`). To allow grandchildren or more, raise
+`max_depth` in `[agents]` (for example `max_depth = 2`). A launch deeper than
+that is refused before anything starts. There is no
 cumulative limit on the descendants of a run: `max_total_per_run` is removed,
 and the slots and the queue pace the work.
 
 **No circular wait.** A slot is held while an agent works, never while it
 waits: an agent waiting for its children (`Agents`, `AgentControl wait`)
 gives its slot back — and its writer admission — and takes them again
-afterwards. A chain parent → child → grandchild completes with
-`max_concurrent = 1`.
+afterwards. A chain parent → child → grandchild (`max_depth = 2` or more)
+completes with `max_concurrent = 1`.
 
 ## Handles, messages and resumes: `AgentControl`
 
@@ -526,7 +529,7 @@ Schema 6 is additive: an event written at schema 5 reads as before, and an
 absent `executed` means the call ran. `agent_tool_finished` gains `executed`
 (`false` for a call that never ran: refused, denied, or blocked by a hook),
 `status` (`success`, `failure`, `timed_out`, `cancelled`, or `running`) and
-`output`, cut to 64 KiB (`output_truncated` says when). `edit_applied` files
+`output`, cut to 96 KiB (`output_truncated` says when). `edit_applied` files
 gain `absolute` and `patch` (the unified diff actually written, cut to 512 KiB,
 `patch_truncated`). `binary` is now set for a binary file, which has no patch
 (it was always false before).
@@ -563,10 +566,10 @@ enabled = true              # register Agent and AgentProfiles
 # auto_model = "provider/model"
 max_context_chars = 16000
 catalog_size = 30           # profiles described in the tool schema
-summary_chars = 10000       # characters of a sub-agent's answer returned (exact, ellipsis included)
+summary_chars = 30000       # characters of a sub-agent's answer returned (exact, ellipsis included)
 
 max_concurrent = 16         # sub-agents working at once in the session (launches, batches, resumes, any depth)
-max_depth = 2               # generations below the session's agent
+max_depth = 1               # generations below the session's agent (1: children only, no grandchildren)
 max_queued = 64             # children waiting for a slot (beyond: AgentQueueFull)
 admission_timeout_ms = 60000   # a child waits this long for a slot or a writer, then AgentAdmissionTimeout
 background_drain_ms = 600000   # headless: sub-agents still running get this long after the main run (exit 6 if cut)

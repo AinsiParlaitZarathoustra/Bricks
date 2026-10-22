@@ -421,7 +421,7 @@ export type Event =
       duration_ms: number
       executed?: boolean
       status?: string
-      /** The output, cut to 64 KiB (`output_truncated`). Absent for older events. */
+      /** The output, cut to 96 KiB (`output_truncated`). Absent for older events. */
       output?: string
       output_truncated?: boolean
     }

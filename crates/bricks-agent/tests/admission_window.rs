@@ -153,7 +153,8 @@ fn the_defaults_are_16_slots_60_seconds_of_admission_and_a_waiting_drain() {
     assert_eq!(d.agents.admission_timeout_ms, 60_000);
     assert_eq!(d.agents.background_drain_ms, 600_000);
     assert_eq!(d.agents.max_concurrent, 16);
-    assert_eq!(d.agents.summary_chars, 10_000);
+    assert_eq!(d.agents.summary_chars, 30_000);
+    assert_eq!(d.agents.max_depth, 1);
     let explicit = bricks_agent::BricksConfig::from_texts(
         Some("[agents]\nadmission_timeout_ms = 1500\nbackground_drain_ms = 600000\n"),
         &[],

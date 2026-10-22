@@ -611,8 +611,8 @@ The `AgentControl` actions, by their parameters:
 | `cancel` | `agent_id` | cancels it and its descendants |
 | `inspect_changes`, `apply_changes`, `discard_changes` | `changeset_id` or `agent_id` | a ChangeSet of an isolated sub-agent |
 
-Their parameters, the limits (`max_depth`, `max_concurrent` = 16, `max_queued`
-= 64, `admission_timeout_ms` = 60000, `summary_chars` = 10000) and the
+Their parameters, the limits (`max_depth` = 1, `max_concurrent` = 16, `max_queued`
+= 64, `admission_timeout_ms` = 60000, `summary_chars` = 30000) and the
 isolation rules are in `docs/agents.md` in the repository.
 
 ## Other

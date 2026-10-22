@@ -35,6 +35,10 @@
 - **Defaults.** `[agents] background_drain_ms` is `0` (was 600000): background sub-agents still running when the main run ends are cancelled at once (`bricks run` exits with code 6). `[agents] admission_timeout_ms` is `30000` (was 600000).
 - **`[agent] retry_after_max_wait_ms`** (default `60000`, new): a provider's `Retry-After` longer than this is not waited for. No retry is sent; the error says so.
 
+### Changed — sub-agent limits
+
+- **Defaults.** `[agents] summary_chars` is `30000`: the answer returned to the parent, the ellipsis included; the full transcript stays on disk. `[agents] max_depth` is `1` (was `2`): the session's agent starts sub-agents, which cannot start their own unless `max_depth` is raised in `bricks.toml`. The output of a tool call inside a sub-agent event is cut to 96 KiB (was 64 KiB), with `output_truncated`. No other limit changes.
+
 ### Added — SDK
 
 - `cersei_tools::file_lock` (`lock_paths`, `lock_key`, `FileLocks`).

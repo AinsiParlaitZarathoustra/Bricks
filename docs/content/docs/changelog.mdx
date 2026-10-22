@@ -52,7 +52,9 @@ export function Tag({ type }) {
 
 <Tag type="changed" /> **`Bash` runs one process per command.** Calls of a session run side by side. The working directory, exported variables, functions and aliases of a command that ends normally carry over; non-exported variables and shell options do not.
 
-<Tag type="changed" /> **Waits and limits.** `[agents] background_drain_ms` defaults to `600000` (a headless run waits for sub-agents still running, then cancels them and exits with code 6), `[agents] admission_timeout_ms` to `60000`, `[agents] max_concurrent` is `16`, `max_queued` `64`, `summary_chars` `10000` (exact, the ellipsis included), and the new `[agent] retry_after_max_wait_ms` (`60000`) bounds a provider's `Retry-After`. Process stops are awaited through kernel notifications, not polled. Language-server stderr is read to its end at shutdown, for at most 500 ms.
+<Tag type="changed" /> **Waits and limits.** `[agents] background_drain_ms` defaults to `600000` (a headless run waits for sub-agents still running, then cancels them and exits with code 6), `[agents] admission_timeout_ms` to `60000`, `[agents] max_concurrent` is `16`, `max_queued` `64`, `summary_chars` `30000` (exact, the ellipsis included), and the new `[agent] retry_after_max_wait_ms` (`60000`) bounds a provider's `Retry-After`. Process stops are awaited through kernel notifications, not polled. Language-server stderr is read to its end at shutdown, for at most 500 ms.
+
+<Tag type="changed" /> **Sub-agent defaults.** `[agents] summary_chars` is `30000`: the answer returned to the parent, the ellipsis included; the full transcript stays on disk. `[agents] max_depth` is `1` (was `2`): the session's agent starts sub-agents, which cannot start their own unless `max_depth` is raised in `bricks.toml`. The output of a tool call inside a sub-agent event is cut to `96 KiB` (was 64 KiB). No other limit changes.
 
 <Tag type="changed" /> **JSONL schema 6.** `tool_finished` and `agent_tool_finished` gain `executed` and `status`; `agent_tool_finished` also gains `output` and `output_truncated`; `edit_applied` files gain `absolute`, `patch` and `patch_truncated`. See `docs/cli.md`.
 

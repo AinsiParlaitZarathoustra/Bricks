@@ -36,7 +36,7 @@ pub const MAX_PATCH_BYTES: usize = 512 * 1024;
 
 /// Largest output a sub-agent's tool event carries (`output_truncated` says
 /// when it was cut).
-pub const MAX_SUBAGENT_OUTPUT_BYTES: usize = 64 * 1024;
+pub const MAX_SUBAGENT_OUTPUT_BYTES: usize = 96 * 1024;
 
 /// The wire name of a tool call's status (`status` of the tool events).
 pub fn tool_status_name(status: ToolStatus) -> &'static str {
@@ -953,6 +953,23 @@ mod tests {
         let (cut, truncated) = cap_text("aé", 2);
         assert_eq!((cut.as_str(), truncated), ("a", true));
         assert_eq!(cap_text("aé", 3), ("aé".to_string(), false));
+    }
+
+    /// A sub-agent's tool output keeps 96 KiB (98 304 bytes); an emoji
+    /// across that boundary is dropped whole, and the flag says so.
+    #[test]
+    fn a_sub_agent_output_is_cut_at_96_kib_on_a_character_boundary() {
+        assert_eq!(MAX_SUBAGENT_OUTPUT_BYTES, 98_304);
+        let exact = "a".repeat(MAX_SUBAGENT_OUTPUT_BYTES);
+        assert_eq!(
+            cap_text(&exact, MAX_SUBAGENT_OUTPUT_BYTES),
+            (exact.clone(), false)
+        );
+        let across = "a".repeat(MAX_SUBAGENT_OUTPUT_BYTES - 2) + "😀" + "tail";
+        let (cut, truncated) = cap_text(&across, MAX_SUBAGENT_OUTPUT_BYTES);
+        assert!(truncated);
+        assert_eq!(cut.len(), MAX_SUBAGENT_OUTPUT_BYTES - 2);
+        assert!(cut.bytes().all(|b| b == b'a'));
     }
 
     #[test]

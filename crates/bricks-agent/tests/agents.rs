@@ -874,10 +874,10 @@ async fn disabled_delegation_registers_no_tool() {
 /// characters (the ellipsis included), accents and emoji counted as one
 /// character each, and says so; an answer of exactly that size is whole.
 #[tokio::test]
-async fn a_summary_is_cut_exactly_at_ten_thousand_characters() {
-    let long: String = "é😀".repeat(6_000);
-    let exact: String = "àé😀".repeat(3_333) + "a";
-    assert_eq!(exact.chars().count(), 10_000);
+async fn a_summary_is_cut_exactly_at_thirty_thousand_characters() {
+    let long: String = "é😀".repeat(18_000);
+    let exact: String = "àé😀".repeat(9_999) + "aaa";
+    assert_eq!(exact.chars().count(), 30_000);
     let mut env = open(
         vec![
             Reply::tool("c1", "Agent", json!({"task": "long answer"})),
@@ -898,12 +898,12 @@ async fn a_summary_is_cut_exactly_at_ten_thousand_characters() {
     let rs = finished(&evs);
     assert_eq!(rs.len(), 2);
     let cut = &rs[0];
-    assert_eq!(cut.summary.chars().count(), 10_000, "{}", cut.summary.len());
+    assert_eq!(cut.summary.chars().count(), 30_000, "{}", cut.summary.len());
     assert!(cut.summary.ends_with('…'));
     assert!(cut.summary_truncated);
     assert!(cut.summary.starts_with("é😀é😀"));
     let whole = &rs[1];
-    assert_eq!(whole.summary.chars().count(), 10_000);
+    assert_eq!(whole.summary.chars().count(), 30_000);
     assert_eq!(whole.summary, exact);
     assert!(!whole.summary_truncated);
     // The full answer stays in the stored transcript.
