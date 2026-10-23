@@ -1,12 +1,9 @@
 //! bricks-tools: Tool trait, built-in tool implementations, and permission system.
 
 pub mod apply_patch;
-pub mod ask_user;
 pub mod bash;
 pub mod code_scout;
 pub mod code_search;
-pub mod config_tool;
-pub mod cron;
 pub mod file_edit;
 pub mod file_history;
 pub mod file_lock;
@@ -22,16 +19,12 @@ pub mod lsp_tool;
 pub mod mcp_tool;
 pub mod notebook_edit;
 pub mod permissions;
-pub mod plan_mode;
 pub mod powershell;
 pub mod preview;
-pub mod remote_trigger;
 pub mod send_message;
 pub mod shell;
 pub mod skill_tool;
-pub mod sleep;
 pub mod synthetic_output;
-pub mod tasks;
 pub mod todo_write;
 pub mod tool_feedback;
 pub mod tool_primitives;
@@ -402,11 +395,8 @@ pub fn all() -> Vec<Box<dyn Tool>> {
     tools.extend(shell());
     tools.extend(web());
     tools.extend(planning());
-    tools.extend(scheduling());
     tools.extend(orchestration());
-    tools.push(Box::new(ask_user::AskUserQuestionTool));
     tools.push(Box::new(synthetic_output::SyntheticOutputTool));
-    tools.push(Box::new(config_tool::ConfigTool));
     // Last, so it indexes every tool registered above.
     let search = tool_search::ToolSearchTool::new(&tools);
     tools.push(Box::new(search));
@@ -459,36 +449,15 @@ pub fn web() -> Vec<Box<dyn Tool>> {
     ]
 }
 
-/// Planning tools: EnterPlanMode, ExitPlanMode, TodoWrite.
+/// Planning tools: TodoWrite.
 pub fn planning() -> Vec<Box<dyn Tool>> {
-    vec![
-        Box::new(plan_mode::EnterPlanModeTool),
-        Box::new(plan_mode::ExitPlanModeTool),
-        Box::new(todo_write::TodoWriteTool),
-    ]
+    vec![Box::new(todo_write::TodoWriteTool)]
 }
 
-/// Scheduling tools: Cron (Create/List/Delete), Sleep, RemoteTrigger.
-pub fn scheduling() -> Vec<Box<dyn Tool>> {
-    vec![
-        Box::new(cron::CronCreateTool),
-        Box::new(cron::CronListTool),
-        Box::new(cron::CronDeleteTool),
-        Box::new(sleep::SleepTool),
-        Box::new(remote_trigger::RemoteTriggerTool),
-    ]
-}
-
-/// Orchestration tools: SendMessage, Tasks, Worktree.
+/// Orchestration tools: SendMessage, Worktree.
 pub fn orchestration() -> Vec<Box<dyn Tool>> {
     vec![
         Box::new(send_message::SendMessageTool),
-        Box::new(tasks::TaskCreateTool),
-        Box::new(tasks::TaskGetTool),
-        Box::new(tasks::TaskUpdateTool),
-        Box::new(tasks::TaskListTool),
-        Box::new(tasks::TaskStopTool),
-        Box::new(tasks::TaskOutputTool),
         Box::new(worktree::EnterWorktreeTool),
         Box::new(worktree::ExitWorktreeTool),
     ]
@@ -567,7 +536,7 @@ mod unknown_parameter_policy {
     /// makes running this against the real registry safe: every tool covered
     /// here has at least one required parameter, so the call can never
     /// deserialize into a runnable request and no tool body executes — not
-    /// `Bash`, not `Write`, not `CronCreate`. The assertion is only about which
+    /// `Bash`, not `Write`, not `Job`. The assertion is only about which
     /// *error* comes back.
     ///
     /// Before `deny_unknown_fields`, the unknown key was discarded during
@@ -614,8 +583,9 @@ mod unknown_parameter_policy {
             }
         }
 
+        // 23 built-in tools, 20 of them with a required parameter.
         assert!(
-            covered >= 25,
+            covered >= 20,
             "coverage collapsed to {covered} tools; the filter is hiding the registry"
         );
         assert!(

@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 
 /// Version of the event and command schema. Incremented on any change a
 /// consumer could notice; documented in `docs/cli.md`.
-pub const SCHEMA_VERSION: u32 = 6;
+pub const SCHEMA_VERSION: u32 = 7;
 
 /// Largest patch an edit event carries for one file. A longer one is cut and
 /// marked (`patch_truncated`).
@@ -314,6 +314,11 @@ pub enum Event {
     TitleChanged {
         title: String,
     },
+    /// The session's plan (TodoWrite) was saved: the complete state, whose
+    /// `revision` orders it against the snapshot's and other updates.
+    PlanUpdated {
+        plan: bricks_tools::todo_write::PlanState,
+    },
     /// Something worth showing that is not an error (retries, configuration
     /// diagnostics, nudges).
     Notice {
@@ -541,6 +546,7 @@ impl Event {
             Event::ContextCleared { .. } => "context_cleared",
             Event::SessionSaved => "session_saved",
             Event::TitleChanged { .. } => "title_changed",
+            Event::PlanUpdated { .. } => "plan_updated",
             Event::Notice { .. } => "notice",
             Event::RunFinished { .. } => "run_finished",
             Event::MemoryMaintenanceStarted => "memory_maintenance_started",
@@ -830,8 +836,8 @@ mod tests {
     }
 
     #[test]
-    fn the_schema_is_six_and_the_new_fields_are_only_written_when_set() {
-        assert_eq!(SCHEMA_VERSION, 6);
+    fn the_schema_is_seven_and_the_new_fields_are_only_written_when_set() {
+        assert_eq!(SCHEMA_VERSION, 7);
         let mut w = written(false);
         let v = serde_json::to_value(&w).unwrap();
         assert!(

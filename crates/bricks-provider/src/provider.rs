@@ -247,11 +247,8 @@ impl ConfiguredProvider {
             }
         };
 
-        let requested = request
-            .options
-            .get::<String>(REASONING_PROFILE_OPTION)
-            .or_else(|| self.profile.clone());
-        let profile = reasoning::select_profile(&m.reasoning, requested.as_deref())
+        let profile = self
+            .profile_for(&request.options)
             .map_err(|e| CerseiError::Config(format!("{}: {e}", m.selection())))?;
         reasoning::apply(
             &mut body,
@@ -262,6 +259,18 @@ impl ConfiguredProvider {
         )
         .map_err(|e| CerseiError::Config(format!("{}: {e}", m.selection())))?;
         Ok(body)
+    }
+
+    /// The profile a request with `options` gets: the requested one, else
+    /// the instance's, else the model's default.
+    fn profile_for(
+        &self,
+        options: &crate::ProviderOptions,
+    ) -> std::result::Result<Option<&crate::config::ReasoningProfile>, String> {
+        let requested = options
+            .get::<String>(REASONING_PROFILE_OPTION)
+            .or_else(|| self.profile.clone());
+        reasoning::select_profile(&self.model.reasoning, requested.as_deref())
     }
 
     /// Estimate the cost of a usage under this provider's tariff. `None` when
@@ -397,6 +406,17 @@ impl Provider for ConfiguredProvider {
                 _ => true,
             },
             token_counting: m.count_url.is_some(),
+        })
+    }
+
+    fn request_identity(&self, options: &crate::ProviderOptions) -> Option<crate::RequestIdentity> {
+        Some(crate::RequestIdentity {
+            api_model: self.model.api_model.clone(),
+            reasoning_profile: self
+                .profile_for(options)
+                .ok()
+                .flatten()
+                .map(|p| p.id.clone()),
         })
     }
 

@@ -3,6 +3,7 @@
   // operation's counts). The full path is the name's tooltip; a click opens
   // the file in the reader.
   import DiffStat from '$lib/layout/DiffStat.svelte'
+  import FileIcon from '$lib/features/file-icons/FileIcon.svelte'
   import type { Conversation, EditItem } from '$lib/state/conversation.svelte'
   import { reader } from '$lib/state/reader.svelte'
   import { CHANGE_KIND_LABEL } from '../format'
@@ -37,11 +38,12 @@
     <li class="flex min-w-0 items-center gap-2">
       <button
         type="button"
-        class="min-w-0 truncate rounded-sm text-start font-mono text-xs hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        class="inline-flex min-w-0 items-center gap-1.5 rounded-sm text-start font-mono text-xs hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         title={`${file.absolute ?? file.path} · ${CHANGE_KIND_LABEL[file.kind]}${agentName ? ` · ${agentName}` : ''}`}
         onclick={() => open(file)}
       >
-        {baseName(file.path)}
+        <FileIcon path={file.path} />
+        <span class="min-w-0 truncate">{baseName(file.path)}</span>
       </button>
       {#if file.binary}
         <span class="text-xs text-muted-foreground">binaire</span>

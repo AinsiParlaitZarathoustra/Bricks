@@ -4,6 +4,7 @@
   // applied operations, names only; a name opens the reader) and the
   // commands run by the response and its sub-agents.
   import Ban from '@lucide/svelte/icons/ban'
+  import FileIcon from '$lib/features/file-icons/FileIcon.svelte'
   import ChevronDown from '@lucide/svelte/icons/chevron-down'
   import CircleAlert from '@lucide/svelte/icons/circle-alert'
   import CircleCheck from '@lucide/svelte/icons/circle-check'
@@ -126,11 +127,12 @@
             <li class="flex min-w-0 items-center gap-2 py-0.5">
               <button
                 type="button"
-                class="min-w-0 truncate rounded-sm text-start font-mono text-xs hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                class="inline-flex min-w-0 items-center gap-1.5 rounded-sm text-start font-mono text-xs hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                 title={file.absolute ?? file.path}
                 onclick={() => openFile(file)}
               >
-                {file.name}
+                <FileIcon path={file.path} />
+                <span class="min-w-0 truncate">{file.name}</span>
               </button>
               {#if file.binary}
                 <span class="text-xs text-muted-foreground">binaire</span>

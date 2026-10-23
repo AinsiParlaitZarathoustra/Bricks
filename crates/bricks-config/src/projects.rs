@@ -28,17 +28,17 @@ impl Projects {
     }
 }
 
-/// The names of the tools the session agent announces to the model, as the
-/// controller builds it from the engine's tools (`bricks_tools::coding`):
-/// those, and the native sub-agent tools when `[agents] enabled`. The
-/// system prompt's conditional guidance is decided from this list. (`Skill`
-/// is left out: the skills catalog, added to the prompt by the agent, says
-/// how to use it.)
+/// The names of the tools the session agent announces when the controller
+/// builds it from the engine's tools (`bricks_tools::coding`): those,
+/// `TodoWrite`, and the native sub-agent tools when `[agents] enabled`.
+/// The prompt itself no longer relies on this list: its conditional
+/// guidance follows the definitions each request really carries.
 pub fn announced_tools(bricks: &BricksConfig) -> Vec<String> {
     let mut names: Vec<String> = bricks_tools::coding()
         .iter()
         .map(|t| t.name().to_string())
         .collect();
+    names.push("TodoWrite".to_string());
     if bricks.agents.enabled && !names.iter().any(|n| n == "Agent") {
         names.extend(["Agent", "Agents", "AgentControl", "AgentProfiles"].map(String::from));
     }
@@ -49,14 +49,19 @@ impl ProjectLoader for Projects {
     fn load(&self, wd: &Path) -> Result<ProjectContext, String> {
         let bricks = BricksConfig::load(wd);
         let memory = long_term_memory(wd, &self.registry, &self.memories)?;
-        let tools_available = announced_tools(&bricks);
-        let system = build_system_prompt(&SystemPromptOptions {
+        // Assembled for each request (tools announced, date, environment,
+        // git, model, plan); the text here is the same prompt without a
+        // request, for inspection.
+        let options = SystemPromptOptions {
             is_non_interactive: !self.interactive,
             working_directory: Some(wd.display().to_string()),
-            tools_available,
             has_memory: memory.is_some(),
             has_auto_compact: true,
             ..Default::default()
+        };
+        let system = build_system_prompt(&SystemPromptOptions {
+            tools_available: announced_tools(&bricks),
+            ..options.clone()
         });
         let (long_term_memory, memory_space) = match memory {
             Some((m, space)) => (
@@ -69,6 +74,7 @@ impl ProjectLoader for Projects {
             working_dir: wd.to_path_buf(),
             bricks,
             system_prompt: Some(system),
+            prompt_options: Some(options),
             long_term_memory,
             memory_space,
             mcp_servers: Vec::new(),

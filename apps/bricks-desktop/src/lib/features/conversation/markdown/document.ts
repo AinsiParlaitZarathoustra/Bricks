@@ -8,6 +8,8 @@ import type { Token } from 'marked'
 import { DUPLICATE_MARK, fenceClosed, fenceLanguage, forEachNode, labelsOf, plainText, slugify, type Tok } from './extensions'
 import {
   codeShell,
+  fenceIconId,
+  withCodeIcons,
   escapeHtml,
   finishHtml,
   footnotesHtml,
@@ -616,7 +618,12 @@ export class MarkdownDocument {
       body = highlightedBody(text, language)
       this.openCode = { key: entry.key, language, text, body }
     }
-    entry.output = { key: entry.key, kind: 'html', html: codeShell(fenceLanguage(node.lang as string | undefined) || 'texte', body) }
+    const info = node.lang as string | undefined
+    entry.output = {
+      key: entry.key,
+      kind: 'html',
+      html: withCodeIcons(codeShell(fenceLanguage(info) || 'texte', body, fenceIconId(info))),
+    }
     entry.outputSig = OPEN_SIG
     stats.renderedBlocks += 1
   }

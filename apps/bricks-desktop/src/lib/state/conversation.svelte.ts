@@ -20,6 +20,7 @@ import type {
   Decision,
   Envelope,
   InstanceState,
+  PlanState,
   RunOutcome,
   SkillSourceInfo,
   Snapshot,
@@ -464,6 +465,9 @@ export class Conversation {
   runningRunId = $state<string | null>(null)
   busy = $state<string | null>(null)
 
+  /** The session's plan (TodoWrite): the latest revision seen, `null` before any. */
+  plan = $state<PlanState | null>(null)
+
   context = $state<ContextStatus | null>(null)
   /** The last measure no longer applies (model change, compaction...). */
   contextStale = $state(false)
@@ -591,6 +595,18 @@ export class Conversation {
     this.busy = s.activity.state === 'busy' ? s.activity.what : null
     this.approvals.clear()
     for (const a of s.pending_approvals) this.approvals.set(a.approval_id, a)
+    if (s.plan) this.applyPlan(s.plan)
+  }
+
+  /**
+   * Adopts a plan state only when its revision is newer than the one held:
+   * the snapshot and the replayed events may have been taken at different
+   * moments, so an older state (cleared ones included) never wins.
+   */
+  applyPlan(plan: PlanState) {
+    if (plan.revision <= 0) return
+    if (this.plan && plan.revision <= this.plan.revision) return
+    this.plan = plan
   }
 
   updateSession(item: SessionItem) {
@@ -846,6 +862,9 @@ export class Conversation {
     this.lastSeq = env.seq
     const runId = env.run_id
     switch (env.type) {
+      case 'plan_updated':
+        this.applyPlan(env.plan)
+        break
       case 'session_opened':
         this.workingDir = env.working_dir
         this.model = env.model

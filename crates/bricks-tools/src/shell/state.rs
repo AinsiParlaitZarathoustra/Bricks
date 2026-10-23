@@ -132,6 +132,12 @@ impl ShellState {
         }
     }
 
+    /// The working directory commands start from, once one was set.
+    pub fn cwd(&self) -> Option<PathBuf> {
+        let inner = self.inner.lock();
+        (!inner.cwd.value.pwd.as_os_str().is_empty()).then(|| inner.cwd.value.pwd.clone())
+    }
+
     /// Counts the changes published so far (approvals compare it).
     pub fn generation(&self) -> u64 {
         self.generation.load(Ordering::SeqCst)

@@ -1,7 +1,5 @@
 <script lang="ts">
-  import File from '@lucide/svelte/icons/file'
-  import Folder from '@lucide/svelte/icons/folder'
-  import Image from '@lucide/svelte/icons/image'
+  import FileIcon from '$lib/features/file-icons/FileIcon.svelte'
   import { openUrl } from '@tauri-apps/plugin-opener'
   import type { Conversation, UserItem } from '$lib/state/conversation.svelte'
   import type { AttachmentInfo } from '$lib/ipc/engine'
@@ -85,12 +83,8 @@
         >
           {#if preview}
             <img src={preview} alt="" class="size-10 shrink-0 rounded object-cover" />
-          {:else if attachment.kind === 'image'}
-            <Image class="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-          {:else if attachment.kind === 'folder'}
-            <Folder class="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
           {:else}
-            <File class="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <FileIcon path={shownName(attachment)} kind={attachment.kind === 'folder' ? 'folder' : 'file'} />
           {/if}
           <span class="min-w-0 truncate">{shownName(attachment)}</span>
           {#if size}<span class="shrink-0 text-muted-foreground">{size}</span>{/if}

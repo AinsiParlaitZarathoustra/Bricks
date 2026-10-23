@@ -3,6 +3,7 @@
   // message. The path is resolved and checked by Rust (`project_file_read`)
   // in the project of the conversation the message belongs to.
   import { tick } from 'svelte'
+  import FileIcon from '$lib/features/file-icons/FileIcon.svelte'
   import { projectFileRead } from '$lib/ipc/client'
   import type { ProjectFileWindow } from '$lib/features/conversation/markdown/types'
 
@@ -43,8 +44,9 @@
 </script>
 
 <div class="flex min-h-0 flex-col gap-2 text-[13px]">
-  <p class="font-mono text-xs break-all text-muted-foreground">
-    {path}{#if line}:{line}{#if endLine && endLine !== line}-{endLine}{/if}{/if}
+  <p class="flex min-w-0 items-start gap-1.5 font-mono text-xs text-muted-foreground">
+    <span class="flex h-4 shrink-0 items-center"><FileIcon {path} /></span>
+    <span class="min-w-0 break-all">{path}{#if line}:{line}{#if endLine && endLine !== line}-{endLine}{/if}{/if}</span>
   </p>
   {#if error}
     <p class="text-xs text-destructive" role="alert">{error}</p>

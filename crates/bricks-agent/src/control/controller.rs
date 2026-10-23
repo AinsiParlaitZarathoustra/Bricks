@@ -216,7 +216,12 @@ pub struct ProjectContext {
     /// Canonical folder of the project.
     pub working_dir: PathBuf,
     pub bricks: BricksConfig,
+    /// A fixed system prompt (used when `prompt_options` is absent).
     pub system_prompt: Option<String>,
+    /// The Bricks prompt, assembled for each request from the tools it
+    /// really announces and its context (see
+    /// `AgentBuilder::system_prompt_options`); wins over `system_prompt`.
+    pub prompt_options: Option<crate::system_prompt::SystemPromptOptions>,
     pub long_term_memory: Option<Arc<dyn LongTermMemory>>,
     pub memory_space: Option<String>,
     pub mcp_servers: Vec<bricks_mcp::McpServerConfig>,
@@ -239,6 +244,7 @@ fn load_project(cfg: &EngineConfig, working_dir: &Path) -> Result<ProjectContext
         working_dir: working_dir.to_path_buf(),
         bricks: cfg.bricks.clone(),
         system_prompt: cfg.system_prompt.clone(),
+        prompt_options: None,
         long_term_memory: cfg.long_term_memory.clone(),
         memory_space: cfg.memory_space.clone(),
         mcp_servers: cfg.mcp_servers.clone(),
@@ -329,6 +335,8 @@ pub struct Snapshot {
     pub approval_rules: super::settings::ApprovalRules,
     /// The runtime override in force (the project's rules apply under it).
     pub approval_mode: ApprovalMode,
+    /// The session's plan (TodoWrite); `revision` 0: none yet.
+    pub plan: bricks_tools::todo_write::PlanState,
 }
 
 /// A tool as inspectors show it.
@@ -485,6 +493,10 @@ fn session_tools(
     profiles: &Arc<crate::agents::ProfileCatalog>,
 ) -> (Vec<Box<dyn Tool>>, Option<Arc<crate::agents::AgentSpawner>>) {
     let mut tools = (cfg.tools)();
+    // The session's plan, with its own tool.
+    if !tools.iter().any(|t| t.name() == "TodoWrite") {
+        tools.push(Box::new(bricks_tools::todo_write::TodoWriteTool));
+    }
     let mut spawner_out = None;
     if project.bricks.agents.enabled && !tools.iter().any(|t| t.name() == "Agent") {
         let factory = Arc::clone(&cfg.tools);
@@ -534,6 +546,11 @@ fn build_agent(
         Some(files_dir(cfg, &meta.id).join("jobs")),
     );
     ext.insert(bricks_tools::jobs::JobsHandle(jobs));
+    // The session's plan, kept with its files (`plan.json`): the same file
+    // whatever agent is built for the session, never a sub-agent's.
+    ext.insert(bricks_tools::todo_write::PlanHandle(
+        bricks_tools::todo_write::PlanService::in_dir(&files_dir(cfg, &meta.id)),
+    ));
     // The `[bash]` settings of the project (`yield_time_ms`) shape the shell
     // of the Bash tool; everything else keeps its default.
     let mut shell = bricks_tools::shell::ShellConfig::default();
@@ -566,7 +583,9 @@ fn build_agent(
     if let Some(t) = settings.max_tokens {
         b = b.max_tokens(t);
     }
-    if let Some(s) = &project.system_prompt {
+    if let Some(o) = &project.prompt_options {
+        b = b.system_prompt_options(o.clone());
+    } else if let Some(s) = &project.system_prompt {
         b = b.system_prompt(s.clone());
     }
     if let Some(m) = &project.long_term_memory {
@@ -819,6 +838,7 @@ impl Controller {
             install_session_sink(&queue, sp.runtime());
         }
         install_job_sink(&queue, &inner.agent.read());
+        install_plan_sink(&queue, &inner.agent.read());
         queue.push(None, opened, None).await;
         let controller = Controller { inner };
         if controller
@@ -935,6 +955,7 @@ impl Controller {
             memory_space: meta.memory_space.clone(),
             approval_rules: self.project().bricks.permissions.clone(),
             approval_mode: self.inner.cfg.approval_override.get(),
+            plan: agent.plan().map(|p| p.current()).unwrap_or_default(),
         }
     }
 
@@ -1857,12 +1878,17 @@ impl Controller {
             install_session_sink(&self.inner.queue, sp.runtime());
         }
         install_job_sink(&self.inner.queue, &agent);
+        install_plan_sink(&self.inner.queue, &agent);
         let count = session_store(cfg)
             .load(&meta.id)
             .await
             .map(|m| m.len())
             .unwrap_or(0);
         let old = std::mem::replace(&mut *self.inner.agent.write(), agent);
+        // The previous session's plan no longer reports here.
+        if let Some(p) = old.plan() {
+            p.set_observer(None);
+        }
         // The previous session's background jobs end with it: none is left
         // running without an owner, and none reports as the new session.
         if let Some(j) = old.extensions.get::<bricks_tools::jobs::JobsHandle>() {
@@ -2084,6 +2110,11 @@ impl Controller {
         if let Some(t) = self.inner.maintenance.lock().as_ref() {
             t.cancel();
         }
+        // Closed sessions write no plan: a late update cannot recreate the
+        // folder of a conversation being deleted.
+        if let Some(p) = self.agent().plan() {
+            p.close();
+        }
         self.agent().close().await;
     }
 }
@@ -2180,6 +2211,9 @@ async fn translate(
                 status: Box::new(status),
             },
             AgentEvent::SessionSaved { .. } => Event::SessionSaved,
+            // The session's plan reports through its own observer
+            // (`install_plan_sink`), never twice.
+            AgentEvent::PlanUpdated { .. } => continue,
             AgentEvent::SubAgentSpawned { agent_id, .. } => Event::Notice {
                 message: format!("sub-agent {agent_id} started"),
             },
@@ -2544,6 +2578,31 @@ fn install_session_sink(q: &Arc<EventQueue>, rt: &Arc<crate::agents::AgentRuntim
     rt.set_session_sink(Arc::new(move |ev| {
         let _ = tx.send(ev);
     }));
+}
+
+/// Plan updates reach the queue in their revision order, once each, with
+/// the run that made them, before the update returns (so before the tool
+/// call that made it is reported finished).
+fn install_plan_sink(q: &Arc<EventQueue>, agent: &Agent) {
+    let Some(plan) = agent.plan() else {
+        return;
+    };
+    struct Forward(Arc<EventQueue>);
+    impl bricks_tools::todo_write::PlanObserver for Forward {
+        fn plan_updated(
+            &self,
+            plan: &bricks_tools::todo_write::PlanState,
+            root_run_id: Option<&str>,
+        ) {
+            self.0.push_now(
+                root_run_id,
+                Event::PlanUpdated {
+                    plan: plan.clone(),
+                },
+            );
+        }
+    }
+    plan.set_observer(Some(Arc::new(Forward(q.clone()))));
 }
 
 /// Job events reach the queue in order, outside runs.

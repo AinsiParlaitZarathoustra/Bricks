@@ -1,4 +1,5 @@
 <script lang="ts">
+	import FileIcon from '$lib/features/file-icons/FileIcon.svelte';
 	import { app } from '$lib/state/app.svelte';
 	import type { AgentInfo, Conversation } from '$lib/state/conversation.svelte';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
@@ -169,9 +170,12 @@
 		{#each files as file (file.path)}
 			<li class="flex min-w-0 items-center gap-2">
 				<span class="w-16 shrink-0 text-muted-foreground">{changeStatusLabel(file.status)}</span>
-				<span class="min-w-0 flex-1 font-mono break-all">
-					{file.path}
-					{#if file.from}<span class="text-muted-foreground">← {file.from}</span>{/if}
+				<span class="flex min-w-0 flex-1 items-start gap-1.5 font-mono">
+					<span class="flex h-4 shrink-0 items-center"><FileIcon path={file.path} /></span>
+					<span class="min-w-0 break-all">
+						{file.path}
+						{#if file.from}<span class="text-muted-foreground">← {file.from}</span>{/if}
+					</span>
 				</span>
 				{#if file.binary}
 					<span class="shrink-0 text-muted-foreground">binaire</span>
@@ -299,11 +303,12 @@
 							<li class="min-w-0">
 								<button
 									type="button"
-									class="max-w-full truncate rounded-sm text-left font-mono text-primary underline decoration-dotted underline-offset-2 hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+									class="inline-flex max-w-full items-center gap-1.5 rounded-sm text-left font-mono text-primary hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
 									title={relativePath(path)}
 									onclick={() => reveal(path)}
 								>
-									{fileName(path)}
+									<FileIcon {path} />
+									<span class="min-w-0 truncate underline decoration-dotted underline-offset-2">{fileName(path)}</span>
 								</button>
 							</li>
 						{/each}

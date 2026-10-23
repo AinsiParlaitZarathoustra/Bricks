@@ -4,6 +4,7 @@
   // read in bounded windows), a Markdown preview, and the recorded edit
   // operations of that file (each patch on its own, never merged).
   import X from '@lucide/svelte/icons/x'
+  import FileIcon from '$lib/features/file-icons/FileIcon.svelte'
   import DiffView from '$lib/features/changes/DiffView.svelte'
   import SvgViewer from '$lib/features/conversation/markdown/SvgViewer.svelte'
   import MarkdownView from '$lib/features/conversation/markdown/MarkdownView.svelte'
@@ -72,10 +73,11 @@
             role="tab"
             aria-selected={tab.id === active?.id}
             title={tab.fullPath}
-            class="max-w-48 truncate rounded-md py-1 pr-1 pl-2 font-mono text-xs focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            class="flex max-w-48 min-w-0 items-center gap-1.5 rounded-md py-1 pr-1 pl-2 font-mono text-xs focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
             onclick={() => reader.activate(tab.id)}
           >
-            {tab.title}
+            <FileIcon path={tab.fullPath || tab.title} />
+            <span class="min-w-0 truncate">{tab.title}</span>
           </button>
           <button
             type="button"

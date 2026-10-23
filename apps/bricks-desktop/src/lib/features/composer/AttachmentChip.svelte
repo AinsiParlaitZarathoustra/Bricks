@@ -1,9 +1,7 @@
 <script lang="ts">
   import type { DraftAttachment } from '$lib/state/conversation.svelte'
   import { Button } from '$lib/components/ui/button'
-  import FileIcon from '@lucide/svelte/icons/file'
-  import FolderIcon from '@lucide/svelte/icons/folder'
-  import ImageIcon from '@lucide/svelte/icons/image'
+  import FileIcon from '$lib/features/file-icons/FileIcon.svelte'
   import XIcon from '@lucide/svelte/icons/x'
 
   let {
@@ -25,23 +23,21 @@
   class:border-destructive={error !== null}
   data-kind={attachment.kind}
 >
-  {#if attachment.previewUrl}
-    <img src={attachment.previewUrl} alt="" class="size-8 shrink-0 rounded object-cover" />
-  {:else if attachment.kind === 'folder'}
-    <FolderIcon class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-  {:else if attachment.kind === 'image'}
-    <ImageIcon class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-  {:else}
-    <FileIcon class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-  {/if}
-
-  <div class="min-w-0">
-    <p class="max-w-56 truncate" title={attachment.path || attachment.name}>{attachment.name}</p>
-    {#if error}
-      <p class="text-xs text-destructive" role="alert">{error}</p>
-    {:else if attachment.importing}
-      <p class="text-xs text-muted-foreground">Copie…</p>
+  <div class="flex min-w-0 items-center {attachment.previewUrl ? 'gap-2' : 'gap-1.5'}">
+    {#if attachment.previewUrl}
+      <img src={attachment.previewUrl} alt="" class="size-8 shrink-0 rounded object-cover" />
+    {:else}
+      <FileIcon path={attachment.path || attachment.name} kind={attachment.kind === 'folder' ? 'folder' : 'file'} />
     {/if}
+
+    <div class="min-w-0">
+      <p class="max-w-56 truncate" title={attachment.path || attachment.name}>{attachment.name}</p>
+      {#if error}
+        <p class="text-xs text-destructive" role="alert">{error}</p>
+      {:else if attachment.importing}
+        <p class="text-xs text-muted-foreground">Copie…</p>
+      {/if}
+    </div>
   </div>
 
   <Button variant="ghost" size="icon-xs" aria-label={`Retirer ${attachment.name}`} onclick={onRemove}>

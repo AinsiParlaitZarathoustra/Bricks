@@ -58,30 +58,22 @@ async fn run() {
         let sh = bricks::tools::shell();
         let web = bricks::tools::web();
         let plan = bricks::tools::planning();
-        let sched = bricks::tools::scheduling();
         let orch = bricks::tools::orchestration();
 
         check!(
             &format!("all() returns {} tools", all.len()),
-            all.len() >= 24
+            all.len() == 23
         );
-        check!(
-            &format!("filesystem() = {} tools", fs.len()),
-            fs.len() == 10
-        );
+        check!(&format!("filesystem() = {} tools", fs.len()), fs.len() == 9);
         check!(&format!("shell() = {} tools", sh.len()), sh.len() == 6);
         check!(&format!("web() = {} tools", web.len()), web.len() == 2);
         check!(
             &format!("planning() = {} tools", plan.len()),
-            plan.len() == 3
-        );
-        check!(
-            &format!("scheduling() = {} tools", sched.len()),
-            sched.len() == 5
+            plan.len() == 1
         );
         check!(
             &format!("orchestration() = {} tools", orch.len()),
-            orch.len() == 9
+            orch.len() == 3
         );
         check!("none() is empty", bricks::tools::none().is_empty());
 
@@ -251,21 +243,6 @@ async fn run() {
     println!("  4. Planning Tools");
     println!("  ─────────────────");
     {
-        bricks_tools::plan_mode::set_plan_mode(false);
-        let enter = bricks_tools::plan_mode::EnterPlanModeTool;
-        enter.execute(serde_json::json!({}), &ctx).await;
-        check!(
-            "EnterPlanMode sets flag",
-            bricks_tools::plan_mode::is_plan_mode()
-        );
-
-        let exit = bricks_tools::plan_mode::ExitPlanModeTool;
-        exit.execute(serde_json::json!({}), &ctx).await;
-        check!(
-            "ExitPlanMode clears flag",
-            !bricks_tools::plan_mode::is_plan_mode()
-        );
-
         let todo = bricks_tools::todo_write::TodoWriteTool;
         let r = todo
             .execute(
@@ -278,74 +255,17 @@ async fn run() {
                 &ctx,
             )
             .await;
-        check!("TodoWrite creates items", r.content.contains("2 items"));
+        check!(
+            "TodoWrite creates items",
+            r.content.contains("0/2 completed")
+        );
         let todos = bricks_tools::todo_write::get_todos("phase2-test");
         check!("Todos persisted in registry", todos.len() == 2);
         println!();
     }
 
-    // ── 5. Scheduling Tools ──────────────────────────────────────────────
-    println!("  5. Scheduling Tools");
-    println!("  ───────────────────");
-    {
-        bricks_tools::cron::clear_crons();
-        let create = bricks_tools::cron::CronCreateTool;
-        let r = create
-            .execute(
-                serde_json::json!({
-                    "schedule": "*/10 * * * *",
-                    "prompt": "Check build status"
-                }),
-                &ctx,
-            )
-            .await;
-        check!("CronCreate succeeds", !r.is_error);
-
-        let list = bricks_tools::cron::CronListTool;
-        let r = list.execute(serde_json::json!({}), &ctx).await;
-        check!(
-            "CronList shows entry",
-            r.content.contains("Check build status")
-        );
-
-        let entries = bricks_tools::cron::list_crons();
-        let id = entries[0].id.clone();
-        let delete = bricks_tools::cron::CronDeleteTool;
-        delete.execute(serde_json::json!({"id": id}), &ctx).await;
-        check!(
-            "CronDelete removes entry",
-            bricks_tools::cron::list_crons().is_empty()
-        );
-
-        let sleep = bricks_tools::sleep::SleepTool;
-        let start = std::time::Instant::now();
-        sleep
-            .execute(serde_json::json!({"duration_ms": 50}), &ctx)
-            .await;
-        check!("Sleep waits correctly", start.elapsed().as_millis() >= 40);
-
-        let trigger = bricks_tools::remote_trigger::RemoteTriggerTool;
-        let r = trigger
-            .execute(
-                serde_json::json!({
-                    "target_session": "other",
-                    "event_type": "deploy",
-                    "payload": {"env": "staging"}
-                }),
-                &ctx,
-            )
-            .await;
-        check!("RemoteTrigger sends", !r.is_error);
-        let events = bricks_tools::remote_trigger::drain_triggers("other");
-        check!(
-            "Trigger received",
-            events.len() == 1 && events[0].event_type == "deploy"
-        );
-        println!();
-    }
-
-    // ── 6. Orchestration Tools ───────────────────────────────────────────
-    println!("  6. Orchestration Tools");
+    // ── 5. Orchestration Tools ───────────────────────────────────────────
+    println!("  5. Orchestration Tools");
     println!("  ──────────────────────");
     {
         let send = bricks_tools::send_message::SendMessageTool;
@@ -363,21 +283,10 @@ async fn run() {
         println!();
     }
 
-    // ── 7. Config Tool ───────────────────────────────────────────────────
-    println!("  7. Config & Utility Tools");
-    println!("  ─────────────────────────");
+    // ── 6. Utility Tools ───────────────────────────────────────────────────
+    println!("  6. Utility Tools");
+    println!("  ────────────────");
     {
-        let cfg = bricks_tools::config_tool::ConfigTool;
-        cfg.execute(
-            serde_json::json!({"action": "set", "key": "model", "value": "claude-opus"}),
-            &ctx,
-        )
-        .await;
-        let r = cfg
-            .execute(serde_json::json!({"action": "get", "key": "model"}), &ctx)
-            .await;
-        check!("Config set/get works", r.content.contains("claude-opus"));
-
         let so = bricks_tools::synthetic_output::SyntheticOutputTool;
         let r = so
             .execute(
@@ -388,16 +297,11 @@ async fn run() {
         check!("SyntheticOutput returns JSON", r.content.contains("42"));
         check!("SyntheticOutput has metadata", r.metadata.is_some());
 
-        let ask = bricks_tools::ask_user::AskUserQuestionTool;
-        let r = ask
-            .execute(serde_json::json!({"question": "Continue?"}), &ctx)
-            .await;
-        check!("AskUser returns question", r.content.contains("Continue?"));
         println!();
     }
 
-    // ── 8. Web Tools (schema-only, no live API) ──────────────────────────
-    println!("  8. Web Tools (schema validation)");
+    // ── 7. Web Tools (schema-only, no live API) ──────────────────────────
+    println!("  7. Web Tools (schema validation)");
     println!("  ────────────────────────────────");
     {
         let wf = bricks_tools::web_fetch::WebFetchTool;
@@ -422,8 +326,8 @@ async fn run() {
         println!();
     }
 
-    // ── 9. ToolSearch ────────────────────────────────────────────────────
-    println!("  9. ToolSearch");
+    // ── 8. ToolSearch ────────────────────────────────────────────────────
+    println!("  8. ToolSearch");
     println!("  ─────────────");
     {
         let all = bricks::tools::all();
@@ -442,9 +346,17 @@ async fn run() {
         check!("ToolSearch finds Bash", r.content.contains("Bash"));
 
         let r = search
+            .execute(serde_json::json!({"query": "worktree"}), &ctx)
+            .await;
+        check!("ToolSearch finds Worktree", r.content.contains("Worktree"));
+
+        let r = search
             .execute(serde_json::json!({"query": "cron"}), &ctx)
             .await;
-        check!("ToolSearch finds Cron", r.content.contains("Cron"));
+        check!(
+            "ToolSearch finds no Cron tool",
+            !r.content.contains("CronCreate")
+        );
 
         let r = search
             .execute(serde_json::json!({"query": "xyznonexistent"}), &ctx)
@@ -456,8 +368,8 @@ async fn run() {
         println!();
     }
 
-    // ── 10. Benchmark: tool dispatch speed ───────────────────────────────
-    println!("  10. Performance (tool dispatch speed)");
+    // ── 9. Benchmark: tool dispatch speed ───────────────────────────────
+    println!("  9. Performance (tool dispatch speed)");
     println!("  ─────────────────────────────────────");
     {
         let tools = bricks::tools::filesystem();

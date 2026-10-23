@@ -1,7 +1,7 @@
 //! # Phase 3 Stress Test — Sub-Agent Orchestration
 //!
-//! Tests AgentTool (sub-agent spawning), coordinator mode, task system,
-//! and message passing between agents.
+//! Tests AgentTool (sub-agent spawning), coordinator mode and message
+//! passing between agents.
 //!
 //! ```bash
 //! cargo run --example phase3_stress_test --release
@@ -197,10 +197,6 @@ async fn run() {
         let has_send = worker_tools.iter().any(|t| t.name() == "SendMessage");
         check!("Workers can't SendMessage", !has_send);
 
-        // Workers can't use TaskStop
-        let has_stop = worker_tools.iter().any(|t| t.name() == "TaskStop");
-        check!("Workers can't TaskStop", !has_stop);
-
         // Workers still have core tools
         let has_bash = worker_tools.iter().any(|t| t.name() == "Bash");
         let has_read = worker_tools.iter().any(|t| t.name() == "Read");
@@ -223,88 +219,8 @@ async fn run() {
         println!();
     }
 
-    // ── 3. Task System ───────────────────────────────────────────────────
-    println!("  3. Task System (6 tools)");
-    println!("  ────────────────────────");
-    {
-        bricks_tools::tasks::clear_tasks();
-
-        // Create
-        let create = bricks_tools::tasks::TaskCreateTool;
-        let r = create
-            .execute(serde_json::json!({"description": "Deploy staging"}), &ctx)
-            .await;
-        check!("TaskCreate succeeds", !r.is_error);
-        let id = r.content.split('\'').nth(1).unwrap().to_string();
-
-        // List
-        let list = bricks_tools::tasks::TaskListTool;
-        let r = list.execute(serde_json::json!({}), &ctx).await;
-        check!("TaskList shows task", r.content.contains("Deploy staging"));
-
-        // Update to running
-        let update = bricks_tools::tasks::TaskUpdateTool;
-        update
-            .execute(serde_json::json!({"id": &id, "status": "running"}), &ctx)
-            .await;
-        let task = bricks_tools::tasks::get_task(&id).unwrap();
-        check!(
-            "TaskUpdate sets running",
-            task.status == bricks_tools::tasks::TaskStatus::Running
-        );
-
-        // Complete with output
-        update
-            .execute(
-                serde_json::json!({
-                    "id": &id, "status": "completed", "output": "Deployed to staging-v42"
-                }),
-                &ctx,
-            )
-            .await;
-        let task = bricks_tools::tasks::get_task(&id).unwrap();
-        check!(
-            "Task completed with output",
-            task.status == bricks_tools::tasks::TaskStatus::Completed
-        );
-
-        // Get output
-        let output = bricks_tools::tasks::TaskOutputTool;
-        let r = output.execute(serde_json::json!({"id": &id}), &ctx).await;
-        check!(
-            "TaskOutput returns result",
-            r.content.contains("staging-v42")
-        );
-
-        // Get status
-        let get = bricks_tools::tasks::TaskGetTool;
-        let r = get.execute(serde_json::json!({"id": &id}), &ctx).await;
-        check!("TaskGet shows completed", r.content.contains("Completed"));
-
-        // Create second task and stop it
-        create
-            .execute(serde_json::json!({"description": "Run migrations"}), &ctx)
-            .await;
-        let tasks = bricks_tools::tasks::list_tasks();
-        let second_id = tasks
-            .iter()
-            .find(|t| t.description == "Run migrations")
-            .unwrap()
-            .id
-            .clone();
-        let stop = bricks_tools::tasks::TaskStopTool;
-        stop.execute(serde_json::json!({"id": &second_id}), &ctx)
-            .await;
-        let task = bricks_tools::tasks::get_task(&second_id).unwrap();
-        check!(
-            "TaskStop stops task",
-            task.status == bricks_tools::tasks::TaskStatus::Stopped
-        );
-        println!();
-    }
-
-    // ── 4. Message Passing ───────────────────────────────────────────────
-    println!("  4. Inter-Agent Message Passing");
+    // ── 3. Message Passing ───────────────────────────────────────────────
+    println!("  3. Inter-Agent Message Passing");
     println!("  ──────────────────────────────");
     {
         let send = bricks_tools::send_message::SendMessageTool;
@@ -326,52 +242,27 @@ async fn run() {
             r.is_error && r.content.contains("nothing was sent")
         );
 
-        // Cross-session triggers
-        let trigger = bricks_tools::remote_trigger::RemoteTriggerTool;
-        trigger
-            .execute(
-                serde_json::json!({
-                    "target_session": "deploy-agent",
-                    "event_type": "tests_passed",
-                    "payload": {"suite": "integration", "passed": 99}
-                }),
-                &ctx_a,
-            )
-            .await;
-        let events = bricks_tools::remote_trigger::drain_triggers("deploy-agent");
-        check!("Trigger delivered", events.len() == 1);
-        check!("Trigger has payload", events[0].payload["passed"] == 99);
         println!();
     }
 
-    // ── 5. Full orchestration scenario ───────────────────────────────────
-    println!("  5. Full Orchestration Scenario");
+    // ── 4. Full orchestration scenario ───────────────────────────────────
+    println!("  4. Full Orchestration Scenario");
     println!("  ──────────────────────────────");
     {
         use bricks_agent::agent_tool::AgentTool;
-        bricks_tools::tasks::clear_tasks();
-
-        // Simulate coordinator creating tasks and spawning workers
-        let create = bricks_tools::tasks::TaskCreateTool;
-        create
-            .execute(serde_json::json!({"description": "Lint check"}), &ctx)
-            .await;
-        create
-            .execute(serde_json::json!({"description": "Test suite"}), &ctx)
-            .await;
-        create
-            .execute(serde_json::json!({"description": "Build release"}), &ctx)
-            .await;
-
-        let tasks = bricks_tools::tasks::list_tasks();
-        check!("3 tasks created", tasks.len() >= 3);
+        // The coordinator's three pieces of work.
+        let tasks: Vec<(String, String)> = ["Lint check", "Test suite", "Build release"]
+            .iter()
+            .enumerate()
+            .map(|(i, d)| (format!("work-{i}"), d.to_string()))
+            .collect();
 
         // Spawn 3 parallel workers
         let _agent_tool = AgentTool::new(|| Box::new(EchoProvider), bricks::tools::coding());
         let mut handles = Vec::new();
-        for task in &tasks {
-            let desc = task.description.clone();
-            let id = task.id.clone();
+        for (id, desc) in &tasks {
+            let desc = desc.clone();
+            let id = id.clone();
             let at = AgentTool::new(|| Box::new(EchoProvider), bricks::tools::coding());
             let ctx_clone = ctx.clone();
             handles.push(tokio::spawn(async move {
@@ -406,24 +297,10 @@ async fn run() {
         }
         check!("All 3 workers completed", all_ok);
 
-        // Mark tasks complete
-        let update = bricks_tools::tasks::TaskUpdateTool;
-        for (id, result) in results.iter().filter_map(|r| r.as_ref().ok()) {
-            update
-                .execute(
-                    serde_json::json!({
-                        "id": id,
-                        "status": "completed",
-                        "output": &result.content
-                    }),
-                    &ctx,
-                )
-                .await;
-        }
-
-        let completed = bricks_tools::tasks::list_tasks()
+        let completed = results
             .iter()
-            .filter(|t| t.status == bricks_tools::tasks::TaskStatus::Completed)
+            .filter_map(|r| r.as_ref().ok())
+            .filter(|(_, r)| !r.is_error)
             .count();
         check!(&format!("{}/3 tasks completed", completed), completed >= 3);
         println!();

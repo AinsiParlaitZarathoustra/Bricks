@@ -2,7 +2,7 @@
 //!
 //! When active, the agent acts as a coordinator that spawns parallel worker
 //! agents using the Agent tool. Workers have restricted tool access (no Agent,
-//! SendMessage, TaskStop) to prevent uncontrolled recursion.
+//! SendMessage) to prevent uncontrolled recursion.
 
 use bricks_tools::Tool;
 
@@ -21,7 +21,6 @@ pub enum AgentMode {
 pub const COORDINATOR_ONLY_TOOLS: &[&str] = &[
     "Agent",
     "SendMessage",
-    "TaskStop",
     "TeamCreate",
     "TeamDelete",
     "SyntheticOutput",
@@ -54,8 +53,7 @@ pub fn coordinator_system_prompt() -> &'static str {
     1. Break complex tasks into independent sub-tasks\n\
     2. Spawn parallel worker agents using the Agent tool\n\
     3. Each worker prompt must be fully self-contained\n\
-    4. Synthesize findings from all workers before responding\n\
-    5. Use TaskCreate/TaskUpdate to track parallel work\n\n\
+    4. Synthesize findings from all workers before responding\n\n\
     Workers cannot spawn their own sub-agents. They have access to \
     filesystem, shell, and web tools only."
 }

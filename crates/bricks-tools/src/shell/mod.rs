@@ -192,6 +192,33 @@ pub fn close_session_now(id: &str) {
     }
 }
 
+/// The working directory of session `id`'s shell, once a command set one
+/// (`None`: no shell yet, or it starts in the tools' directory).
+pub fn session_cwd(id: &str) -> Option<PathBuf> {
+    REGISTRY.get(id).and_then(|s| s.state.cwd())
+}
+
+/// The shell the Bash tool runs with `config` (`None`: none found), and
+/// whether its state carries over between calls (`false`: each command runs
+/// on its own, as in a sandbox).
+pub fn tool_shell(config: &ShellConfig, ext: &crate::Extensions) -> (Option<PathBuf>, bool) {
+    #[cfg(feature = "vms")]
+    if ext
+        .get::<std::sync::Arc<dyn bricks_vms::Sandbox>>()
+        .is_some()
+    {
+        return (None, false);
+    }
+    let _ = ext;
+    // The `bash` found on `PATH` is looked up once for the process.
+    static FOUND: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    let path = match &config.bash_path {
+        Some(p) => Some(p.clone()),
+        None => FOUND.get_or_init(|| which::which("bash").ok()).clone(),
+    };
+    (path, true)
+}
+
 /// The `bash` to run: configured, or the first on `PATH`.
 #[cfg(unix)]
 pub(crate) fn bash_path(config: &ShellConfig) -> std::io::Result<PathBuf> {

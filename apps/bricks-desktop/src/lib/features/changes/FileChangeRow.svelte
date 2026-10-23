@@ -3,6 +3,7 @@
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import { Badge } from '$lib/components/ui/badge';
 	import DiffStat from '$lib/layout/DiffStat.svelte';
+	import FileIcon from '$lib/features/file-icons/FileIcon.svelte';
 	import { errorMessage, type FileDiff } from '$lib/ipc/client';
 	import { cn } from '$lib/utils.js';
 	import DiffView from './DiffView.svelte';
@@ -88,8 +89,11 @@
 				<span class="size-4 shrink-0" aria-hidden="true"></span>
 			{/if}
 			<span class="flex min-w-0 flex-1 flex-col gap-0.5">
-				<span class="truncate font-mono text-xs" title={path}>
-					{#if dirName(path)}<span class="text-muted-foreground">{dirName(path)}/</span>{/if}{baseName(path)}
+				<span class="flex min-w-0 items-center gap-1.5 font-mono text-xs" title={path}>
+					<FileIcon {path} />
+					<span class="min-w-0 truncate">
+						{#if dirName(path)}<span class="text-muted-foreground">{dirName(path)}/</span>{/if}{baseName(path)}
+					</span>
 				</span>
 				<span class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
 					{#if status}<span>{status}</span>{/if}

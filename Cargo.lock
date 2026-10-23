@@ -534,6 +534,7 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
+ "which",
 ]
 
 [[package]]

@@ -12,6 +12,7 @@ pub mod control;
 pub mod coordinator;
 pub mod events;
 pub mod reporters;
+mod request_env;
 pub(crate) mod runner;
 pub mod session_memory;
 pub mod skills;
@@ -253,6 +254,13 @@ pub struct Agent {
     selection: parking_lot::RwLock<Selection>,
     tools: Vec<Box<dyn Tool>>,
     system_prompt: Option<String>,
+    /// The Bricks prompt, assembled for each request from its announced
+    /// tools and its context (wins over `system_prompt`).
+    prompt_options: Option<system_prompt::SystemPromptOptions>,
+    /// Environment facts of the requests (cached, git read when stale).
+    request_env: request_env::RequestEnv,
+    /// The system of the last request built (what was measured and sent).
+    last_system: parking_lot::Mutex<Option<String>>,
     append_system_prompt: Option<String>,
     max_tokens: u32,
     temperature: Option<f32>,
@@ -673,13 +681,33 @@ impl Agent {
         notes
     }
 
-    /// The system prompt of the requests of the current run: the configured
-    /// prompt, the catalog of skills (names and descriptions only), then the
-    /// recalled long-term memory block (if any), then the appended instructions.
+    /// The system prompt of the last request built ([`Self::request_system`]),
+    /// else the prompt without a request context: what estimates and
+    /// compaction measure.
     pub(crate) fn effective_system(&self) -> Option<String> {
+        if let Some(s) = self.last_system.lock().clone() {
+            return Some(s);
+        }
+        let names: Vec<String> = self.tool_list().iter().map(|t| t.name().to_string()).collect();
+        let base = match &self.prompt_options {
+            Some(o) => {
+                let mut o = o.clone();
+                o.tools_available = names;
+                Some(system_prompt::build_system_prompt(&o))
+            }
+            None => self.system_prompt.clone(),
+        };
+        self.join_system(base, None)
+    }
+
+    /// The configured or assembled prompt, the catalog of skills (names and
+    /// descriptions only), the plan block (raw prompts only), the recalled
+    /// long-term memory block, then the appended instructions.
+    fn join_system(&self, base: Option<String>, plan: Option<String>) -> Option<String> {
         let parts: Vec<String> = [
-            self.system_prompt.clone(),
+            base,
             self.skills_catalog(),
+            plan,
             self.recalled.lock().clone(),
             self.append_system_prompt.clone(),
         ]
@@ -687,6 +715,91 @@ impl Agent {
         .flatten()
         .collect();
         (!parts.is_empty()).then(|| parts.join("\n\n"))
+    }
+
+    /// The system prompt of one request announcing `tools`, sent with
+    /// `selection` and `options`: the conditional guidance follows those
+    /// tools, the dynamic part describes this request (date, environment,
+    /// git, model, plan). Kept as the last system built.
+    pub(crate) async fn request_system(
+        &self,
+        tools: &[String],
+        selection: &Selection,
+        options: &bricks_provider::ProviderOptions,
+    ) -> Option<String> {
+        let has = |n: &str| tools.iter().any(|t| t == n);
+        let plan = self
+            .plan()
+            .filter(|_| has("TodoWrite"))
+            .map(|p| p.current())
+            .filter(|p| p.revision > 0);
+        let (base, raw_plan) = match &self.prompt_options {
+            Some(o) => {
+                let mut o = o.clone();
+                o.tools_available = tools.to_vec();
+                let replace = o.replace_system_prompt && o.custom_system_prompt.is_some();
+                if !replace {
+                    o.git_status = self.request_env.git(&self.working_dir).await;
+                    let shell = has("Bash").then(|| {
+                        let config = self
+                            .extensions
+                            .get::<bricks_tools::shell::ShellConfig>()
+                            .map(|c| (*c).clone())
+                            .unwrap_or_default();
+                        bricks_tools::shell::tool_shell(&config, &self.extensions)
+                    });
+                    let identity = selection.provider.request_identity(options);
+                    let model = system_prompt::ModelIdentity {
+                        selection: Some(selection.model_label()),
+                        api_model: identity.as_ref().map(|i| i.api_model.clone()),
+                        reasoning: identity
+                            .and_then(|i| i.reasoning_profile)
+                            .or_else(|| selection.reasoning.clone()),
+                    };
+                    o.request = Some(request_env::context(
+                        &self.request_env,
+                        &self.working_dir,
+                        shell,
+                        has("Bash")
+                            .then(|| bricks_tools::shell::session_cwd(&self.shell_session_id))
+                            .flatten(),
+                        model,
+                        plan,
+                    ));
+                }
+                (Some(system_prompt::build_system_prompt(&o)), None)
+            }
+            None => (
+                self.system_prompt.clone(),
+                plan.as_ref().map(|p| {
+                    system_prompt::render_plan_block(p)
+                        .trim_start()
+                        .to_string()
+                }),
+            ),
+        };
+        let system = self.join_system(base, raw_plan);
+        *self.last_system.lock() = system.clone();
+        system
+    }
+
+    /// The workspace may have changed: the git state of the next request
+    /// is read again.
+    pub(crate) fn workspace_may_have_changed(&self) {
+        self.request_env.mark_git_stale();
+    }
+
+    /// A user request starts: its first request reads the git state again.
+    pub(crate) fn request_started(&self) {
+        self.request_env.mark_git_stale();
+    }
+
+    /// The plan TodoWrite writes to (`None`: this agent has no TodoWrite and
+    /// was given no plan).
+    pub fn plan(&self) -> Option<Arc<bricks_tools::todo_write::PlanService>> {
+        self.extensions
+            .get::<bricks_tools::todo_write::PlanHandle>()
+            .map(|h| Arc::clone(&h.0))
     }
 
     /// Built-in tools, then MCP tools.
@@ -705,6 +818,18 @@ impl Agent {
 
     pub fn tool_by_name(&self, name: &str) -> Option<&dyn Tool> {
         self.tool_list().into_iter().find(|t| t.name() == name)
+    }
+}
+
+/// Publishes the plan updates of an agent's own plan as its events.
+struct PlanEvents(Box<dyn Fn(AgentEvent) + Send + Sync>);
+
+impl bricks_tools::todo_write::PlanObserver for PlanEvents {
+    fn plan_updated(&self, plan: &bricks_tools::todo_write::PlanState, root_run_id: Option<&str>) {
+        (self.0)(AgentEvent::PlanUpdated {
+            plan: plan.clone(),
+            root_run_id: root_run_id.map(str::to_string),
+        });
     }
 }
 
@@ -749,6 +874,7 @@ pub struct AgentBuilder {
     provider: Option<Box<dyn Provider>>,
     tools: Vec<Box<dyn Tool>>,
     system_prompt: Option<String>,
+    prompt_options: Option<system_prompt::SystemPromptOptions>,
     append_system_prompt: Option<String>,
     model: Option<String>,
     max_tokens: u32,
@@ -792,6 +918,7 @@ impl Default for AgentBuilder {
             provider: None,
             tools: Vec::new(),
             system_prompt: None,
+            prompt_options: None,
             append_system_prompt: None,
             model: None,
             max_tokens: 16384,
@@ -857,6 +984,18 @@ impl AgentBuilder {
 
     pub fn system_prompt(mut self, s: impl Into<String>) -> Self {
         self.system_prompt = Some(s.into());
+        self
+    }
+
+    /// The Bricks prompt, assembled for each request: its conditional
+    /// guidance follows the tools the request announces, and its dynamic
+    /// part describes that request (date, environment, git, model, plan).
+    /// `tools_available` and `request` are set per request. Wins over
+    /// [`Self::system_prompt`]. Replace mode
+    /// (`replace_system_prompt` with a custom prompt) stays the custom text
+    /// alone.
+    pub fn system_prompt_options(mut self, opts: system_prompt::SystemPromptOptions) -> Self {
+        self.prompt_options = Some(opts);
         self
     }
 
@@ -1115,7 +1254,7 @@ impl AgentBuilder {
             (Some(memory), Some(sid)) => memory.session_files_dir(sid),
             _ => None,
         };
-        let store = match (raw_dir, session_dir) {
+        let store = match (raw_dir, session_dir.clone()) {
             (Some(dir), _) => bricks_compression::RawStore::new(dir.join(&session_for_store)),
             (None, Some(dir)) => bricks_compression::RawStore::new(dir),
             (None, None) => bricks_compression::RawStore::for_session(&session_for_store),
@@ -1149,6 +1288,24 @@ impl AgentBuilder {
             .or(bricks.compression_level)
             .unwrap_or_default();
         let initial = self.initial_messages.unwrap_or_default();
+
+        let mut own_plan = false;
+        // TodoWrite's plan: the given one, else this instance's own — kept
+        // with the session's files when it has a folder, in memory otherwise.
+        if self.tools.iter().any(|t| t.name() == "TodoWrite")
+            && self
+                .extensions
+                .get::<bricks_tools::todo_write::PlanHandle>()
+                .is_none()
+        {
+            let plan = match &session_dir {
+                Some(dir) => bricks_tools::todo_write::PlanService::in_dir(dir),
+                None => bricks_tools::todo_write::PlanService::in_memory(),
+            };
+            self.extensions
+                .insert(bricks_tools::todo_write::PlanHandle(plan));
+            own_plan = true;
+        }
 
         // The workspace's shared code understanding engine, for CodeScout
         // (and the sub-agents of this workspace, through the registry).
@@ -1185,7 +1342,7 @@ impl AgentBuilder {
         let cancel_token = self.cancel_token.unwrap_or_default();
         let run_cancel = cancel_token.child_token();
         let compact_cancel = cancel_token.child_token();
-        Ok(Agent {
+        let agent = Agent {
             selection: parking_lot::RwLock::new(Selection {
                 provider: Arc::from(provider),
                 label: self.model,
@@ -1194,6 +1351,9 @@ impl AgentBuilder {
             }),
             tools,
             system_prompt: self.system_prompt,
+            prompt_options: self.prompt_options,
+            request_env: request_env::RequestEnv::default(),
+            last_system: parking_lot::Mutex::new(None),
             append_system_prompt: self.append_system_prompt,
             max_tokens: self.max_tokens,
             temperature: self.temperature,
@@ -1243,7 +1403,13 @@ impl AgentBuilder {
             save_owner: uuid::Uuid::new_v4().as_u64_pair().0,
             extensions: self.extensions,
             skills,
-        })
+        };
+        // A plan made here reports to this agent's events (one given by the
+        // caller reports wherever the caller decided).
+        if own_plan && let Some(plan) = agent.plan() {
+            plan.set_observer(Some(Arc::new(PlanEvents(Box::new(agent.emit_handle())))));
+        }
+        Ok(agent)
     }
 
     /// Build + run in one shot.

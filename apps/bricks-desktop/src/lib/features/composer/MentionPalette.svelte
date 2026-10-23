@@ -4,8 +4,7 @@
   // the keyboard (aria-activedescendant); this component renders and reports.
   import type { ProjectFileEntry } from '$lib/ipc/bindings/ProjectFileEntry'
   import { Kbd } from '$lib/components/ui/kbd'
-  import FileIcon from '@lucide/svelte/icons/file'
-  import FolderIcon from '@lucide/svelte/icons/folder'
+  import FileIcon from '$lib/features/file-icons/FileIcon.svelte'
   import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw'
   import type { MentionStatus } from './mention-files.svelte'
 
@@ -51,7 +50,7 @@
           id="{id}-opt-{i}"
           aria-selected={i === activeIndex}
           tabindex="-1"
-          class="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm {i === activeIndex
+          class="flex cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5 text-sm {i === activeIndex
             ? 'bg-accent text-accent-foreground'
             : ''}"
           onmousedown={(e) => e.preventDefault()}
@@ -64,11 +63,7 @@
             onPick(entry)
           }}
         >
-          {#if entry.is_dir}
-            <FolderIcon class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-          {:else}
-            <FileIcon class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-          {/if}
+          <FileIcon path={entry.path} kind={entry.is_dir ? 'folder' : 'file'} />
           <span class="truncate font-mono">{entry.path}{entry.is_dir ? '/' : ''}</span>
         </div>
       {/each}

@@ -100,6 +100,12 @@ pub enum AgentEvent {
     SessionSaved {
         session_id: String,
     },
+    /// TodoWrite's plan was written and adopted (`root_run_id`: the run of
+    /// the tool call, when known).
+    PlanUpdated {
+        plan: bricks_tools::todo_write::PlanState,
+        root_run_id: Option<String>,
+    },
 
     // Cost tracking (realtime)
     CostUpdate {

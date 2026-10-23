@@ -115,6 +115,25 @@ impl EventQueue {
         }
     }
 
+    /// Queue an event at once, beyond the capacity if needed: for rare
+    /// session events that must keep the order of the call that made them
+    /// (a plan update is published before its tool call returns).
+    pub fn push_now(&self, run_id: Option<&str>, event: Event) {
+        let at = chrono::Utc::now().timestamp_millis();
+        {
+            let mut st = self.state.lock();
+            if st.closed {
+                return;
+            }
+            st.items.push_back(Item {
+                run_id: run_id.map(str::to_string),
+                at,
+                event,
+            });
+        }
+        self.readable.notify_one();
+    }
+
     /// The next envelope; `None` once closed and drained.
     pub async fn recv(&self) -> Option<Envelope> {
         loop {

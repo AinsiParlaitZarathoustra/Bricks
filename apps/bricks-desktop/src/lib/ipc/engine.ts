@@ -1,9 +1,29 @@
 // Engine protocol types, mirroring `bricks_agent::control::protocol`
-// (schema 5, see docs/cli.md). These are the JSON shapes the engine
+// (schema 7, see docs/cli.md). These are the JSON shapes the engine
 // serializes; the desktop bridge forwards them unchanged.
 // Owner: orchestrator. Keep in sync with protocol.rs.
 
-export const SCHEMA_VERSION = 6
+export const SCHEMA_VERSION = 7
+
+export type PlanStatus = 'pending' | 'in_progress' | 'completed'
+
+export interface PlanStep {
+  content: string
+  status: PlanStatus
+  activeForm: string
+}
+
+/** The session's plan (TodoWrite), `bricks_tools::todo_write::PlanState`.
+ *  `revision` orders states: 0 before any update, an empty plan keeps its
+ *  revision. */
+export interface PlanState {
+  version: number
+  revision: number
+  todos: PlanStep[]
+  explanation?: string
+  /** Unix milliseconds of the last update (0: never updated). */
+  updated_at: number
+}
 
 export type RunOutcome = 'succeeded' | 'incomplete' | 'failed' | 'cancelled'
 export type FailureKind = 'approval_required' | 'error'
@@ -369,6 +389,7 @@ export type Event =
   | { type: 'context_cleared'; messages_removed: number }
   | { type: 'session_saved' }
   | { type: 'title_changed'; title: string }
+  | { type: 'plan_updated'; plan: PlanState }
   | { type: 'notice'; message: string }
   | {
       type: 'run_finished'
@@ -553,6 +574,8 @@ export interface Snapshot {
   approval_rules: unknown
   /** Application-wide approval override (`standard` without one). */
   approval_mode: 'standard' | 'always_ask' | 'no_confirmation'
+  /** The session's plan (schema 7; absent from older engines). */
+  plan?: PlanState
 }
 
 export interface ProfileChoice {

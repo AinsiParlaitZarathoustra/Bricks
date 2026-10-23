@@ -540,6 +540,19 @@ async fn publish_call(
     {
         bricks_tools::code_scout::notify_workspace_changed(tool_ctx);
     }
+    // The same, for the git state of the next request (a plan update
+    // changes no file).
+    if executed
+        && agent.tool_list().iter().any(|t| {
+            t.name() == name
+                && !matches!(
+                    t.permission_level(),
+                    bricks_tools::PermissionLevel::ReadOnly | bricks_tools::PermissionLevel::None
+                )
+        })
+    {
+        agent.workspace_may_have_changed();
+    }
     let own_output = result.content.clone();
     if let Some(change) = change.filter(|c| !result.is_error && !c.files.is_empty()) {
         send(
@@ -1042,27 +1055,15 @@ async fn run_loop(
             options.set(bricks_provider::REASONING_PROFILE_OPTION, &profile);
         }
 
-        // Todo nudge: on turns > 2, remind model about incomplete todos
-        let system_with_nudge = if turn > 2 {
-            // The key TodoWrite writes under: the tool context's session.
-            let todos = bricks_tools::todo_write::get_todos(&tool_ctx.session_id);
-            let incomplete = todos
-                .iter()
-                .filter(|t| t.status != bricks_tools::todo_write::TodoStatus::Completed)
-                .count();
-            if incomplete > 0 {
-                let nudge = format!(
-                    "\n\n[system reminder: You have {} incomplete task{} in your TodoWrite list. Finish the ones the request still needs; mark done ones completed and drop the ones that are no longer needed.]",
-                    incomplete,
-                    if incomplete == 1 { "" } else { "s" }
-                );
-                agent.effective_system().map(|s| format!("{s}{nudge}"))
-            } else {
-                agent.effective_system()
-            }
-        } else {
-            agent.effective_system()
-        };
+        // The system of this request: guidance for the tools it announces,
+        // its own date, environment, git state, model and plan (the plan's
+        // complete state replaces any reminder), built before the budget
+        // measures it.
+        if turn == 1 {
+            agent.request_started();
+        }
+        let announced: Vec<String> = tool_defs.iter().map(|d| d.name.clone()).collect();
+        let system_with_nudge = agent.request_system(&announced, &selection, &options).await;
 
         // F-04: last line of defence. Compaction is the known way to sever a
         // tool_use/tool_result pair, but anything that rewrites history can do

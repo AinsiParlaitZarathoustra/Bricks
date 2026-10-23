@@ -233,7 +233,7 @@ pub fn reject_unknown_keys(input: &Value, known: &[&str]) -> std::result::Result
 /// "expected `a`", two as "expected `a` or `b`", and only three or more as
 /// "expected one of `a`, `b`, `c`". Reproducing the branching keeps the
 /// hand-rolled path reading exactly like the serde tools (`Write`, `Bash`,
-/// `CronCreate`, …) for the same arity.
+/// `Job`, …) for the same arity.
 fn expected_one_of(known: &[&str]) -> String {
     let q: Vec<String> = known.iter().map(|k| format!("`{k}`")).collect();
     match q.len() {
@@ -790,19 +790,19 @@ mod tests {
     #[test]
     fn not_found_keeps_the_literal_substring_and_lists_values() {
         let avail = vec!["ab12".to_string(), "cd34".to_string()];
-        let msg = not_found_message("task", "ab13", &avail, "Run TaskList to see all tasks.");
+        let msg = not_found_message("job", "ab13", &avail, "Call Job with action `list`.");
         assert!(msg.contains("not found"), "{msg}");
-        assert!(msg.starts_with("Task 'ab13' not found."), "{msg}");
+        assert!(msg.starts_with("Job 'ab13' not found."), "{msg}");
         assert!(msg.contains("Did you mean: ab12?"), "{msg}");
-        assert!(msg.contains("Available tasks (2): ab12, cd34"), "{msg}");
-        assert!(msg.contains("Run TaskList"), "{msg}");
+        assert!(msg.contains("Available jobs (2): ab12, cd34"), "{msg}");
+        assert!(msg.contains("Call Job with action `list`"), "{msg}");
     }
 
     #[test]
     fn not_found_with_nothing_available() {
-        let msg = not_found_message("cron job", "x", &[], "Run CronList to see all jobs.");
-        assert!(msg.contains("Cron job 'x' not found."), "{msg}");
-        assert!(msg.contains("no cron jobs available"), "{msg}");
+        let msg = not_found_message("background task", "x", &[], "Check the task id.");
+        assert!(msg.contains("Background task 'x' not found."), "{msg}");
+        assert!(msg.contains("no background tasks available"), "{msg}");
     }
 
     #[test]

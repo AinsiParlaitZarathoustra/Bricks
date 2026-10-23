@@ -19,6 +19,7 @@ import {
   type Tok,
 } from './extensions'
 import { sanitizeMarkdown } from './sanitize'
+import { iconId, iconImgHtml, isIconId, languageIconId } from '../../file-icons/resolve'
 import type { FileReference, MathRenderer } from './types'
 
 /** A math expression of the block being rendered, replaced after sanitizing. */
@@ -90,12 +91,39 @@ export function highlightedBody(text: string, language: string): string {
   return hljs.highlight(text, { language, ignoreIllegals: true }).value
 }
 
-/** The frame of a code block: its label, its copy button and its body (safe HTML). */
-export function codeShell(label: string, body: string): string {
+/**
+ * The icon of a code block: the file its info string names (`ts src/a.ts`,
+ * or a path alone), else its language; `null` without either. A known path
+ * wins over the language.
+ */
+export function fenceIconId(info: string | undefined): string | null {
+  const words = (info ?? '').trim().split(/\s+/).filter(Boolean)
+  const path = words.find((w, i) => (i > 0 || languageIconId(fenceLanguage(w)) === null) && /[./\\]/.test(w))
+  if (path) return iconId({ path })
+  return languageIconId(fenceLanguage(info))
+}
+
+/** Signs the marks this renderer writes: a message cannot forge one, even in HTML the sanitizer keeps. */
+const CODE_ICON_KEY = crypto.randomUUID().replace(/-/g, '')
+const CODE_ICON = new RegExp(`<span data-code-icon="([a-z0-9_.-]+)" data-code-icon-key="${CODE_ICON_KEY}"></span>`, 'g')
+
+/**
+ * Turns the icon marks of code block headers into their images. Only marks
+ * signed by this renderer count, and only a catalog id becomes an image: the
+ * sanitizer still refuses every `img`.
+ */
+export function withCodeIcons(html: string): string {
+  if (!html.includes('data-code-icon')) return html
+  return html.replace(CODE_ICON, (_mark, id: string) => (isIconId(id) ? iconImgHtml(id) : ''))
+}
+
+/** The frame of a code block: its icon, its label, its copy button and its body (safe HTML). */
+export function codeShell(label: string, body: string, icon: string | null = null): string {
+  const mark = icon && isIconId(icon) ? `<span data-code-icon="${icon}" data-code-icon-key="${CODE_ICON_KEY}"></span>` : ''
   return (
     `<div class="code-block my-2 overflow-hidden rounded-md border border-border bg-code-bg text-code-foreground">` +
     `<div class="flex items-center justify-between gap-2 border-b border-border px-2.5 py-1 text-xs text-muted-foreground">` +
-    `<span class="font-mono">${escapeHtml(label)}</span>` +
+    `<span class="inline-flex min-w-0 items-center gap-1.5 font-mono">${mark}${escapeHtml(label)}</span>` +
     `<button type="button" data-copy class="rounded px-1.5 py-0.5 hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">Copier</button>` +
     `</div>` +
     `<pre class="overflow-x-auto p-2.5 text-xs leading-relaxed"><code class="hljs font-mono">${body}</code></pre>` +
@@ -105,7 +133,7 @@ export function codeShell(label: string, body: string): string {
 
 /** A code block as HTML: highlighted when the language is known, escaped otherwise. */
 export function codeBlockHtml(text: string, lang: string): string {
-  return codeShell(fenceLanguage(lang) || 'texte', highlightedBody(text, knownLanguage(lang)))
+  return codeShell(fenceLanguage(lang) || 'texte', highlightedBody(text, knownLanguage(lang)), fenceIconId(lang))
 }
 
 function fileButton(ref: FileReference, label: string): string {
@@ -265,7 +293,7 @@ export function withScope(prefix: string, run: () => string): { html: string; ma
 
 /** Sanitizes block HTML, then replaces each math placeholder by the renderer output or by its source. */
 export function finishHtml(raw: string, maths: MathItem[], math: MathSettings): string {
-  const html = sanitizeMarkdown(raw)
+  const html = withCodeIcons(sanitizeMarkdown(raw))
   if (maths.length === 0) return html
   return html.replace(/<span data-math="(\d+)"><\/span>/g, (_match, index: string) =>
     mathHtml(maths[Number(index)] as MathItem, math),

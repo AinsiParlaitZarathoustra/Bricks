@@ -1,4 +1,5 @@
 <script lang="ts">
+  import FileIcon from '$lib/features/file-icons/FileIcon.svelte'
   // A top-level ```diff / ```patch fence: a proposal written in the answer,
   // shown read-only with the change views' DiffView. Its counts are the
   // proposal's own, never the conversation's Git statistics. Nothing here
@@ -56,9 +57,21 @@
           <ChevronRight class="size-3.5 transition-transform group-data-[state=open]:rotate-90" aria-hidden="true" />
         </CollapsibleTrigger>
         {#if file.path && onFile}
-          <button type="button" class="file-ref font-mono" onclick={() => onFile({ path: file.path! })}>{file.path}</button>
+          <button
+            type="button"
+            class="inline-flex min-w-0 items-center gap-1.5 rounded-sm font-mono focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            onclick={() => onFile({ path: file.path! })}
+          >
+            <FileIcon path={file.path} />
+            <span class="file-ref min-w-0 truncate">{file.path}</span>
+          </button>
+        {:else if file.path}
+          <span class="inline-flex min-w-0 items-center gap-1.5 font-mono">
+            <FileIcon path={file.path} />
+            <span class="min-w-0 truncate">{file.path}</span>
+          </span>
         {:else}
-          <span class="font-mono">{file.path ?? 'patch'}</span>
+          <span class="font-mono">patch</span>
         {/if}
         <span class="ml-auto tabular-nums">
           <span class="text-diff-add">+{file.additions}</span>

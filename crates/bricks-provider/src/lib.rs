@@ -200,6 +200,17 @@ pub struct ModelInfo {
     pub token_counting: bool,
 }
 
+/// What a request is sent as by one provider instance: the name the server
+/// receives and the reasoning profile applied. The server may still run
+/// another model behind that name (an alias proves nothing about it).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RequestIdentity {
+    /// The model name in the request body (`api_model`).
+    pub api_model: String,
+    /// The reasoning profile applied with these options (`None`: none).
+    pub reasoning_profile: Option<String>,
+}
+
 #[async_trait]
 pub trait Provider: Send + Sync {
     /// The configured provider id (e.g. `custom`).
@@ -214,6 +225,13 @@ pub trait Provider: Send + Sync {
     /// the context manager then uses [`Provider::context_window`] only and
     /// reports the missing information.
     fn model_info(&self) -> Option<ModelInfo> {
+        None
+    }
+
+    /// The identity of a request sent with `options` by this instance,
+    /// resolved as the request body would be. `None` when the provider does
+    /// not say (tests, custom implementations).
+    fn request_identity(&self, _options: &ProviderOptions) -> Option<RequestIdentity> {
         None
     }
 
@@ -245,6 +263,9 @@ impl Provider for Box<dyn Provider> {
     }
     fn model_info(&self) -> Option<ModelInfo> {
         (**self).model_info()
+    }
+    fn request_identity(&self, options: &ProviderOptions) -> Option<RequestIdentity> {
+        (**self).request_identity(options)
     }
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionStream> {
         (**self).complete(request).await

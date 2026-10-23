@@ -2049,13 +2049,18 @@ impl AgentSpawner {
         )));
         // The profile's skills, as validated before the launch: whole, in
         // the system prompt (where compaction never removes them).
-        let mut system = child_system_prompt(profile, &names, cwd);
+        // Assembled for each of its requests, from its own tools, model,
+        // directory and plan.
+        let mut prompt = child_prompt_options(profile, cwd);
         let mut skills = Vec::new();
         let mut preloaded = Vec::new();
         for a in preload {
             let id = bricks_skills::Ledger::new_id();
-            system.push_str("\n\n");
-            system.push_str(&bricks_skills::render_activation(a, &id, Some(cwd)));
+            let section = prompt.profile_section.get_or_insert_with(String::new);
+            if !section.is_empty() {
+                section.push_str("\n\n");
+            }
+            section.push_str(&bricks_skills::render_activation(a, &id, Some(cwd)));
             skills.push(SkillLoad {
                 name: a.name.clone(),
                 state: "loaded".into(),
@@ -2076,7 +2081,7 @@ impl AgentSpawner {
             .working_dir(cwd)
             .bricks_config(self.bricks.clone())
             .extensions(ext)
-            .system_prompt(system)
+            .system_prompt_options(prompt)
             .cancel_token(cancel.child_token());
         if let Some(r) = reasoning {
             b = b.reasoning_profile(r);
@@ -2235,30 +2240,39 @@ fn commands_of(out: &AgentOutput) -> Vec<CommandRun> {
         .collect()
 }
 
-/// A fresh child's system prompt: the engine's prompt for its tools (the
-/// Bricks foundation, with its conditional bullets decided by the child's
-/// own tools, then the sub-agent role), and the profile's instructions.
-/// Rebuilt for each child (never in the history, so no compaction removes
-/// it).
-pub fn child_system_prompt(profile: &AgentProfile, tools: &[String], wd: &Path) -> String {
-    let mut s =
-        crate::system_prompt::build_system_prompt(&crate::system_prompt::SystemPromptOptions {
-            prefix: Some(crate::system_prompt::SystemPromptPrefix::SubAgent),
-            is_non_interactive: true,
-            working_directory: Some(wd.display().to_string()),
-            tools_available: tools.to_vec(),
-            has_auto_compact: true,
-            ..Default::default()
-        });
-    if !subagent::is_blank(&profile.instructions) {
-        s.push_str(&format!(
-            "\n\n## Profile `{}` ({})\n\n{}",
-            profile.name,
-            profile.source.label,
-            profile.instructions.trim()
-        ));
+/// A fresh child's prompt, assembled for each of its requests: the Bricks
+/// foundation with the guidance its own announced tools decide, the
+/// sub-agent role, then the profile's instructions (stable); its own date,
+/// environment, model and plan after the boundary. Never in the history,
+/// so no compaction removes it.
+pub fn child_prompt_options(
+    profile: &AgentProfile,
+    wd: &Path,
+) -> crate::system_prompt::SystemPromptOptions {
+    crate::system_prompt::SystemPromptOptions {
+        prefix: Some(crate::system_prompt::SystemPromptPrefix::SubAgent),
+        is_non_interactive: true,
+        working_directory: Some(wd.display().to_string()),
+        has_auto_compact: true,
+        profile_section: (!subagent::is_blank(&profile.instructions)).then(|| {
+            format!(
+                "## Profile `{}` ({})\n\n{}",
+                profile.name,
+                profile.source.label,
+                profile.instructions.trim()
+            )
+        }),
+        ..Default::default()
     }
-    s
+}
+
+/// [`child_prompt_options`] as text, for a child announcing `tools`, without
+/// a request context.
+pub fn child_system_prompt(profile: &AgentProfile, tools: &[String], wd: &Path) -> String {
+    crate::system_prompt::build_system_prompt(&crate::system_prompt::SystemPromptOptions {
+        tools_available: tools.to_vec(),
+        ..child_prompt_options(profile, wd)
+    })
 }
 
 /// The text returned to the parent: compact, never the child's transcript.
