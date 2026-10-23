@@ -368,6 +368,9 @@ struct Inner {
     skills: parking_lot::RwLock<Option<bricks_skills::SkillAccess>>,
     /// The catalog revision the current provider was built with.
     provider_revision: AtomicU64,
+    /// The session's last run in this controller ended with its answer
+    /// (`succeeded`): its plan is done with at the next message.
+    last_run_succeeded: std::sync::atomic::AtomicBool,
 }
 
 /// One session, driven by commands. Cheap to clone.
@@ -522,6 +525,9 @@ fn session_tools(
         tools.push(Box::new(crate::agents::AgentProfilesTool::new(Arc::clone(
             &spawner,
         ))));
+        if !tools.iter().any(|t| t.name() == "SendMessage") {
+            tools.push(Box::new(crate::agents::SendMessageTool));
+        }
         spawner_out = Some(spawner);
     }
     (tools, spawner_out)
@@ -560,9 +566,6 @@ fn build_agent(
         // The session agent records its usage in its root runs' ledger and
         // sees the session's sub-agents.
         ext.insert(crate::agents::RuntimeHandle(Arc::clone(sp.runtime())));
-        ext.insert(bricks_tools::send_message::MessageRouterHandle(Arc::new(
-            crate::agents::runtime::RuntimeRouter(Arc::clone(sp.runtime())),
-        )));
     }
     let mut b = Agent::builder()
         .provider_boxed(provider)
@@ -833,6 +836,7 @@ impl Controller {
             spawner: parking_lot::RwLock::new(spawner.clone()),
             skills: parking_lot::RwLock::new(skills),
             provider_revision: AtomicU64::new(revision),
+            last_run_succeeded: std::sync::atomic::AtomicBool::new(false),
         });
         if let Some(sp) = &spawner {
             install_session_sink(&queue, sp.runtime());
@@ -1117,7 +1121,7 @@ impl Controller {
                 None => (false, "unknown sub-agent".into()),
             },
             // The user writes to a running sub-agent: the same queue as
-            // `AgentControl message` (the user sees every instance).
+            // SendMessage (the user sees every instance).
             "message" => match rec(&agent_id) {
                 Some(r) => match crate::agents::tool::message_text(
                     &r.info.agent_id,
@@ -1727,6 +1731,33 @@ impl Controller {
                         return self.reject(&cmd, e);
                     }
                 };
+                // A finished plan is cleared when the next message is
+                // accepted: the previous run ended with its answer, or every
+                // step is done. After an interruption, a failure or a reopened
+                // conversation, unfinished steps stay for the work to go on.
+                // Clearing goes through the normal update (revision, file,
+                // event); if it cannot be saved, the message is still sent
+                // and the plan stays as it was.
+                if let Some(plan) = self.agent().plan() {
+                    let current = plan.current();
+                    let done = !current.todos.is_empty()
+                        && current
+                            .todos
+                            .iter()
+                            .all(|t| t.status == bricks_tools::todo_write::TodoStatus::Completed);
+                    let succeeded = self.inner.last_run_succeeded.load(Ordering::SeqCst);
+                    if (!current.todos.is_empty() || current.explanation.is_some())
+                        && (succeeded || done)
+                        && let Err(e) = plan.update_by(Vec::new(), None, Some(&run_id))
+                    {
+                        self.inner.queue.push_now(
+                            Some(&run_id),
+                            Event::Notice {
+                                message: format!("The previous plan was kept: {e}"),
+                            },
+                        );
+                    }
+                }
                 let this = self.clone();
                 tokio::spawn(async move { this.run(run_id, converted).await });
                 Ok(())
@@ -1889,6 +1920,8 @@ impl Controller {
         if let Some(p) = old.plan() {
             p.set_observer(None);
         }
+        // The new session's last run is not known here.
+        self.inner.last_run_succeeded.store(false, Ordering::SeqCst);
         // The previous session's background jobs end with it: none is left
         // running without an owner, and none reports as the new session.
         if let Some(j) = old.extensions.get::<bricks_tools::jobs::JobsHandle>() {
@@ -2044,6 +2077,16 @@ impl Controller {
                 q.push(rid, sub_agent_event(ev), Some(&token)).await;
             }
         }
+        let succeeded = matches!(
+            &finished,
+            Event::RunFinished {
+                outcome: RunOutcome::Succeeded,
+                ..
+            }
+        );
+        self.inner
+            .last_run_succeeded
+            .store(succeeded, Ordering::SeqCst);
         q.push(rid, finished, Some(&token)).await;
         {
             let mut m = self.inner.meta.lock();

@@ -62,7 +62,7 @@ async fn run() {
 
         check!(
             &format!("all() returns {} tools", all.len()),
-            all.len() == 23
+            all.len() == 22
         );
         check!(&format!("filesystem() = {} tools", fs.len()), fs.len() == 9);
         check!(&format!("shell() = {} tools", sh.len()), sh.len() == 6);
@@ -73,7 +73,7 @@ async fn run() {
         );
         check!(
             &format!("orchestration() = {} tools", orch.len()),
-            orch.len() == 3
+            orch.len() == 2
         );
         check!("none() is empty", bricks::tools::none().is_empty());
 
@@ -268,7 +268,7 @@ async fn run() {
     println!("  5. Orchestration Tools");
     println!("  ──────────────────────");
     {
-        let send = bricks_tools::send_message::SendMessageTool;
+        let send = bricks_agent::agents::SendMessageTool;
         let r = send
             .execute(
                 serde_json::json!({"to": "worker-1", "content": "Start task"}),

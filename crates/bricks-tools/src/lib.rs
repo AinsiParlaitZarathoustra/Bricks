@@ -21,7 +21,6 @@ pub mod notebook_edit;
 pub mod permissions;
 pub mod powershell;
 pub mod preview;
-pub mod send_message;
 pub mod shell;
 pub mod skill_tool;
 pub mod synthetic_output;
@@ -454,10 +453,9 @@ pub fn planning() -> Vec<Box<dyn Tool>> {
     vec![Box::new(todo_write::TodoWriteTool)]
 }
 
-/// Orchestration tools: SendMessage, Worktree.
+/// Orchestration tools: Worktree.
 pub fn orchestration() -> Vec<Box<dyn Tool>> {
     vec![
-        Box::new(send_message::SendMessageTool),
         Box::new(worktree::EnterWorktreeTool),
         Box::new(worktree::ExitWorktreeTool),
     ]
@@ -583,9 +581,9 @@ mod unknown_parameter_policy {
             }
         }
 
-        // 23 built-in tools, 20 of them with a required parameter.
+        // 22 built-in tools, 19 of them with a required parameter.
         assert!(
-            covered >= 20,
+            covered >= 19,
             "coverage collapsed to {covered} tools; the filter is hiding the registry"
         );
         assert!(

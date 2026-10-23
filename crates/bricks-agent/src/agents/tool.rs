@@ -96,7 +96,7 @@ fn render_spawned(s: Spawned) -> ToolResult {
                 })
                 .collect();
             ToolResult::success(format!(
-                "{} sub-agent(s) started; they work in parallel while you go on. Follow them with AgentControl: `wait` for their results, `result`, `status`, `message` to guide a running one, `resume` to continue an ended one, `cancel`; their ChangeSets with inspect_changes / apply_changes.\n{}",
+                "{} sub-agent(s) started; they work in parallel while you go on. Follow them with AgentControl: `wait` for their results, `result`, `status`, `resume` to continue an ended one, `cancel`; their ChangeSets with inspect_changes / apply_changes. Use SendMessage to guide a running sub-agent.\n{}",
                 hs.len(),
                 lines.join("\n")
             ))
@@ -257,14 +257,6 @@ impl Tool for AgentsTool {
     }
 }
 
-/// The answer of `message`: what really happened, never a false « sent ».
-fn render_message(id: &str, outcome: super::runtime::MessageOutcome) -> ToolResult {
-    match message_text(id, outcome) {
-        Ok(t) => ToolResult::success(t),
-        Err(t) => ToolResult::error(t),
-    }
-}
-
 /// The text of a message outcome: `Ok` when it was queued.
 pub(crate) fn message_text(
     id: &str,
@@ -319,9 +311,6 @@ struct ControlInput {
     changeset_id: Option<String>,
     #[serde(default)]
     timeout_ms: Option<u64>,
-    /// `message`: the text for the running sub-agent.
-    #[serde(default)]
-    message: Option<String>,
     /// `resume`: what the ended sub-agent should do now.
     #[serde(default)]
     prompt: Option<String>,
@@ -331,7 +320,7 @@ const MAX_WAIT_MS: u64 = 600_000;
 
 /// Viewer: `None` for the session's agent (sees the session), else the
 /// sub-agent (sees its descendants).
-fn viewer(ctx: &ToolContext) -> Option<String> {
+pub(super) fn viewer(ctx: &ToolContext) -> Option<String> {
     ctx.extensions
         .get::<super::spawn::AgentIdentity>()
         .filter(|i| i.parent_id.is_some())
@@ -381,8 +370,7 @@ impl Tool for AgentControlTool {
 
     fn description(&self) -> &str {
         "Follow and control your sub-agents: `list`, `status`/`result` (agent_id), `wait` \
-         (agent_id, timeout_ms), `message` (agent_id, message: read by the running sub-agent at \
-         its next step), `resume` (agent_id, prompt: an ended sub-agent continues its own \
+         (agent_id, timeout_ms), `resume` (agent_id, prompt: an ended sub-agent continues its own \
          conversation, same profile, model and tools), `cancel` (agent_id, with its descendants); \
          and their ChangeSets: `inspect_changes`, `apply_changes` (to your working tree; a \
          conflict writes nothing), `discard_changes` (changeset_id or agent_id). Reading never \
@@ -397,7 +385,7 @@ impl Tool for AgentControlTool {
     fn permission_level_for(&self, input: &Value) -> PermissionLevel {
         match input["action"].as_str().unwrap_or("") {
             "list" | "status" | "result" | "wait" | "inspect_changes" => PermissionLevel::ReadOnly,
-            "cancel" | "message" | "resume" => PermissionLevel::Execute,
+            "cancel" | "resume" => PermissionLevel::Execute,
             _ => PermissionLevel::Write,
         }
     }
@@ -410,9 +398,8 @@ impl Tool for AgentControlTool {
         json!({
             "type": "object",
             "properties": {
-                "action": { "type": "string", "enum": ["list", "status", "result", "wait", "message", "resume", "cancel", "inspect_changes", "apply_changes", "discard_changes"] },
-                "agent_id": { "type": "string", "description": "Required for status, result, wait, message, resume, cancel; or to find an agent's ChangeSet." },
-                "message": { "type": "string", "description": "message: the text for the running sub-agent (bounded)." },
+                "action": { "type": "string", "enum": ["list", "status", "result", "wait", "resume", "cancel", "inspect_changes", "apply_changes", "discard_changes"] },
+                "agent_id": { "type": "string", "description": "Required for status, result, wait, resume, cancel; or to find an agent's ChangeSet." },
                 "prompt": { "type": "string", "description": "resume: what the ended sub-agent should do now." },
                 "changeset_id": { "type": "string", "description": "For inspect/apply/discard (or give agent_id)." },
                 "timeout_ms": { "type": "integer", "minimum": 1, "maximum": MAX_WAIT_MS, "description": "wait: how long (default 60000 ms); a timeout stops nothing." }
@@ -502,13 +489,6 @@ impl Tool for AgentControlTool {
                         )),
                         None => ToolResult::error(format!("{id} disappeared")),
                     }
-                }
-            },
-            "message" => match need_agent(&i.agent_id) {
-                Err(e) => e,
-                Ok(id) => {
-                    let text = i.message.clone().unwrap_or_default();
-                    render_message(&id, rt.send_message(&id, who.as_deref(), text))
                 }
             },
             "resume" => match need_agent(&i.agent_id) {
@@ -632,7 +612,7 @@ impl Tool for AgentControlTool {
                 }
             }
             other => ToolResult::error(format!(
-                "unknown action `{other}`: list, status, result, wait, cancel, inspect_changes, apply_changes, discard_changes"
+                "unknown action `{other}`: list, status, result, wait, resume, cancel, inspect_changes, apply_changes, discard_changes"
             )),
         }
     }

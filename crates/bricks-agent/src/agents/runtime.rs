@@ -921,25 +921,6 @@ impl AgentRuntime {
 #[derive(Clone)]
 pub struct RuntimeHandle(pub Arc<AgentRuntime>);
 
-/// `SendMessage` delivers through the runtime: the same queue, scope and
-/// bounds as `AgentControl message`.
-pub struct RuntimeRouter(pub Arc<AgentRuntime>);
-
-impl bricks_tools::send_message::MessageRouter for RuntimeRouter {
-    fn deliver(
-        &self,
-        sender: &bricks_tools::Extensions,
-        to: &str,
-        content: String,
-    ) -> Result<String, String> {
-        let viewer = sender
-            .get::<super::spawn::AgentIdentity>()
-            .filter(|i| i.parent_id.is_some())
-            .map(|i| i.agent_id.clone());
-        super::tool::message_text(to, self.0.send_message(to, viewer.as_deref(), content))
-    }
-}
-
 /// The section of a git patch (`git diff` output) that concerns `path`: each
 /// section starts with a `diff --git a/<old> b/<new>` line.
 fn patch_section(patch: &str, path: &str) -> Option<String> {
@@ -1310,51 +1291,99 @@ mod tests {
         assert_eq!(r.result.as_ref().map(|x| x.execution), Some(2));
     }
 
-    /// `SendMessage` goes through the router: a running child receives it
-    /// (queued), a sibling's child is out of scope, an unknown or ended agent
-    /// is refused and nothing is reported as sent.
-    #[test]
-    fn sendmessage_through_the_router_reaches_a_running_child_and_refuses_otherwise() {
-        use bricks_tools::send_message::MessageRouter;
+    /// Exercise the native tool against the real runtime queue and visibility rules.
+    #[tokio::test]
+    async fn native_sendmessage_queues_only_for_visible_running_children() {
+        use super::super::message::SendMessageTool;
+        use bricks_tools::{CostTracker, Extensions, Tool, ToolContext};
         let rt = runtime(None);
         rt.register(info_of("agent_c"), false, CancellationToken::new());
         rt.set_state("agent_c", InstanceState::Running, None);
         let controls = Arc::new(crate::events::StreamControls::new(CancellationToken::new()));
         rt.set_controls("agent_c", 1, Some(Arc::clone(&controls)));
-        let router = RuntimeRouter(Arc::clone(&rt));
-        let session = bricks_tools::Extensions::default();
-        let ok = router
-            .deliver(&session, "agent_c", "hello".into())
-            .expect("queued");
-        assert!(ok.contains("queued for agent_c"), "{ok}");
-        assert_eq!(controls.pending_messages(), 1);
-        // A sibling, another sub-agent of the session: out of scope.
-        rt.register(info_of("agent_sib"), false, CancellationToken::new());
-        let sibling = bricks_tools::Extensions::default();
-        sibling.insert(super::super::spawn::AgentIdentity {
-            agent_id: "agent_sib".into(),
-            parent_id: Some("main_1".into()),
-            root_run_id: "run_1".into(),
-        });
-        let err = router
-            .deliver(&sibling, "agent_c", "nope".into())
-            .unwrap_err();
-        assert!(err.contains("nothing was sent"), "{err}");
-        assert_eq!(controls.pending_messages(), 1, "nothing added");
-        // Unknown.
+        let ctx = ToolContext {
+            working_dir: std::env::temp_dir(),
+            session_id: "main_1".into(),
+            permissions: Arc::new(bricks_tools::permissions::AllowAll),
+            cost_tracker: Arc::new(CostTracker::new()),
+            mcp_manager: None,
+            extensions: Extensions::default(),
+        };
+        let input = |to: &str, content: &str| serde_json::json!({"to": to, "content": content});
+        let missing = SendMessageTool
+            .execute(input("agent_c", "hello"), &ctx)
+            .await;
+        assert!(missing.is_error && missing.content.contains("nothing was sent"));
+        ctx.extensions.insert(RuntimeHandle(Arc::clone(&rt)));
+        let ok = SendMessageTool
+            .execute(input("agent_c", "hello"), &ctx)
+            .await;
         assert!(
-            router
-                .deliver(&session, "agent_nope", "x".into())
-                .unwrap_err()
-                .contains("nothing was sent")
+            !ok.is_error && ok.content.contains("queued for agent_c"),
+            "{}",
+            ok.content
         );
-        // Ended: refused, nothing reads it.
-        rt.finish("agent_c", AgentResult::lost(&info_of("agent_c")));
-        let err = router
-            .deliver(&session, "agent_c", "late".into())
-            .unwrap_err();
-        assert!(err.contains("nothing was sent"), "{err}");
         assert_eq!(controls.pending_messages(), 1);
+        for content in [
+            String::new(),
+            "x".repeat(crate::events::MAX_INJECTED_BYTES + 1),
+        ] {
+            let err = SendMessageTool
+                .execute(input("agent_c", &content), &ctx)
+                .await;
+            assert!(
+                err.is_error && err.content.contains("nothing was sent"),
+                "{}",
+                err.content
+            );
+        }
+        let unknown = SendMessageTool
+            .execute(input("agent_nope", "x"), &ctx)
+            .await;
+        assert!(unknown.is_error && unknown.content.contains("nothing was sent"));
+        let sibling = ToolContext {
+            extensions: Extensions::default(),
+            ..ctx.clone()
+        };
+        sibling.extensions.insert(RuntimeHandle(Arc::clone(&rt)));
+        sibling
+            .extensions
+            .insert(super::super::spawn::AgentIdentity {
+                agent_id: "agent_sib".into(),
+                parent_id: Some("main_1".into()),
+                root_run_id: "run_1".into(),
+            });
+        rt.register(info_of("agent_sib"), false, CancellationToken::new());
+        let err = SendMessageTool
+            .execute(input("agent_c", "nope"), &sibling)
+            .await;
+        assert!(err.is_error && err.content.contains("nothing was sent"));
+        assert_eq!(controls.pending_messages(), 1);
+        for _ in 1..crate::events::MAX_PENDING_MESSAGES {
+            assert!(
+                !SendMessageTool
+                    .execute(input("agent_c", "queued"), &ctx)
+                    .await
+                    .is_error
+            );
+        }
+        let full = SendMessageTool
+            .execute(input("agent_c", "overflow"), &ctx)
+            .await;
+        assert!(full.is_error && full.content.contains("nothing was sent"));
+        assert_eq!(
+            controls.pending_messages(),
+            crate::events::MAX_PENDING_MESSAGES
+        );
+        rt.finish("agent_c", AgentResult::lost(&info_of("agent_c")));
+        let err = SendMessageTool
+            .execute(input("agent_c", "late"), &ctx)
+            .await;
+        assert!(err.is_error && err.content.contains("nothing was sent"));
+        assert_eq!(
+            controls.pending_messages(),
+            crate::events::MAX_PENDING_MESSAGES
+        );
     }
 
     /// A manifest written by an earlier version, with a termination kind this

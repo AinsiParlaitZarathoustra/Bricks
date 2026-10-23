@@ -1383,7 +1383,7 @@ impl AgentSpawner {
             .map(|t| t.name().to_string())
             .collect();
         available.extend(
-            ["Agent", "Agents", "AgentControl", "AgentProfiles"].map(String::from),
+            ["Agent", "Agents", "AgentControl", "AgentProfiles", "SendMessage"].map(String::from),
         );
         if let Some(missing) = launch.tools.iter().find(|t| !available.contains(t)) {
             return Err(SpawnError::Refused(format!(
@@ -1949,7 +1949,7 @@ impl AgentSpawner {
         };
         let input = crate::UserInput::text(prompt);
         // Its message queue, reachable by its identity while it runs:
-        // `AgentControl message` and `SendMessage` deliver there, at the next
+        // `SendMessage` delivers there, at the next
         // model request (never between a tool call and its result).
         let run_cancel = child.begin_run();
         let controls = Arc::new(crate::events::StreamControls::new(run_cancel.clone()));
@@ -2022,6 +2022,12 @@ impl AgentSpawner {
         tools.push(Box::new(super::tool::AgentProfilesTool::new(Arc::clone(
             self,
         ))));
+        // SendMessage reaches one's own sub-agents: only a child that may
+        // start some (below `max_depth`) gets it.
+        let may_delegate = pc.depth + 2 <= self.bricks.agents.max_depth;
+        if may_delegate && !tools.iter().any(|t| t.name() == "SendMessage") {
+            tools.push(Box::new(super::message::SendMessageTool));
+        }
         let names: Vec<String> = tools.iter().map(|t| t.name().to_string()).collect();
         let ext = subagent::child_extensions(pc.depth);
         // Services: the code engine only within the same workspace (a
@@ -2044,9 +2050,6 @@ impl AgentSpawner {
             ext.insert(j.clone());
         }
         ext.insert(super::runtime::RuntimeHandle(Arc::clone(&self.runtime)));
-        ext.insert(bricks_tools::send_message::MessageRouterHandle(Arc::new(
-            super::runtime::RuntimeRouter(Arc::clone(&self.runtime)),
-        )));
         // The profile's skills, as validated before the launch: whole, in
         // the system prompt (where compaction never removes them).
         // Assembled for each of its requests, from its own tools, model,

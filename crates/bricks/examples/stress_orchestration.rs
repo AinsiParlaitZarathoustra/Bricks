@@ -223,7 +223,7 @@ async fn run() {
     println!("  3. Inter-Agent Message Passing");
     println!("  ──────────────────────────────");
     {
-        let send = bricks_tools::send_message::SendMessageTool;
+        let send = bricks_agent::agents::SendMessageTool;
 
         // Agent A sends to Agent B
         let ctx_a = ToolContext {
