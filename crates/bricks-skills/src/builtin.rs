@@ -1,36 +1,15 @@
-//! Skills built into Bricks: standard `SKILL.md` documents compiled into the
-//! binary, read by the same parser as any other. They describe procedures;
-//! none runs, schedules or commits anything by being activated. They have no
-//! files and nothing is extracted to the user's folders.
+//! The skill built into Bricks: a standard `SKILL.md` compiled into the
+//! binary, read by the same parser as any other. `create-skills` teaches the
+//! model to write a skill and install it in the store; activating it runs,
+//! schedules or installs nothing by itself. It has no files and nothing is
+//! extracted to the user's folders.
 
 use crate::registry::BuiltinSkill;
 
-pub const BUILTIN: &[BuiltinSkill] = &[
-    BuiltinSkill {
-        name: "commit",
-        text: include_str!("../builtin/commit/SKILL.md"),
-    },
-    BuiltinSkill {
-        name: "debug",
-        text: include_str!("../builtin/debug/SKILL.md"),
-    },
-    BuiltinSkill {
-        name: "remember",
-        text: include_str!("../builtin/remember/SKILL.md"),
-    },
-    BuiltinSkill {
-        name: "simplify",
-        text: include_str!("../builtin/simplify/SKILL.md"),
-    },
-    BuiltinSkill {
-        name: "stuck",
-        text: include_str!("../builtin/stuck/SKILL.md"),
-    },
-    BuiltinSkill {
-        name: "verify",
-        text: include_str!("../builtin/verify/SKILL.md"),
-    },
-];
+pub const BUILTIN: &[BuiltinSkill] = &[BuiltinSkill {
+    name: "create-skills",
+    text: include_str!("../builtin/create-skills/SKILL.md"),
+}];
 
 #[cfg(test)]
 mod tests {
@@ -52,13 +31,23 @@ mod tests {
 
     #[test]
     fn builtins_name_only_tools_bricks_has() {
-        // The procedures rely on the standard tool set; nothing like
-        // CronCreate or a memory tool is assumed.
+        // The procedure relies on the standard tool set and the `Skill`
+        // actions that exist; nothing like CronCreate or a memory tool.
         for b in BUILTIN {
             for absent in ["CronCreate", "CronList", "MemoryWrite", "$ARGUMENTS"] {
                 assert!(!b.text.contains(absent), "{}: {absent}", b.name);
             }
         }
+        let text = BUILTIN[0].text;
+        for action in ["\"validate\"", "\"install\"", "\"list\""] {
+            assert!(text.contains(action), "{action}");
+        }
+    }
+
+    #[test]
+    fn create_skills_is_the_only_builtin() {
+        let names: Vec<&str> = BUILTIN.iter().map(|b| b.name).collect();
+        assert_eq!(names, ["create-skills"]);
     }
 }
 

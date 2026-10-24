@@ -99,8 +99,9 @@ pub struct RunArgs {
     /// stops the command (exit code 2).
     #[arg(long = "skill", value_name = "NAME")]
     pub skills: Vec<String>,
-    /// Allow this project's skills (.agents/skills, .claude/skills) for
-    /// this run's session only. Grants no other permission.
+    /// Allow the project skills of explicitly configured sources for this
+    /// run's session only (Bricks reads none by default). Grants no other
+    /// permission.
     #[arg(long)]
     pub trust_project_skills: bool,
 }

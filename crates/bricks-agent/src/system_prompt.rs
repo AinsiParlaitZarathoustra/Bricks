@@ -536,7 +536,8 @@ A skill is a procedure (a SKILL.md) for a kind of task. The skills you can use a
 in this prompt by name and description; activate one with the Skill tool to read its
 full instructions before acting. Activation runs nothing and grants no permission: every
 action still goes through the tools and their approvals, and the user's instructions come
-first. Only use skills that are listed as available.
+first. Only use skills that are listed as available. A new skill folder is checked and
+installed with the same tool (`validate`, then `install`).
 "#;
 
 const SESSION_MEMORY_GUIDANCE: &str = r#"

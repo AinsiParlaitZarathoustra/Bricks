@@ -8,10 +8,18 @@ use crate::registry::{
     Scope, SkillRoot, Trust,
 };
 use crate::resources::{self, Resource};
-use parking_lot::RwLock;
+use parking_lot::{Mutex, RwLock};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+/// The store's change counter and folder date.
+fn stamp(store: Option<&Path>) -> StoreStamp {
+    (
+        crate::store::generation(),
+        store.and_then(|d| std::fs::metadata(d).ok()?.modified().ok()),
+    )
+}
 
 /// Bounds of the catalog given to the model.
 pub const CATALOG_MAX_ENTRIES: usize = 100;
@@ -25,12 +33,25 @@ pub struct SkillsService {
     /// Canonical project folder, when the roots include project sources.
     project: Option<PathBuf>,
     current: RwLock<Arc<Registry>>,
+    /// The store among the roots, and how it was when last read: a change
+    /// made by this process or another one is seen at the next use.
+    store: Option<PathBuf>,
+    store_seen: Mutex<StoreStamp>,
+    /// One reading at a time: a slower reading never replaces a newer one.
+    reading: Mutex<()>,
 }
+
+type StoreStamp = (u64, Option<std::time::SystemTime>);
 
 impl SkillsService {
     /// Read `roots` now.
     pub fn new(roots: Vec<SkillRoot>, builtins: &[BuiltinSkill], project: Option<PathBuf>) -> Self {
         let limits = Limits::default();
+        let store = roots
+            .iter()
+            .find(|r| r.scope == Scope::Store)
+            .and_then(|r| r.path.clone());
+        let seen = stamp(store.as_deref());
         let reg = Registry::discover(1, roots.clone(), builtins, limits);
         Self {
             roots,
@@ -38,15 +59,19 @@ impl SkillsService {
             limits,
             project,
             current: RwLock::new(Arc::new(reg)),
+            store,
+            store_seen: Mutex::new(seen),
+            reading: Mutex::new(()),
         }
     }
 
-    /// The five default sources of `project` (made canonical) and `home`,
-    /// with Bricks' built-in skills.
-    pub fn standard(project: &Path, home: Option<&Path>) -> Self {
+    /// Bricks' sources: the skills installed in `store` and the built-in
+    /// one. `project` is kept as the session's folder; none of its folders
+    /// is read.
+    pub fn standard(project: &Path, store: Option<&Path>) -> Self {
         let project = std::fs::canonicalize(project).unwrap_or_else(|_| project.to_path_buf());
         Self::new(
-            crate::registry::standard_roots(&project, home),
+            crate::registry::bricks_roots(store),
             crate::builtin::BUILTIN,
             Some(project),
         )
@@ -67,13 +92,37 @@ impl SkillsService {
         self.project.as_deref()
     }
 
+    /// The store among the sources, where installations go.
+    pub fn store(&self) -> Option<crate::store::SkillStore> {
+        self.store.as_deref().map(crate::store::SkillStore::new)
+    }
+
+    /// The current generation, read again first when the store changed.
     pub fn registry(&self) -> Arc<Registry> {
+        if self.store.is_some() && *self.store_seen.lock() != stamp(self.store.as_deref()) {
+            let _one = self.reading.lock();
+            // Taken before reading: a change made during the reading moves
+            // the stamp again, and the next call reads once more.
+            let now = stamp(self.store.as_deref());
+            if *self.store_seen.lock() != now {
+                let reg = self.read_sources();
+                *self.store_seen.lock() = now;
+                return reg;
+            }
+        }
         self.current.read().clone()
     }
 
     /// Read the sources again. Activations made from an older generation
     /// keep the text they were validated with.
     pub fn reload(&self) -> Arc<Registry> {
+        let _one = self.reading.lock();
+        self.read_sources()
+    }
+
+    /// Discover the sources and publish the result (the caller holds
+    /// `reading`).
+    fn read_sources(&self) -> Arc<Registry> {
         let generation = self.current.read().generation + 1;
         let reg = Arc::new(Registry::discover(
             generation,

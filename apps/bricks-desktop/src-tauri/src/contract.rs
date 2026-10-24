@@ -849,11 +849,12 @@ pub struct ReasoningProfileEdit {
     pub remove: Vec<String>,
 }
 
-/// Skills catalogue outside any session (settings), for a project or the
-/// user/built-in sources only. Consulting grants no trust.
+/// Skills catalogue outside any session (settings): the skills installed in
+/// Bricks' store and the built-in ones. Consulting grants no trust.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct SkillsCatalog {
-    /// Project whose sources were included (`None`: user and built-in only).
+    /// The project given by the caller, echoed back (the catalogue reads no
+    /// project folder).
     pub project_id: Option<String>,
     /// `bricks_agent::control::SkillsListing`.
     #[ts(type = "import('../engine').SkillsListing")]
@@ -864,10 +865,36 @@ pub struct SkillsCatalog {
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct SkillSourceView {
-    /// `project` | `user` | `builtin` (engine wording).
+    /// `store` | `builtin` (or `project` | `user` | `explicit` in engine wording).
     pub source: String,
     pub path: String,
     pub skills: u32,
+}
+
+/// The outcome of a change to the installed skills (create, import, remove).
+/// A refused change is an answer, not an error: `problem` says what to
+/// correct. Only a failure of the file system is an error.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct SkillChange {
+    /// The skill's name, when the change was made.
+    pub name: Option<String>,
+    /// Why the change was refused, when it was.
+    pub problem: Option<SkillProblem>,
+    /// Notes on the installed skill (for example, the folder's name differs).
+    pub notes: Vec<String>,
+}
+
+/// Why a change to the installed skills was refused.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct SkillProblem {
+    /// The part the message is about: `name` | `description` | `instructions`
+    /// | `document` | `folder`.
+    pub field: String,
+    /// `invalid` | `incompatible` | `reserved` | `exists` | `not_installed` |
+    /// `unsafe`.
+    pub kind: String,
+    /// For the person, in English.
+    pub message: String,
 }
 
 // ─── typed-command labels ──────────────────────────────────────

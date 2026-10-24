@@ -1,17 +1,18 @@
 //! # Stress test — Agent Skills
 //!
 //! The `bricks-skills` service and the `Skill` tool, on temporary folders
-//! only (an injected home: no personal skill of the machine is read).
-//! Built-in documents, the five sources and their priorities, collisions,
-//! trust, incompatible documents, activation, resources, the tool contract,
-//! an agent's single `Skill` registration, and discovery at scale.
+//! only (an injected store: no skill of the machine is read). Built-in
+//! document, the store and its collisions with the built-in skill, project
+//! folders that are never read, validation, incompatible documents,
+//! activation, resources, the tool contract, an agent's single `Skill`
+//! registration, and discovery at scale.
 //!
 //! ```bash
 //! cargo run --release -p bricks --example stress_skills
 //! ```
 
 use bricks::prelude::*;
-use bricks::skills::{ProjectDecision, ResolveError, SkillAccess, SkillsService, standard_roots};
+use bricks::skills::{ProjectDecision, ResolveError, SkillAccess, SkillsService};
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Instant;
@@ -61,14 +62,15 @@ fn main() {
     let tmp = tempfile::tempdir().unwrap();
     let project = tmp.path().join("project");
     let home = tmp.path().join("home");
+    let store = home.join("skills");
     std::fs::create_dir_all(&project).unwrap();
-    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(&store).unwrap();
 
     // ── 1. Built-in skills ───────────────────────────────────────────────
     println!("  1. Built-in skills");
     println!("  ──────────────────");
     {
-        let svc = SkillsService::standard(&project, Some(&home));
+        let svc = SkillsService::standard(&project, Some(&store));
         let access = SkillAccess::new(Arc::new(svc));
         let names: Vec<String> = access
             .catalog()
@@ -76,7 +78,7 @@ fn main() {
             .into_iter()
             .map(|e| e.name)
             .collect();
-        for n in ["commit", "debug", "remember", "simplify", "stuck", "verify"] {
+        for n in ["create-skills"] {
             check!(
                 format!("built-in `{n}` is listed"),
                 names.iter().any(|x| x == n)
@@ -100,40 +102,30 @@ fn main() {
     }
     println!();
 
-    // ── 2. Sources and priorities ────────────────────────────────────────
-    println!("  2. Sources, priorities, collisions");
-    println!("  ──────────────────────────────────");
+    // ── 2. The store, collisions, project folders ────────────────────────
+    println!("  2. Store, collisions, project folders");
+    println!("  ─────────────────────────────────────");
     {
         let ok = |n: &str, d: &str| format!("name: {n}\ndescription: {d}\n");
+        write(&store, "shared", &ok("shared", "s-store"), "A");
         write(
-            &project.join(".agents/skills"),
-            "shared",
-            &ok("shared", "p-agents"),
-            "A",
-        );
-        write(
-            &project.join(".claude/skills"),
-            "shared",
-            &ok("shared", "p-claude"),
+            &store,
+            "create-skills",
+            &ok("create-skills", "installed copy"),
             "B",
         );
+        // Folders of other clients in the project: never read.
         write(
-            &home.join(".agents/skills"),
-            "shared",
-            &ok("shared", "h-agents"),
+            &project.join(".agents/skills"),
+            "legacy",
+            &ok("legacy", "p-agents"),
             "C",
         );
         write(
-            &home.join(".claude/skills"),
-            "shared",
-            &ok("shared", "h-claude"),
+            &project.join(".claude/skills"),
+            "legacy",
+            &ok("legacy", "p-claude"),
             "D",
-        );
-        write(
-            &home.join(".claude/skills"),
-            "verify",
-            &ok("verify", "personal verify"),
-            "E",
         );
         write(
             &project.join(".cersei/skills"),
@@ -143,36 +135,35 @@ fn main() {
         );
         std::fs::create_dir_all(project.join(".claude/commands")).unwrap();
         std::fs::write(project.join(".claude/commands/cmd.md"), "Do $ARGUMENTS").unwrap();
-        let svc = Arc::new(SkillsService::standard(&project, Some(&home)));
+        let svc = Arc::new(SkillsService::standard(&project, Some(&store)));
         let access = SkillAccess::new(Arc::clone(&svc));
         let desc = |a: &SkillAccess, n: &str| a.activate(n).map(|x| x.description).ok();
         check!(
-            "pending project: personal wins",
-            desc(&access, "shared").as_deref() == Some("h-agents")
+            "an installed skill is activable",
+            desc(&access, "shared").as_deref() == Some("s-store")
         );
         check!(
-            "a personal skill shadows a built-in one",
-            desc(&access, "verify").as_deref() == Some("personal verify")
-        );
-        access.decide_project(ProjectDecision::Granted);
-        check!(
-            "approved project: .agents first",
-            desc(&access, "shared").as_deref() == Some("p-agents")
+            "an installed skill shadows the built-in one",
+            desc(&access, "create-skills").as_deref() == Some("installed copy")
         );
         let reg = svc.registry();
         check!(
-            "every homonym stays visible for diagnostics (4)",
-            reg.candidates.iter().filter(|c| c.key == "shared").count() == 4
+            "every homonym stays visible for diagnostics (2)",
+            reg.candidates.iter().filter(|c| c.key == "create-skills").count() == 2
         );
         check!(
-            ".cersei/skills and .claude/commands are not read",
+            "project folders of other clients are not read",
             access.activate("legacy").is_err() && access.activate("cmd").is_err()
         );
         let child = access.clone();
-        access.decide_project(ProjectDecision::Denied);
+        access.decide_project(ProjectDecision::Granted);
         check!(
-            "a sub-agent's access follows the session's decision",
-            desc(&child, "shared").as_deref() == Some("h-agents")
+            "a project decision grants no skill that is not read",
+            access.activate("legacy").is_err()
+        );
+        check!(
+            "a sub-agent's access follows the session's store",
+            desc(&child, "shared").as_deref() == Some("s-store")
         );
     }
     println!();
@@ -182,7 +173,7 @@ fn main() {
     println!("  ────────────────────────────────────────");
     {
         let t = tempfile::tempdir().unwrap();
-        let root = t.path().join("h/.agents/skills");
+        let root = t.path().join("h/skills");
         write(
             &root,
             "données",
@@ -202,11 +193,7 @@ fn main() {
             "---\r\nname: crlf\r\ndescription: >-\r\n  two\r\n  lines\r\n---\r\nbody\r\n",
         )
         .unwrap();
-        let svc = SkillsService::new(
-            standard_roots(&t.path().join("p"), Some(&t.path().join("h"))),
-            &[],
-            None,
-        );
+        let svc = SkillsService::standard(&t.path().join("p"), Some(&root));
         let a = SkillAccess::new(Arc::new(svc));
         check!("Unicode name accepted", a.activate("données").is_ok());
         check!(
@@ -234,7 +221,7 @@ fn main() {
     println!("  ─────────────");
     {
         let t = tempfile::tempdir().unwrap();
-        let root = t.path().join("h/.agents/skills");
+        let root = t.path().join("h/skills");
         write(
             &root,
             "list",
@@ -249,11 +236,7 @@ fn main() {
         );
         std::fs::create_dir_all(root.join("pdf/scripts")).unwrap();
         std::fs::write(root.join("pdf/scripts/x.sh"), "SCRIPT-CONTENT").unwrap();
-        let svc = SkillsService::new(
-            standard_roots(&t.path().join("p"), Some(&t.path().join("h"))),
-            &[],
-            None,
-        );
+        let svc = SkillsService::standard(&t.path().join("p"), Some(&root));
         let session = bricks::tools::skill_tool::SkillSession::new(SkillAccess::new(Arc::new(svc)));
         let ext = Extensions::default();
         ext.insert(session.clone());
@@ -311,7 +294,7 @@ fn main() {
     println!("  5. Agent");
     println!("  ────────");
     {
-        let svc = SkillsService::standard(&project, Some(&home));
+        let svc = SkillsService::standard(&project, Some(&store));
         let access = SkillAccess::new(Arc::new(svc));
         let agent = Agent::builder()
             .provider(Nothing)
@@ -356,7 +339,7 @@ fn main() {
     println!("  ─────────────────────");
     {
         let t = tempfile::tempdir().unwrap();
-        let root = t.path().join("h/.agents/skills");
+        let root = t.path().join("h/skills");
         for i in 0..300 {
             let n = format!("skill-{i:03}");
             write(
@@ -367,17 +350,14 @@ fn main() {
             );
         }
         let start = Instant::now();
-        let svc = SkillsService::new(
-            standard_roots(&t.path().join("p"), Some(&t.path().join("h"))),
-            &[],
-            None,
-        );
+        let svc = SkillsService::standard(&t.path().join("p"), Some(&root));
         let elapsed = start.elapsed();
         let a = SkillAccess::new(Arc::new(svc));
         let cat = a.catalog();
         println!("    300 skills discovered in {} ms", elapsed.as_millis());
         check!("catalog bounded (100 entries)", cat.entries.len() == 100);
-        check!("partial catalog says so", cat.omitted == 200);
+        // 300 installed skills and the built-in one: 100 shown, 201 left out.
+        check!("partial catalog says so", cat.omitted == 201);
         check!(
             "catalog carries no instructions",
             !cat.render().unwrap_or_default().contains(&"x".repeat(100))

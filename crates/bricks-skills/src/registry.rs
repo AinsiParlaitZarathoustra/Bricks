@@ -37,6 +37,8 @@ pub enum Scope {
     Builtin,
     /// Given explicitly by an embedder (SDK), trusted as it says.
     Explicit,
+    /// Installed by a person in Bricks' store.
+    Store,
 }
 
 /// One place skills are read from.
@@ -71,8 +73,30 @@ impl SkillRoot {
     }
 }
 
-/// The five default sources of `project`, with `home` (injected, so tests
-/// never read the real one).
+/// Bricks' sources: the skills installed in its store (`<bricks_home>/skills`,
+/// when given) and the built-in ones.
+pub fn bricks_roots(store: Option<&Path>) -> Vec<SkillRoot> {
+    let mut roots = Vec::new();
+    if let Some(store) = store {
+        roots.push(SkillRoot {
+            id: "store".into(),
+            scope: Scope::Store,
+            path: Some(store.to_path_buf()),
+            trusted: true,
+        });
+    }
+    roots.push(SkillRoot {
+        id: "builtin".into(),
+        scope: Scope::Builtin,
+        path: None,
+        trusted: true,
+    });
+    roots
+}
+
+/// The folders other clients share (`.agents/skills`, `.claude/skills` of
+/// `project` and of `home`) and the built-in source. Bricks never reads
+/// them by default; an embedder may pass them explicitly.
 pub fn standard_roots(project: &Path, home: Option<&Path>) -> Vec<SkillRoot> {
     let mut roots = vec![
         SkillRoot {
@@ -163,7 +187,7 @@ impl Trust {
         match root.scope {
             Scope::Project => self.project == ProjectDecision::Granted,
             Scope::Personal => self.personal,
-            Scope::Builtin => true,
+            Scope::Builtin | Scope::Store => true,
             Scope::Explicit => root.trusted,
         }
     }
@@ -490,14 +514,16 @@ impl Registry {
                 _ => continue, // a folder without SKILL.md is not a skill
             }
             let bytes = read_bounded(&file);
-            self.candidates.push(candidate_of(
-                i,
-                root,
-                name,
-                Some(entry_path),
-                Some(file),
-                bytes,
-            ));
+            // An installed copy answers to its installation: removed and
+            // installed again, it is another source.
+            let install = (root.scope == Scope::Store)
+                .then(|| crate::store::install_id(&entry_path))
+                .flatten();
+            let mut c = candidate_of(i, root, name, Some(entry_path), Some(file), bytes);
+            if let Some(id) = install {
+                c.source = format!("{}:{id}", root.id);
+            }
+            self.candidates.push(c);
         }
     }
 

@@ -333,6 +333,9 @@ pub struct Agent {
     pub(crate) extensions: bricks_tools::Extensions,
     /// The skills service and this agent's activations (`None`: no skills).
     pub(crate) skills: Option<bricks_tools::skill_tool::SkillSession>,
+    /// The withdrawn activations and snapshots the summaries of the active
+    /// history were last checked against (a fingerprint).
+    pub(crate) skills_checked: parking_lot::Mutex<Option<String>>,
 }
 
 impl Agent {
@@ -705,7 +708,8 @@ impl Agent {
     /// long-term memory block, then the appended instructions.
     fn join_system(&self, base: Option<String>, plan: Option<String>) -> Option<String> {
         let parts: Vec<String> = [
-            base,
+            // A preloaded skill withdrawn since leaves the prompt.
+            base.map(|b| self.without_withdrawn_skills(b)),
             self.skills_catalog(),
             plan,
             self.recalled.lock().clone(),
@@ -1403,6 +1407,7 @@ impl AgentBuilder {
             save_owner: uuid::Uuid::new_v4().as_u64_pair().0,
             extensions: self.extensions,
             skills,
+            skills_checked: parking_lot::Mutex::new(None),
         };
         // A plan made here reports to this agent's events (one given by the
         // caller reports wherever the caller decided).

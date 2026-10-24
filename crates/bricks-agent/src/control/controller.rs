@@ -168,11 +168,12 @@ pub struct EngineConfig {
 /// Where a session's skills come from, besides its project.
 #[derive(Clone, Default)]
 pub struct SkillsSetup {
-    /// The home folder whose `~/.agents/skills` and `~/.claude/skills` are
-    /// read (`None`: no personal skills). Injected, never guessed here.
-    pub home: Option<PathBuf>,
-    /// Personal skills usable without asking (the local policy; default
-    /// true).
+    /// Bricks' skill store (`<bricks_home>/skills`): the skills a person
+    /// installed (`None`: only the built-in one). Injected, never guessed
+    /// here. No other folder is read by default.
+    pub store: Option<PathBuf>,
+    /// Personal skills of explicit sources usable without asking (the
+    /// local policy; default true).
     pub personal: bool,
     /// Sources given by an embedder, after the default ones.
     pub extra_roots: Vec<bricks_skills::SkillRoot>,
@@ -184,9 +185,9 @@ pub struct SkillsSetup {
 }
 
 impl SkillsSetup {
-    pub fn with_home(home: Option<PathBuf>) -> Self {
+    pub fn with_store(store: Option<PathBuf>) -> Self {
         Self {
-            home,
+            store,
             personal: true,
             extra_roots: Vec::new(),
             trust_project: false,
@@ -199,7 +200,7 @@ fn skill_access(cfg: &EngineConfig, working_dir: &Path) -> Option<bricks_skills:
     let setup = cfg.skills.as_ref()?;
     let project = std::fs::canonicalize(working_dir).unwrap_or_else(|_| working_dir.to_path_buf());
     let service = bricks_skills::SkillsService::with_roots(
-        bricks_skills::standard_roots(&project, setup.home.as_deref()),
+        bricks_skills::bricks_roots(setup.store.as_deref()),
         setup.extra_roots.clone(),
         Some(project),
     );

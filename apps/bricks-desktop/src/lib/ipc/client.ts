@@ -301,11 +301,21 @@ export type * from './bindings/ColorSet'
 export type * from './bindings/ReasoningProfileEdit'
 export type * from './bindings/SkillsCatalog'
 export type * from './bindings/SkillSourceView'
+export type * from './bindings/SkillChange'
+export type * from './bindings/SkillProblem'
+import type { SkillChange } from './bindings/SkillChange'
 import type { SkillsCatalog } from './bindings/SkillsCatalog'
 
-/** Settings: skills of the user/built-in sources (+ a project's, never trusted). */
+/** Settings: the skills of Bricks' store and the built-in ones. */
 export const skillsCatalog = (projectId: string | null, query = '', page = 0, reload = false) =>
   call<SkillsCatalog>('skills_catalog', { projectId, query, page, reload })
+/** Settings: writes a skill into the store. A refusal is `problem`, not a rejection. */
+export const skillsCreate = (name: string, description: string, instructions: string) =>
+  call<SkillChange>('skills_create', { name, description, instructions })
+/** Settings: copies the skill folder `path` (chosen with the dialog) into the store. */
+export const skillsImport = (path: string) => call<SkillChange>('skills_import', { path })
+/** Settings: removes an installed skill, by name. */
+export const skillsRemove = (name: string) => call<SkillChange>('skills_remove', { name })
 
 /** Sub-agent instance records of an open session (engine `InstanceRecord[]`). */
 export const sessionAgents = (sessionId: string) =>

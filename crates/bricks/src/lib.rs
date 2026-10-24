@@ -35,7 +35,7 @@ pub use bricks_hooks as hooks;
 pub use bricks_mcp as mcp;
 pub use bricks_memory as memory;
 pub use bricks_provider as provider;
-/// Agent Skills (`SKILL.md`): format, sources, trust, activation.
+/// Agent Skills (`SKILL.md`): format, sources, the store, trust, activation.
 pub use bricks_skills as skills;
 pub use bricks_tools as tools;
 pub use bricks_types as types;

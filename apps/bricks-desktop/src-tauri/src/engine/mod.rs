@@ -111,7 +111,7 @@ impl AppState {
             drafts_dir: desktop.join("drafts"),
             attachments_dir: desktop.join("attachments"),
             prefs: Arc::new(prefs),
-            skills: Arc::new(SkillsCatalogStore::new(dirs::home_dir())),
+            skills: Arc::new(SkillsCatalogStore::new(home.join("skills"))),
             run_labels: Arc::new(RunLabelStore::at(desktop.join("run-labels"))),
             run_records: Arc::new(RunRecordStore::at(desktop.join("run-records"))),
             projects: Arc::new(projects),

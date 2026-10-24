@@ -12,6 +12,12 @@ pub fn bricks_home() -> PathBuf {
         .join(".bricks")
 }
 
+/// The skill store: `<bricks_home>/skills`, one standard skill folder per
+/// installed skill.
+pub fn skills_dir() -> PathBuf {
+    bricks_home().join("skills")
+}
+
 /// The session store: `<bricks_home>/sessions`.
 pub fn sessions_dir() -> PathBuf {
     bricks_home().join("sessions")

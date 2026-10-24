@@ -12,8 +12,8 @@ use std::sync::Arc;
 /// opens, so a broken `bricks.toml` in one folder does not prevent resuming
 /// a session of another.
 ///
-/// Skills: the session's project sources and the user's home folder
-/// (`~/.agents/skills`, `~/.claude/skills`), plus the built-in ones.
+/// Skills: the ones installed in Bricks' store (`<bricks_home>/skills`) and
+/// the built-in one. No project or home folder of another client is read.
 pub fn engine_config(
     workspace: &Path,
     registry: Arc<ProviderRegistry>,
@@ -26,7 +26,7 @@ pub fn engine_config(
         crate::paths::sessions_dir(),
     );
     cfg.interactive = interactive;
-    cfg.skills = Some(SkillsSetup::with_home(dirs::home_dir()));
+    cfg.skills = Some(SkillsSetup::with_store(Some(crate::paths::skills_dir())));
     cfg.project_loader = Some(Arc::new(Projects::new(registry, interactive)));
     cfg
 }

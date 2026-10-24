@@ -829,6 +829,7 @@ dependencies = [
 name = "bricks-skills"
 version = "0.6.1"
 dependencies = [
+ "libc",
  "parking_lot",
  "serde",
  "serde-saphyr",

@@ -53,15 +53,22 @@ export function skillStateTone(state: string): SkillTone {
 }
 
 /**
- * The French name of a source. The engine writes `builtin`, `user:<folder>`, `project:<folder>` and
- * `sdk:<id>`; the catalogue's source list uses `builtin`, `user` and `project`.
+ * The French name of a source. The engine writes `builtin`, `store` / `store:<installation>`,
+ * `user:<folder>`, `project:<folder>` and `sdk:<id>`; the catalogue's source list uses `builtin`,
+ * `store`, `user` and `project`.
  */
 export function skillSourceLabel(source: string): string {
 	if (source === 'builtin') return 'Intégrée';
+	if (isInstalledSkill(source)) return 'Installée';
 	if (source === 'user') return 'Personnelle';
 	if (source === 'project') return 'Projet';
 	if (source.startsWith('user:')) return `Personnelle · ${source.slice('user:'.length)}`;
 	if (source.startsWith('project:')) return `Projet · ${source.slice('project:'.length)}`;
 	if (source.startsWith('sdk:')) return `SDK · ${source.slice('sdk:'.length)}`;
 	return source;
+}
+
+/** A skill installed in Bricks' store (the only ones the settings can remove). */
+export function isInstalledSkill(source: string): boolean {
+	return source === 'store' || source.startsWith('store:');
 }

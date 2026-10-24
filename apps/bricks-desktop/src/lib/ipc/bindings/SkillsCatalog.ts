@@ -2,12 +2,13 @@
 import type { SkillSourceView } from "./SkillSourceView";
 
 /**
- * Skills catalogue outside any session (settings), for a project or the
- * user/built-in sources only. Consulting grants no trust.
+ * Skills catalogue outside any session (settings): the skills installed in
+ * Bricks' store and the built-in ones. Consulting grants no trust.
  */
 export type SkillsCatalog = { 
 /**
- * Project whose sources were included (`None`: user and built-in only).
+ * The project given by the caller, echoed back (the catalogue reads no
+ * project folder).
  */
 project_id: string | null, 
 /**

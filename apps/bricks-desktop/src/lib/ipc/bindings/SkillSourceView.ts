@@ -2,6 +2,6 @@
 
 export type SkillSourceView = { 
 /**
- * `project` | `user` | `builtin` (engine wording).
+ * `store` | `builtin` (or `project` | `user` | `explicit` in engine wording).
  */
 source: string, path: string, skills: number, };

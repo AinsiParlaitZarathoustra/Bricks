@@ -1,16 +1,20 @@
 //! The `Skill` tool: list the skills the agent may use, activate one (read
-//! its full instructions), or locate one of its files. Everything goes
-//! through the agent's [`SkillSession`] (the `bricks-skills` service and
-//! this agent's ledger); without one, the tool says so.
+//! its full instructions), locate one of its files, or check a skill folder
+//! and install a copy of it in Bricks' store. Everything goes through the
+//! agent's [`SkillSession`] (the `bricks-skills` service and this agent's
+//! ledger); without one, the tool says so.
 //!
 //! Activating reads instructions; it runs nothing, changes no working
 //! directory and grants no permission. The tool only *proposes* the
 //! activation: the engine records it once the text is in the agent's
 //! context (and refuses it, without cutting it, when it does not fit).
+//! Installing writes in the store, so it asks the write permission; it
+//! copies files and runs none of them.
 
 use super::*;
 use bricks_skills::{
-    ActivationError, Ledger, Origin, ResolveError, SkillAccess, render_activation,
+    ActivationError, InstallOrigin, Ledger, Origin, ResolveError, SkillAccess, StoreError,
+    render_activation,
 };
 use serde::Deserialize;
 use std::sync::Arc;
@@ -67,6 +71,29 @@ fn resolve_error(e: &ActivationError, access: &SkillAccess) -> ToolResult {
     }
 }
 
+fn notes_text(notes: &[String]) -> String {
+    if notes.is_empty() {
+        String::new()
+    } else {
+        format!("\nNotes:\n- {}", notes.join("\n- "))
+    }
+}
+
+/// A refused validation or installation, with what to fix.
+fn store_error(e: &StoreError) -> ToolResult {
+    let meta = serde_json::to_value(e).unwrap_or_default();
+    let fix = match e {
+        StoreError::Invalid { .. } | StoreError::Incompatible { .. } | StoreError::Unsafe { .. } => {
+            " Fix the folder, then validate it again."
+        }
+        StoreError::Exists { .. } | StoreError::Reserved { .. } => {
+            " Choose another name (in SKILL.md and for the folder)."
+        }
+        _ => "",
+    };
+    ToolResult::error(format!("{e}.{fix}")).with_metadata(meta)
+}
+
 #[async_trait]
 impl Tool for SkillTool {
     fn name(&self) -> &str {
@@ -75,12 +102,22 @@ impl Tool for SkillTool {
 
     fn description(&self) -> &str {
         "Activate a skill to read its full instructions (action 'activate'), list the skills \
-         you can activate (action 'list'), or locate one of a skill's files (action \
-         'resource'). Activation runs nothing and grants no permission."
+         you can activate (action 'list'), locate one of a skill's files (action 'resource'), \
+         check a skill folder against the Agent Skills standard (action 'validate'), or install \
+         a copy of a checked folder in Bricks (action 'install'; it is then in the catalog at \
+         once). Activation runs nothing and grants no permission."
     }
 
     fn permission_level(&self) -> PermissionLevel {
         PermissionLevel::ReadOnly
+    }
+
+    /// Installing writes in the store; every other action only reads.
+    fn permission_level_for(&self, input: &Value) -> PermissionLevel {
+        match input.get("action").and_then(Value::as_str).map(str::trim) {
+            Some("install") => PermissionLevel::Write,
+            _ => PermissionLevel::ReadOnly,
+        }
     }
 
     fn category(&self) -> ToolCategory {
@@ -93,8 +130,8 @@ impl Tool for SkillTool {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["activate", "list", "resource"],
-                    "description": "'activate' (default when `skill` is given), 'list', or 'resource'"
+                    "enum": ["activate", "list", "resource", "validate", "install"],
+                    "description": "'activate' (default when `skill` is given), 'list', 'resource', 'validate' or 'install'"
                 },
                 "skill": {
                     "type": "string",
@@ -115,7 +152,7 @@ impl Tool for SkillTool {
                 },
                 "path": {
                     "type": "string",
-                    "description": "For 'resource': a path relative to the skill's directory"
+                    "description": "For 'resource': a path relative to the skill's directory. For 'validate' and 'install': the skill's folder (holding SKILL.md), relative to the working directory or absolute"
                 }
             }
         })
@@ -227,8 +264,57 @@ impl Tool for SkillTool {
                     Err(e) => ToolResult::error(e),
                 }
             }
+            "validate" | "install" => {
+                let Some(path) = input.path.as_deref().map(str::trim).filter(|p| !p.is_empty())
+                else {
+                    return ToolResult::error(format!("'{action}' needs `path`: the skill's folder."));
+                };
+                let Some(store) = session.access.service.store() else {
+                    return ToolResult::error(
+                        "This agent has no skill store: skills cannot be installed here.",
+                    );
+                };
+                let folder = ctx.working_dir.join(path);
+                if action == "validate" {
+                    return match store.validate(&folder) {
+                        Ok(c) => {
+                            let meta = serde_json::json!({
+                                "valid": true, "name": c.name, "files": c.files, "notes": c.notes,
+                            });
+                            let notes = notes_text(&c.notes);
+                            ToolResult::success(format!(
+                                "Valid: skill `{}` ({} file(s), {} bytes) can be installed with \
+                                 action 'install'. Nothing was written.{notes}",
+                                c.name, c.files, c.bytes
+                            ))
+                            .with_metadata(meta)
+                        }
+                        Err(e) => store_error(&e),
+                    };
+                }
+                match store.install(&folder, InstallOrigin::Model) {
+                    Ok(i) => {
+                        let meta = serde_json::json!({
+                            "installed": true, "name": i.name, "id": i.id,
+                            "dir": i.dir.display().to_string(), "files": i.files, "notes": i.notes,
+                        });
+                        let notes = notes_text(&i.notes);
+                        ToolResult::success(format!(
+                            "Installed skill `{}` ({} file(s)) in {}. It is in the catalog now: \
+                             activate it with action 'activate'. The folder {} was left as it \
+                             was.{notes}",
+                            i.name,
+                            i.files,
+                            i.dir.display(),
+                            folder.display()
+                        ))
+                        .with_metadata(meta)
+                    }
+                    Err(e) => store_error(&e),
+                }
+            }
             other => ToolResult::error(format!(
-                "unknown action `{other}`: 'activate', 'list' or 'resource'"
+                "unknown action `{other}`: 'activate', 'list', 'resource', 'validate' or 'install'"
             )),
         }
     }

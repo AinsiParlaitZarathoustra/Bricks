@@ -93,5 +93,7 @@ fn export_bindings() {
         PricingEdit,
         SkillsCatalog,
         SkillSourceView,
+        SkillChange,
+        SkillProblem,
     );
 }

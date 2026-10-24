@@ -989,6 +989,13 @@ async fn run_loop(
         let _ = event_tx.send(AgentEvent::TurnStart { turn }).await;
         agent.emit(AgentEvent::TurnStart { turn });
 
+        // Skills removed, installed again or changed since they were
+        // activated: withdrawn before anything is sent (a tool call in
+        // progress already ended: this is between two requests).
+        for ev in agent.reconcile_skills() {
+            send(agent, Some(&event_tx), ev).await;
+        }
+
         // Apply tool result budget to keep context manageable. Removed
         // results name their saved original, and the measurement of the old
         // history no longer applies.
