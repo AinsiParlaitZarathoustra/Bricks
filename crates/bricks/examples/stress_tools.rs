@@ -200,24 +200,6 @@ async fn run() {
             .await;
         check!("Grep finds pattern", r.content.contains("fn f"));
 
-        // NotebookEdit
-        let nb_path = tmp.path().join("test.ipynb");
-        std::fs::write(&nb_path, serde_json::json!({
-            "nbformat": 4, "nbformat_minor": 5, "metadata": {},
-            "cells": [{"cell_type": "code", "source": ["x = 1\n"], "outputs": [], "metadata": {}}]
-        }).to_string()).unwrap();
-        let nb_tool = tools.iter().find(|t| t.name() == "NotebookEdit").unwrap();
-        let r = nb_tool
-            .execute(
-                serde_json::json!({
-                    "file_path": nb_path.display().to_string(),
-                    "cell_index": 0,
-                    "new_source": "x = 42"
-                }),
-                &ctx,
-            )
-            .await;
-        check!("NotebookEdit updates cell", !r.is_error);
         println!();
     }
 

@@ -4,6 +4,7 @@ pub mod apply_patch;
 pub mod bash;
 pub mod code_scout;
 pub mod code_search;
+pub mod code_stats;
 pub mod file_edit;
 pub mod file_history;
 pub mod file_lock;
@@ -17,7 +18,6 @@ pub mod grep_tool;
 pub mod jobs;
 pub mod lsp_tool;
 pub mod mcp_tool;
-pub mod notebook_edit;
 pub mod permissions;
 pub mod powershell;
 pub mod preview;
@@ -412,7 +412,7 @@ pub fn coding() -> Vec<Box<dyn Tool>> {
 }
 
 /// File system tools: Read, Write, Edit, ApplyPatch, Glob, Grep,
-/// CodeSearch, CodeScout, NotebookEdit.
+/// CodeSearch, CodeScout, CodeStats.
 pub fn filesystem() -> Vec<Box<dyn Tool>> {
     vec![
         Box::new(file_read::FileReadTool),
@@ -423,7 +423,7 @@ pub fn filesystem() -> Vec<Box<dyn Tool>> {
         Box::new(grep_tool::GrepTool),
         Box::new(code_search::CodeSearchTool::new()),
         Box::new(code_scout::CodeScoutTool),
-        Box::new(notebook_edit::NotebookEditTool),
+        Box::new(code_stats::CodeStatsTool),
     ]
 }
 
@@ -581,9 +581,9 @@ mod unknown_parameter_policy {
             }
         }
 
-        // 22 built-in tools, 19 of them with a required parameter.
+        // 22 built-in tools, 18 of them with a required parameter.
         assert!(
-            covered >= 19,
+            covered >= 18,
             "coverage collapsed to {covered} tools; the filter is hiding the registry"
         );
         assert!(

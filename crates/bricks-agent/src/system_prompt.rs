@@ -368,6 +368,9 @@ pub const BRICKS_INTRODUCTION: &str = "Tu es Bricks, un agent de développement 
 /// The foundation's bullet kept only when `CodeScout` is announced.
 const CODE_SCOUT_BULLET: &str = "- Utilise CodeScout lorsque les symboles, références ou diagnostics apportent une précision nécessaire.";
 
+/// The foundation's bullet kept only when `CodeStats` is announced.
+const CODE_STATS_BULLET: &str = "- Utilise CodeStats pour compter le code, les commentaires et les lignes vides d’un fichier ou projet. `top_n` limite l’affichage, pas l’analyse ; vérifie `partial` avant de présenter les totaux comme complets.";
+
 /// The foundation's bullet kept only when `Bash` is announced.
 const BASH_BULLET: &str = "- Utilise Bash pour les commandes, scripts et opérations mal couverts par les outils dédiés. Respecte les règles de persistance et les limites indiquées dans sa description.";
 
@@ -474,6 +477,9 @@ pub fn bricks_foundation(tools: &[String]) -> String {
     }
     if has("CodeScout") {
         bullets.push(CODE_SCOUT_BULLET.to_string());
+    }
+    if has("CodeStats") {
+        bullets.push(CODE_STATS_BULLET.to_string());
     }
     if WEB_TOOLS.iter().any(|t| has(t)) {
         bullets.push(WEB_BULLET.to_string());
@@ -728,14 +734,15 @@ mod tests {
     /// them are whole.
     const FILE_TOOLS: [&str; 5] = ["Glob", "Grep", "Read", "Edit", "Write"];
 
-    /// The reference with the file tools, keeping the Bash, CodeScout and
-    /// web bullets as asked.
-    fn reference(bash: bool, code_scout: bool, web: bool) -> String {
+    /// The reference with the file tools, keeping the Bash, CodeScout,
+    /// CodeStats and web bullets as asked.
+    fn reference(bash: bool, code_scout: bool, code_stats: bool, web: bool) -> String {
         REFERENCE
             .trim_end_matches('\n')
             .lines()
             .filter(|l| bash || !l.starts_with("- Utilise Bash pour"))
             .filter(|l| code_scout || !l.starts_with("- Utilise CodeScout lorsque"))
+            .filter(|l| code_stats || !l.starts_with("- Utilise CodeStats pour"))
             .filter(|l| web || !l.starts_with("- Avant chaque réponse/modification incertaine"))
             .collect::<Vec<_>>()
             .join("\n")
@@ -767,7 +774,7 @@ mod tests {
     #[test]
     fn the_foundation_is_the_reference_in_every_combination() {
         for bash in [true, false] {
-            for scout in [true, false] {
+            for (scout, stats) in [(true, true), (true, false), (false, true), (false, false)] {
                 for web in [None, Some("WebFetch"), Some("WebSearch")] {
                     let mut extra = Vec::new();
                     if bash {
@@ -776,9 +783,12 @@ mod tests {
                     if scout {
                         extra.push("CodeScout");
                     }
+                    if stats {
+                        extra.push("CodeStats");
+                    }
                     extra.extend(web);
                     let names = with_files(&extra);
-                    let expected = reference(bash, scout, web.is_some());
+                    let expected = reference(bash, scout, stats, web.is_some());
                     assert_eq!(bricks_foundation(&names), expected, "{names:?}");
                     for mode in [
                         SystemPromptPrefix::Interactive,
@@ -798,7 +808,13 @@ mod tests {
         }
         // Every capability: exactly the reference text, whole.
         assert_eq!(
-            bricks_foundation(&with_files(&["Bash", "CodeScout", "WebFetch", "WebSearch"])),
+            bricks_foundation(&with_files(&[
+                "Bash",
+                "CodeScout",
+                "CodeStats",
+                "WebFetch",
+                "WebSearch"
+            ])),
             REFERENCE.trim_end_matches('\n')
         );
     }
@@ -815,6 +831,7 @@ mod tests {
             "Write",
             "Bash",
             "CodeScout",
+            "CodeStats",
             "internet",
         ] {
             assert!(!f.contains(absent), "{absent}");
