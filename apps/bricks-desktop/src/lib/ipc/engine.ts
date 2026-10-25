@@ -27,8 +27,27 @@ export interface PlanState {
 
 export type RunOutcome = 'succeeded' | 'incomplete' | 'failed' | 'cancelled'
 export type FailureKind = 'approval_required' | 'error'
-export type Decision = 'allow' | 'allow_for_session' | 'deny'
-export type DecidedBy = 'user' | 'session' | 'non_interactive' | 'cancelled'
+/** An answer covers the one call it was given for. */
+export type Decision = 'allow' | 'deny'
+export type DecidedBy = 'user' | 'non_interactive' | 'cancelled'
+export type PermissionEffect = 'allow' | 'ask' | 'deny'
+export type PermissionProfile = 'ask' | 'execute' | 'custom'
+
+/** The rules of the CUSTOM profile: an effect per class, and per tool. */
+export interface CustomRules {
+  read: PermissionEffect
+  write: PermissionEffect
+  execute: PermissionEffect
+  network: PermissionEffect
+  tools: Record<string, PermissionEffect>
+}
+
+/** A session's permission policy. Unchosen, it behaves as ASK. */
+export interface SessionPolicy {
+  profile: PermissionProfile
+  custom: CustomRules
+  chosen: boolean
+}
 export type ChangeKind = 'create' | 'modify' | 'delete'
 export type Provenance = 'measured' | 'counted' | 'mixed' | 'estimated'
 export type InstanceState =
@@ -145,6 +164,8 @@ export interface ApprovalRequest {
   input: unknown
   preview: ChangePreview | null
   agent_id?: string
+  /** The revision of the session's policy that asked. */
+  policy_revision?: number
 }
 
 export interface AttachmentInfo {
@@ -356,6 +377,7 @@ export type Event =
       decision: Decision
       by: DecidedBy
     }
+  | { type: 'permission_policy_changed'; policy: SessionPolicy; revision: number }
   | {
       type: 'edit_applied'
       tool_call_id: string
@@ -549,6 +571,7 @@ export type Command =
   | { type: 'list_skills'; query?: string; page?: number }
   | { type: 'reload_skills' }
   | { type: 'trust_project_skills'; allow: boolean }
+  | { type: 'set_permission_policy'; policy: SessionPolicy }
   | { type: 'approve'; approval_id: string; decision: Decision; reason?: string }
 
 export type Activity =
@@ -569,11 +592,9 @@ export interface Snapshot {
   context: ContextStatus
   usage: Usage
   pending_approvals: ApprovalRequest[]
-  allowed_for_session: string[]
   memory_space: string | null
-  approval_rules: unknown
-  /** Application-wide approval override (`standard` without one). */
-  approval_mode: 'standard' | 'always_ask' | 'no_confirmation'
+  permission_policy: SessionPolicy
+  permission_revision: number
   /** The session's plan (schema 7; absent from older engines). */
   plan?: PlanState
 }

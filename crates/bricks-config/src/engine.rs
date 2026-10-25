@@ -27,6 +27,11 @@ pub fn engine_config(
     );
     cfg.interactive = interactive;
     cfg.skills = Some(SkillsSetup::with_store(Some(crate::paths::skills_dir())));
+    // New sessions start from the default policy chosen once by a person
+    // (`<bricks_home>/permissions.json`); each keeps its own afterwards.
+    cfg.permissions = Some(bricks_agent::permission::PermissionStore::in_home(
+        &crate::paths::bricks_home(),
+    ));
     cfg.project_loader = Some(Arc::new(Projects::new(registry, interactive)));
     cfg
 }

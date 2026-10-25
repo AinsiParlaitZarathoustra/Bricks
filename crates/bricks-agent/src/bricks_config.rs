@@ -29,8 +29,6 @@ pub struct BricksConfig {
     pub diagnostics: Vec<String>,
     /// `[agent]`: default model, reasoning profile and limits.
     pub agent: crate::control::AgentSettings,
-    /// `[permissions]`: the approval policy shared by every frontend.
-    pub permissions: crate::control::ApprovalRules,
     /// `[semantic]`: limits of the shared code understanding engine.
     pub semantic: bricks_semantic::SemanticConfig,
     /// `[agents]`: sub-agents (the `Agent` tool) and their runtime limits.
@@ -53,7 +51,6 @@ impl Default for BricksConfig {
             web: bricks_web::WebConfig::default(),
             diagnostics: Vec::new(),
             agent: crate::control::AgentSettings::default(),
-            permissions: crate::control::ApprovalRules::default(),
             semantic: bricks_semantic::SemanticConfig::default(),
             agents: crate::agents::DelegationSettings::default(),
             background: bricks_tools::jobs::JobSettings::default(),
@@ -140,14 +137,19 @@ impl BricksConfig {
                 .push(format!("{name}: {e} (compression defaults used)")),
         }
         match crate::control::settings::from_bricks_toml(text) {
-            Ok((agent, permissions)) => {
-                c.agent = agent;
-                c.permissions = permissions;
-            }
-            Err(e) => c.diagnostics.push(format!(
-                "{name}: {e} (agent and permission defaults used: approval is asked before \
-                 writing or executing)"
-            )),
+            Ok(agent) => c.agent = agent,
+            Err(e) => c
+                .diagnostics
+                .push(format!("{name}: {e} (agent defaults used)")),
+        }
+        if toml::from_str::<toml::Value>(text)
+            .ok()
+            .is_some_and(|v| v.get("permissions").is_some())
+        {
+            c.diagnostics.push(format!(
+                "{name}: {}",
+                crate::control::settings::OBSOLETE_PERMISSIONS
+            ));
         }
         match table_from_bricks_toml::<crate::agents::DelegationSettings>(text, "agents") {
             Ok(Some(a)) => c.agents = a,
@@ -357,13 +359,15 @@ mod tests {
             Some("p/m"),
             "the rest of [agent] is read"
         );
-        assert_eq!(
-            c.permissions.write,
-            crate::control::settings::Action::Allow,
-            "[permissions] is not reset by an unknown key of [agent]"
-        );
         assert_eq!(c.agents.max_depth, 3, "the rest of [agents] is read");
-        assert_eq!(c.diagnostics.len(), 3, "{:#?}", c.diagnostics);
+        assert_eq!(c.diagnostics.len(), 4, "{:#?}", c.diagnostics);
+        assert!(
+            c.diagnostics
+                .iter()
+                .any(|d| d.contains("[permissions] is no longer read")),
+            "the obsolete section is reported: {:#?}",
+            c.diagnostics
+        );
         for key in [
             "[agent] max_turns",
             "[agent] speed",

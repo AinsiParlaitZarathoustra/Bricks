@@ -15,7 +15,7 @@ pub mod settings;
 pub mod slash;
 pub mod title;
 
-pub use approval::{ApprovalBroker, ApprovalGate, ApprovalRequest, DecidedBy, Decision};
+pub use approval::{ApprovalBroker, ApprovalRequest, BrokerApprover, DecidedBy, Decision};
 pub use controller::{
     Activity, Controller, EngineConfig, EventStream, ModelCatalog, ModelChoice, OpenOptions,
     ProfileChoice, ProjectContext, ProjectLoader, SessionChoice, SkillsSetup, Snapshot,
@@ -28,6 +28,4 @@ pub use protocol::{
     tool_status_name,
 };
 pub use session::{SessionMeta, SessionScope, SessionSummary, same_workspace};
-pub use settings::{
-    Action, AgentSettings, ApprovalMode, ApprovalOverride, ApprovalRules, Effective,
-};
+pub use settings::AgentSettings;

@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 
 /// Version of the event and command schema. Incremented on any change a
 /// consumer could notice; documented in `docs/cli.md`.
-pub const SCHEMA_VERSION: u32 = 7;
+pub const SCHEMA_VERSION: u32 = 8;
 
 /// Largest patch an edit event carries for one file. A longer one is cut and
 /// marked (`patch_truncated`).
@@ -241,6 +241,12 @@ pub enum Event {
         tool_call_id: String,
         decision: Decision,
         by: DecidedBy,
+    },
+    /// The session's permission policy changed (by a person); calls
+    /// decided from now on follow `revision`.
+    PermissionPolicyChanged {
+        policy: crate::permission::SessionPolicy,
+        revision: u64,
     },
     /// A change was applied to the session's workspace: a tool call of the
     /// session agent or of a sub-agent working in that workspace
@@ -536,6 +542,7 @@ impl Event {
             Event::ToolFinished { .. } => "tool_finished",
             Event::ApprovalRequested { .. } => "approval_requested",
             Event::ApprovalResolved { .. } => "approval_resolved",
+            Event::PermissionPolicyChanged { .. } => "permission_policy_changed",
             Event::EditApplied { .. } => "edit_applied",
             Event::MemoryRecalled { .. } => "memory_recalled",
             Event::Context { .. } => "context",
@@ -759,6 +766,11 @@ pub enum Command {
     /// A person's decision on this project's skills, for this session
     /// only. Never sent by the model.
     TrustProjectSkills { allow: bool },
+    /// Set this session's permission policy (a person's choice; never
+    /// sent by the model). Answered by `permission_policy_changed`.
+    SetPermissionPolicy {
+        policy: crate::permission::SessionPolicy,
+    },
     /// Answer an approval request.
     Approve {
         approval_id: String,
@@ -785,6 +797,7 @@ impl Command {
             Command::ListSkills { .. } => "list_skills",
             Command::ReloadSkills => "reload_skills",
             Command::TrustProjectSkills { .. } => "trust_project_skills",
+            Command::SetPermissionPolicy { .. } => "set_permission_policy",
             Command::Approve { .. } => "approve",
         }
     }
@@ -811,10 +824,17 @@ mod tests {
         let back: Envelope = serde_json::from_value(v).unwrap();
         assert_eq!(back, env);
         let c: Command = serde_json::from_str(
-            r#"{"type":"approve","approval_id":"ap_1","decision":"allow_for_session"}"#,
+            r#"{"type":"approve","approval_id":"ap_1","decision":"allow"}"#,
         )
         .unwrap();
         assert_eq!(c.name(), "approve");
+        // An answer covers one call: a grant for the session no longer exists.
+        assert!(
+            serde_json::from_str::<Command>(
+                r#"{"type":"approve","approval_id":"ap_1","decision":"allow_for_session"}"#,
+            )
+            .is_err()
+        );
         let p: Prompt = serde_json::from_str(
             r#"{"blocks":[{"kind":"text","text":"hi"},{"kind":"file","path":"a b.rs"}]}"#,
         )
@@ -837,7 +857,7 @@ mod tests {
 
     #[test]
     fn the_schema_is_seven_and_the_new_fields_are_only_written_when_set() {
-        assert_eq!(SCHEMA_VERSION, 7);
+        assert_eq!(SCHEMA_VERSION, 8);
         let mut w = written(false);
         let v = serde_json::to_value(&w).unwrap();
         assert!(

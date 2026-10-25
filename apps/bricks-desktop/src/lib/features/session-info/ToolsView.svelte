@@ -1,7 +1,6 @@
 <script lang="ts">
-	// Tools of the session (`/tools`): name, description, permission level, the
-	// decision the approval rules give it, and whether it was allowed for the
-	// session.
+	// Tools of the session (`/tools`): name, description, permission level and
+	// the decision of the session's permission policy.
 	import { untrack } from 'svelte';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
@@ -42,12 +41,11 @@
 		}
 	}
 
-	// Read on open, and again when a run ends or an approval is answered: an
-	// "allow for this session" grant changes what the table says.
+	// Read on open, and again when a run ends or the policy changes.
 	$effect(() => {
 		const id = sessionId;
 		void conv?.running;
-		void conv?.approvals.size;
+		void conv?.permissions?.revision;
 		if (!id) {
 			loadToken++;
 			tools = null;
@@ -96,7 +94,6 @@
 							<th scope="col" class="px-3 py-2 font-medium">Outil</th>
 							<th scope="col" class="px-3 py-2 font-medium">Niveau</th>
 							<th scope="col" class="px-3 py-2 font-medium">Décision</th>
-							<th scope="col" class="px-3 py-2 font-medium">Pour la session</th>
 						</tr>
 					</thead>
 					<tbody class="divide-y divide-border">
@@ -112,14 +109,9 @@
 								</th>
 								<td class="px-3 py-2 whitespace-nowrap">{levelLabel(tool.level)}</td>
 								<td class="px-3 py-2">
-									<Badge variant={decisionVariant(tool.decision)}>{decisionLabel(tool.decision)}</Badge>
-								</td>
-								<td class="px-3 py-2 whitespace-nowrap">
-									{#if tool.allowed_for_session}
-										<Badge variant="secondary">Autorisé</Badge>
-									{:else}
-										<span class="text-muted-foreground">non</span>
-									{/if}
+									<Badge variant={decisionVariant(tool.decision)} title={tool.reason}>
+										{decisionLabel(tool.decision)}
+									</Badge>
 								</td>
 							</tr>
 						{/each}

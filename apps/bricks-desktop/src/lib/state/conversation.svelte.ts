@@ -23,6 +23,7 @@ import type {
   PlanState,
   RunOutcome,
   SkillSourceInfo,
+  SessionPolicy,
   Snapshot,
   SpawnInfo,
   Termination,
@@ -468,6 +469,9 @@ export class Conversation {
   /** The session's plan (TodoWrite): the latest revision seen, `null` before any. */
   plan = $state<PlanState | null>(null)
 
+  /** The session's permission policy, at the latest revision seen. */
+  permissions = $state<{ policy: SessionPolicy; revision: number } | null>(null)
+
   context = $state<ContextStatus | null>(null)
   /** The last measure no longer applies (model change, compaction...). */
   contextStale = $state(false)
@@ -596,6 +600,13 @@ export class Conversation {
     this.approvals.clear()
     for (const a of s.pending_approvals) this.approvals.set(a.approval_id, a)
     if (s.plan) this.applyPlan(s.plan)
+    if (s.permission_policy) this.applyPermissions(s.permission_policy, s.permission_revision)
+  }
+
+  /** Adopts a policy unless an equal or newer revision is already held. */
+  applyPermissions(policy: SessionPolicy, revision: number) {
+    if (this.permissions && revision <= this.permissions.revision) return
+    this.permissions = { policy, revision }
   }
 
   /**
@@ -927,6 +938,9 @@ export class Conversation {
         if (item) item.resolved = { decision: env.decision, by: env.by }
         break
       }
+      case 'permission_policy_changed':
+        this.applyPermissions(env.policy, env.revision)
+        break
       case 'edit_applied': {
         this.closeAssistant()
         this.items.push({

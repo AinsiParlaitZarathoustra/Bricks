@@ -2074,7 +2074,7 @@ impl AgentSpawner {
             .provider_boxed(provider)
             .tools(tools)
             .model(resolved.model.applied.clone())
-            .permission_policy_arc(Arc::new(ChildPolicy {
+            .permission_engine_arc(Arc::new(ChildPolicy {
                 inner: Arc::clone(&pc.permissions),
                 agent_id: info.agent_id.clone(),
             }))
@@ -2492,25 +2492,25 @@ mod tests {
         assert_eq!(r.reasoning.applied, "(none)");
     }
 
-    /// A sub-agent's approvals go through its parent's gate, read at each
-    /// decision: the runtime override reaches a running child, and a
-    /// pending request is not answered by a change.
+    /// A sub-agent's calls go through its parent's engine, read at each
+    /// decision: a change of the session's policy reaches a running child,
+    /// and a pending request is not answered by a change.
     #[tokio::test]
-    async fn a_sub_agent_follows_the_runtime_override_of_its_parent() {
-        use crate::control::settings::ApprovalOverride;
-        use crate::control::{ApprovalBroker, ApprovalGate, ApprovalMode, ApprovalRules, Decision};
-        use bricks_tools::PermissionLevel;
+    async fn a_sub_agent_follows_the_policy_of_its_session() {
+        use crate::control::{ApprovalBroker, BrokerApprover, Decision};
+        use crate::permission::{PermissionEngine, PermissionProfile, PolicyCell, SessionPolicy};
         use bricks_tools::permissions::{PermissionDecision, PermissionPolicy, PermissionRequest};
+        use bricks_tools::{PermissionLevel, ToolCategory};
         use std::time::Duration;
 
-        let mode = ApprovalOverride::new(ApprovalMode::Standard);
+        let cell = PolicyCell::new(SessionPolicy::chosen(PermissionProfile::Ask), 0);
         let broker = ApprovalBroker::new(true);
         let (tx, _rx) = tokio::sync::mpsc::channel(64);
         broker.begin_run(tx, tokio_util::sync::CancellationToken::new());
-        let parent: Arc<dyn PermissionPolicy> = Arc::new(
-            ApprovalGate::new(ApprovalRules::default(), broker.clone())
-                .with_override(Arc::clone(&mode)),
-        );
+        let parent: Arc<dyn PermissionPolicy> = Arc::new(PermissionEngine::new(
+            cell.clone(),
+            Arc::new(BrokerApprover::new(broker.clone())),
+        ));
         let child: Arc<dyn PermissionPolicy> = Arc::new(ChildPolicy {
             inner: parent,
             agent_id: "sa_child".into(),
@@ -2519,65 +2519,56 @@ mod tests {
             tool_name: "Write".into(),
             tool_input: serde_json::json!({}),
             permission_level: PermissionLevel::Write,
+            category: ToolCategory::FileSystem,
             description: "write".into(),
             id: "call".into(),
             preview: None,
             agent_id: None,
+            policy_revision: None,
+        };
+        let pending = || async {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    if let Some(r) = broker.pending().first() {
+                        break r.clone();
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("the child asks")
         };
 
-        // Standard: the child asks, as the parent's rules say.
+        // ASK: the child asks, named, under the session's revision.
         let mut asking = {
             let child = Arc::clone(&child);
             tokio::spawn(async move { child.check(&request()).await })
         };
-        let id = tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                if let Some(r) = broker.pending().first() {
-                    break r.clone();
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("the child asks under standard");
-        assert_eq!(id.agent_id.as_deref(), Some("sa_child"), "the child is named");
+        let r = pending().await;
+        assert_eq!(r.agent_id.as_deref(), Some("sa_child"), "the child is named");
+        assert_eq!(r.policy_revision, Some(0));
         // A change while the request waits does not answer it.
-        mode.set(ApprovalMode::NoConfirmation);
+        cell.set(SessionPolicy::chosen(PermissionProfile::Execute));
         assert!(
             tokio::time::timeout(Duration::from_millis(100), &mut asking)
                 .await
                 .is_err(),
             "the pending request is still waiting"
         );
-        assert_eq!(broker.pending().len(), 1);
-        broker.respond(&id.approval_id, Decision::Allow, None).unwrap();
-        assert!(matches!(
-            asking.await.unwrap(),
-            PermissionDecision::AllowOnce
-        ));
+        broker.respond(&r.approval_id, Decision::Allow, None).unwrap();
+        assert!(matches!(asking.await.unwrap(), PermissionDecision::AllowOnce));
 
-        // NoConfirmation: the child runs without asking, and nothing is pending.
+        // EXECUTE: the child runs without asking.
         let d = child.check(&request()).await;
-        assert!(matches!(d, PermissionDecision::Allow | PermissionDecision::AllowOnce));
+        assert!(matches!(d, PermissionDecision::Allow));
         assert!(broker.pending().is_empty());
 
-        // AlwaysAsk: asked again, whatever was granted before.
-        mode.set(ApprovalMode::AlwaysAsk);
-        let again = {
-            let child = Arc::clone(&child);
-            tokio::spawn(async move { child.check(&request()).await })
-        };
-        let id = tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                if let Some(r) = broker.pending().first() {
-                    break r.approval_id.clone();
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("the child is asked under always-ask");
-        broker.respond(&id, Decision::Deny, Some("no".into())).unwrap();
-        assert!(matches!(again.await.unwrap(), PermissionDecision::Deny(_)));
+        // CUSTOM with a denial: refused, nobody asked.
+        let mut custom = SessionPolicy::chosen(PermissionProfile::Custom);
+        custom.custom.tools.insert("Write".into(), crate::permission::PermissionEffect::Deny);
+        cell.set(custom);
+        let d = child.check(&request()).await;
+        assert!(matches!(d, PermissionDecision::Deny(r) if r.contains("own rule")));
+        assert!(broker.pending().is_empty());
     }
 }

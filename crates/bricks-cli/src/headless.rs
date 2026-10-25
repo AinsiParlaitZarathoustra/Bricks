@@ -143,7 +143,7 @@ fn ask_on_terminal(req: &ApprovalRequest) -> Decision {
         text.push_str(&input.lines().take(40).collect::<Vec<_>>().join("\n"));
         text.push('\n');
     }
-    text.push_str("Allow? [y]es / [a]lways for this session / [N]o: ");
+    text.push_str("Allow this call? [y]es / [N]o: ");
     let _ = tty.write_all(text.as_bytes());
     let _ = tty.flush();
     let mut line = String::new();
@@ -151,7 +151,6 @@ fn ask_on_terminal(req: &ApprovalRequest) -> Decision {
     let _ = std::io::BufRead::read_line(&mut reader, &mut line);
     match line.trim().to_lowercase().as_str() {
         "y" | "yes" | "o" | "oui" => Decision::Allow,
-        "a" | "always" => Decision::AllowForSession,
         _ => Decision::Deny,
     }
 }
@@ -346,6 +345,20 @@ pub async fn run(global: &Global, launch: &std::path::Path, args: RunArgs) -> i3
                 return exit::USAGE;
             }
         };
+    // Problems of the project's settings (an obsolete `[permissions]`
+    // section among them) go to stderr: stdout stays the run's output.
+    for diagnostic in &ctl.project().bricks.diagnostics {
+        eprintln!("bricks: warning: {diagnostic}");
+    }
+    // `--permissions`: this run's session follows the profile given (the
+    // default for new sessions is not changed).
+    if let Some(profile) = args.permissions {
+        let policy = bricks_agent::permission::SessionPolicy::chosen(profile.into());
+        if let Err(e) = ctl.set_permission_policy(policy) {
+            eprintln!("bricks: {e}");
+            return exit::USAGE;
+        }
+    }
     let mut human = Human {
         at_line_start: true,
     };

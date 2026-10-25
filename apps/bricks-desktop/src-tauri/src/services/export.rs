@@ -79,7 +79,7 @@ fn export_bindings() {
         RunUsageRecord,
         RunFile,
         RunCommand,
-        ToolApproval,
+        PermissionsDefault,
         ProvidersFile,
         ProviderView,
         ModelView,

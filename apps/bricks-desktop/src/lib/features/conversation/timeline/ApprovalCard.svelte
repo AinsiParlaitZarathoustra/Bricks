@@ -11,7 +11,7 @@
   import type { ApprovalRequest, Command, DecidedBy, Decision } from '$lib/ipc/engine'
   import { CHANGE_KIND_LABEL, prettyJson, summarizeInput } from '../format'
   import MonoBlock from './MonoBlock.svelte'
-  import { approvalTrace, sessionGrantOffered } from './toolLine'
+  import { approvalTrace } from './toolLine'
 
   interface Props {
     approval: ApprovalRequest
@@ -32,11 +32,9 @@
   })
   const inputSummary = $derived(summarizeInput(approval.tool, approval.input))
   const inputText = $derived(prettyJson(approval.input))
-  const grantOffered = $derived(sessionGrantOffered(app.prefs.tool_approval))
 
   async function decide(decision: Decision) {
     if (sending !== null || resolved) return
-    if (decision === 'allow_for_session' && !grantOffered) return
     sending = decision
     refusal = null
     const message: string | null = await app.command(conversation.sessionId, {
@@ -128,11 +126,6 @@
 
     <div class="flex flex-wrap gap-2">
       <Button size="sm" disabled={sending !== null} onclick={() => decide('allow')}>Autoriser</Button>
-      {#if grantOffered}
-        <Button size="sm" variant="outline" disabled={sending !== null} onclick={() => decide('allow_for_session')}>
-          Autoriser pour la session
-        </Button>
-      {/if}
       <Button size="sm" variant="ghost" class="text-destructive hover:text-destructive" disabled={sending !== null} onclick={() => decide('deny')}>
         Refuser
       </Button>

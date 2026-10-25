@@ -71,10 +71,10 @@ impl AppState {
         };
         let fresh_dir = (project.chats && request.session_id.is_none()).then(|| working_dir.clone());
         let mut cfg = bricks_config::engine_config(&working_dir, registry, true);
-        // The catalog and the approval override are the application's: a
-        // change of either reaches every session, at its next run.
+        // The catalog is the application's: a change reaches every session,
+        // at its next run. New sessions start from this home's default policy.
         cfg.catalog = Arc::clone(&self.catalog) as Arc<dyn bricks_agent::control::ModelCatalog>;
-        cfg.approval_override = Arc::clone(&self.approval);
+        cfg.permissions = Some(self.permissions.clone());
         cfg.generated_titles = true;
         // Sessions are stored under this application state's home (tests use
         // a temporary one), never the global default.

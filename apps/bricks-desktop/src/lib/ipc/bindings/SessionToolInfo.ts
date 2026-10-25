@@ -6,7 +6,7 @@ export type SessionToolInfo = { name: string, description: string,
  */
 level: string, 
 /**
- * What the session's rules decide for it (`allow`, `ask`, `deny`), and
- * whether it was allowed for this session.
+ * What the session's policy decides for it at its declared level
+ * (`allow`, `ask`, `deny`), and why.
  */
-decision: string, allowed_for_session: boolean, };
+decision: string, reason: string, };

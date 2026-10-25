@@ -1,16 +1,22 @@
-//! Permission policies for tool execution.
+//! The approver of tool calls: who answers when the permission engine says
+//! a call must be asked.
+//!
+//! The decision itself belongs to the engine (`bricks_agent::permission`):
+//! the session's policy says allow, ask or deny. A [`PermissionPolicy`] is
+//! only consulted for the calls it says to ask — a person through a
+//! frontend, a terminal, or an embedder's callback. An answer covers the one
+//! call it was given for.
 
-use super::PermissionLevel;
+use super::{PermissionLevel, ToolCategory};
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 
-// ─── Permission policy trait ─────────────────────────────────────────────────
+// ─── Approver trait ──────────────────────────────────────────────────────────
 
 #[async_trait]
 pub trait PermissionPolicy: Send + Sync {
     async fn check(&self, request: &PermissionRequest) -> PermissionDecision;
 
-    /// Whether the agent must bind this policy to an interactive stream.
+    /// Whether the agent must bind this approver to an interactive stream.
     fn requires_stream(&self) -> bool {
         false
     }
@@ -20,26 +26,31 @@ pub trait PermissionPolicy: Send + Sync {
 pub struct PermissionRequest {
     pub tool_name: String,
     pub tool_input: serde_json::Value,
+    /// The level of this call (for its input).
     pub permission_level: PermissionLevel,
+    /// The tool's category (a read on the network is not a local read).
+    pub category: ToolCategory,
     pub description: String,
     pub id: String,
     /// The file changes the call would make, when the tool can preview them.
     pub preview: Option<crate::preview::ChangePreview>,
     /// The sub-agent making the call (`None`: the top-level agent).
     pub agent_id: Option<String>,
+    /// The revision of the policy that asked for this decision.
+    pub policy_revision: Option<u64>,
 }
 
 #[derive(Debug, Clone)]
 pub enum PermissionDecision {
     Allow,
     Deny(String),
+    /// Allowed by a person, for this call only.
     AllowOnce,
-    AllowForSession,
 }
 
-// ─── Built-in policies ──────────────────────────────────────────────────────
+// ─── Built-in approvers ──────────────────────────────────────────────────────
 
-/// Allow all tool invocations. Suitable for CI/headless/trusted environments.
+/// Agrees to every call it is asked about (tests, trusted automation).
 pub struct AllowAll;
 
 #[async_trait]
@@ -49,79 +60,20 @@ impl PermissionPolicy for AllowAll {
     }
 }
 
-/// Only allow tools with PermissionLevel::None or ReadOnly.
-pub struct AllowReadOnly;
-
-#[async_trait]
-impl PermissionPolicy for AllowReadOnly {
-    async fn check(&self, request: &PermissionRequest) -> PermissionDecision {
-        match request.permission_level {
-            PermissionLevel::None | PermissionLevel::ReadOnly => PermissionDecision::Allow,
-            _ => PermissionDecision::Deny(format!(
-                "Tool '{}' requires {:?} permission (read-only mode)",
-                request.tool_name, request.permission_level
-            )),
-        }
-    }
-}
-
-/// Deny all tool invocations.
+/// Refuses every call it is asked about.
 pub struct DenyAll;
 
 #[async_trait]
 impl PermissionPolicy for DenyAll {
     async fn check(&self, request: &PermissionRequest) -> PermissionDecision {
         PermissionDecision::Deny(format!(
-            "Tool '{}' blocked by DenyAll policy",
+            "`{}` needs an approval and nobody approves here",
             request.tool_name
         ))
     }
 }
 
-/// Rule-based permission policy with pattern matching.
-pub struct RuleBased {
-    pub rules: Vec<PermissionRule>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PermissionRule {
-    pub tool_name: Option<String>,
-    pub path_pattern: Option<String>,
-    pub action: PermissionAction,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum PermissionAction {
-    Allow,
-    Deny,
-}
-
-#[async_trait]
-impl PermissionPolicy for RuleBased {
-    async fn check(&self, request: &PermissionRequest) -> PermissionDecision {
-        for rule in &self.rules {
-            let name_matches = rule
-                .tool_name
-                .as_ref()
-                .map(|n| n == &request.tool_name || n == "all")
-                .unwrap_or(true);
-
-            if name_matches {
-                return match rule.action {
-                    PermissionAction::Allow => PermissionDecision::Allow,
-                    PermissionAction::Deny => PermissionDecision::Deny(format!(
-                        "Tool '{}' blocked by rule",
-                        request.tool_name
-                    )),
-                };
-            }
-        }
-        // Default: allow if no rules match
-        PermissionDecision::Allow
-    }
-}
-
-/// Interactive permission policy that defers to a callback.
+/// An approver that defers to a callback.
 pub struct InteractivePolicy {
     pub handler: Box<dyn Fn(&PermissionRequest) -> PermissionDecision + Send + Sync>,
 }
@@ -135,7 +87,7 @@ impl InteractivePolicy {
         }
     }
 
-    /// Create a policy that defers to the AgentStream for interactive decisions.
+    /// An approver answered through the AgentStream.
     pub fn via_stream() -> StreamDeferredPolicy {
         StreamDeferredPolicy
     }
@@ -148,8 +100,8 @@ impl PermissionPolicy for InteractivePolicy {
     }
 }
 
-/// Policy bound to permission events by `Agent::run_stream`.
-/// Without a stream it denies calls rather than silently allowing them.
+/// Approver bound to permission events by `Agent::run_stream`.
+/// Without a stream it refuses rather than silently allowing.
 pub struct StreamDeferredPolicy;
 
 #[async_trait]

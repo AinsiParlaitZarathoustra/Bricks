@@ -1,51 +1,65 @@
 <script lang="ts">
-	// Approval policy of the desktop's tools (`Preferences.tool_approval`). The engine applies it.
+	// The permission policy new conversations start from (`~/.bricks/permissions.json`).
+	// Open conversations keep theirs.
+	import { onMount } from 'svelte';
 	import DiagramSettings from './DiagramSettings.svelte';
-	import { app } from '$lib/state/app.svelte';
-	import * as Select from '$lib/components/ui/select';
-	import { Label } from '$lib/components/ui/label';
-	import { TOOL_APPROVAL_OPTIONS, isToolApproval } from './format';
+	import PolicyEditor from '$lib/features/permissions/PolicyEditor.svelte';
+	import { unchosenPolicy } from '$lib/features/permissions/policy';
+	import { errorMessage, permissionsDefaultGet, permissionsDefaultSet } from '$lib/ipc/client';
+	import type { SessionPolicy } from '$lib/ipc/engine';
 
-	const uid = $props.id();
+	let policy = $state<SessionPolicy | null>(null);
+	let loadError = $state<string | null>(null);
+	let saveError = $state<string | null>(null);
+	let saving = $state(false);
 
-	const selected = $derived(TOOL_APPROVAL_OPTIONS.find((o) => o.value === app.prefs.tool_approval));
+	onMount(() => {
+		void permissionsDefaultGet()
+			.then((read) => {
+				policy = read.policy ?? unchosenPolicy();
+				loadError = read.error;
+			})
+			.catch((e) => {
+				policy = unchosenPolicy();
+				loadError = errorMessage(e);
+			});
+	});
 
-	/**
-	 * `lastError.at` when the last change was sent (0 when none was). An error stamped later than
-	 * that is the failure of this change; the store rolls the saved value back.
-	 */
-	let sentAfter = $state<number | null>(null);
-	const failure = $derived(
-		sentAfter !== null && app.lastError && app.lastError.at !== sentAfter ? app.lastError.message : null
-	);
-
-	/** Saves the policy at once (the select shows the pick; the store rolls it back on failure). */
-	function choose(next: string | undefined) {
-		if (!isToolApproval(next) || next === app.prefs.tool_approval) return;
-		sentAfter = app.lastError?.at ?? 0;
-		app.setPrefs({ tool_approval: next });
+	/** Saves the new default; the editor shows it only once it is saved. */
+	async function save(next: SessionPolicy) {
+		saving = true;
+		saveError = null;
+		try {
+			await permissionsDefaultSet(next);
+			policy = next;
+			loadError = null;
+		} catch (e) {
+			saveError = errorMessage(e);
+		} finally {
+			saving = false;
+		}
 	}
 </script>
 
 <div class="flex flex-col gap-6">
-<div class="flex flex-col gap-3">
-	<Label for={`${uid}-approval`} class="text-[13px] font-semibold text-foreground">Approbation des outils</Label>
-	<Select.Root type="single" value={app.prefs.tool_approval} onValueChange={choose}>
-		<Select.Trigger id={`${uid}-approval`} class="w-full max-w-72">
-			<span class="truncate">{selected?.label ?? app.prefs.tool_approval}</span>
-		</Select.Trigger>
-		<Select.Content>
-			{#each TOOL_APPROVAL_OPTIONS as option (option.value)}
-				<Select.Item value={option.value} label={option.label}>{option.label}</Select.Item>
-			{/each}
-		</Select.Content>
-	</Select.Root>
-	{#if failure}
-		<p role="alert" class="text-[13px] text-pretty text-destructive">
-			Le réglage n’a pas été enregistré : {failure}
-		</p>
-	{/if}
-</div>
+	<section aria-labelledby="default-permissions" class="flex flex-col gap-3">
+		<h3 id="default-permissions" class="text-[13px] font-semibold text-foreground">
+			Permissions des nouvelles conversations
+		</h3>
+		{#if policy}
+			<PolicyEditor {policy} disabled={saving} onchange={save} />
+		{/if}
+		{#if loadError}
+			<p role="alert" class="text-[13px] text-pretty text-destructive">
+				Lecture impossible : {loadError}
+			</p>
+		{/if}
+		{#if saveError}
+			<p role="alert" class="text-[13px] text-pretty text-destructive">
+				Le réglage n’a pas été enregistré : {saveError}
+			</p>
+		{/if}
+	</section>
 
-  <DiagramSettings />
+	<DiagramSettings />
 </div>

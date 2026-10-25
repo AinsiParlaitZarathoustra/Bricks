@@ -8,6 +8,7 @@
 //! and are typed on the frontend by `src/lib/ipc/engine.ts`, which mirrors
 //! `bricks_agent::control::protocol`.
 
+use bricks_agent::permission::SessionPolicy;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
@@ -503,9 +504,6 @@ pub struct Preferences {
     pub terminal_height: u32,
     pub last_project_id: Option<String>,
     pub last_session_id: Option<String>,
-    /// Desktop-wide tool approval policy, applied by the engine
-    /// to every session of this application and its sub-agents.
-    pub tool_approval: ToolApproval,
     /// Custom colours per resolved mode. Empty = theme tokens.
     pub colors: ThemeColors,
     /// Terminal pane share of the centre column, 0.1–0.8.
@@ -526,7 +524,6 @@ impl Default for Preferences {
             terminal_height: 240,
             last_project_id: None,
             last_session_id: None,
-            tool_approval: ToolApproval::Standard,
             colors: ThemeColors::default(),
             terminal_ratio: None,
             diagrams: DiagramSettings::default(),
@@ -600,10 +597,10 @@ pub struct SessionToolInfo {
     pub description: String,
     /// Permission level (`none`, `read_only`, `write`, `execute`, `dangerous`).
     pub level: String,
-    /// What the session's rules decide for it (`allow`, `ask`, `deny`), and
-    /// whether it was allowed for this session.
+    /// What the session's policy decides for it at its declared level
+    /// (`allow`, `ask`, `deny`), and why.
     pub decision: String,
-    pub allowed_for_session: bool,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -624,10 +621,11 @@ pub struct SessionConfigInfo {
     pub effective_reasoning: Option<String>,
     pub interactive: bool,
     pub memory_space: Option<String>,
-    /// `bricks_agent::control::ApprovalRules` (actions per level and tool).
-    #[ts(type = "Record<string, unknown>")]
-    pub approval_rules: serde_json::Value,
-    pub allowed_for_session: Vec<String>,
+    /// The session's permission policy and its revision.
+    #[ts(type = "import('../engine').SessionPolicy")]
+    pub permission_policy: SessionPolicy,
+    #[ts(type = "number")]
+    pub permission_revision: u64,
     pub agents_enabled: bool,
     /// Configuration files read for this session, in order.
     pub sources: Vec<String>,
@@ -667,18 +665,16 @@ pub struct ProjectFileWindow {
     pub language: Option<String>,
 }
 
-// ─── tool approval policy and provider/model editing ───────────
+// ─── permissions and provider/model editing ────────────────────
 
-/// Global approval policy of the desktop. Priority (one place, in the engine
-/// gate): `forbidden` tools → refused; an explicit `deny` rule → refused;
-/// then `AlwaysAsk` → ask (session grants ignored), `NoConfirmation` →
-/// allow; `Standard` → the project's rules and session grants unchanged.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
-#[serde(rename_all = "snake_case")]
-pub enum ToolApproval {
-    Standard,
-    AlwaysAsk,
-    NoConfirmation,
+/// The permission policy new sessions start from (`~/.bricks/permissions.json`).
+/// `policy` is `None` until it is chosen once.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct PermissionsDefault {
+    #[ts(type = "import('../engine').SessionPolicy | null")]
+    pub policy: Option<SessionPolicy>,
+    /// The file exists but cannot be read (new sessions then ask).
+    pub error: Option<String>,
 }
 
 /// The providers file as loaded, without any secret value.

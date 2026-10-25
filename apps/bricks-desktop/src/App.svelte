@@ -15,6 +15,7 @@
   import ConversationView from '$lib/features/conversation/ConversationView.svelte'
   import ConversationTitle from '$lib/features/conversation/ConversationTitle.svelte'
   import Composer from '$lib/features/composer/Composer.svelte'
+  import PermissionChoice from '$lib/features/permissions/PermissionChoice.svelte'
   import ContextPanel from '$lib/features/context/ContextPanel.svelte'
   import PlusMenu from '$lib/features/context/PlusMenu.svelte'
   import AgentInspectorHost from '$lib/features/agents/AgentInspectorHost.svelte'
@@ -156,6 +157,7 @@
               </div>
             {/if}
           </div>
+          <PermissionChoice conversation={app.current} />
           <Composer conversation={app.current} />
         </div>
       {/snippet}

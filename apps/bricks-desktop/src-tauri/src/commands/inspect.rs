@@ -13,7 +13,8 @@ use crate::pty;
 use crate::services::conversations::{item_from_summary, path_text};
 use crate::services::{error, io_error, join_error, not_found};
 use bricks_agent::BricksConfig;
-use bricks_agent::control::{Action, ApprovalMode, Controller, Snapshot, list_sessions};
+use bricks_agent::control::{Controller, Snapshot, list_sessions};
+use bricks_agent::permission::{PermissionEffect, PermissionProfile, SessionPolicy};
 use bricks_tools::PermissionLevel;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -33,11 +34,9 @@ pub(crate) fn open_or_not_found(
         .ok_or_else(|| not_found("cette conversation n'est pas ouverte"))
 }
 
-/// Tools of an open session with the decision each one gets: the engine's
-/// own (`ApprovalRules::effective`, the rule the approval gate applies, with
-/// the application's override in force), taken on the level the tool declares.
+/// Tools of an open session with the decision each one gets: the verdict of
+/// the session's permission engine, taken on the level the tool declares.
 pub(crate) fn tools_of(controller: &Controller) -> IpcResult<Vec<SessionToolInfo>> {
-    let snap = controller.snapshot();
     let mut out = Vec::new();
     for info in controller.tools() {
         let level = permission_level(&info.level).ok_or_else(|| {
@@ -46,16 +45,12 @@ pub(crate) fn tools_of(controller: &Controller) -> IpcResult<Vec<SessionToolInfo
                 format!("niveau de permission inconnu : {}", info.level),
             )
         })?;
-        let action = snap
-            .approval_rules
-            .effective(snap.approval_mode, &info.name, level)
-            .action;
         out.push(SessionToolInfo {
-            allowed_for_session: snap.allowed_for_session.contains(&info.name),
             name: info.name,
             description: first_line(&info.description),
             level: level_name(level).to_string(),
-            decision: action_name(action).to_string(),
+            decision: effect_name(info.verdict.effect).to_string(),
+            reason: info.verdict.reason,
         });
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));
@@ -82,8 +77,6 @@ pub(crate) async fn config_of(
     let snap = controller.snapshot();
     let project = controller.project();
     let (provider, model) = split_selection(&snap.model);
-    let approval_rules = serde_json::to_value(&snap.approval_rules)
-        .map_err(|e| error(IpcErrorCode::Internal, e.to_string()))?;
     let providers_file = providers_origin.map(PathBuf::from);
     let working_dir = project.working_dir.clone();
     let rules_dir = user_rules_dir();
@@ -101,8 +94,8 @@ pub(crate) async fn config_of(
         effective_reasoning: snap.effective_reasoning.clone(),
         interactive: snap.interactive,
         memory_space: snap.memory_space.clone(),
-        approval_rules,
-        allowed_for_session: snap.allowed_for_session.clone(),
+        permission_policy: snap.permission_policy.clone(),
+        permission_revision: snap.permission_revision,
         agents_enabled: project.bricks.agents.enabled,
         sources,
         settings: settings_of(&snap, &project.bricks),
@@ -218,20 +211,23 @@ fn permission_level(name: &str) -> Option<PermissionLevel> {
     })
 }
 
-/// The application's tool-approval preference, as the configuration shows it.
-fn approval_label(mode: ApprovalMode) -> &'static str {
-    match mode {
-        ApprovalMode::Standard => "standard (règles du projet)",
-        ApprovalMode::AlwaysAsk => "toujours demander",
-        ApprovalMode::NoConfirmation => "sans confirmation",
+/// The session's permission profile, as the configuration shows it.
+fn profile_label(policy: &SessionPolicy) -> &'static str {
+    if !policy.chosen {
+        return "non choisi (ASK)";
+    }
+    match policy.profile {
+        PermissionProfile::Ask => "ASK",
+        PermissionProfile::Execute => "EXECUTE",
+        PermissionProfile::Custom => "CUSTOM",
     }
 }
 
-fn action_name(action: Action) -> &'static str {
-    match action {
-        Action::Allow => "allow",
-        Action::Ask => "ask",
-        Action::Deny => "deny",
+fn effect_name(effect: PermissionEffect) -> &'static str {
+    match effect {
+        PermissionEffect::Allow => "allow",
+        PermissionEffect::Ask => "ask",
+        PermissionEffect::Deny => "deny",
     }
 }
 
@@ -302,10 +298,7 @@ fn settings_of(snap: &Snapshot, bricks: &BricksConfig) -> Vec<ConfigEntry> {
         .ok()
         .and_then(|v| v.as_str().map(str::to_string));
     vec![
-        entry(
-            "Approbation des outils (application)",
-            approval_label(snap.approval_mode).to_string(),
-        ),
+        entry("Permissions", profile_label(&snap.permission_policy).to_string()),
         entry("Budget de contexte", format!("{} jetons", snap.context.input_limit)),
         entry("Marge de sécurité", format!("{} jetons", snap.context.margin)),
         entry("Réserve pour la sortie", format!("{} jetons", snap.context.reserved_output)),
@@ -349,9 +342,8 @@ mod tests {
     use super::*;
     use crate::contract::OpenSessionRequest;
     use bricks_agent::control::scripted::{Reply, Script, ScriptedCatalog};
-    use bricks_agent::control::{
-        ApprovalOverride, Command, Decision, EngineConfig, OpenOptions, Prompt, SessionChoice,
-    };
+    use bricks_agent::control::{Command, EngineConfig, OpenOptions, Prompt, SessionChoice};
+    use bricks_agent::permission::CustomRules;
     use bricks_provider::ProviderRegistry;
     use std::time::Duration;
 
@@ -403,31 +395,6 @@ mod tests {
         controller
     }
 
-    /// A scripted controller of the project folder that reads the
-    /// application's approval override `mode` (no project rules).
-    async fn scripted_in_mode(fx: &Fixture, bricks_toml: &str, mode: ApprovalMode) -> Controller {
-        let mut cfg = EngineConfig::new(
-            &fx.wd,
-            ScriptedCatalog::new(&["a"], Script::new(vec![])),
-            BricksConfig::from_texts(Some(bricks_toml), &[]),
-            fx.sessions.clone(),
-        );
-        cfg.interactive = false;
-        cfg.approval_override = ApprovalOverride::new(mode);
-        let (controller, mut stream) = Controller::open(
-            cfg,
-            OpenOptions {
-                session: SessionChoice::New,
-                model: Some("test/a".into()),
-                reasoning: None,
-            },
-        )
-        .await
-        .expect("open");
-        tokio::spawn(async move { while stream.next().await.is_some() {} });
-        controller
-    }
-
     /// Waits until `check` holds (polling), or fails after a few seconds.
     async fn eventually(what: &str, mut check: impl FnMut() -> bool) {
         for _ in 0..400 {
@@ -455,12 +422,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn tools_carry_the_levels_and_the_decisions_of_the_rules() {
+    async fn tools_carry_the_levels_and_the_verdicts_of_the_session_policy() {
         let fx = fixture();
-        // Writes allowed; Bash refused by its own rule; the rest by default.
+        // Not chosen yet: reading is allowed, the rest is asked. The old
+        // `[permissions]` section of bricks.toml is not applied.
         let ctl = scripted(
             &fx,
-            "[permissions]\nwrite = \"allow\"\n\n[permissions.tools]\nBash = \"deny\"\n",
+            "[permissions]\nwrite = \"allow\"\n\n[permissions.tools]\nRead = \"deny\"\n",
             Script::new(vec![]),
             false,
         )
@@ -468,84 +436,50 @@ mod tests {
         let tools = tools_of(&ctl).unwrap();
         assert!(tools.len() > 5, "the session's tools are listed");
         assert!(tools.windows(2).all(|w| w[0].name <= w[1].name), "sorted by name");
-
         let read = tool(&tools, "Read");
         assert_eq!((read.level.as_str(), read.decision.as_str()), ("read_only", "allow"));
         let edit = tool(&tools, "Edit");
-        assert_eq!((edit.level.as_str(), edit.decision.as_str()), ("write", "allow"));
+        assert_eq!((edit.level.as_str(), edit.decision.as_str()), ("write", "ask"));
         let bash = tool(&tools, "Bash");
-        assert_eq!((bash.level.as_str(), bash.decision.as_str()), ("execute", "deny"));
-        assert!(tools.iter().all(|t| !t.allowed_for_session), "nothing allowed yet");
+        assert_eq!((bash.level.as_str(), bash.decision.as_str()), ("execute", "ask"));
+        assert!(tools.iter().all(|t| !t.reason.is_empty()), "every verdict says why");
         assert!(tools.iter().all(|t| !t.description.contains('\n')), "one line each");
-        ctl.close().await;
+        let info = config_of(&ctl, None).await.unwrap();
+        assert_eq!(setting(&info, "Permissions"), "non choisi (ASK)");
+        assert!(!info.permission_policy.chosen);
 
-        // Default rules: writing and executing are asked, reading is allowed.
-        let ctl = scripted(&fx, "", Script::new(vec![]), false).await;
+        // CUSTOM: writes allowed, Bash refused by its own rule.
+        let mut custom = SessionPolicy::chosen(PermissionProfile::Custom);
+        custom.custom = CustomRules {
+            write: PermissionEffect::Allow,
+            ..CustomRules::default()
+        };
+        custom.custom.tools.insert("Bash".into(), PermissionEffect::Deny);
+        ctl.set_permission_policy(custom).unwrap();
         let tools = tools_of(&ctl).unwrap();
-        assert_eq!(tool(&tools, "Bash").decision, "ask");
-        assert_eq!(tool(&tools, "Write").decision, "ask");
+        assert_eq!(tool(&tools, "Edit").decision, "allow");
+        assert_eq!(tool(&tools, "Bash").decision, "deny");
         assert_eq!(tool(&tools, "Read").decision, "allow");
+        let info = config_of(&ctl, None).await.unwrap();
+        assert_eq!(setting(&info, "Permissions"), "CUSTOM");
+        assert_eq!(info.permission_revision, 1);
         ctl.close().await;
     }
 
     #[tokio::test]
-    async fn the_application_override_is_the_decision_shown_and_configured() {
+    async fn a_policy_sent_as_a_command_is_the_one_shown() {
         let fx = fixture();
-        // Always ask: every call is asked, even those the rules allow.
-        let ctl = scripted_in_mode(&fx, "", ApprovalMode::AlwaysAsk).await;
-        let tools = tools_of(&ctl).unwrap();
-        assert_eq!(tool(&tools, "Read").decision, "ask");
-        assert_eq!(tool(&tools, "Write").decision, "ask");
-        let info = config_of(&ctl, None).await.unwrap();
-        assert_eq!(setting(&info, "Approbation des outils (application)"), "toujours demander");
-        ctl.close().await;
-
-        // No confirmation: allowed, except a tool the project denies by name.
-        let ctl = scripted_in_mode(
-            &fx,
-            "[permissions.tools]\nBash = \"deny\"\n",
-            ApprovalMode::NoConfirmation,
-        )
-        .await;
-        let tools = tools_of(&ctl).unwrap();
-        assert_eq!(tool(&tools, "Write").decision, "allow");
-        assert_eq!(tool(&tools, "Bash").decision, "deny", "an explicit deny still wins");
-        let info = config_of(&ctl, None).await.unwrap();
-        assert_eq!(setting(&info, "Approbation des outils (application)"), "sans confirmation");
-        ctl.close().await;
-
-        // Standard, the default: the project's rules, as before.
-        let ctl = scripted_in_mode(&fx, "", ApprovalMode::Standard).await;
-        let info = config_of(&ctl, None).await.unwrap();
-        assert!(setting(&info, "Approbation des outils (application)").starts_with("standard"));
-        assert_eq!(tool(&tools_of(&ctl).unwrap(), "Write").decision, "ask");
-        ctl.close().await;
-    }
-
-    #[tokio::test]
-    async fn a_tool_allowed_for_the_session_is_marked() {
-        let fx = fixture();
-        let script = Script::new(vec![
-            Reply::tool("w0", "Write", serde_json::json!({"file_path": "a.txt", "content": "a"})),
-            Reply::text("écrit"),
-        ]);
-        let ctl = scripted(&fx, "", script, true).await;
-        ctl.send(Command::Submit { prompt: Prompt::text("écris a.txt") }).unwrap();
-        eventually("the approval to be asked", || !ctl.snapshot().pending_approvals.is_empty()).await;
-        let approval = ctl.snapshot().pending_approvals[0].clone();
-        assert_eq!(approval.tool, "Write");
-        ctl.send(Command::Approve {
-            approval_id: approval.approval_id.clone(),
-            decision: Decision::AllowForSession,
-            reason: None,
+        let ctl = scripted(&fx, "", Script::new(vec![]), true).await;
+        ctl.send(Command::SetPermissionPolicy {
+            policy: SessionPolicy::chosen(PermissionProfile::Execute),
         })
         .unwrap();
-        ctl.wait_idle().await;
-
+        eventually("the policy to change", || ctl.snapshot().permission_revision == 1).await;
         let tools = tools_of(&ctl).unwrap();
-        assert!(tool(&tools, "Write").allowed_for_session, "allowed for the session");
-        assert!(!tool(&tools, "Read").allowed_for_session);
-        assert_eq!(tool(&tools, "Write").decision, "ask", "the rule itself is unchanged");
+        assert!(tools.iter().all(|t| t.decision == "allow" || t.level == "forbidden"));
+        let info = config_of(&ctl, None).await.unwrap();
+        assert_eq!(setting(&info, "Permissions"), "EXECUTE");
+        assert_eq!(info.permission_policy.profile, PermissionProfile::Execute);
         ctl.close().await;
     }
 
@@ -640,9 +574,8 @@ max_output_tokens = 8000
         assert_eq!(setting(&info, "Avertissements de configuration"), "1");
         let text = serde_json::to_string(&info).unwrap();
         assert!(!text.contains(SECRET), "a value of bricks.toml was quoted");
-        // The approval policy and the session's grants, as the TUI shows them.
-        assert_eq!(info.approval_rules["write"], "ask");
-        assert!(info.allowed_for_session.is_empty());
+        // The session's policy: not chosen yet, writes are asked.
+        assert_eq!(info.permission_policy, SessionPolicy::unchosen());
         assert!(!info.interactive);
         ctl.close().await;
     }
@@ -751,7 +684,7 @@ max_output_tokens = 8000
         }
         assert_eq!(permission_level("inconnu"), None);
         assert_eq!(level_name(PermissionLevel::ReadOnly), "read_only");
-        assert_eq!(action_name(Action::Deny), "deny");
+        assert_eq!(effect_name(PermissionEffect::Deny), "deny");
         assert_eq!(split_selection("p/m/v2"), ("p", "m/v2"));
         assert_eq!(split_selection("seul"), ("", "seul"));
         assert!(first_line(&"x".repeat(1000)).ends_with('…'));

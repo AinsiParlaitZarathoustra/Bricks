@@ -2,18 +2,12 @@
 import type { DiagramSettings } from "./DiagramSettings";
 import type { Theme } from "./Theme";
 import type { ThemeColors } from "./ThemeColors";
-import type { ToolApproval } from "./ToolApproval";
 
 export type Preferences = { theme: Theme, 
 /**
  * User's explicit choices (not the size-forced visibility).
  */
 left_open: boolean, right_open: boolean, left_width: number, right_width: number, terminal_open: boolean, terminal_height: number, last_project_id: string | null, last_session_id: string | null, 
-/**
- * Desktop-wide tool approval policy, applied by the engine
- * to every session of this application and its sub-agents.
- */
-tool_approval: ToolApproval, 
 /**
  * Custom colours per resolved mode. Empty = theme tokens.
  */

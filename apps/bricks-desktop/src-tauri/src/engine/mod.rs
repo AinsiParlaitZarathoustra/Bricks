@@ -11,7 +11,7 @@ pub mod hub;
 pub mod live;
 pub mod sessions;
 
-use crate::contract::{AppInfo, IpcErrorCode, IpcResult, ProviderInfo, ToolApproval};
+use crate::contract::{AppInfo, IpcErrorCode, IpcResult, ProviderInfo};
 use crate::services::attachments as store;
 use crate::services::changes::ChangeJournal;
 use crate::services::conversations::path_text;
@@ -22,7 +22,8 @@ use crate::services::projects::ProjectStore;
 use crate::services::run_labels::RunLabelStore;
 use crate::services::run_records::RunRecordStore;
 use crate::services::skills::SkillsCatalogStore;
-use bricks_agent::control::{ApprovalMode, ApprovalOverride, ModelCatalog};
+use bricks_agent::control::ModelCatalog;
+use bricks_agent::permission::PermissionStore;
 use bricks_provider::ProviderRegistry;
 use bricks_provider::config::{AuthMode, ProviderConfig};
 use catalog::DesktopCatalog;
@@ -46,8 +47,8 @@ pub struct AppState {
     pub(crate) providers_path: PathBuf,
     /// Serialises the edits of the providers file (check, write, reload).
     pub(crate) providers_lock: Arc<parking_lot::Mutex<()>>,
-    /// The tool-approval override shared by every session and sub-agent.
-    pub(crate) approval: Arc<ApprovalOverride>,
+    /// The permission policy new sessions start from.
+    pub(crate) permissions: PermissionStore,
     /// Configuration problems of the projects and stores, to show.
     config_errors: Vec<String>,
     home: PathBuf,
@@ -90,7 +91,7 @@ impl AppState {
     }
 
     /// The state for a home, a registry and the providers file it was read
-    /// from. The saved tool-approval preference is applied from the start.
+    /// from.
     pub fn assemble_at(
         home: PathBuf,
         registry: Result<Arc<ProviderRegistry>, String>,
@@ -99,13 +100,12 @@ impl AppState {
         let desktop = home.join("desktop");
         let projects = ProjectStore::load(desktop.join("projects.json"));
         let prefs = PrefsStore::at(desktop.join("preferences.json"));
-        let approval = ApprovalOverride::new(approval_mode(prefs.get().tool_approval));
         let journal = Arc::new(ChangeJournal::at(desktop.join("changes")));
         Self {
             catalog: DesktopCatalog::new(registry),
             providers_path,
             providers_lock: Arc::new(parking_lot::Mutex::new(())),
-            approval,
+            permissions: PermissionStore::in_home(&home),
             config_errors: projects.notes().to_vec(),
             sessions_dir: home.join("sessions"),
             drafts_dir: desktop.join("drafts"),
@@ -228,15 +228,6 @@ pub fn providers_file() -> PathBuf {
     bricks_config::providers_file_from_env()
         .or_else(bricks_provider::config::default_config_path)
         .unwrap_or_else(|| bricks_config::bricks_home().join("providers.toml"))
-}
-
-/// The engine's approval mode for the desktop's preference.
-pub fn approval_mode(tool_approval: ToolApproval) -> ApprovalMode {
-    match tool_approval {
-        ToolApproval::Standard => ApprovalMode::Standard,
-        ToolApproval::AlwaysAsk => ApprovalMode::AlwaysAsk,
-        ToolApproval::NoConfirmation => ApprovalMode::NoConfirmation,
-    }
 }
 
 /// Whether a provider can be called: no credential is needed (`auth =

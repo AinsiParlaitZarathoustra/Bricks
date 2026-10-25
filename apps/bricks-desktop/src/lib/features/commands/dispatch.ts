@@ -264,6 +264,11 @@ async function runEngine(command: Command, host: SlashHost, line: string): Promi
       return agentControl(command, host)
     case 'resume':
       return fromError(await host.resume(command.session_id))
+    case 'set_permission_policy': {
+      const sid = host.currentSession()
+      if (sid === null) return refused('Ouvrez une conversation pour choisir ses permissions.')
+      return sendTo(host, sid, command, NO_WATCH)
+    }
     case 'approve':
       return refused('Les demandes d’approbation se traitent dans la conversation.')
     default: {

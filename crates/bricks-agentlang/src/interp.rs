@@ -245,15 +245,15 @@ impl<'a> EvalCtx<'a> {
             tool_name: tool_name.to_string(),
             tool_input: input.clone(),
             permission_level: perm,
+            category: bricks_tools::ToolCategory::Custom,
             description: format!("agentlang: {tool_name}"),
             id: uuid_like(span),
             preview: None,
             agent_id: None,
+            policy_revision: None,
         };
         match self.tools.permissions.check(&req).await {
-            PermissionDecision::Allow
-            | PermissionDecision::AllowOnce
-            | PermissionDecision::AllowForSession => Ok(()),
+            PermissionDecision::Allow | PermissionDecision::AllowOnce => Ok(()),
             PermissionDecision::Deny(reason) => Err(RuntimeError::new(
                 RuntimeErrorKind::PermissionDenied,
                 reason,
@@ -352,16 +352,16 @@ impl<'a> EvalCtx<'a> {
             tool_name: "agent.permission.ask".to_string(),
             tool_input: Value::String(mode.to_string()),
             permission_level: perm,
+            category: bricks_tools::ToolCategory::Custom,
             description: format!("agentlang: permission.ask('{mode}')"),
             id: uuid_like(span),
             preview: None,
             agent_id: None,
+            policy_revision: None,
         };
         let granted = matches!(
             self.tools.permissions.check(&req).await,
-            PermissionDecision::Allow
-                | PermissionDecision::AllowOnce
-                | PermissionDecision::AllowForSession
+            PermissionDecision::Allow | PermissionDecision::AllowOnce
         );
         Ok(Value::Bool(granted))
     }

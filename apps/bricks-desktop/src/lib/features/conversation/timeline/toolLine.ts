@@ -3,7 +3,6 @@
 
 import { DECIDED_BY_LABEL, DECISION_LABEL, formatDuration } from '../format';
 import type { DecidedBy, Decision } from '$lib/ipc/engine';
-import type { ToolApproval } from '$lib/ipc/bindings/ToolApproval';
 
 /** What the line says about a call. */
 export type ToolLineState = 'running' | 'done' | 'failed' | 'interrupted';
@@ -43,15 +42,12 @@ export function formatToolDuration(ms: number | undefined): string | null {
 	return formatDuration(ms);
 }
 
-/** The trace that replaces a resolved approval: `Autorisé · Bash · par vous`. */
-export function approvalTrace(tool: string, resolved: { decision: Decision; by: DecidedBy }): string {
-	return `${DECISION_LABEL[resolved.decision]} · ${tool} · ${DECIDED_BY_LABEL[resolved.by]}`;
-}
-
 /**
- * Whether the card offers « Autoriser pour la session ». Not under « Toujours demander »
- * (always_ask): a session grant is ignored in that mode, and would apply again later.
+ * The trace that replaces a resolved approval: `Autorisé · Bash · par vous`. Conversations
+ * stored before answers covered one call only may carry other values: shown as allowed.
  */
-export function sessionGrantOffered(mode: ToolApproval): boolean {
-	return mode !== 'always_ask';
+export function approvalTrace(tool: string, resolved: { decision: Decision; by: DecidedBy }): string {
+	const decision = DECISION_LABEL[resolved.decision] ?? DECISION_LABEL.allow;
+	const by = DECIDED_BY_LABEL[resolved.by];
+	return by ? `${decision} · ${tool} · ${by}` : `${decision} · ${tool}`;
 }

@@ -190,7 +190,7 @@ impl Tool for AgentTool {
         let mut builder = Agent::builder()
             .provider_boxed((self.provider_factory)())
             .tools(tools)
-            .permission_policy_arc(Arc::clone(&ctx.permissions))
+            .permission_engine_arc(Arc::clone(&ctx.permissions))
             .working_dir(&ctx.working_dir)
             .extensions(subagent::child_extensions(depth))
             .system_prompt(

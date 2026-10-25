@@ -12,12 +12,12 @@
 //! * `submit`, `resume`, `compact` and `clear_context` are refused with a
 //!   `command_rejected` event: a second prompt is never started silently.
 
-use super::approval::{ApprovalBroker, ApprovalGate, ApprovalRequest};
+use super::approval::{ApprovalBroker, ApprovalRequest, BrokerApprover};
 use super::attach::{self, AttachLimits};
 use super::protocol::*;
 use super::queue::EventQueue;
 use super::session::{SessionMeta, SessionScope, SessionSummary};
-use super::settings::{ApprovalMode, ApprovalOverride};
+use crate::permission::{PermissionStore, PolicyCell, SessionPolicy};
 use crate::events::AgentEvent;
 use crate::{Agent, BricksConfig, CompactReason};
 use bricks_memory::{JsonlMemory, LongTermMemory, Memory};
@@ -156,10 +156,10 @@ pub struct EngineConfig {
     /// Skills (`None`: no skills, no `Skill` tool). Each session reads its
     /// own project's sources; its trust decision is its own.
     pub skills: Option<SkillsSetup>,
-    /// Runtime approval override shared by every session built from this
-    /// configuration, read at each decision (default: standard, which is
-    /// the project's rules unchanged).
-    pub approval_override: Arc<ApprovalOverride>,
+    /// The default permission policy for new sessions, chosen once by a
+    /// person (`None`: new sessions start with no policy chosen — reads
+    /// run, everything else is asked). Each session then keeps its own.
+    pub permissions: Option<PermissionStore>,
     /// Whether the model names a new session from its first prompt (default
     /// false: the shortened prompt stays the title).
     pub generated_titles: bool,
@@ -193,6 +193,24 @@ impl SkillsSetup {
             trust_project: false,
         }
     }
+}
+
+/// The permission policy of session `id`: the one stored with it, else the
+/// default for new sessions (stored with it at once, so a later change of
+/// the default leaves it alone). An unreadable stored policy is an error:
+/// the session does not open with a policy nobody chose.
+fn session_permissions(cfg: &EngineConfig, id: &str) -> Result<PolicyCell, String> {
+    let dir = files_dir(cfg, id);
+    if let Some(stored) = crate::permission::load_session_policy(&dir)? {
+        return Ok(PolicyCell::new(stored.policy, stored.revision));
+    }
+    let policy = cfg
+        .permissions
+        .as_ref()
+        .map(PermissionStore::initial_policy)
+        .unwrap_or_else(SessionPolicy::unchosen);
+    crate::permission::save_session_policy(&dir, &policy, 0)?;
+    Ok(PolicyCell::new(policy, 0))
 }
 
 /// The skills of a session in `working_dir`: a fresh trust (pending).
@@ -276,7 +294,7 @@ impl EngineConfig {
             agent_profile_sources: None,
             project_loader: None,
             skills: None,
-            approval_override: ApprovalOverride::new(ApprovalMode::Standard),
+            permissions: None,
             generated_titles: false,
         }
     }
@@ -331,11 +349,10 @@ pub struct Snapshot {
     pub context: crate::context::ContextStatus,
     pub usage: Usage,
     pub pending_approvals: Vec<ApprovalRequest>,
-    pub allowed_for_session: Vec<String>,
     pub memory_space: Option<String>,
-    pub approval_rules: super::settings::ApprovalRules,
-    /// The runtime override in force (the project's rules apply under it).
-    pub approval_mode: ApprovalMode,
+    /// The session's permission policy and its revision.
+    pub permission_policy: SessionPolicy,
+    pub permission_revision: u64,
     /// The session's plan (TodoWrite); `revision` 0: none yet.
     pub plan: bricks_tools::todo_write::PlanState,
 }
@@ -346,6 +363,9 @@ pub struct ToolInfo {
     pub name: String,
     pub description: String,
     pub level: String,
+    /// What the session's policy decides for this tool at its declared
+    /// level (an action may declare another level for some inputs).
+    pub verdict: crate::permission::PermissionVerdict,
 }
 
 // ─── Controller ──────────────────────────────────────────────────────────────
@@ -358,6 +378,8 @@ struct Inner {
     meta: parking_lot::Mutex<SessionMeta>,
     queue: Arc<EventQueue>,
     broker: Arc<ApprovalBroker>,
+    /// The open session's permission policy (shared with its sub-agents).
+    permissions: parking_lot::RwLock<PolicyCell>,
     activity: parking_lot::Mutex<Activity>,
     maintenance: parking_lot::Mutex<Option<CancellationToken>>,
     idle: tokio::sync::Notify,
@@ -541,6 +563,7 @@ fn build_agent(
     meta: &SessionMeta,
     provider: Box<dyn Provider>,
     broker: &Arc<ApprovalBroker>,
+    permissions: &PolicyCell,
     profiles: &Arc<crate::agents::ProfileCatalog>,
     skills: Option<bricks_skills::SkillAccess>,
 ) -> Result<(Agent, Option<Arc<crate::agents::AgentSpawner>>), String> {
@@ -574,10 +597,8 @@ fn build_agent(
         .extensions(ext)
         .working_dir(&meta.working_dir)
         .model(meta.model.clone())
-        .permission_policy(
-            ApprovalGate::new(project.bricks.permissions.clone(), broker.clone())
-                .with_override(Arc::clone(&cfg.approval_override)),
-        )
+        .permission_cell(permissions.clone())
+        .permission_policy(BrokerApprover::new(broker.clone()))
         .memory(session_store(cfg))
         .session_id(meta.id.clone())
         .bricks_config(project.bricks.clone());
@@ -780,12 +801,14 @@ impl Controller {
         let broker = ApprovalBroker::new(cfg.interactive);
         let profiles = profile_catalog(&project, &meta);
         let skills = skill_access(&cfg, &meta.working_dir);
+        let permissions = session_permissions(&cfg, &meta.id)?;
         let (agent, spawner) = build_agent(
             &cfg,
             &project,
             &meta,
             provider,
             &broker,
+            &permissions,
             &profiles,
             skills.clone(),
         )?;
@@ -830,6 +853,7 @@ impl Controller {
             meta: parking_lot::Mutex::new(meta),
             queue: queue.clone(),
             broker,
+            permissions: parking_lot::RwLock::new(permissions),
             activity: parking_lot::Mutex::new(Activity::Idle),
             maintenance: parking_lot::Mutex::new(None),
             idle: tokio::sync::Notify::new(),
@@ -878,6 +902,7 @@ impl Controller {
     }
 
     pub fn tools(&self) -> Vec<ToolInfo> {
+        let cell = self.inner.permissions.read().clone();
         self.agent()
             .tool_list()
             .iter()
@@ -885,6 +910,7 @@ impl Controller {
                 name: t.name().to_string(),
                 description: t.description().to_string(),
                 level: format!("{:?}", t.permission_level()).to_lowercase(),
+                verdict: cell.verdict(t.name(), t.permission_level(), t.category()),
             })
             .collect()
     }
@@ -956,16 +982,35 @@ impl Controller {
             context: agent.context_status(),
             usage: agent.usage(),
             pending_approvals: self.inner.broker.pending(),
-            allowed_for_session: self.inner.broker.session_allowed(),
             memory_space: meta.memory_space.clone(),
-            approval_rules: self.project().bricks.permissions.clone(),
-            approval_mode: self.inner.cfg.approval_override.get(),
+            permission_policy: self.inner.permissions.read().get().0,
+            permission_revision: self.inner.permissions.read().revision(),
             plan: agent.plan().map(|p| p.current()).unwrap_or_default(),
         }
     }
 
     pub fn activity(&self) -> Activity {
         self.inner.activity.lock().clone()
+    }
+
+    /// Set the open session's permission policy: stored with the session
+    /// first, then in force for its agents and sub-agents from their next
+    /// call. A request already waiting for a person is not answered by it.
+    pub fn set_permission_policy(&self, policy: SessionPolicy) -> Result<(), String> {
+        let policy = SessionPolicy {
+            chosen: true,
+            ..policy
+        };
+        let id = self.inner.meta.lock().id.clone();
+        let cell = self.inner.permissions.read().clone();
+        let dir = files_dir(&self.inner.cfg, &id);
+        let revision = cell.set_saved(policy.clone(), |policy, revision| {
+            crate::permission::save_session_policy(&dir, policy, revision)
+        })?;
+        self.inner
+            .queue
+            .push_now(None, Event::PermissionPolicyChanged { policy, revision });
+        Ok(())
     }
 
     /// Rename the open session, saved at once. Later saves of the session
@@ -1557,6 +1602,12 @@ impl Controller {
                 self.search(text.clone(), regex);
                 Ok(())
             }
+            Command::SetPermissionPolicy { ref policy } => {
+                match self.set_permission_policy(policy.clone()) {
+                    Ok(()) => Ok(()),
+                    Err(e) => self.reject(&cmd, e),
+                }
+            }
             Command::Approve {
                 ref approval_id,
                 decision,
@@ -1885,20 +1936,23 @@ impl Controller {
         // nothing of the previous project's catalog, activations or trust
         // carries over.
         let skills = skill_access(cfg, &meta.working_dir);
+        // The target's own policy: nothing of the previous session's carries
+        // over.
+        let permissions = session_permissions(cfg, &meta.id)?;
         let (agent, spawner) = build_agent(
             cfg,
             &project,
             &meta,
             provider,
             &self.inner.broker,
+            &permissions,
             &profiles,
             skills.clone(),
         )?;
         let agent = Arc::new(agent);
         meta.save(&files_dir(cfg, &meta.id))?;
-        // From here the target replaces the current session. Approvals
-        // "for the session" belonged to the previous one.
-        self.inner.broker.reset_session();
+        // From here the target replaces the current session.
+        *self.inner.permissions.write() = permissions;
         *self.inner.profiles.write() = profiles;
         let old_spawner = std::mem::replace(&mut *self.inner.spawner.write(), spawner.clone());
         if let Some(old) = old_spawner {

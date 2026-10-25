@@ -45,7 +45,7 @@ impl PrefsStore {
 }
 
 /// Reads the preferences field by field. A value that does not fit its field
-/// (an unknown `tool_approval`, a width written as text) takes that field's
+/// (a width written as text) takes that field's
 /// default and is reported; the other fields are kept. Unknown keys are
 /// ignored. A file that is not a JSON object gives the defaults.
 fn parse_fields(bytes: &[u8], file: &std::path::Path) -> Preferences {
@@ -154,14 +154,13 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_approval_value_keeps_every_other_preference() {
-        use crate::contract::ToolApproval;
+    fn a_wrong_value_keeps_every_other_preference() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("preferences.json");
         std::fs::write(
             &file,
             r#"{"theme":"dark","left_width":300,"right_open":false,
-                "last_project_id":"p_1","tool_approval":"yolo","right_width":"wide",
+                "last_project_id":"p_1","tool_approval":"no_confirmation","right_width":"wide",
                 "from_a_newer_version":true}"#,
         )
         .unwrap();
@@ -171,21 +170,14 @@ mod tests {
         assert!(!p.right_open, "kept");
         assert_eq!(p.last_project_id.as_deref(), Some("p_1"), "kept");
         assert_eq!(
-            p.tool_approval,
-            ToolApproval::Standard,
-            "unknown value: standard, never more"
-        );
-        assert_eq!(
             p.right_width, 280,
             "a value of the wrong type takes its default"
         );
-
-        // A valid approval value is read as written.
-        std::fs::write(&file, r#"{"tool_approval":"always_ask"}"#).unwrap();
-        assert_eq!(
-            PrefsStore::at(file).get().tool_approval,
-            ToolApproval::AlwaysAsk
-        );
+        // The old approval preference is no longer read nor written back.
+        PrefsStore::at(file.clone()).set(p).unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        assert!(saved.get("tool_approval").is_none());
     }
 
     #[test]

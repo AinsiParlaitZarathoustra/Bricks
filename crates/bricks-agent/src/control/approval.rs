@@ -1,21 +1,22 @@
-//! Approvals: the engine's permission policy, shared by every frontend.
+//! Approvals: how a person is asked, shared by every frontend.
 //!
-//! [`ApprovalGate`] applies the configured [`ApprovalRules`]. A call that
-//! must be approved becomes an [`ApprovalRequest`] (with the change preview
-//! when the tool can compute one) and waits for a decision sent back through
-//! [`ApprovalBroker::respond`]. Nothing is written before the decision.
+//! The session's permission engine (`crate::permission`) decides each call.
+//! A call it says to ask goes through [`BrokerApprover`]: it becomes an
+//! [`ApprovalRequest`] (with the change preview when the tool can compute
+//! one) and waits for a decision sent back through
+//! [`ApprovalBroker::respond`]. Nothing is written before the decision, and
+//! an answer covers that one call.
 //!
 //! Without anyone to ask (non-interactive), the call is refused, recorded as
 //! unsatisfied and the run is stopped: it ends with an explicit result
 //! instead of going on without the step that needed approval.
 
-use super::settings::{Action, ApprovalMode, ApprovalOverride, ApprovalRules};
 use crate::events::AgentEvent;
 use async_trait::async_trait;
 use bricks_tools::permissions::{PermissionDecision, PermissionPolicy, PermissionRequest};
 use bricks_tools::preview::ChangePreview;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
@@ -38,6 +39,9 @@ pub struct ApprovalRequest {
     /// The sub-agent asking (absent: the session's own agent).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
+    /// The revision of the session's policy that asked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_revision: Option<u64>,
 }
 
 /// A decision on an approval.
@@ -46,8 +50,6 @@ pub struct ApprovalRequest {
 pub enum Decision {
     /// This call only.
     Allow,
-    /// This call and every later call of the same tool in this session.
-    AllowForSession,
     Deny,
 }
 
@@ -57,8 +59,6 @@ pub enum Decision {
 pub enum DecidedBy {
     /// A person, through a frontend.
     User,
-    /// An earlier "allow for this session".
-    Session,
     /// Nobody could be asked (non-interactive): refused.
     NonInteractive,
     /// The run was cancelled while the request waited.
@@ -77,7 +77,6 @@ pub struct ApprovalBroker {
     /// The current run's cancellation.
     run: parking_lot::Mutex<Option<CancellationToken>>,
     interactive: std::sync::atomic::AtomicBool,
-    session_allowed: parking_lot::Mutex<HashSet<String>>,
     unsatisfied: parking_lot::Mutex<Vec<ApprovalRequest>>,
 }
 
@@ -124,19 +123,6 @@ impl ApprovalBroker {
         v
     }
 
-    /// Tools allowed for the rest of the session.
-    /// Another session takes over: approvals given "for the session"
-    /// belonged to the previous one.
-    pub fn reset_session(&self) {
-        self.session_allowed.lock().clear();
-    }
-
-    pub fn session_allowed(&self) -> Vec<String> {
-        let mut v: Vec<String> = self.session_allowed.lock().iter().cloned().collect();
-        v.sort();
-        v
-    }
-
     /// Answer a pending request. Unknown or already answered ids are an
     /// error (the caller reports it; nothing is decided twice).
     pub fn respond(
@@ -162,19 +148,8 @@ impl ApprovalBroker {
         }
     }
 
-    /// Asks a person (or refuses, non-interactive). `honour_grants`: whether
-    /// session grants apply in this mode. When they do not (AlwaysAsk), an
-    /// "allow for this session" answer is only a one-time allow and is not
-    /// recorded.
-    async fn ask(
-        &self,
-        request: ApprovalRequest,
-        honour_grants: bool,
-    ) -> (Decision, DecidedBy, Option<String>) {
-        let tool = request.tool.clone();
-        if honour_grants && self.session_allowed.lock().contains(&tool) {
-            return (Decision::Allow, DecidedBy::Session, None);
-        }
+    /// Asks a person (or refuses, non-interactive).
+    async fn ask(&self, request: ApprovalRequest) -> (Decision, DecidedBy, Option<String>) {
         let run = self.run.lock().clone();
         let has_sink = self.sink.lock().is_some();
         if !self.is_interactive() || !has_sink {
@@ -204,19 +179,7 @@ impl ApprovalBroker {
         };
         tokio::select! {
             answer = rx => match answer {
-                Ok((decision, reason)) => {
-                    // Under AlwaysAsk a grant is not kept: "allow for this
-                    // session" is a one-time allow there, so nothing applies
-                    // once the mode is back to standard.
-                    let decision = match decision {
-                        Decision::AllowForSession if !honour_grants => Decision::Allow,
-                        other => other,
-                    };
-                    if decision == Decision::AllowForSession {
-                        self.session_allowed.lock().insert(tool);
-                    }
-                    (decision, DecidedBy::User, reason)
-                }
+                Ok((decision, reason)) => (decision, DecidedBy::User, reason),
                 Err(_) => (Decision::Deny, DecidedBy::Cancelled, Some("the request was dropped".into())),
             },
             _ = cancelled => {
@@ -227,38 +190,15 @@ impl ApprovalBroker {
     }
 }
 
-/// The engine's permission policy: rules, then a person when the rules say
-/// to ask. The runtime override ([`ApprovalMode`]) is read at each decision.
-pub struct ApprovalGate {
-    rules: ApprovalRules,
+/// The approver of a session: asks a person through the broker. It is only
+/// consulted for the calls the session's policy says to ask.
+pub struct BrokerApprover {
     broker: Arc<ApprovalBroker>,
-    mode: Arc<ApprovalOverride>,
 }
 
-impl ApprovalGate {
-    /// A gate with no override: the project's rules, as before.
-    pub fn new(rules: ApprovalRules, broker: Arc<ApprovalBroker>) -> Self {
-        Self {
-            rules,
-            broker,
-            mode: ApprovalOverride::new(ApprovalMode::Standard),
-        }
-    }
-
-    /// Reads `mode` at each decision (shared by every gate of one engine
-    /// configuration, so a change reaches open sessions and sub-agents).
-    pub fn with_override(mut self, mode: Arc<ApprovalOverride>) -> Self {
-        self.mode = mode;
-        self
-    }
-
-    pub fn rules(&self) -> &ApprovalRules {
-        &self.rules
-    }
-
-    /// The override in force now.
-    pub fn mode(&self) -> ApprovalMode {
-        self.mode.get()
+impl BrokerApprover {
+    pub fn new(broker: Arc<ApprovalBroker>) -> Self {
+        Self { broker }
     }
 }
 
@@ -275,49 +215,33 @@ fn level_name(level: bricks_tools::PermissionLevel) -> &'static str {
 }
 
 #[async_trait]
-impl PermissionPolicy for ApprovalGate {
+impl PermissionPolicy for BrokerApprover {
     async fn check(&self, request: &PermissionRequest) -> PermissionDecision {
-        let effective = self.rules.effective(
-            self.mode.get(),
-            &request.tool_name,
-            request.permission_level,
-        );
-        match effective.action {
-            Action::Allow => PermissionDecision::Allow,
-            Action::Deny => PermissionDecision::Deny(format!(
-                "`{}` is not allowed by the approval policy ([permissions] in bricks.toml)",
-                request.tool_name
-            )),
-            Action::Ask => {
-                let req = ApprovalRequest {
-                    approval_id: format!("ap_{}", uuid::Uuid::new_v4().simple()),
-                    tool_call_id: request.id.clone(),
-                    tool: request.tool_name.clone(),
-                    level: level_name(request.permission_level).to_string(),
-                    description: request.description.clone(),
-                    input: request.tool_input.clone(),
-                    preview: request.preview.clone(),
-                    agent_id: request.agent_id.clone(),
-                };
-                let (approval_id, tool_call_id) =
-                    (req.approval_id.clone(), req.tool_call_id.clone());
-                let (decision, by, reason) =
-                    self.broker.ask(req, effective.honour_session_grants).await;
-                self.broker
-                    .emit(AgentEvent::ApprovalResolved {
-                        approval_id,
-                        tool_call_id,
-                        decision,
-                        by,
-                    })
-                    .await;
-                match decision {
-                    Decision::Allow => PermissionDecision::AllowOnce,
-                    Decision::AllowForSession => PermissionDecision::AllowForSession,
-                    Decision::Deny => PermissionDecision::Deny(
-                        reason.unwrap_or_else(|| "rejected by the user".into()),
-                    ),
-                }
+        let req = ApprovalRequest {
+            approval_id: format!("ap_{}", uuid::Uuid::new_v4().simple()),
+            tool_call_id: request.id.clone(),
+            tool: request.tool_name.clone(),
+            level: level_name(request.permission_level).to_string(),
+            description: request.description.clone(),
+            input: request.tool_input.clone(),
+            preview: request.preview.clone(),
+            agent_id: request.agent_id.clone(),
+            policy_revision: request.policy_revision,
+        };
+        let (approval_id, tool_call_id) = (req.approval_id.clone(), req.tool_call_id.clone());
+        let (decision, by, reason) = self.broker.ask(req).await;
+        self.broker
+            .emit(AgentEvent::ApprovalResolved {
+                approval_id,
+                tool_call_id,
+                decision,
+                by,
+            })
+            .await;
+        match decision {
+            Decision::Allow => PermissionDecision::AllowOnce,
+            Decision::Deny => {
+                PermissionDecision::Deny(reason.unwrap_or_else(|| "rejected by the user".into()))
             }
         }
     }
@@ -326,7 +250,8 @@ impl PermissionPolicy for ApprovalGate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bricks_tools::PermissionLevel;
+    use crate::permission::{PermissionEngine, PermissionProfile, PolicyCell, SessionPolicy};
+    use bricks_tools::{PermissionLevel, ToolCategory};
     use std::time::Duration;
 
     fn request(tool: &str, level: PermissionLevel, id: &str) -> PermissionRequest {
@@ -334,35 +259,36 @@ mod tests {
             tool_name: tool.into(),
             tool_input: serde_json::json!({}),
             permission_level: level,
+            category: ToolCategory::FileSystem,
             description: format!("run {tool}"),
             id: id.into(),
             preview: None,
             agent_id: None,
+            policy_revision: None,
         }
     }
 
-    /// An interactive broker with a live run, and a gate reading `mode`.
+    /// An interactive broker with a live run, and an engine on `cell`.
     fn setup(
-        rules: ApprovalRules,
-        mode: Arc<ApprovalOverride>,
+        cell: PolicyCell,
     ) -> (
         Arc<ApprovalBroker>,
-        Arc<ApprovalGate>,
+        Arc<PermissionEngine>,
         mpsc::Receiver<AgentEvent>,
     ) {
         let broker = ApprovalBroker::new(true);
         let (tx, rx) = mpsc::channel(64);
         broker.begin_run(tx, CancellationToken::new());
-        let gate = ApprovalGate::new(rules, broker.clone()).with_override(mode);
-        (broker, Arc::new(gate), rx)
+        let engine = PermissionEngine::new(cell, Arc::new(BrokerApprover::new(broker.clone())));
+        (broker, Arc::new(engine), rx)
     }
 
-    /// Waits until a request is pending, and returns its id.
-    async fn wait_pending(broker: &ApprovalBroker) -> String {
+    /// Waits until a request is pending, and returns it.
+    async fn wait_pending(broker: &ApprovalBroker) -> ApprovalRequest {
         tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 if let Some(r) = broker.pending().first() {
-                    return r.approval_id.clone();
+                    return r.clone();
                 }
                 tokio::task::yield_now().await;
             }
@@ -372,155 +298,80 @@ mod tests {
     }
 
     fn spawn_check(
-        gate: &Arc<ApprovalGate>,
+        engine: &Arc<PermissionEngine>,
         req: PermissionRequest,
     ) -> tokio::task::JoinHandle<PermissionDecision> {
-        let gate = Arc::clone(gate);
-        tokio::spawn(async move { gate.check(&req).await })
-    }
-
-    fn is_allowed(d: &PermissionDecision) -> bool {
-        matches!(
-            d,
-            PermissionDecision::Allow
-                | PermissionDecision::AllowOnce
-                | PermissionDecision::AllowForSession
-        )
+        let engine = Arc::clone(engine);
+        tokio::spawn(async move { engine.check(&req).await })
     }
 
     #[tokio::test]
-    async fn a_session_grant_is_honoured_in_standard_and_ignored_under_always_ask() {
-        let mode = ApprovalOverride::new(ApprovalMode::Standard);
-        let (broker, gate, _rx) = setup(ApprovalRules::default(), Arc::clone(&mode));
-
-        // The person allows Write for the session.
-        let first = spawn_check(&gate, request("Write", PermissionLevel::Write, "c1"));
-        let id = wait_pending(&broker).await;
+    async fn an_answer_covers_one_call_only() {
+        let cell = PolicyCell::new(SessionPolicy::chosen(PermissionProfile::Ask), 3);
+        let (broker, engine, _rx) = setup(cell);
+        let first = spawn_check(&engine, request("Write", PermissionLevel::Write, "c1"));
+        let pending = wait_pending(&broker).await;
+        assert_eq!(
+            pending.policy_revision,
+            Some(3),
+            "the request says which revision asked"
+        );
         broker
-            .respond(&id, Decision::AllowForSession, None)
+            .respond(&pending.approval_id, Decision::Allow, None)
             .unwrap();
         assert!(matches!(
             first.await.unwrap(),
-            PermissionDecision::AllowForSession
+            PermissionDecision::AllowOnce
         ));
-
-        // Standard: the grant answers the next call without asking.
-        let second = spawn_check(&gate, request("Write", PermissionLevel::Write, "c2"));
-        assert!(is_allowed(&second.await.unwrap()));
-        assert!(broker.pending().is_empty(), "no question under standard");
-
-        // AlwaysAsk: the same grant is ignored, the person is asked again.
-        mode.set(ApprovalMode::AlwaysAsk);
-        let third = spawn_check(&gate, request("Write", PermissionLevel::Write, "c3"));
-        let id = wait_pending(&broker).await;
+        // The same tool again: asked again.
+        let second = spawn_check(&engine, request("Write", PermissionLevel::Write, "c2"));
+        let pending = wait_pending(&broker).await;
         broker
-            .respond(&id, Decision::Deny, Some("no".into()))
-            .unwrap();
-        assert!(matches!(third.await.unwrap(), PermissionDecision::Deny(_)));
-    }
-
-    /// Under AlwaysAsk, "allow for this session" is a one-time allow: it is
-    /// not recorded, so nothing applies once the mode is back to standard.
-    #[tokio::test]
-    async fn an_always_ask_session_grant_is_one_time_and_not_recorded() {
-        let mode = ApprovalOverride::new(ApprovalMode::AlwaysAsk);
-        let (broker, gate, mut rx) = setup(ApprovalRules::default(), Arc::clone(&mode));
-
-        let first = spawn_check(&gate, request("Write", PermissionLevel::Write, "c1"));
-        let id = wait_pending(&broker).await;
-        broker
-            .respond(&id, Decision::AllowForSession, None)
-            .unwrap();
-        assert!(
-            matches!(first.await.unwrap(), PermissionDecision::AllowOnce),
-            "a one-time allow, not a session grant"
-        );
-        assert!(broker.session_allowed().is_empty(), "nothing is recorded");
-        let resolved = std::iter::from_fn(|| rx.try_recv().ok()).find_map(|e| match e {
-            AgentEvent::ApprovalResolved { decision, .. } => Some(decision),
-            _ => None,
-        });
-        assert_eq!(
-            resolved,
-            Some(Decision::Allow),
-            "announced as a one-time allow"
-        );
-
-        // Back to standard: the earlier answer does not apply, the write is asked.
-        mode.set(ApprovalMode::Standard);
-        let second = spawn_check(&gate, request("Write", PermissionLevel::Write, "c2"));
-        let id = wait_pending(&broker).await;
-        broker
-            .respond(&id, Decision::Deny, Some("non".into()))
+            .respond(&pending.approval_id, Decision::Deny, Some("no".into()))
             .unwrap();
         assert!(matches!(second.await.unwrap(), PermissionDecision::Deny(_)));
     }
 
     #[tokio::test]
-    async fn always_ask_asks_a_read_only_call_the_rules_allow() {
-        let mode = ApprovalOverride::new(ApprovalMode::AlwaysAsk);
-        let (broker, gate, _rx) = setup(ApprovalRules::default(), mode);
-        let check = spawn_check(&gate, request("Read", PermissionLevel::ReadOnly, "r1"));
-        let id = wait_pending(&broker).await;
-        broker.respond(&id, Decision::Allow, None).unwrap();
-        assert!(is_allowed(&check.await.unwrap()));
-    }
-
-    #[tokio::test]
-    async fn no_confirmation_runs_without_asking_but_forbidden_and_denied_stay_refused() {
-        let mut rules = ApprovalRules::default();
-        rules.tools.insert("Bash".into(), Action::Deny);
-        let mode = ApprovalOverride::new(ApprovalMode::NoConfirmation);
-        let (broker, gate, _rx) = setup(rules, mode);
-
-        let write = gate
-            .check(&request("Write", PermissionLevel::Write, "w"))
-            .await;
-        assert!(is_allowed(&write));
-        let dangerous = gate
-            .check(&request("Shell", PermissionLevel::Dangerous, "d"))
-            .await;
-        assert!(is_allowed(&dangerous));
-        let bash = gate
-            .check(&request("Bash", PermissionLevel::Execute, "b"))
-            .await;
-        assert!(
-            matches!(bash, PermissionDecision::Deny(_)),
-            "explicit deny wins"
-        );
-        let forbidden = gate
-            .check(&request("Locked", PermissionLevel::Forbidden, "f"))
-            .await;
-        assert!(
-            matches!(forbidden, PermissionDecision::Deny(_)),
-            "forbidden wins"
-        );
-        assert!(broker.pending().is_empty(), "nothing was asked");
-    }
-
-    #[tokio::test]
-    async fn a_pending_request_is_not_resolved_by_a_change_of_mode() {
-        let mode = ApprovalOverride::new(ApprovalMode::Standard);
-        let (broker, gate, _rx) = setup(ApprovalRules::default(), Arc::clone(&mode));
-        let mut check = spawn_check(&gate, request("Write", PermissionLevel::Write, "p"));
-        let id = wait_pending(&broker).await;
-
-        mode.set(ApprovalMode::NoConfirmation);
-        let still_waiting = tokio::time::timeout(Duration::from_millis(100), &mut check).await;
-        assert!(
-            still_waiting.is_err(),
-            "the change must not answer the request"
-        );
-        assert_eq!(broker.pending().len(), 1, "still waiting for the person");
-
-        broker.respond(&id, Decision::Deny, None).unwrap();
+    async fn a_pending_request_is_not_resolved_by_a_change_of_policy() {
+        let cell = PolicyCell::new(SessionPolicy::chosen(PermissionProfile::Ask), 0);
+        let (broker, engine, _rx) = setup(cell.clone());
+        let mut check = spawn_check(&engine, request("Write", PermissionLevel::Write, "p"));
+        let pending = wait_pending(&broker).await;
+        cell.set(SessionPolicy::chosen(PermissionProfile::Execute));
+        let still = tokio::time::timeout(Duration::from_millis(100), &mut check).await;
+        assert!(still.is_err(), "the change must not answer the request");
+        broker
+            .respond(&pending.approval_id, Decision::Deny, None)
+            .unwrap();
         assert!(matches!(check.await.unwrap(), PermissionDecision::Deny(_)));
+        // The next call follows the new policy.
+        let next = engine
+            .check(&request("Write", PermissionLevel::Write, "q"))
+            .await;
+        assert!(matches!(next, PermissionDecision::Allow));
     }
 
-    #[test]
-    fn a_gate_without_override_keeps_the_project_rules() {
+    #[tokio::test]
+    async fn without_anyone_to_ask_the_call_is_refused_and_recorded() {
         let broker = ApprovalBroker::new(false);
-        let gate = ApprovalGate::new(ApprovalRules::default(), broker);
-        assert_eq!(gate.mode(), ApprovalMode::Standard);
+        let (tx, _rx) = mpsc::channel(64);
+        let run = CancellationToken::new();
+        broker.begin_run(tx, run.clone());
+        let engine = PermissionEngine::new(
+            PolicyCell::new(SessionPolicy::unchosen(), 0),
+            Arc::new(BrokerApprover::new(broker.clone())),
+        );
+        let d = engine
+            .check(&request("Edit", PermissionLevel::Write, "e"))
+            .await;
+        assert!(matches!(d, PermissionDecision::Deny(r) if r.contains("non-interactive")));
+        assert_eq!(broker.unsatisfied().len(), 1);
+        assert!(run.is_cancelled(), "the run stops with approval required");
+        // Reads still run without asking.
+        let r = engine
+            .check(&request("Read", PermissionLevel::ReadOnly, "r"))
+            .await;
+        assert!(matches!(r, PermissionDecision::Allow));
     }
 }

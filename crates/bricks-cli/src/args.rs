@@ -78,6 +78,12 @@ pub struct RunArgs {
     /// (exit code 3). Does not grant any permission.
     #[arg(long)]
     pub non_interactive: bool,
+    /// The permission profile of this run's session: `ask` (reads run,
+    /// writes, commands, network and sub-agents are asked) or `execute`
+    /// (everything runs). Without it, the session keeps its own policy, or
+    /// starts from the default chosen in Bricks (none chosen: as `ask`).
+    #[arg(long, value_enum, value_name = "PROFILE")]
+    pub permissions: Option<PermissionsArg>,
     /// Also read stdin and attach it after the positional prompt.
     #[arg(long)]
     pub stdin: bool,
@@ -104,4 +110,20 @@ pub struct RunArgs {
     /// permission.
     #[arg(long)]
     pub trust_project_skills: bool,
+}
+
+/// The profiles `--permissions` accepts (CUSTOM is set in Bricks).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum PermissionsArg {
+    Ask,
+    Execute,
+}
+
+impl From<PermissionsArg> for bricks_agent::permission::PermissionProfile {
+    fn from(a: PermissionsArg) -> Self {
+        match a {
+            PermissionsArg::Ask => Self::Ask,
+            PermissionsArg::Execute => Self::Execute,
+        }
+    }
 }

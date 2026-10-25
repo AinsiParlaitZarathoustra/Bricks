@@ -6,9 +6,9 @@ import type { ConfigEntry } from "./ConfigEntry";
  */
 export type SessionConfigInfo = { session_id: string, working_dir: string, model: string, provider: string, reasoning: string | null, effective_reasoning: string | null, interactive: boolean, memory_space: string | null, 
 /**
- * `bricks_agent::control::ApprovalRules` (actions per level and tool).
+ * The session's permission policy and its revision.
  */
-approval_rules: Record<string, unknown>, allowed_for_session: Array<string>, agents_enabled: boolean, 
+permission_policy: import('../engine').SessionPolicy, permission_revision: number, agents_enabled: boolean, 
 /**
  * Configuration files read for this session, in order.
  */

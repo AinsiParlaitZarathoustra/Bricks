@@ -28,7 +28,8 @@ import type { ResolvedAttachment } from './bindings/ResolvedAttachment'
 import type { SessionItem } from './bindings/SessionItem'
 import type { SessionSearchHit } from './bindings/SessionSearchHit'
 import type { ProjectFileWindow } from './bindings/ProjectFileWindow'
-import type { Command, ModelChoice, Snapshot } from './engine'
+import type { PermissionsDefault } from './bindings/PermissionsDefault'
+import type { Command, ModelChoice, SessionPolicy, Snapshot } from './engine'
 
 export type * from './bindings/AppInfo'
 export type * from './bindings/ChangeJournalInfo'
@@ -99,6 +100,9 @@ export const appInfo = () => call<AppInfo>('app_info')
 export const modelsList = () => call<ModelChoice[]>('models_list')
 export const prefsGet = () => call<Preferences>('prefs_get')
 export const prefsSet = (prefs: Preferences) => call<void>('prefs_set', { prefs })
+export const permissionsDefaultGet = () => call<PermissionsDefault>('permissions_default_get')
+export const permissionsDefaultSet = (policy: SessionPolicy) =>
+  call<void>('permissions_default_set', { policy })
 
 /** Subscribes to every session's events. Returns an unsubscribe function. */
 export async function subscribeEvents(
@@ -262,7 +266,7 @@ export const projectFiles = (projectId: string, query: string, limit = 50, refre
 
 // ─── provider/model editing ─────────────────────────────────────
 
-export type * from './bindings/ToolApproval'
+export type * from './bindings/PermissionsDefault'
 export type * from './bindings/ProvidersFile'
 export type * from './bindings/ProviderView'
 export type * from './bindings/ModelView'

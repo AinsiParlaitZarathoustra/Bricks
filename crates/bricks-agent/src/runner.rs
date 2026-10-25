@@ -2738,10 +2738,28 @@ async fn decide_and_run(
     input: serde_json::Value,
 ) -> CallRun {
     let mut input = input;
+    // Set once a hook changed the input: that input was decided again and
+    // is what runs (the hook is not run a second time on its own output).
+    let mut hooked = false;
     for _ in 0..MAX_DECISION_ROUNDS {
         let (decision, approved) = decide(site, tool, tool_name, &input).await;
         if let PermissionDecision::Deny(reason) = decision {
             return CallRun::not_run(ToolResult::error(format!("Permission denied: {reason}")));
+        }
+        if hooked {
+            let mut exec_ctx = site.tool_ctx.clone();
+            if let Some(change) = &approved {
+                exec_ctx.extensions = exec_ctx.extensions.with_local(ApprovedState::of(change));
+            }
+            let result = execute_admitted(tool, input.clone(), &exec_ctx).await;
+            if is_stale_approval(&result) {
+                continue;
+            }
+            return CallRun {
+                result,
+                executed: true,
+                change: approved,
+            };
         }
 
         let hook_ctx = HookContext {
@@ -2762,14 +2780,11 @@ async fn decide_and_run(
             _ => (input.clone(), false),
         };
         if modified {
-            let now = tool
-                .preview(&effective, site.tool_ctx)
-                .await
-                .filter(|p| p.refusal.is_none());
-            if now != approved {
-                input = effective;
-                continue;
-            }
+            // Other input, other call: decided again, even when its file
+            // changes look the same.
+            input = effective;
+            hooked = true;
+            continue;
         }
 
         let mut exec_ctx = site.tool_ctx.clone();
@@ -2824,17 +2839,17 @@ async fn decide(
             tool_name: tool_name.to_string(),
             tool_input: input.clone(),
             permission_level: tool.permission_level_for(input),
+            category: tool.category(),
             description: description.clone(),
             id: site.tool_id.to_string(),
             preview: preview.clone(),
             agent_id: None,
+            policy_revision: None,
         };
         let decision = site.permissions.check(&request).await;
         let allowed = matches!(
             decision,
-            PermissionDecision::Allow
-                | PermissionDecision::AllowOnce
-                | PermissionDecision::AllowForSession
+            PermissionDecision::Allow | PermissionDecision::AllowOnce
         );
         match preview.as_ref().map(|p| p.check_current()) {
             Some(Err(changed)) if allowed => {

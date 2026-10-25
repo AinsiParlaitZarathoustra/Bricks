@@ -11,6 +11,7 @@ pub mod context_analyzer;
 pub mod control;
 pub mod coordinator;
 pub mod events;
+pub mod permission;
 pub mod reporters;
 mod request_env;
 pub(crate) mod runner;
@@ -29,7 +30,7 @@ use bricks_hooks::Hook;
 use bricks_mcp::McpServerConfig;
 use bricks_memory::Memory;
 use bricks_provider::Provider;
-use bricks_tools::permissions::{AllowAll, PermissionPolicy};
+use bricks_tools::permissions::PermissionPolicy;
 use bricks_tools::{CostTracker, Tool};
 use bricks_types::*;
 use events::AgentEvent;
@@ -246,6 +247,9 @@ type EventFilter = Arc<dyn Fn(&AgentEvent) -> bool + Send + Sync>;
 
 // ─── Agent ───────────────────────────────────────────────────────────────────
 
+/// The policy cell and the approver an agent's engine was built from.
+type PermissionParts = (permission::PolicyCell, Arc<dyn PermissionPolicy>);
+
 pub struct Agent {
     /// Provider, model label and reasoning profile, changed together by
     /// [`Agent::set_model`] / [`Agent::set_reasoning`]. A run takes one
@@ -265,7 +269,11 @@ pub struct Agent {
     max_tokens: u32,
     temperature: Option<f32>,
     working_dir: PathBuf,
+    /// Decides every tool call (the session's policy, then the approver).
     permission_policy: Arc<dyn PermissionPolicy>,
+    /// The policy and the approver it was built from (absent when a whole
+    /// engine was given, as for a sub-agent).
+    permission_parts: Option<PermissionParts>,
     memory: Option<Arc<dyn Memory>>,
     /// Long-term memory recalled into the prompt and fed with each exchange.
     pub(crate) long_term_memory: Option<Arc<dyn bricks_memory::LongTermMemory>>,
@@ -371,11 +379,17 @@ impl Agent {
         let cancel = self.begin_run();
         let controls = Arc::new(events::StreamControls::new(cancel.clone()));
         let permissions: Arc<dyn PermissionPolicy> = if self.permission_policy.requires_stream() {
-            Arc::new(events::StreamPermissions::new(
+            let stream: Arc<dyn PermissionPolicy> = Arc::new(events::StreamPermissions::new(
                 Arc::clone(&controls),
                 event_tx.clone(),
                 Arc::new(self.emit_handle()),
-            ))
+            ));
+            // The stream answers what the policy asks; the policy still
+            // decides.
+            match &self.permission_parts {
+                Some((cell, _)) => Arc::new(permission::PermissionEngine::new(cell.clone(), stream)),
+                None => stream,
+            }
         } else {
             Arc::clone(&self.permission_policy)
         };
@@ -886,7 +900,10 @@ pub struct AgentBuilder {
     reasoning_profile: Option<String>,
     seed_usage: Option<Usage>,
     working_dir: Option<PathBuf>,
-    permission_policy: Option<Arc<dyn PermissionPolicy>>,
+    permission_approver: Option<Arc<dyn PermissionPolicy>>,
+    permission_profile: Option<permission::SessionPolicy>,
+    permission_cell: Option<permission::PolicyCell>,
+    permission_engine: Option<Arc<dyn PermissionPolicy>>,
     memory: Option<Arc<dyn Memory>>,
     long_term_memory: Option<Arc<dyn bricks_memory::LongTermMemory>>,
     memory_recall_tokens: usize,
@@ -930,7 +947,10 @@ impl Default for AgentBuilder {
             reasoning_profile: None,
             seed_usage: None,
             working_dir: None,
-            permission_policy: None,
+            permission_approver: None,
+            permission_profile: None,
+            permission_cell: None,
+            permission_engine: None,
             memory: None,
             long_term_memory: None,
             memory_recall_tokens: 1200,
@@ -1043,15 +1063,40 @@ impl AgentBuilder {
         self
     }
 
+    /// The approver: who answers the calls the policy says to ask (a person
+    /// through a callback, a stream, a fixed answer). It never decides the
+    /// others. Without a policy set, giving an approver means the ASK
+    /// profile, so a call that used to be asked is still asked.
     pub fn permission_policy(mut self, p: impl PermissionPolicy + 'static) -> Self {
-        self.permission_policy = Some(Arc::new(p));
+        self.permission_approver = Some(Arc::new(p));
         self
     }
 
-    /// [`AgentBuilder::permission_policy`] with a policy already shared, such
-    /// as a parent's (a sub-agent never gets more than its parent).
+    /// [`AgentBuilder::permission_policy`] with an approver already shared.
     pub fn permission_policy_arc(mut self, p: Arc<dyn PermissionPolicy>) -> Self {
-        self.permission_policy = Some(p);
+        self.permission_approver = Some(p);
+        self
+    }
+
+    /// The agent's permission policy (ASK, EXECUTE or CUSTOM). Default:
+    /// EXECUTE without an approver, ASK with one.
+    pub fn permission_profile(mut self, policy: permission::SessionPolicy) -> Self {
+        self.permission_profile = Some(policy);
+        self
+    }
+
+    /// A policy shared with other agents of the same session (a change
+    /// reaches all of them at their next call).
+    pub fn permission_cell(mut self, cell: permission::PolicyCell) -> Self {
+        self.permission_cell = Some(cell);
+        self
+    }
+
+    /// A whole decision path already built — a parent's engine, for a
+    /// sub-agent (which never gets more than its parent). Wins over the
+    /// approver, profile and cell.
+    pub fn permission_engine_arc(mut self, p: Arc<dyn PermissionPolicy>) -> Self {
+        self.permission_engine = Some(p);
         self
     }
 
@@ -1234,6 +1279,36 @@ impl AgentBuilder {
             .working_dir
             .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
+        // One engine decides every call: a whole one given (a sub-agent's
+        // parent), or the policy (shared cell, profile, or the default)
+        // with its approver.
+        let (permission_policy, permission_parts): (Arc<dyn PermissionPolicy>, Option<PermissionParts>) = match self.permission_engine {
+            Some(engine) => (engine, None),
+            None => {
+                let has_approver = self.permission_approver.is_some();
+                let approver = self
+                    .permission_approver
+                    .unwrap_or_else(|| Arc::new(bricks_tools::permissions::DenyAll));
+                let cell = self.permission_cell.unwrap_or_else(|| {
+                    let policy = self.permission_profile.unwrap_or_else(|| {
+                        permission::SessionPolicy::chosen(if has_approver {
+                            permission::PermissionProfile::Ask
+                        } else {
+                            permission::PermissionProfile::Execute
+                        })
+                    });
+                    permission::PolicyCell::new(policy, 0)
+                });
+                (
+                    Arc::new(permission::PermissionEngine::new(
+                        cell.clone(),
+                        Arc::clone(&approver),
+                    )),
+                    Some((cell, approver)),
+                )
+            }
+        };
+
         let broadcast_tx = self.broadcast_capacity.map(|cap| {
             let (tx, _) = broadcast::channel(cap);
             tx
@@ -1362,7 +1437,8 @@ impl AgentBuilder {
             max_tokens: self.max_tokens,
             temperature: self.temperature,
             working_dir,
-            permission_policy: self.permission_policy.unwrap_or_else(|| Arc::new(AllowAll)),
+            permission_policy,
+            permission_parts,
             memory: self.memory,
             long_term_memory: self.long_term_memory,
             memory_recall_tokens: self.memory_recall_tokens,

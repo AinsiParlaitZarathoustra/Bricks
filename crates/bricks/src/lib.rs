@@ -25,6 +25,7 @@
 pub use bricks_agent::events::{
     self as events, AgentEvent, AgentStream, CompactReason, WarningState,
 };
+pub use bricks_agent::permission;
 pub use bricks_agent::reporters;
 pub use bricks_agent::{Agent, AgentBuilder, AgentOutput, Reporter};
 #[cfg(feature = "agentlang")]
@@ -53,6 +54,9 @@ pub use bricks_provider::{
 /// The prelude — import this for the most common types.
 pub mod prelude {
     // Core agent
+    pub use crate::permission::{
+        CustomRules, PermissionEffect, PermissionProfile, PermissionVerdict, SessionPolicy,
+    };
     pub use crate::{Agent, AgentBuilder, AgentOutput};
     pub use crate::{AgentEvent, AgentStream, Reporter};
 
@@ -68,8 +72,8 @@ pub mod prelude {
 
     // Tools
     pub use bricks_tools::permissions::{
-        AllowAll, AllowReadOnly, DenyAll, InteractivePolicy, PermissionDecision, PermissionPolicy,
-        PermissionRequest, RuleBased,
+        AllowAll, DenyAll, InteractivePolicy, PermissionDecision, PermissionPolicy,
+        PermissionRequest,
     };
     pub use bricks_tools::{
         CostTracker, Extensions, PermissionLevel, Tool, ToolCategory, ToolContext, ToolExecute,

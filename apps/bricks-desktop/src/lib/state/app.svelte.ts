@@ -14,7 +14,7 @@ import type {
   SessionItem,
   SessionSearchHit,
 } from '$lib/ipc/client'
-import type { Command, Envelope, ModelChoice } from '$lib/ipc/engine'
+import type { Command, Envelope, ModelChoice, SessionPolicy } from '$lib/ipc/engine'
 import { Conversation, type Draft } from './conversation.svelte'
 import { defaultDiagramSettings } from '$lib/features/diagrams/settings'
 import { reader } from './reader.svelte'
@@ -29,7 +29,6 @@ export const DEFAULT_PREFERENCES: Preferences = {
   terminal_height: 240,
   last_project_id: null,
   last_session_id: null,
-  tool_approval: 'standard',
   colors: { light: { accent: null, background: null, panel: null }, dark: { accent: null, background: null, panel: null } },
   terminal_ratio: null,
   diagrams: defaultDiagramSettings(),
@@ -176,23 +175,8 @@ class AppStore {
 
   // ─── Preferences ──────────────────────────────────────────────────────────
 
-  /**
-   * Updates preferences and saves them (debounced). The tool approval
-   * policy changes engine decisions: it is saved at once and rolled back
-   * if the save fails, so the shown choice is always the applied one.
-   */
+  /** Updates preferences and saves them (debounced). */
   setPrefs(patch: Partial<Preferences>) {
-    if (patch.tool_approval !== undefined && patch.tool_approval !== this.prefs.tool_approval) {
-      const previous = this.prefs.tool_approval
-      this.prefs = { ...this.prefs, ...patch }
-      if (this.prefsTimer) clearTimeout(this.prefsTimer)
-      this.prefsTimer = null
-      ipc.prefsSet($state.snapshot(this.prefs)).catch((e) => {
-        this.prefs = { ...this.prefs, tool_approval: previous }
-        this.fail(e)
-      })
-      return
-    }
     this.prefs = { ...this.prefs, ...patch }
     if (this.prefsTimer) clearTimeout(this.prefsTimer)
     this.prefsTimer = setTimeout(() => {
@@ -489,6 +473,22 @@ class AppStore {
       return null
     } catch (e) {
       submitted?.setPendingSubmitLabel(null)
+      return ipc.errorMessage(e)
+    }
+  }
+
+  /**
+   * Sets a session's permission policy. `asDefault` also makes it the policy
+   * new conversations start from. Errors are returned, not thrown.
+   */
+  async setPermissions(sessionId: string, policy: SessionPolicy, asDefault = false): Promise<string | null> {
+    const chosen = { ...policy, chosen: true }
+    const refused = await this.command(sessionId, { type: 'set_permission_policy', policy: chosen })
+    if (refused || !asDefault) return refused
+    try {
+      await ipc.permissionsDefaultSet(chosen)
+      return null
+    } catch (e) {
       return ipc.errorMessage(e)
     }
   }

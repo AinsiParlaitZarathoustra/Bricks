@@ -42,20 +42,6 @@ export function decisionVariant(decision: string): BadgeVariant {
 	}
 }
 
-/** An action of the approval policy, written as a setting ("Autoriser", ...). */
-export function ruleLabel(action: string): string {
-	switch (action) {
-		case 'allow':
-			return 'Autoriser';
-		case 'ask':
-			return 'Demander';
-		case 'deny':
-			return 'Refuser';
-		default:
-			return action;
-	}
-}
-
 /** What the engine is doing (`Snapshot.activity`). */
 export function activityLabel(activity: Activity): string {
 	switch (activity.state) {
@@ -104,51 +90,4 @@ export function matchesTool(tool: { name: string; description: string }, filter:
 		tool.name.toLocaleLowerCase('fr').includes(needle) ||
 		tool.description.toLocaleLowerCase('fr').includes(needle)
 	);
-}
-
-/** Levels of the approval policy, in the order the configuration lists them. */
-export const RULE_LEVELS: ReadonlyArray<{ key: string; label: string }> = [
-	{ key: 'none', label: 'Aucune' },
-	{ key: 'read_only', label: 'Lecture' },
-	{ key: 'write', label: 'Écriture' },
-	{ key: 'execute', label: 'Exécution' },
-	{ key: 'dangerous', label: 'Dangereux' }
-];
-
-export interface RulesView {
-	/** Action for tools no other rule covers. */
-	defaultAction: string;
-	levels: Array<{ key: string; label: string; action: string }>;
-	/** Per-tool overrides, by tool name. */
-	tools: Array<{ name: string; action: string }>;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/**
- * The approval policy (`ApprovalRules` as JSON) read for display. `null`
- * when the value does not have the expected shape.
- */
-export function rulesView(value: unknown): RulesView | null {
-	if (!isRecord(value)) return null;
-	const action = (v: unknown): string | null => (typeof v === 'string' ? v : null);
-	const defaultAction = action(value.default);
-	if (defaultAction === null) return null;
-	const levels: RulesView['levels'] = [];
-	for (const level of RULE_LEVELS) {
-		const found = action(value[level.key]);
-		if (found === null) return null;
-		levels.push({ key: level.key, label: level.label, action: found });
-	}
-	const tools: RulesView['tools'] = [];
-	if (isRecord(value.tools)) {
-		for (const [name, raw] of Object.entries(value.tools)) {
-			const found = action(raw);
-			if (found !== null) tools.push({ name, action: found });
-		}
-	}
-	tools.sort((a, b) => a.name.localeCompare(b.name, 'fr'));
-	return { defaultAction, levels, tools };
 }

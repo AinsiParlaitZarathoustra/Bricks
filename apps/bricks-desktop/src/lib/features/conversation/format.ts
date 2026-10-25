@@ -20,13 +20,11 @@ export const OUTCOME_LABEL: Record<RunOutcome, string> = {
 
 export const DECISION_LABEL: Record<Decision, string> = {
   allow: 'Autorisé',
-  allow_for_session: 'Autorisé pour la session',
   deny: 'Refusé',
 }
 
 export const DECIDED_BY_LABEL: Record<DecidedBy, string> = {
   user: 'par vous',
-  session: 'selon l’autorisation de la session',
   non_interactive: 'mode non interactif',
   cancelled: 'annulée',
 }
