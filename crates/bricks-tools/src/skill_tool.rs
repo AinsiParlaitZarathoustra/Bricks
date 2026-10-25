@@ -83,9 +83,9 @@ fn notes_text(notes: &[String]) -> String {
 fn store_error(e: &StoreError) -> ToolResult {
     let meta = serde_json::to_value(e).unwrap_or_default();
     let fix = match e {
-        StoreError::Invalid { .. } | StoreError::Incompatible { .. } | StoreError::Unsafe { .. } => {
-            " Fix the folder, then validate it again."
-        }
+        StoreError::Invalid { .. }
+        | StoreError::Incompatible { .. }
+        | StoreError::Unsafe { .. } => " Fix the folder, then validate it again.",
         StoreError::Exists { .. } | StoreError::Reserved { .. } => {
             " Choose another name (in SKILL.md and for the folder)."
         }
@@ -101,11 +101,7 @@ impl Tool for SkillTool {
     }
 
     fn description(&self) -> &str {
-        "Activate a skill to read its full instructions (action 'activate'), list the skills \
-         you can activate (action 'list'), locate one of a skill's files (action 'resource'), \
-         check a skill folder against the Agent Skills standard (action 'validate'), or install \
-         a copy of a checked folder in Bricks (action 'install'; it is then in the catalog at \
-         once). Activation runs nothing and grants no permission."
+        "Manage skills: list, activate (read instructions), resource (locate files), validate a folder, or install a checked copy in Bricks. Activation runs nothing and grants no permission."
     }
 
     fn permission_level(&self) -> PermissionLevel {
@@ -265,9 +261,15 @@ impl Tool for SkillTool {
                 }
             }
             "validate" | "install" => {
-                let Some(path) = input.path.as_deref().map(str::trim).filter(|p| !p.is_empty())
+                let Some(path) = input
+                    .path
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|p| !p.is_empty())
                 else {
-                    return ToolResult::error(format!("'{action}' needs `path`: the skill's folder."));
+                    return ToolResult::error(format!(
+                        "'{action}' needs `path`: the skill's folder."
+                    ));
                 };
                 let Some(store) = session.access.service.store() else {
                     return ToolResult::error(

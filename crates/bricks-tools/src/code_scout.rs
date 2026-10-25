@@ -86,13 +86,7 @@ impl Tool for CodeScoutTool {
     }
 
     fn description(&self) -> &str {
-        "Understand code: find a symbol's definitions, its references, what is at a place, \
-         a file's diagnostics, or search text — in one call, with exact sourced locations and \
-         bounded context. State the intent; the engine picks text search, syntax or a language \
-         server, and says how each result was established (confirmed / syntactic / textual) \
-         and what is missing. Homonyms are listed, never chosen silently: pass `target_id` (an \
-         `id` from a previous result) or file+line+column to be precise. Read, Grep and the \
-         other tools remain available."
+        "Find symbols, definitions, references, diagnostics or text with bounded source context. Results identify their evidence: confirmed, syntactic or textual. Resolve ambiguous symbols with target_id or file, line and column."
     }
 
     fn permission_level(&self) -> PermissionLevel {

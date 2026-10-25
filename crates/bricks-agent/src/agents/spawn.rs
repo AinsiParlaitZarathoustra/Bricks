@@ -43,8 +43,6 @@ pub struct DelegationSettings {
     pub reasoning_aliases: BTreeMap<String, String>,
     /// Largest explicit `context` a request may pass, in characters.
     pub max_context_chars: usize,
-    /// Profiles described in the tool's schema (the rest: `AgentProfiles`).
-    pub catalog_size: usize,
     /// Characters of the child's answer returned to the parent (the full
     /// transcript stays on disk).
     pub summary_chars: usize,
@@ -77,7 +75,6 @@ impl Default for DelegationSettings {
             auto_model: None,
             reasoning_aliases: BTreeMap::new(),
             max_context_chars: 16_000,
-            catalog_size: 30,
             summary_chars: 30_000,
             max_concurrent: 16,
             max_depth: 1,

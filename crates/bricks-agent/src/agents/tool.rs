@@ -17,28 +17,7 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 use std::time::Duration;
 
-fn catalog(spawner: &AgentSpawner) -> String {
-    let reg = spawner.profiles().snapshot();
-    let max = spawner.settings().catalog_size.max(1);
-    let usable: Vec<_> = reg.list().into_iter().filter(|l| l.valid).collect();
-    let mut lines: Vec<String> = usable
-        .iter()
-        .take(max)
-        .map(|l| {
-            let d: String = l.description.chars().take(140).collect();
-            format!("{}: {d}", l.name)
-        })
-        .collect();
-    if usable.len() > max {
-        lines.push(format!(
-            "… {} more: use AgentProfiles to list or search them",
-            usable.len() - max
-        ));
-    }
-    lines.join("\n")
-}
-
-fn item_schema(spawner: &AgentSpawner) -> Value {
+fn item_schema() -> Value {
     json!({
         "task": {
             "type": "string",
@@ -48,7 +27,7 @@ fn item_schema(spawner: &AgentSpawner) -> Value {
         "description": { "type": "string", "description": "Short label (3-5 words)." },
         "profile": {
             "type": "string",
-            "description": format!("A specialist profile (optional). Available:\n{}", catalog(spawner))
+            "description": "Optional specialist profile. Use AgentProfiles to list or search profiles."
         },
         "model": { "type": "string", "description": "`inherit` (default), `auto`, or `provider_id/model_id`." },
         "reasoning": { "type": "string", "description": "`inherit` (default) or a reasoning profile id of that model." },
@@ -123,11 +102,7 @@ impl Tool for NativeAgentTool {
     }
 
     fn description(&self) -> &str {
-        "Delegate one self-contained task to a sub-agent that works in a fresh context (it does \
-         not see this conversation) with your permissions and tools, optionally as a specialist \
-         profile, model or reasoning profile. It always runs in parallel: you get its id at once \
-         and go on; `AgentControl wait` gives its compact result when you need it. Use it when a \
-         task is substantial and separable; do small tasks yourself."
+        "Delegate one self-contained task in parallel. Returns an id; use AgentControl wait for its result. The child has fresh context and inherits your permissions and tools."
     }
 
     fn permission_level(&self) -> PermissionLevel {
@@ -139,7 +114,7 @@ impl Tool for NativeAgentTool {
     }
 
     fn input_schema(&self) -> Value {
-        json!({ "type": "object", "properties": item_schema(&self.spawner), "required": ["task"] })
+        json!({ "type": "object", "properties": item_schema(), "required": ["task"] })
     }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> ToolResult {
@@ -201,11 +176,7 @@ impl Tool for AgentsTool {
     }
 
     fn description(&self) -> &str {
-        "Delegate several independent, self-contained tasks to sub-agents that run at the same \
-         time (as capacity allows; the others wait in line), each in a fresh context with your \
-         permissions and tools; parallel writers each get their own git worktree, and their \
-         changes come back as ChangeSets to inspect and apply. You get their ids at once; \
-         `AgentControl wait` gives each result. `fail_fast`: the first failure cancels the others."
+        "Run independent tasks in parallel as capacity allows; returns ids. Writers use isolated worktrees and ChangeSets. Read results with AgentControl wait. fail_fast cancels the others after a failure."
     }
 
     fn permission_level(&self) -> PermissionLevel {
@@ -223,7 +194,7 @@ impl Tool for AgentsTool {
                 "agents": {
                     "type": "array",
                     "minItems": 1,
-                    "items": { "type": "object", "properties": item_schema(&self.spawner), "required": ["task"] }
+                    "items": { "type": "object", "properties": item_schema(), "required": ["task"] }
                 },
                 "fail_fast": { "type": "boolean", "description": "Cancel the others when one fails (default false)." }
             },

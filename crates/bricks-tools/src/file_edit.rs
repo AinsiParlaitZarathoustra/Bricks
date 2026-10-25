@@ -57,11 +57,7 @@ impl Tool for FileEditTool {
         "Edit"
     }
     fn description(&self) -> &str {
-        "Replace text in a file. Give one replacement with old_string and new_string, or several \
-         with edits: they are applied in order, each against the result of the previous one, and \
-         the file is written only if all of them apply. old_string matches with tolerance for \
-         leading/trailing whitespace and indentation differences; it must identify one place \
-         unless replace_all is set."
+        "Replace text in one file: old_string/new_string or sequential edits, written only if all apply. Matching tolerates whitespace and indentation differences; matches must be unique unless replace_all is true."
     }
     fn permission_level(&self) -> PermissionLevel {
         PermissionLevel::Write

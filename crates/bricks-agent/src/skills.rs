@@ -52,9 +52,7 @@ pub(crate) fn scrub_text(text: &str, withdrawn: &HashMap<String, String>) -> Opt
     let mut changed = false;
     while let Some(i) = rest.find(MARK) {
         let after = &rest[i + MARK.len()..];
-        let name = after
-            .find('"')
-            .and_then(|end| withdrawn.get(&after[..end]));
+        let name = after.find('"').and_then(|end| withdrawn.get(&after[..end]));
         match name {
             Some(name) => {
                 out.push_str(&rest[..i]);
@@ -77,7 +75,10 @@ pub(crate) fn scrub_text(text: &str, withdrawn: &HashMap<String, String>) -> Opt
 }
 
 /// Replace the withdrawn activations in every text of `messages`.
-pub(crate) fn scrub_messages(messages: &mut [Message], withdrawn: &HashMap<String, String>) -> bool {
+pub(crate) fn scrub_messages(
+    messages: &mut [Message],
+    withdrawn: &HashMap<String, String>,
+) -> bool {
     let mut changed = false;
     let mut fix = |t: &mut String| {
         if let Some(new) = scrub_text(t, withdrawn) {
@@ -129,7 +130,11 @@ fn has_summary(m: &Message) -> bool {
 /// Whether the summary made at compaction `k` (1-based) was written from
 /// a withdrawn activation's text: its snapshot holds one, or the summary
 /// it summarised was itself written from one.
-fn summary_tainted(snapshots: &[crate::CompactionSnapshot], k: usize, withdrawn: &HashSet<String>) -> bool {
+fn summary_tainted(
+    snapshots: &[crate::CompactionSnapshot],
+    k: usize,
+    withdrawn: &HashSet<String>,
+) -> bool {
     let Some(snap) = k.checked_sub(1).and_then(|i| snapshots.get(i)) else {
         return false;
     };
@@ -143,7 +148,8 @@ fn summary_tainted(snapshots: &[crate::CompactionSnapshot], k: usize, withdrawn:
 /// blocks when it merges the summary into it).
 fn same(a: &Message, b: &Message) -> bool {
     a.role == b.role
-        && serde_json::to_value(a.content_blocks()).ok() == serde_json::to_value(b.content_blocks()).ok()
+        && serde_json::to_value(a.content_blocks()).ok()
+            == serde_json::to_value(b.content_blocks()).ok()
 }
 
 /// The active history with its summary replaced by what it summarised,
@@ -166,7 +172,9 @@ pub(crate) fn expand_tainted_summary(
     let rest_blocks: Vec<ContentBlock> = first
         .content_blocks()
         .into_iter()
-        .filter(|b| !is_summary(b) && !matches!(b, ContentBlock::Text { text } if text.starts_with(MARK)))
+        .filter(|b| {
+            !is_summary(b) && !matches!(b, ContentBlock::Text { text } if text.starts_with(MARK))
+        })
         .collect();
     let mut after: Vec<Message> = Vec::new();
     if !rest_blocks.is_empty() {
@@ -631,7 +639,10 @@ mod tests {
 
     fn summary(text: &str) -> ContentBlock {
         ContentBlock::Text {
-            text: format!("{}\n## Summary\n{text}\n</context_summary>", crate::compact::SUMMARY_OPEN),
+            text: format!(
+                "{}\n## Summary\n{text}\n</context_summary>",
+                crate::compact::SUMMARY_OPEN
+            ),
         }
     }
 
@@ -680,13 +691,18 @@ mod tests {
     #[test]
     fn a_summary_of_a_tainted_summary_is_tainted_too() {
         let gone = activation("skill_g", "gone", "GONE-SECRET");
-        let first = vec![Message::user("a"), tool_result("c", gone), Message::user("b")];
+        let first = vec![
+            Message::user("a"),
+            tool_result("c", gone),
+            Message::user("b"),
+        ];
         // The second compaction summarised the first summary (no marker
         // left in it) and kept nothing.
         let second = vec![
-            Message::user_blocks(vec![summary("paraphrase one"), ContentBlock::Text {
-                text: "b".into(),
-            }]),
+            Message::user_blocks(vec![
+                summary("paraphrase one"),
+                ContentBlock::Text { text: "b".into() },
+            ]),
             Message::assistant("c"),
         ];
         let active = vec![Message::user_blocks(vec![summary("paraphrase two")])];
@@ -694,7 +710,10 @@ mod tests {
         let ids: HashSet<String> = ["skill_g".to_string()].into();
         let rebuilt = expand_tainted_summary(&active, &snaps, &ids).expect("tainted");
         let text = all_text(&rebuilt);
-        assert!(!text.contains("paraphrase one") && !text.contains("paraphrase two"), "{text}");
+        assert!(
+            !text.contains("paraphrase one") && !text.contains("paraphrase two"),
+            "{text}"
+        );
         assert!(text.contains("\"a\"") || text.contains("a"));
         assert_eq!(rebuilt.len(), 4, "{text}");
     }

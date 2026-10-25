@@ -149,7 +149,11 @@ fn main() {
         let reg = svc.registry();
         check!(
             "every homonym stays visible for diagnostics (2)",
-            reg.candidates.iter().filter(|c| c.key == "create-skills").count() == 2
+            reg.candidates
+                .iter()
+                .filter(|c| c.key == "create-skills")
+                .count()
+                == 2
         );
         check!(
             "project folders of other clients are not read",
