@@ -8,7 +8,7 @@ const SHELL_TOOLS = new Set(['Bash', 'bash', 'Shell', 'PowerShell'])
 // `Edit` may carry `edits` (several replacements in one call): its summary is still the path.
 // `MultiEdit` and `NotebookEdit` are historical names of earlier calls: kept as
 // recorded so old conversations still show their path, never offered as tools.
-const PATH_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
+const PATH_TOOLS = new Set(['Read', 'ViewImage', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit'])
 const SEARCH_TOOLS = new Set(['Grep', 'Glob'])
 
 export const OUTCOME_LABEL: Record<RunOutcome, string> = {

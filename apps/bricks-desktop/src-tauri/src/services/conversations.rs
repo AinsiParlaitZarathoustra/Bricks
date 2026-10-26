@@ -56,6 +56,51 @@ fn history_block(b: &ContentBlock) -> Option<HistoryBlock> {
     })
 }
 
+/// The first image the tool call `tool_call_id` showed, as a data URL: inside
+/// its result, or next to it after its label in the same user turn.
+pub fn tool_image(history: &[Message], tool_call_id: &str) -> Option<String> {
+    let label = format!("{}{tool_call_id}]", bricks_tools::TOOL_IMAGE_MARK);
+    let data_url = |b: &ContentBlock| match b {
+        ContentBlock::Image { source } => source.data.as_ref().map(|data| {
+            let media = source.media_type.as_deref().unwrap_or("image/png");
+            format!("data:{media};base64,{data}")
+        }),
+        _ => None,
+    };
+    for message in history.iter().rev() {
+        let MessageContent::Blocks(blocks) = &message.content else {
+            continue;
+        };
+        // Only the engine's turns of tool results carry a call's image: a
+        // person's message that looks like a label is not one.
+        let engine_turn = message.role == Role::User
+            && blocks.iter().any(|b| matches!(b, ContentBlock::ToolResult { .. }));
+        if !engine_turn {
+            continue;
+        }
+        for (i, block) in blocks.iter().enumerate() {
+            match block {
+                ContentBlock::ToolResult {
+                    tool_use_id,
+                    content: ToolResultContent::Blocks(inner),
+                    ..
+                } if tool_use_id == tool_call_id => {
+                    if let Some(url) = inner.iter().find_map(data_url) {
+                        return Some(url);
+                    }
+                }
+                ContentBlock::Text { text } if text.starts_with(&label) => {
+                    if let Some(url) = blocks.get(i + 1).and_then(data_url) {
+                        return Some(url);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    None
+}
+
 fn tool_result_text(content: &ToolResultContent) -> String {
     match content {
         ToolResultContent::Text(t) => t.clone(),
@@ -201,5 +246,127 @@ mod tests {
         assert_eq!(h.blocks.len(), 3);
         assert!(matches!(&h.blocks[1], HistoryBlock::ToolResult { content, is_error: false, .. } if content == "ok"));
         assert_eq!(message_text(&msg), "voici");
+    }
+
+    fn call_result(id: &str, content: ToolResultContent) -> ContentBlock {
+        ContentBlock::ToolResult {
+            tool_use_id: id.into(),
+            content,
+            is_error: None,
+        }
+    }
+
+    fn label(id: &str) -> ContentBlock {
+        ContentBlock::Text {
+            text: format!("{}{id}] a.png, image/png, 3 bytes", bricks_tools::TOOL_IMAGE_MARK),
+        }
+    }
+
+    /// A turn of tool results, as the engine writes it: its results first.
+    fn turn(blocks: Vec<ContentBlock>) -> Message {
+        let mut all = vec![ContentBlock::ToolResult {
+            tool_use_id: "earlier".into(),
+            content: ToolResultContent::Text("ok".into()),
+            is_error: None,
+        }];
+        all.extend(blocks);
+        Message::user_blocks(all)
+    }
+
+    #[test]
+    fn an_image_inside_the_result_of_its_call_is_read_as_a_data_url() {
+        let history = vec![turn(vec![call_result(
+            "v1",
+            ToolResultContent::Blocks(vec![
+                ContentBlock::Text { text: "Image a.png".into() },
+                ContentBlock::image_base64("image/png", "QUJD"),
+            ]),
+        )])];
+        assert_eq!(
+            tool_image(&history, "v1").as_deref(),
+            Some("data:image/png;base64,QUJD")
+        );
+    }
+
+    #[test]
+    fn an_image_after_its_label_in_the_same_turn_is_read_as_a_data_url() {
+        let history = vec![turn(vec![
+            call_result("v1", ToolResultContent::Text("Image a.png".into())),
+            label("v1"),
+            ContentBlock::image_base64("image/jpeg", "WFla"),
+        ])];
+        assert_eq!(
+            tool_image(&history, "v1").as_deref(),
+            Some("data:image/jpeg;base64,WFla")
+        );
+    }
+
+    #[test]
+    fn a_persons_message_that_looks_like_a_label_shows_no_call_image() {
+        let typed = Message::user_blocks(vec![
+            label("v1"),
+            ContentBlock::image_base64("image/png", "AAAA"),
+        ]);
+        assert_eq!(tool_image(&[typed], "v1"), None);
+    }
+
+    #[test]
+    fn a_missing_media_type_is_read_as_png() {
+        let history = vec![turn(vec![
+            label("v1"),
+            ContentBlock::Image {
+                source: ImageSource {
+                    source_type: "base64".into(),
+                    media_type: None,
+                    data: Some("QUJD".into()),
+                    url: None,
+                    file_id: None,
+                },
+            },
+        ])];
+        assert_eq!(
+            tool_image(&history, "v1").as_deref(),
+            Some("data:image/png;base64,QUJD")
+        );
+    }
+
+    #[test]
+    fn a_label_only_matches_its_own_call_id_exactly() {
+        let history = vec![turn(vec![
+            label("v10"),
+            ContentBlock::image_base64("image/png", "AAAA"),
+        ])];
+        assert_eq!(tool_image(&history, "v1"), None, "v10 is not v1");
+        assert_eq!(
+            tool_image(&history, "v10").as_deref(),
+            Some("data:image/png;base64,AAAA")
+        );
+    }
+
+    #[test]
+    fn an_image_that_is_not_right_after_its_label_is_not_taken() {
+        let history = vec![turn(vec![
+            label("v1"),
+            ContentBlock::Text { text: "autre chose".into() },
+            ContentBlock::image_base64("image/png", "AAAA"),
+        ])];
+        assert_eq!(tool_image(&history, "v1"), None);
+    }
+
+    #[test]
+    fn none_when_the_call_showed_no_image_or_the_image_has_no_data() {
+        let url_only = ContentBlock::image_url("https://example.com/x.png");
+        let history = vec![
+            turn(vec![call_result("v1", ToolResultContent::Text("Image".into()))]),
+            turn(vec![
+                call_result("v2", ToolResultContent::Blocks(vec![url_only.clone()])),
+            ]),
+            turn(vec![label("v3"), url_only]),
+        ];
+        assert_eq!(tool_image(&history, "v1"), None, "a text result shows nothing");
+        assert_eq!(tool_image(&history, "v2"), None, "an image without data is not read");
+        assert_eq!(tool_image(&history, "v3"), None, "a label next to a URL is not read");
+        assert_eq!(tool_image(&history, "unknown"), None);
+        assert_eq!(tool_image(&[], "v1"), None);
     }
 }

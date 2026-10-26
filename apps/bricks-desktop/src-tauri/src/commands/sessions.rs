@@ -69,6 +69,12 @@ pub async fn session_command(
     state.send_command(&session_id, command, display).await
 }
 
+/// The image a tool call showed the model, as a data URL (`None`: it showed none).
+#[tauri::command]
+pub async fn session_tool_image(state: State<'_, AppState>, session_id: String, tool_call_id: String) -> IpcResult<Option<String>> {
+    state.tool_image(&session_id, &tool_call_id).await
+}
+
 /// `bricks_agent::control::Snapshot`.
 #[tauri::command]
 pub async fn session_snapshot(state: State<'_, AppState>, session_id: String) -> IpcResult<serde_json::Value> {

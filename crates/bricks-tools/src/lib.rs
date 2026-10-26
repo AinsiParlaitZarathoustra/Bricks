@@ -9,6 +9,7 @@ pub mod file_edit;
 pub mod file_history;
 pub mod file_lock;
 pub mod file_read;
+pub mod view_image;
 pub mod file_snapshot;
 pub mod file_watcher;
 pub mod file_write;
@@ -146,6 +147,35 @@ pub struct ToolResult {
     /// Structured form of the result, when the tool provides one; the agent
     /// renders it uniformly (see [`tool_report`]).
     pub report: Option<Box<tool_report::ToolReport>>,
+    /// Images the result shows the model (`ViewImage`). The agent carries
+    /// them as the model's protocol allows, or says why it cannot.
+    pub images: Vec<ToolImage>,
+}
+
+/// The text that names, for the model and the desktop, an image a tool call
+/// showed next to its result: `[image from tool call <id>] <path>, <type>, <n> bytes`.
+pub fn tool_image_label(tool_use_id: &str, image: &ToolImage) -> String {
+    let path = image.path.as_deref().unwrap_or("(no path)");
+    format!(
+        "{TOOL_IMAGE_MARK}{tool_use_id}] {path}, {}, {} bytes",
+        image.media_type, image.bytes
+    )
+}
+
+/// The start of [`tool_image_label`].
+pub const TOOL_IMAGE_MARK: &str = "[image from tool call ";
+
+/// An image a tool result shows the model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolImage {
+    /// `image/png`, `image/jpeg`, `image/gif` or `image/webp`.
+    pub media_type: String,
+    /// The bytes, base64 (standard alphabet).
+    pub data_base64: String,
+    /// Where it was read, for the person and the model.
+    pub path: Option<String>,
+    /// Size of the decoded bytes.
+    pub bytes: usize,
 }
 
 impl ToolResult {
@@ -155,6 +185,7 @@ impl ToolResult {
             is_error: false,
             metadata: None,
             report: None,
+            images: Vec::new(),
         }
     }
 
@@ -164,7 +195,14 @@ impl ToolResult {
             is_error: true,
             metadata: None,
             report: None,
+            images: Vec::new(),
         }
+    }
+
+    /// The same result, showing `images` to the model.
+    pub fn with_images(mut self, images: Vec<ToolImage>) -> Self {
+        self.images = images;
+        self
     }
 
     pub fn with_metadata(mut self, meta: Value) -> Self {
@@ -190,6 +228,7 @@ impl ToolResult {
             metadata: report.data.clone(),
             content: content.trim_end_matches('\n').to_string(),
             report: Some(Box::new(report)),
+            images: Vec::new(),
         }
     }
 
@@ -385,6 +424,45 @@ mod cost_tests {
     }
 }
 
+#[cfg(test)]
+mod tool_image_tests {
+    use super::*;
+
+    fn image(path: Option<&str>) -> ToolImage {
+        ToolImage {
+            media_type: "image/png".into(),
+            data_base64: "QUJD".into(),
+            path: path.map(String::from),
+            bytes: 3,
+        }
+    }
+
+    #[test]
+    fn the_label_names_the_call_the_path_the_type_and_the_size() {
+        assert_eq!(
+            tool_image_label("t1", &image(Some("shot.png"))),
+            "[image from tool call t1] shot.png, image/png, 3 bytes"
+        );
+        assert_eq!(
+            tool_image_label("t2", &image(None)),
+            "[image from tool call t2] (no path), image/png, 3 bytes"
+        );
+        assert!(tool_image_label("t1", &image(None)).starts_with(TOOL_IMAGE_MARK));
+    }
+
+    #[test]
+    fn with_images_keeps_the_text_and_plain_results_show_none() {
+        let r = ToolResult::success("ok").with_images(vec![image(Some("a.png"))]);
+        assert!(!r.is_error);
+        assert_eq!(r.content, "ok");
+        assert_eq!(r.images, vec![image(Some("a.png"))]);
+        assert!(ToolResult::success("x").images.is_empty());
+        assert!(ToolResult::error("x").images.is_empty());
+        let with_meta = ToolResult::error("x").with_images(vec![image(None)]);
+        assert!(with_meta.is_error && with_meta.images.len() == 1);
+    }
+}
+
 // ─── Built-in tool sets ──────────────────────────────────────────────────────
 
 /// All built-in tools.
@@ -411,11 +489,12 @@ pub fn coding() -> Vec<Box<dyn Tool>> {
     tools
 }
 
-/// File system tools: Read, Write, Edit, ApplyPatch, Glob, Grep,
+/// File system tools: Read, ViewImage, Write, Edit, ApplyPatch, Glob, Grep,
 /// CodeSearch, CodeScout, CodeStats.
 pub fn filesystem() -> Vec<Box<dyn Tool>> {
     vec![
         Box::new(file_read::FileReadTool),
+        Box::new(view_image::ViewImageTool),
         Box::new(file_write::FileWriteTool),
         Box::new(file_edit::FileEditTool),
         Box::new(apply_patch::ApplyPatchTool),

@@ -211,6 +211,18 @@ pub struct RequestIdentity {
     pub reasoning_profile: Option<String>,
 }
 
+/// How an image a tool returns can reach the bound model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ImageTransport {
+    /// Inside the tool result itself (the protocol carries media there).
+    ToolResult,
+    /// Next to the tool results, in the same user turn (the model reads
+    /// images, but its protocol carries only text in a tool result).
+    UserTurn,
+    /// The model does not read images.
+    None,
+}
+
 #[async_trait]
 pub trait Provider: Send + Sync {
     /// The configured provider id (e.g. `custom`).
@@ -226,6 +238,12 @@ pub trait Provider: Send + Sync {
     /// reports the missing information.
     fn model_info(&self) -> Option<ModelInfo> {
         None
+    }
+
+    /// How an image returned by a tool can reach the bound model. `None`
+    /// (no image) for providers that do not declare their inputs.
+    fn image_transport(&self) -> ImageTransport {
+        ImageTransport::None
     }
 
     /// The identity of a request sent with `options` by this instance,

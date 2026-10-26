@@ -391,6 +391,19 @@ impl Provider for ConfiguredProvider {
         l.input_budget(l.max_output_tokens)
     }
 
+    fn image_transport(&self) -> crate::ImageTransport {
+        use crate::modality::protocol_support;
+        use bricks_types::Modality;
+        let m = &self.model;
+        if !m.effective_capabilities().input.contains(&Modality::Image) {
+            crate::ImageTransport::None
+        } else if protocol_support(m.protocol).tool_result_media.contains(&Modality::Image) {
+            crate::ImageTransport::ToolResult
+        } else {
+            crate::ImageTransport::UserTurn
+        }
+    }
+
     fn model_info(&self) -> Option<crate::ModelInfo> {
         let m = &self.model;
         Some(crate::ModelInfo {

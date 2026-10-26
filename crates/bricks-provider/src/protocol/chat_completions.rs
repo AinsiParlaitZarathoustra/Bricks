@@ -805,6 +805,60 @@ mod tests {
     }
 
     #[test]
+    fn tool_results_come_first_then_one_user_message_with_the_text_and_the_image() {
+        let mut r = req();
+        r.messages.push(Message::user("go"));
+        r.messages.push(Message::assistant_blocks(vec![
+            ContentBlock::ToolUse {
+                id: "call_1".into(),
+                name: "ViewImage".into(),
+                input: json!({"file_path":"a.png"}),
+            },
+            ContentBlock::ToolUse {
+                id: "call_2".into(),
+                name: "read".into(),
+                input: json!({"path":"b"}),
+            },
+        ]));
+        r.messages.push(Message::user_blocks(vec![
+            ContentBlock::ToolResult {
+                tool_use_id: "call_1".into(),
+                content: ToolResultContent::Text("Image a.png".into()),
+                is_error: None,
+            },
+            ContentBlock::Text {
+                text: "[image from tool call call_1] a.png, image/png, 3 bytes".into(),
+            },
+            ContentBlock::image_base64("image/png", "QUJD"),
+            ContentBlock::ToolResult {
+                tool_use_id: "call_2".into(),
+                content: ToolResultContent::Text("B".into()),
+                is_error: None,
+            },
+        ]));
+        let body = build_body(&ctx(&compat(), true), &r).unwrap();
+        let m = body["messages"].as_array().unwrap();
+        assert_eq!(m.len(), 5, "user, assistant, two tool messages, one user turn");
+        assert_eq!(
+            m[2],
+            json!({"role":"tool","tool_call_id":"call_1","content":"Image a.png"})
+        );
+        assert_eq!(
+            m[3],
+            json!({"role":"tool","tool_call_id":"call_2","content":"B"})
+        );
+        assert_eq!(m[4]["role"], "user");
+        let parts = m[4]["content"].as_array().unwrap();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(
+            parts[0],
+            json!({"type":"text","text":"[image from tool call call_1] a.png, image/png, 3 bytes"})
+        );
+        assert_eq!(parts[1]["type"], "image_url");
+        assert_eq!(parts[1]["image_url"]["url"], "data:image/png;base64,QUJD");
+    }
+
+    #[test]
     fn unsupported_media_is_an_error_not_a_drop() {
         for block in [
             ContentBlock::video_url("https://x/v.mp4"),

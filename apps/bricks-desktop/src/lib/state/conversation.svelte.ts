@@ -757,7 +757,11 @@ export class Conversation {
       if (msg.role === 'user') userIndex += 1
       // The user item of this message: the first one its text or its images make.
       let own: UserItem | undefined
+      // A turn of tool results is the engine's: its text and images (an image a
+      // tool showed, a note) belong to the calls, never to a user message.
+      const engineTurn = msg.role === 'user' && msg.blocks.some((b) => b.type === 'tool_result')
       for (const block of msg.blocks) {
+        if (engineTurn && (block.type === 'text' || block.type === 'image')) continue
         switch (block.type) {
           case 'text':
             if (!block.text.trim()) break

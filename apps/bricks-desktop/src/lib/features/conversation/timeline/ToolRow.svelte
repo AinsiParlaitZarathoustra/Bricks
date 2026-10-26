@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Conversation, ToolItem, EditItem } from '$lib/state/conversation.svelte'
   import EditRow from './EditRow.svelte'
+  import ToolImage from './ToolImage.svelte'
   import ToolLine from './ToolLine.svelte'
   import { toolLineState } from './toolLine'
 
@@ -19,3 +20,6 @@
     <EditRow item={edit} {conversation} inline />
   {/each}
 </ToolLine>
+{#if item.name === 'ViewImage' && item.status === 'ok'}
+  <ToolImage {item} {conversation} />
+{/if}

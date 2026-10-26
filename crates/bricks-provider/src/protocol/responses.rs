@@ -746,6 +746,65 @@ mod tests {
     }
 
     #[test]
+    fn function_outputs_come_first_then_one_user_item_with_the_text_and_the_image() {
+        let mut r = CompletionRequest::new("expert");
+        r.messages.push(Message::user("go"));
+        r.messages.push(Message::assistant_blocks(vec![
+            ContentBlock::ToolUse {
+                id: "call_1".into(),
+                name: "ViewImage".into(),
+                input: json!({"file_path":"a.png"}),
+            },
+            ContentBlock::ToolUse {
+                id: "call_2".into(),
+                name: "read".into(),
+                input: json!({"path":"b"}),
+            },
+        ]));
+        r.messages.push(Message::user_blocks(vec![
+            ContentBlock::ToolResult {
+                tool_use_id: "call_1".into(),
+                content: ToolResultContent::Text("Image a.png".into()),
+                is_error: None,
+            },
+            ContentBlock::Text {
+                text: "[image from tool call call_1] a.png, image/png, 3 bytes".into(),
+            },
+            ContentBlock::image_base64("image/png", "QUJD"),
+            ContentBlock::ToolResult {
+                tool_use_id: "call_2".into(),
+                content: ToolResultContent::Text("B".into()),
+                is_error: None,
+            },
+        ]));
+        let input = body(&r, true).unwrap()["input"].as_array().unwrap().clone();
+        let outputs: Vec<&Value> = input
+            .iter()
+            .filter(|i| i["type"] == "function_call_output")
+            .collect();
+        assert_eq!(outputs.len(), 2);
+        assert_eq!(
+            input[input.len() - 3],
+            json!({"type":"function_call_output","call_id":"call_1","output":"Image a.png"}),
+            "the outputs sit right after the calls"
+        );
+        assert_eq!(
+            input[input.len() - 2],
+            json!({"type":"function_call_output","call_id":"call_2","output":"B"})
+        );
+        let last = input.last().unwrap();
+        assert_eq!(last["role"], "user");
+        let parts = last["content"].as_array().unwrap();
+        assert_eq!(parts.len(), 2);
+        assert_eq!(
+            parts[0],
+            json!({"type":"input_text","text":"[image from tool call call_1] a.png, image/png, 3 bytes"})
+        );
+        assert_eq!(parts[1]["type"], "input_image");
+        assert_eq!(parts[1]["image_url"], "data:image/png;base64,QUJD");
+    }
+
+    #[test]
     fn usage_is_normalized() {
         let u = parse_usage(
             &json!({"input_tokens": 500, "input_tokens_details": {"cached_tokens": 200}, "output_tokens": 90, "output_tokens_details": {"reasoning_tokens": 60}}),

@@ -40,6 +40,7 @@ pub fn run() {
             commands::sessions::sessions_list,
             commands::sessions::sessions_search,
             commands::sessions::session_run_user_index,
+            commands::sessions::session_tool_image,
             commands::sessions::session_open,
             commands::sessions::session_close,
             commands::sessions::session_rename,

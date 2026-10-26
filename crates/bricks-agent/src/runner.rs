@@ -440,6 +440,50 @@ fn interrupted_text(why: &str) -> String {
     )
 }
 
+/// The result of a call that shows images, as the model can receive them:
+/// inside the result, after the round's results in the same user turn (the
+/// returned blocks), or not at all, with a note saying so.
+fn tool_result_with_images(
+    transport: bricks_provider::ImageTransport,
+    id: &str,
+    text: String,
+    is_error: bool,
+    images: &[bricks_tools::ToolImage],
+) -> (ContentBlock, Vec<ContentBlock>) {
+    use bricks_provider::ImageTransport;
+    if images.is_empty() {
+        return (tool_result_block(id, text, is_error), Vec::new());
+    }
+    let image_block =
+        |i: &bricks_tools::ToolImage| ContentBlock::image_base64(&i.media_type, &i.data_base64);
+    match transport {
+        ImageTransport::ToolResult => {
+            let mut blocks = vec![ContentBlock::Text { text }];
+            blocks.extend(images.iter().map(image_block));
+            let block = ContentBlock::ToolResult {
+                tool_use_id: id.to_string(),
+                content: ToolResultContent::Blocks(blocks),
+                is_error: Some(is_error),
+            };
+            (block, Vec::new())
+        }
+        ImageTransport::UserTurn => {
+            let mut extra = Vec::new();
+            for image in images {
+                extra.push(ContentBlock::Text {
+                    text: bricks_tools::tool_image_label(id, image),
+                });
+                extra.push(image_block(image));
+            }
+            (tool_result_block(id, text, is_error), extra)
+        }
+        ImageTransport::None => {
+            let note = "[the image was not shown: the current model does not accept images]";
+            (tool_result_block(id, format!("{text}\n{note}"), is_error), Vec::new())
+        }
+    }
+}
+
 fn tool_result_block(id: &str, text: String, is_error: bool) -> ContentBlock {
     ContentBlock::ToolResult {
         tool_use_id: id.to_string(),
@@ -1701,6 +1745,10 @@ async fn run_loop(
             // progress check.
             let mut round: Vec<(String, String, bool, String)> = Vec::new();
             let mut raw_blocks: Vec<ContentBlock> = Vec::new();
+            // Images the calls showed, when they travel after the results.
+            let mut image_blocks: Vec<ContentBlock> = Vec::new();
+            let mut raw_image_blocks: Vec<ContentBlock> = Vec::new();
+            let transport = agent.provider().image_transport();
 
             for slot in slots.into_iter().flatten() {
                 let mut p = match slot {
@@ -1725,11 +1773,16 @@ async fn run_loop(
                 }
 
                 let (capped_content, full_text) = p.render();
-                raw_blocks.push(tool_result_block(
+                let images = std::mem::take(&mut p.result.images);
+                let (raw_block, raw_extra) = tool_result_with_images(
+                    transport,
                     &p.id,
                     full_text.clone(),
                     p.result.is_error,
-                ));
+                    &images,
+                );
+                raw_blocks.push(raw_block);
+                raw_image_blocks.extend(raw_extra);
                 round.push((
                     p.name.clone(),
                     p.input.to_string(),
@@ -1744,8 +1797,20 @@ async fn run_loop(
                     is_error: p.result.is_error,
                     duration: p.duration,
                 });
-                result_blocks.push(tool_result_block(&p.id, capped_content, p.result.is_error));
+                let (block, extra) = tool_result_with_images(
+                    transport,
+                    &p.id,
+                    capped_content,
+                    p.result.is_error,
+                    &images,
+                );
+                result_blocks.push(block);
+                image_blocks.extend(extra);
             }
+            // Images after every result: a protocol that puts results in their
+            // own messages needs them to follow the calls' turn directly.
+            result_blocks.extend(image_blocks);
+            raw_blocks.extend(raw_image_blocks);
 
             // Add tool results as user message: reduced in the active
             // history, unreduced in the raw history.

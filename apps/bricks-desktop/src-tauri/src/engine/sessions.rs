@@ -418,6 +418,16 @@ impl AppState {
             .map_err(|reason| error(IpcErrorCode::Rejected, reason))
     }
 
+    /// The image a tool call showed the model (`ViewImage`), as a data URL,
+    /// read from the open session's history: the bytes the model received,
+    /// never the file as it is now. `None` when the call showed none.
+    pub async fn tool_image(&self, session_id: &str, tool_call_id: &str) -> IpcResult<Option<String>> {
+        check_session_id(session_id)?;
+        let entry = self.require_open(session_id)?;
+        let history = entry.controller.history().await;
+        Ok(crate::services::conversations::tool_image(&history, tool_call_id))
+    }
+
     /// The engine's snapshot of an open session.
     pub fn snapshot(&self, session_id: &str) -> IpcResult<serde_json::Value> {
         check_session_id(session_id)?;
