@@ -80,3 +80,7 @@ TOOL-CALLING-RELIABILITY.md
 # Local browser comparisons, screenshots and generated test reports.
 /output/
 /.playwright-cli/
+
+# Private sprint notes and walkthroughs stay local.
+/docs/sprint-*.md
+/apps/bricks-desktop/docs/SPRINT*_WALKTHROUGH.md
