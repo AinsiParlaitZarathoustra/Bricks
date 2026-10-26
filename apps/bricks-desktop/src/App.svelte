@@ -10,7 +10,8 @@
   import TopBar from '$lib/layout/TopBar.svelte'
   import EmptyState from '$lib/layout/EmptyState.svelte'
   import type { ShellLayout } from '$lib/layout/types'
-  import { initTheme, setTheme } from '$lib/theme/theme.svelte'
+  import { initTheme, setTheme, theme } from '$lib/theme/theme.svelte'
+  import { appIconShow } from '$lib/ipc/client'
   import { app } from '$lib/state/app.svelte'
   import NavigationPanel from '$lib/features/navigation/NavigationPanel.svelte'
   import ConversationView from '$lib/features/conversation/ConversationView.svelte'
@@ -57,6 +58,15 @@
       return Promise.resolve(() => {})
     }
   }
+
+  // The Dock icon: the chosen one, or the one of the mode on screen. Once the
+  // preferences are loaded, so the default never flashes first.
+  $effect(() => {
+    if (!app.ready) return
+    const choice = app.prefs.app_icon
+    const dark = choice === 'dark' || (choice === 'aligned' && theme.resolved === 'dark')
+    appIconShow(dark).catch(() => {})
+  })
 
   onMount(() => {
     const disposeTheme = initTheme('system')

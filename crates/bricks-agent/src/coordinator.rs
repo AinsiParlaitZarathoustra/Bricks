@@ -18,13 +18,7 @@ pub enum AgentMode {
 }
 
 /// Tools restricted to coordinator mode only (workers can't use these).
-pub const COORDINATOR_ONLY_TOOLS: &[&str] = &[
-    "Agent",
-    "SendMessage",
-    "TeamCreate",
-    "TeamDelete",
-    "SyntheticOutput",
-];
+pub const COORDINATOR_ONLY_TOOLS: &[&str] = &["Agent", "SendMessage", "TeamCreate", "TeamDelete"];
 
 /// Check if coordinator mode is active via environment variable.
 pub fn is_coordinator_mode() -> bool {
@@ -62,7 +56,7 @@ pub fn coordinator_system_prompt() -> &'static str {
 pub fn coordinator_context(tools: &[Box<dyn Tool>]) -> String {
     let tool_list: Vec<String> = tools
         .iter()
-        .filter(|t| !["Agent", "SyntheticOutput"].contains(&t.name()))
+        .filter(|t| !["Agent"].contains(&t.name()))
         .map(|t| format!("- {}: {}", t.name(), t.description()))
         .collect();
 
@@ -109,5 +103,111 @@ mod tests {
         assert!(ctx.contains("Available tools"));
         assert!(ctx.contains("Read"));
         assert!(ctx.contains("Bash"));
+    }
+
+    /// A stand-in tool: the filters look at names only.
+    struct Named(&'static str);
+
+    #[async_trait::async_trait]
+    impl Tool for Named {
+        fn name(&self) -> &str {
+            self.0
+        }
+        fn description(&self) -> &str {
+            "stand-in"
+        }
+        fn input_schema(&self) -> serde_json::Value {
+            serde_json::json!({"type": "object"})
+        }
+        async fn execute(
+            &self,
+            _input: serde_json::Value,
+            _ctx: &bricks_tools::ToolContext,
+        ) -> bricks_tools::ToolResult {
+            bricks_tools::ToolResult::success("")
+        }
+    }
+
+    fn named(names: &[&'static str]) -> Vec<Box<dyn Tool>> {
+        names
+            .iter()
+            .map(|n| Box::new(Named(n)) as Box<dyn Tool>)
+            .collect()
+    }
+
+    fn names_of(tools: &[Box<dyn Tool>]) -> Vec<String> {
+        tools.iter().map(|t| t.name().to_string()).collect()
+    }
+
+    const REMOVED: [&str; 4] = [
+        "EnterWorktree",
+        "ExitWorktree",
+        "SyntheticOutput",
+        "ToolSearch",
+    ];
+
+    #[test]
+    fn the_coordinator_only_tools_are_agent_and_the_team_tools() {
+        assert_eq!(
+            COORDINATOR_ONLY_TOOLS,
+            &["Agent", "SendMessage", "TeamCreate", "TeamDelete"]
+        );
+    }
+
+    #[test]
+    fn the_standard_set_has_no_removed_tool_and_no_coordinator_only_tool() {
+        let names = names_of(&bricks_tools::all());
+        assert_eq!(names.len(), 16, "{names:?}");
+        for gone in REMOVED {
+            assert!(
+                !names.iter().any(|n| n == gone),
+                "{gone} is removed: {names:?}"
+            );
+        }
+        for name in COORDINATOR_ONLY_TOOLS {
+            assert!(
+                !names.iter().any(|n| n == *name),
+                "{name} is not standard: {names:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_worker_loses_exactly_the_coordinator_only_tools_it_is_given() {
+        let tools = || {
+            named(&[
+                "Read",
+                "Agent",
+                "SendMessage",
+                "TeamCreate",
+                "TeamDelete",
+                "Bash",
+            ])
+        };
+        let worker = names_of(&filter_tools_for_mode(tools(), AgentMode::Worker));
+        assert_eq!(worker, ["Read", "Bash"]);
+        let coordinator = names_of(&filter_tools_for_mode(tools(), AgentMode::Coordinator));
+        assert_eq!(coordinator.len(), 6, "{coordinator:?}");
+        let normal = names_of(&filter_tools_for_mode(tools(), AgentMode::Normal));
+        assert_eq!(normal.len(), 6, "{normal:?}");
+    }
+
+    #[test]
+    fn a_worker_of_the_standard_set_keeps_all_sixteen_tools() {
+        let worker = filter_tools_for_mode(bricks_tools::all(), AgentMode::Worker);
+        assert_eq!(worker.len(), 16);
+    }
+
+    #[test]
+    fn the_worker_context_leaves_out_agent_and_names_no_removed_tool() {
+        let ctx = coordinator_context(&named(&["Read", "Agent", "Bash"]));
+        assert!(!ctx.contains("- Agent:"), "{ctx}");
+        assert!(ctx.contains("- Read: stand-in"), "{ctx}");
+        assert!(ctx.contains("- Bash: stand-in"), "{ctx}");
+
+        let ctx = coordinator_context(&bricks_tools::all());
+        for gone in REMOVED {
+            assert!(!ctx.contains(&format!("- {gone}:")), "{gone} listed: {ctx}");
+        }
     }
 }

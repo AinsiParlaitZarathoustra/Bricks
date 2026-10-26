@@ -84,3 +84,4 @@ TOOL-CALLING-RELIABILITY.md
 # Private sprint notes and walkthroughs stay local.
 /docs/sprint-*.md
 /apps/bricks-desktop/docs/SPRINT*_WALKTHROUGH.md
+/reports/

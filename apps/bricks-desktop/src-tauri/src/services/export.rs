@@ -65,6 +65,7 @@ fn export_bindings() {
         MermaidSecurityLevel,
         DiagramViewerSettings,
         Theme,
+        AppIcon,
         SlashCommandInfo,
         SlashAction,
         SlashPresent,

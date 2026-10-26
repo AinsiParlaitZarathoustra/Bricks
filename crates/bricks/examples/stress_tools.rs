@@ -11,13 +11,20 @@ use bricks::prelude::*;
 use std::sync::Arc;
 
 fn ctx(dir: &std::path::Path) -> ToolContext {
+    // The agent's identity: Bash records the jobs it starts under it.
+    let extensions = Extensions::default();
+    extensions.insert(bricks_tools::jobs::JobOwner {
+        agent_id: "phase2-test".into(),
+        root_run_id: "run_phase2".into(),
+        workspace: dir.to_path_buf(),
+    });
     ToolContext {
         working_dir: dir.to_path_buf(),
         session_id: "phase2-test".into(),
         permissions: Arc::new(AllowAll),
         cost_tracker: Arc::new(CostTracker::new()),
         mcp_manager: None,
-        extensions: Extensions::default(),
+        extensions,
     }
 }
 
@@ -58,22 +65,19 @@ async fn run() {
         let sh = bricks::tools::shell();
         let web = bricks::tools::web();
         let plan = bricks::tools::planning();
-        let orch = bricks::tools::orchestration();
-
         check!(
             &format!("all() returns {} tools", all.len()),
-            all.len() == 22
+            all.len() == 16
         );
-        check!(&format!("filesystem() = {} tools", fs.len()), fs.len() == 9);
-        check!(&format!("shell() = {} tools", sh.len()), sh.len() == 6);
+        check!(
+            &format!("filesystem() = {} tools", fs.len()),
+            fs.len() == 10
+        );
+        check!(&format!("shell() = {} tools", sh.len()), sh.len() == 2);
         check!(&format!("web() = {} tools", web.len()), web.len() == 2);
         check!(
             &format!("planning() = {} tools", plan.len()),
             plan.len() == 1
-        );
-        check!(
-            &format!("orchestration() = {} tools", orch.len()),
-            orch.len() == 2
         );
         check!("none() is empty", bricks::tools::none().is_empty());
 
@@ -207,7 +211,12 @@ async fn run() {
     println!("  3. Shell Tools");
     println!("  ──────────────");
     {
-        let tools = bricks::tools::shell();
+        // Bash on a job registry: a call with the default yield (10 s) and
+        // timeout (120 s) may hand its command over as a job, so it needs one.
+        let tools = bricks_tools::shell_with_jobs(bricks_tools::jobs::JobRegistry::new(
+            Default::default(),
+            None,
+        ));
         let bash = tools.iter().find(|t| t.name() == "Bash").unwrap();
         let r = bash
             .execute(serde_json::json!({"command": "echo 'Phase2 OK'"}), &ctx)
@@ -265,25 +274,8 @@ async fn run() {
         println!();
     }
 
-    // ── 6. Utility Tools ───────────────────────────────────────────────────
-    println!("  6. Utility Tools");
-    println!("  ────────────────");
-    {
-        let so = bricks_tools::synthetic_output::SyntheticOutputTool;
-        let r = so
-            .execute(
-                serde_json::json!({"data": {"status": "ok", "count": 42}}),
-                &ctx,
-            )
-            .await;
-        check!("SyntheticOutput returns JSON", r.content.contains("42"));
-        check!("SyntheticOutput has metadata", r.metadata.is_some());
-
-        println!();
-    }
-
-    // ── 7. Web Tools (schema-only, no live API) ──────────────────────────
-    println!("  7. Web Tools (schema validation)");
+    // ── 6. Web Tools (schema-only, no live API) ──────────────────────────
+    println!("  6. Web Tools (schema validation)");
     println!("  ────────────────────────────────");
     {
         let wf = bricks_tools::web_fetch::WebFetchTool;
@@ -308,50 +300,8 @@ async fn run() {
         println!();
     }
 
-    // ── 8. ToolSearch ────────────────────────────────────────────────────
-    println!("  8. ToolSearch");
-    println!("  ─────────────");
-    {
-        let all = bricks::tools::all();
-        let search = bricks_tools::tool_search::ToolSearchTool::new(&all);
-        let r = search
-            .execute(serde_json::json!({"query": "file"}), &ctx)
-            .await;
-        check!(
-            "ToolSearch finds file tools",
-            r.content.contains("Read") && r.content.contains("Write")
-        );
-
-        let r = search
-            .execute(serde_json::json!({"query": "bash"}), &ctx)
-            .await;
-        check!("ToolSearch finds Bash", r.content.contains("Bash"));
-
-        let r = search
-            .execute(serde_json::json!({"query": "worktree"}), &ctx)
-            .await;
-        check!("ToolSearch finds Worktree", r.content.contains("Worktree"));
-
-        let r = search
-            .execute(serde_json::json!({"query": "cron"}), &ctx)
-            .await;
-        check!(
-            "ToolSearch finds no Cron tool",
-            !r.content.contains("CronCreate")
-        );
-
-        let r = search
-            .execute(serde_json::json!({"query": "xyznonexistent"}), &ctx)
-            .await;
-        check!(
-            "ToolSearch handles no results",
-            r.content.contains("No tools found")
-        );
-        println!();
-    }
-
-    // ── 9. Benchmark: tool dispatch speed ───────────────────────────────
-    println!("  9. Performance (tool dispatch speed)");
+    // ── 7. Benchmark: tool dispatch speed ───────────────────────────────
+    println!("  7. Performance (tool dispatch speed)");
     println!("  ─────────────────────────────────────");
     {
         let tools = bricks::tools::filesystem();

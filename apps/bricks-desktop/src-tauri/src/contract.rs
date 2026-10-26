@@ -510,6 +510,8 @@ pub struct Preferences {
     /// `None`: not set yet — derived once from the legacy `terminal_height`.
     pub terminal_ratio: Option<f32>,
     pub diagrams: DiagramSettings,
+    /// Which icon the app shows in the Dock.
+    pub app_icon: AppIcon,
 }
 
 impl Default for Preferences {
@@ -527,8 +529,19 @@ impl Default for Preferences {
             colors: ThemeColors::default(),
             terminal_ratio: None,
             diagrams: DiagramSettings::default(),
+            app_icon: AppIcon::Aligned,
         }
     }
+}
+
+/// The app's icon: always the light or the dark one, or the one of the
+/// resolved theme (`aligned`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum AppIcon {
+    Light,
+    Dark,
+    Aligned,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]

@@ -371,8 +371,13 @@ const CODE_SCOUT_BULLET: &str = "- Utilise CodeScout lorsque les symboles, réf�
 /// The foundation's bullet kept only when `CodeStats` is announced.
 const CODE_STATS_BULLET: &str = "- Utilise CodeStats pour compter le code, les commentaires et les lignes vides d'un fichier ou projet. `top_n` limite l'affichage, pas l'analyse ; vérifie `partial` avant de présenter les totaux comme complets.";
 
-/// The foundation's bullet kept only when `Bash` is announced.
-const BASH_BULLET: &str = "- Utilise Bash pour les commandes, scripts et opérations mal couverts par les outils dédiés. Respecte les règles de persistance et les limites indiquées dans sa description.";
+/// The foundation's bullet kept only when `Bash` is announced; it names Job
+/// only when Job is announced too. How each works is in its description.
+const BASH_BULLET: &str = "- Utilise Bash pour les commandes, scripts et opérations mal couverts par les outils dédiés.";
+const BASH_JOB_BULLET: &str = "- Utilise Bash pour les commandes, scripts et opérations mal couverts par les outils dédiés, et Job pour suivre celles qui continuent en arrière-plan.";
+
+/// The foundation's bullet kept only when `ViewImage` is announced.
+const VIEW_IMAGE_BULLET: &str = "- Utilise ViewImage pour voir une image du disque.";
 
 /// The foundation's bullet kept only when a web tool is announced.
 const WEB_BULLET: &str = "- Pour une information incertaine ou susceptible d'avoir changé (API, version, comportement d'une bibliothèque), cherche d'abord dans le code puis, si nécessaire, sur le web en privilégiant les sources officielles.";
@@ -464,9 +469,13 @@ fn edit_bullet(has: &dyn Fn(&str) -> bool) -> Option<String> {
 pub fn bricks_foundation(tools: &[String]) -> String {
     let has = |name: &str| tools.iter().any(|t| t == name);
     let mut bullets = vec![explore_bullet(&has)];
+    if has("ViewImage") {
+        bullets.push(VIEW_IMAGE_BULLET.to_string());
+    }
     bullets.extend(edit_bullet(&has));
     if has("Bash") {
-        bullets.push(BASH_BULLET.to_string());
+        let bash = if has("Job") { BASH_JOB_BULLET } else { BASH_BULLET };
+        bullets.push(bash.to_string());
     }
     if has("CodeScout") {
         bullets.push(CODE_SCOUT_BULLET.to_string());
@@ -724,12 +733,12 @@ mod tests {
     /// The reference text, written apart from the implementation.
     const REFERENCE: &str = include_str!("../tests/fixtures/bricks_foundation.txt");
 
-    /// Glob, Grep, Read, Edit and Write: the bullets that name
+    /// Glob, Grep, Read, ViewImage, Edit and Write: the bullets that name
     /// them are whole.
-    const FILE_TOOLS: [&str; 5] = ["Glob", "Grep", "Read", "Edit", "Write"];
+    const FILE_TOOLS: [&str; 6] = ["Glob", "Grep", "Read", "ViewImage", "Edit", "Write"];
 
-    /// The reference with the file tools, keeping the Bash, CodeScout,
-    /// CodeStats and web bullets as asked.
+    /// The reference with the file tools, keeping the Bash (with Job),
+    /// CodeScout, CodeStats and web bullets as asked.
     fn reference(bash: bool, code_scout: bool, code_stats: bool, web: bool) -> String {
         REFERENCE
             .trim_end_matches('\n')
@@ -773,6 +782,7 @@ mod tests {
                     let mut extra = Vec::new();
                     if bash {
                         extra.push("Bash");
+                        extra.push("Job");
                     }
                     if scout {
                         extra.push("CodeScout");
@@ -804,6 +814,7 @@ mod tests {
         assert_eq!(
             bricks_foundation(&with_files(&[
                 "Bash",
+                "Job",
                 "CodeScout",
                 "CodeStats",
                 "WebFetch",
@@ -811,6 +822,14 @@ mod tests {
             ])),
             REFERENCE.trim_end_matches('\n')
         );
+    }
+
+    #[test]
+    fn the_bash_bullet_names_job_only_when_it_is_announced() {
+        let alone = bricks_foundation(&tools(&["Bash"]));
+        assert!(alone.contains(BASH_BULLET) && !alone.contains("Job"), "{alone}");
+        let with_job = bricks_foundation(&tools(&["Bash", "Job"]));
+        assert!(with_job.contains(BASH_JOB_BULLET), "{with_job}");
     }
 
     #[test]
@@ -824,6 +843,8 @@ mod tests {
             "ApplyPatch",
             "Write",
             "Bash",
+            "Job",
+            "ViewImage",
             "CodeScout",
             "CodeStats",
             "sur le web",

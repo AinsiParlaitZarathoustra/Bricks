@@ -31,6 +31,7 @@ import type { ProjectFileWindow } from './bindings/ProjectFileWindow'
 import type { PermissionsDefault } from './bindings/PermissionsDefault'
 import type { Command, ModelChoice, SessionPolicy, Snapshot } from './engine'
 
+export type * from './bindings/AppIcon'
 export type * from './bindings/AppInfo'
 export type * from './bindings/ChangeJournalInfo'
 export type * from './bindings/ChangeRecord'
@@ -100,6 +101,8 @@ export const appInfo = () => call<AppInfo>('app_info')
 export const modelsList = () => call<ModelChoice[]>('models_list')
 export const prefsGet = () => call<Preferences>('prefs_get')
 export const prefsSet = (prefs: Preferences) => call<void>('prefs_set', { prefs })
+/** Shows the light or the dark icon in the Dock (macOS). */
+export const appIconShow = (dark: boolean) => call<void>('app_icon_show', { dark })
 export const permissionsDefaultGet = () => call<PermissionsDefault>('permissions_default_get')
 export const permissionsDefaultSet = (policy: SessionPolicy) =>
   call<void>('permissions_default_set', { policy })

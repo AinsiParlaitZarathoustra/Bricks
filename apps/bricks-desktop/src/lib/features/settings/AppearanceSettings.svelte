@@ -1,6 +1,7 @@
 <script lang="ts">
-	// « Apparence » of the settings: the light, dark or system mode, and three colours per mode
-	// (accent, central background, panels). Colours are saved in the preferences per resolved mode.
+	// « Apparence » of the settings: the light, dark or system mode, three colours per mode
+	// (accent, central background, panels), saved per resolved mode, and the app's icon.
+	import type { AppIcon } from '$lib/ipc/client';
 	import { app } from '$lib/state/app.svelte';
 	import { setTheme, theme, type ThemeMode } from '$lib/theme/theme.svelte';
 	import {
@@ -20,6 +21,7 @@
 	import Sun from '@lucide/svelte/icons/sun';
 	import Moon from '@lucide/svelte/icons/moon';
 	import Monitor from '@lucide/svelte/icons/monitor';
+	import SunMoon from '@lucide/svelte/icons/sun-moon';
 	import type { Component } from 'svelte';
 
 	const OPTIONS: {
@@ -30,6 +32,17 @@
 		{ value: 'light', label: 'Clair', icon: Sun },
 		{ value: 'dark', label: 'Sombre', icon: Moon },
 		{ value: 'system', label: 'Système', icon: Monitor }
+	];
+
+	/** The icon: always light, always dark, or the one of the mode on screen. */
+	const ICON_OPTIONS: {
+		value: AppIcon;
+		label: string;
+		icon: Component<{ class?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>;
+	}[] = [
+		{ value: 'light', label: 'Claire', icon: Sun },
+		{ value: 'dark', label: 'Sombre', icon: Moon },
+		{ value: 'aligned', label: 'Alignée', icon: SunMoon }
 	];
 
 	/** What each colour changes, shown as a sample on its preview. */
@@ -99,5 +112,30 @@
 				onReset={() => setColor(role, null)}
 			/>
 		{/each}
+	</SettingsGroup>
+
+	<SettingsGroup title="Icône de l'app">
+		<fieldset class="flex flex-col gap-0 p-0">
+			<legend class="sr-only">Icône de l'app</legend>
+			<div class="grid gap-2 p-3 sm:grid-cols-3">
+				{#each ICON_OPTIONS as option (option.value)}
+					{@const Icon = option.icon}
+					<label
+						class="flex cursor-pointer items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-ui font-medium text-foreground transition-colors hover:bg-muted has-[:checked]:border-primary has-[:checked]:ring-1 has-[:checked]:ring-primary has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring"
+					>
+						<input
+							type="radio"
+							name="app-icon"
+							value={option.value}
+							class="sr-only"
+							checked={app.prefs.app_icon === option.value}
+							onchange={() => app.setPrefs({ app_icon: option.value })}
+						/>
+						<Icon class="size-4" aria-hidden="true" />
+						{option.label}
+					</label>
+				{/each}
+			</div>
+		</fieldset>
 	</SettingsGroup>
 </div>

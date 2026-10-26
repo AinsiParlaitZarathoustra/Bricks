@@ -1,5 +1,5 @@
-//! Background commands as jobs: one registry per session over the shell's
-//! supervised tasks (`Bash` with `background: true`), with an owner, a
+//! Commands as jobs: one registry per session over the shell's supervised
+//! tasks (`Bash` with `background: true`, or handed over), with an owner, a
 //! quota, events, durable logs, and the `Job` tool (`list`, `status`,
 //! `output`, `wait`, `stop`).
 //!
@@ -7,9 +7,9 @@
 //!   durable) or a foreground command handed over after `yield_time_ms`
 //!   (not durable: it ends with its run). Both are seen through `Job` by the
 //!   agent that started them.
-//! * A job belongs to the agent that started it (and its root run and
-//!   workspace); only that agent sees it through `Job` (an id guessed from
-//!   another agent, run or session gives nothing). Frontends see the
+//! * A job belongs to the agent that started it (recorded with its root run
+//!   and workspace); only that agent sees it through `Job` (an id guessed
+//!   from another agent or session gives nothing). Frontends see the
 //!   session's jobs.
 //! * It runs from a snapshot of its owner's shell (working directory,
 //!   exported variables, functions, aliases); what it changes never reaches
@@ -321,6 +321,27 @@ impl JobRegistry {
             })
     }
 
+    /// The jobs `viewer` may see, with what `Job` shows of them.
+    pub fn views(&self, viewer: Option<&str>) -> Vec<JobView> {
+        self.table
+            .lock()
+            .entries
+            .iter()
+            .filter(|e| viewer.is_none_or(|v| e.owner.agent_id == v))
+            .map(|e| JobView {
+                id: e.id.clone(),
+                task: Arc::clone(&e.task),
+                cwd: e.cwd.clone(),
+                kept_logs: e.logs.clone(),
+            })
+            .collect()
+    }
+
+    /// One job `viewer` may see.
+    pub fn view(&self, id: &str, viewer: Option<&str>) -> Option<JobView> {
+        self.views(viewer).into_iter().find(|v| v.id == id)
+    }
+
     /// `(id, owner, status)` of the jobs `viewer` may see.
     pub fn list(
         &self,
@@ -393,56 +414,177 @@ impl JobRegistry {
     }
 }
 
-fn describe(id: &str, st: &crate::shell::background::TaskStatus, cwd: Option<&Path>) -> String {
-    let code = match &st.state {
-        TaskState::Completed { code } => format!(" (code {code})"),
-        TaskState::Failed { code, signal } => match (code, signal) {
-            (Some(c), _) => format!(" (code {c})"),
-            (None, Some(s)) => format!(" (signal {s})"),
-            _ => String::new(),
-        },
-        _ => String::new(),
-    };
-    let ready = match &st.readiness {
-        Readiness::NotChecked => "not checked".to_string(),
-        Readiness::Waiting => "not yet".to_string(),
-        Readiness::Ready { after, .. } => {
-            format!("yes, after {}", bricks_types::duration::display_ms(*after))
-        }
-    };
-    format!(
-        "{id} [{}{code}] pid {} · {} · ready: {ready} · stdout {} B / stderr {} B{} · {}",
-        st.state.label(),
-        st.pid,
-        bricks_types::duration::display_ms(st.elapsed),
-        st.stdout_bytes,
-        st.stderr_bytes,
-        cwd.map(|c| format!(" · cwd {}", c.display()))
-            .unwrap_or_default(),
-        st.command
-    )
+/// A job as `Job` shows it.
+#[derive(Clone)]
+pub struct JobView {
+    pub id: String,
+    pub task: Arc<Task>,
+    pub cwd: PathBuf,
+    /// Durable copies of the raw logs, once they exist (the job ended).
+    pub kept_logs: Vec<String>,
 }
 
-/// `Job`: the background commands of the calling agent.
-pub struct JobTool;
+impl JobView {
+    /// One line: id, state and exit, pid, duration, readiness, what each
+    /// stream received, directory and command.
+    fn line(&self) -> String {
+        let st = self.task.status();
+        let exit = match &st.state {
+            TaskState::Completed { code } => format!(" (exit {code})"),
+            TaskState::Failed { code, signal } => match (code, signal) {
+                (Some(c), _) => format!(" (exit {c})"),
+                (None, Some(s)) => format!(" (signal {s})"),
+                _ => String::new(),
+            },
+            _ => String::new(),
+        };
+        let ready = match &st.readiness {
+            Readiness::NotChecked => "not checked".to_string(),
+            Readiness::Waiting => "not yet".to_string(),
+            Readiness::Ready { after, .. } => {
+                format!("yes, after {}", bricks_types::duration::display_ms(*after))
+            }
+        };
+        format!(
+            "{} [{}{exit}] pid {} · {} · ready: {ready} · stdout {} lines / {} B · stderr {} lines / {} B · cwd {} · {}",
+            self.id,
+            st.state.label(),
+            st.pid,
+            bricks_types::duration::display_ms(st.elapsed),
+            st.stdout_lines,
+            st.stdout_bytes,
+            st.stderr_lines,
+            st.stderr_bytes,
+            self.cwd.display(),
+            st.command
+        )
+    }
+
+    /// Where the raw logs are now: the durable copies once made, else the
+    /// live logs (never a copy announced before it exists).
+    fn logs_line(&self) -> String {
+        if !self.kept_logs.is_empty() {
+            return format!("raw logs (kept): {}", self.kept_logs.join(", "));
+        }
+        let (out, err) = self.task.raw_logs();
+        let present: Vec<String> = [out, err]
+            .into_iter()
+            .filter(|p| p.exists())
+            .map(|p| p.display().to_string())
+            .collect();
+        if present.is_empty() {
+            "raw logs: no longer available".to_string()
+        } else {
+            format!("raw logs: {}", present.join(", "))
+        }
+    }
+}
+
+/// What a job id the caller cannot see gets: the same answer whether it does
+/// not exist or belongs to another agent.
+pub const NO_ACCESSIBLE_JOB: &str = "No accessible job with this id. A job is visible only to the \
+    agent that started it. Use Job with action list to see your jobs.";
+
+/// Marker of a line cut to fit a page.
+const PAGE_CUT: &str = " [truncated to fit the page; the whole line is in the raw log]";
+
+/// `Job`: the calling agent's jobs, on its session's registry.
+pub struct JobTool {
+    registry: Arc<JobRegistry>,
+}
+
+impl JobTool {
+    pub fn new(registry: Arc<JobRegistry>) -> Self {
+        Self { registry }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum JobAction {
+    #[default]
+    List,
+    Status,
+    Output,
+    Wait,
+    Stop,
+}
+
+impl JobAction {
+    fn name(self) -> &'static str {
+        match self {
+            JobAction::List => "list",
+            JobAction::Status => "status",
+            JobAction::Output => "output",
+            JobAction::Wait => "wait",
+            JobAction::Stop => "stop",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum JobStream {
+    #[default]
+    Stdout,
+    Stderr,
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct JobInput {
-    action: String,
+    #[serde(default)]
+    action: JobAction,
     #[serde(default)]
     job_id: Option<String>,
     #[serde(default)]
-    stream: Option<String>,
+    stream: JobStream,
     #[serde(default)]
     offset: Option<u64>,
     #[serde(default)]
-    limit: Option<usize>,
+    limit: Option<u64>,
+    #[serde(default)]
+    tail: bool,
     #[serde(default)]
     timeout_ms: Option<u64>,
 }
 
+const DEFAULT_LIMIT: u64 = 200;
+const MAX_LIMIT: u64 = 2000;
+const DEFAULT_WAIT_MS: u64 = 60_000;
 const MAX_JOB_WAIT_MS: u64 = 600_000;
+
+impl JobInput {
+    /// The values out of range are refused, never corrected.
+    fn check(&self) -> std::result::Result<(), String> {
+        if let Some(l) = self.limit
+            && !(1..=MAX_LIMIT).contains(&l)
+        {
+            return Err(format!("`limit` must be between 1 and {MAX_LIMIT} (got {l})."));
+        }
+        if let Some(t) = self.timeout_ms
+            && !(1..=MAX_JOB_WAIT_MS).contains(&t)
+        {
+            return Err(format!(
+                "`timeout_ms` must be between 1 and {MAX_JOB_WAIT_MS} (got {t})."
+            ));
+        }
+        if self.tail && self.offset.is_some() {
+            return Err(
+                "`tail` returns the last `limit` lines: give `tail` or `offset`, not both.".into(),
+            );
+        }
+        if self.action != JobAction::List
+            && self.job_id.as_deref().is_none_or(|id| id.trim().is_empty())
+        {
+            return Err(format!(
+                "`{}` needs a non-empty `job_id`. Use Job with action list to see your jobs.",
+                self.action.name()
+            ));
+        }
+        Ok(())
+    }
+}
 
 #[async_trait]
 impl Tool for JobTool {
@@ -451,10 +593,12 @@ impl Tool for JobTool {
     }
 
     fn description(&self) -> &str {
-        "Your background commands (started with Bash `background: true`): `list`, `status` \
-         (job_id), `output` (job_id, stream stdout|stderr, offset in lines, limit), `wait` \
-         (job_id, timeout_ms; a timeout stops nothing), `stop` (job_id; graceful then forced, \
-         idempotent). Running is not ready, and ready is not proof that a service works."
+        "Follow your jobs: the commands you started with Bash `background: true`, and the \
+         foreground commands handed over after `yield_time_ms` (both give a job_id). `list` \
+         (default): your jobs. `status`: one job, with its raw log paths. `output`: lines of \
+         stdout or stderr from `offset` (0-based), or the last `limit` lines with `tail`. `wait`: \
+         wait for its end up to `timeout_ms` (a timeout stops nothing). `stop`: TERM then KILL, \
+         idempotent. Running is not ready, and ready is not proof that a service works."
     }
 
     fn permission_level(&self) -> PermissionLevel {
@@ -462,8 +606,8 @@ impl Tool for JobTool {
     }
 
     fn permission_level_for(&self, input: &Value) -> PermissionLevel {
-        match input["action"].as_str().unwrap_or("") {
-            "stop" => PermissionLevel::Execute,
+        match input["action"].as_str() {
+            Some("stop") => PermissionLevel::Execute,
             _ => PermissionLevel::ReadOnly,
         }
     }
@@ -472,164 +616,210 @@ impl Tool for JobTool {
         ToolCategory::Shell
     }
 
+    fn job_registry(&self) -> Option<Arc<JobRegistry>> {
+        Some(Arc::clone(&self.registry))
+    }
+
+    fn on_job_registry(&self, registry: &Arc<JobRegistry>) -> Option<Box<dyn Tool>> {
+        Some(Box::new(JobTool::new(Arc::clone(registry))))
+    }
+
     fn input_schema(&self) -> Value {
         serde_json::json!({
             "type": "object",
             "properties": {
-                "action": { "type": "string", "enum": ["list", "status", "output", "wait", "stop"] },
-                "job_id": { "type": "string" },
-                "stream": { "type": "string", "enum": ["stdout", "stderr"] },
-                "offset": { "type": "integer", "minimum": 0, "description": "Lines to skip (output)." },
-                "limit": { "type": "integer", "minimum": 1, "maximum": 2000, "description": "Lines at most (output; default 200)." },
-                "timeout_ms": { "type": "integer", "minimum": 1, "maximum": MAX_JOB_WAIT_MS }
+                "action": {
+                    "type": "string",
+                    "enum": ["list", "status", "output", "wait", "stop"],
+                    "default": "list"
+                },
+                "job_id": { "type": "string", "minLength": 1 },
+                "stream": { "type": "string", "enum": ["stdout", "stderr"], "default": "stdout" },
+                "offset": { "type": "integer", "minimum": 0 },
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": MAX_LIMIT,
+                    "default": DEFAULT_LIMIT
+                },
+                "tail": {
+                    "type": "boolean",
+                    "default": false,
+                    "description": "Return the last limit lines for output; incompatible with offset."
+                },
+                "timeout_ms": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": MAX_JOB_WAIT_MS,
+                    "default": DEFAULT_WAIT_MS
+                }
             },
-            "required": ["action"]
+            "additionalProperties": false
         })
     }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> ToolResult {
-        let i: JobInput = match serde_json::from_value(input) {
+        let i: JobInput = match crate::tool_feedback::parse_input(self, &input) {
             Ok(i) => i,
-            Err(e) => return ToolResult::error(format!("Invalid input: {e}")),
+            Err(e) => return e,
         };
-        let Some(reg) = ctx.extensions.get::<JobsHandle>() else {
+        if let Err(e) = i.check() {
+            return ToolResult::error(e);
+        }
+        let Some(viewer) = ctx.extensions.get::<JobOwner>().map(|o| o.agent_id.clone()) else {
             return ToolResult::error(
-                "no job registry in this context: use BashTaskStatus / BashTaskOutput / BashTaskStop",
+                "this agent has no identity, so no job can be shown (the agent was assembled \
+                 without one).",
             );
         };
-        let reg = &reg.0;
-        let viewer = ctx.extensions.get::<JobOwner>().map(|o| o.agent_id.clone());
-        let Some(viewer) = viewer else {
-            return ToolResult::error("this agent has no identity: no job is visible");
-        };
-        let need = |id: &Option<String>| -> std::result::Result<(Arc<Task>, PathBuf, Vec<String>), ToolResult> {
-            let id = id
-                .as_deref()
-                .ok_or_else(|| ToolResult::error(format!("`{}` needs `job_id`", i.action)))?;
-            reg.find(id, Some(&viewer))
-                .map(|(t, _, cwd, logs)| (t, cwd, logs))
-                .ok_or_else(|| ToolResult::error(format!("no job `{id}` of yours")))
-        };
-        match i.action.as_str() {
-            "list" => {
-                let jobs = reg.list(Some(&viewer));
-                if jobs.is_empty() {
-                    return ToolResult::success("No background job of yours.");
-                }
-                ToolResult::success(
-                    jobs.iter()
-                        .map(|(id, _, st)| describe(id, st, None))
-                        .collect::<Vec<_>>()
-                        .join("\n"),
-                )
+        let reg = &self.registry;
+        if i.action == JobAction::List {
+            let jobs = reg.views(Some(&viewer));
+            if jobs.is_empty() {
+                return ToolResult::success(
+                    "You have no jobs. Bash starts one with `background: true`, or when a \
+                     command is still running after `yield_time_ms`.",
+                );
             }
-            "status" => match need(&i.job_id) {
-                Err(e) => e,
-                Ok((t, cwd, logs)) => {
-                    let mut s =
-                        describe(i.job_id.as_deref().unwrap_or(""), &t.status(), Some(&cwd));
-                    if !logs.is_empty() {
-                        s.push_str(&format!("\nlogs kept: {}", logs.join(", ")));
-                    }
-                    ToolResult::success(s)
-                }
-            },
-            "output" => match need(&i.job_id) {
-                Err(e) => e,
-                Ok((t, _, _)) => {
-                    let stream = match i.stream.as_deref().unwrap_or("stdout") {
-                        "stdout" => Stream::Stdout,
-                        "stderr" => Stream::Stderr,
-                        other => return ToolResult::error(format!("unknown stream `{other}`")),
-                    };
-                    let page = t.read(
-                        stream,
-                        i.offset.unwrap_or(0),
-                        i.limit.unwrap_or(200).clamp(1, 2000),
-                    );
-                    let mut out = String::new();
-                    let mut bytes = 0usize;
-                    let mut shown = 0u64;
-                    let mut next = page.next_offset;
-                    for (n, l) in &page.lines {
-                        if bytes + l.len() > reg.settings.max_page_bytes {
-                            next = n - 1;
-                            break;
-                        }
-                        bytes += l.len() + 1;
-                        out.push_str(l);
-                        out.push('\n');
-                        shown += 1;
-                    }
-                    let mut head = format!(
-                        "{} lines {}–{} of {} ({} bytes received)",
-                        stream.name(),
-                        page.lines.first().map(|x| x.0).unwrap_or(next),
-                        page.lines
-                            .first()
-                            .map(|x| x.0 + shown)
-                            .unwrap_or(next)
-                            .saturating_sub(1),
-                        page.total_lines,
-                        page.received_bytes
-                    );
-                    if page.dropped_before > 0 {
-                        head.push_str(&format!(
-                            "; {} earlier line(s) no longer in memory (raw log: {})",
-                            page.dropped_before,
-                            page.raw_log.display()
-                        ));
-                    }
-                    if page.raw_log_capped {
-                        head.push_str("; raw log capped");
-                    }
-                    if let Some(e) = &page.raw_log_error {
-                        head.push_str(&format!("; raw log write error: {e}"));
-                    }
-                    if next < page.total_lines {
-                        head.push_str(&format!("; next offset {next}"));
-                    }
-                    if let Some(p) = page.partial {
-                        out.push_str(&format!(
-                            "[unfinished line] {}\n",
-                            p.chars().take(2000).collect::<String>()
-                        ));
-                    }
-                    ToolResult::success(format!("{head}\n{out}"))
-                }
-            },
-            "wait" => match need(&i.job_id) {
-                Err(e) => e,
-                Ok((t, cwd, _)) => {
-                    let limit = Duration::from_millis(
-                        i.timeout_ms.unwrap_or(60_000).clamp(1, MAX_JOB_WAIT_MS),
-                    );
-                    let ended = t.wait_finished(limit).await;
-                    let s = describe(i.job_id.as_deref().unwrap_or(""), &t.status(), Some(&cwd));
-                    if ended {
-                        ToolResult::success(s)
-                    } else {
-                        ToolResult::success(format!(
-                            "{s}\nstill running after {} (not stopped).",
-                            bricks_types::duration::display_ms(limit)
-                        ))
-                    }
-                }
-            },
-            "stop" => {
-                let Some(id) = i.job_id.clone() else {
-                    return ToolResult::error("`stop` needs `job_id`");
+            return ToolResult::success(
+                jobs.iter().map(JobView::line).collect::<Vec<_>>().join("\n"),
+            );
+        }
+        let id = i.job_id.as_deref().unwrap_or_default().trim();
+        let Some(job) = reg.view(id, Some(&viewer)) else {
+            return ToolResult::error(NO_ACCESSIBLE_JOB);
+        };
+        match i.action {
+            JobAction::List => unreachable!("handled above"),
+            JobAction::Status => {
+                ToolResult::success(format!("{}\n{}", job.line(), job.logs_line()))
+            }
+            JobAction::Output => {
+                let stream = match i.stream {
+                    JobStream::Stdout => Stream::Stdout,
+                    JobStream::Stderr => Stream::Stderr,
                 };
-                match reg.stop(&id, Some(&viewer)).await {
-                    Some(state) => ToolResult::success(format!("{id}: {}", state.label())),
-                    None => ToolResult::error(format!("no job `{id}` of yours")),
+                let limit = i.limit.unwrap_or(DEFAULT_LIMIT) as usize;
+                let position = if i.tail {
+                    crate::shell::background::OutputPosition::Tail
+                } else {
+                    crate::shell::background::OutputPosition::Offset(i.offset.unwrap_or(0))
+                };
+                let page = job.task.read(stream, position, limit);
+                ToolResult::success(render_page(&page, reg.settings.max_page_bytes))
+            }
+            JobAction::Wait => {
+                let limit = Duration::from_millis(i.timeout_ms.unwrap_or(DEFAULT_WAIT_MS));
+                let ended = job.task.wait_finished(limit).await;
+                let view = reg.view(id, Some(&viewer)).unwrap_or(job);
+                if ended {
+                    ToolResult::success(view.line())
+                } else {
+                    ToolResult::success(format!(
+                        "{}\nStill running after {}: the wait timed out, and the job was not \
+                         stopped (wait again, read its output, or stop it).",
+                        view.line(),
+                        bricks_types::duration::display_ms(limit)
+                    ))
                 }
             }
-            other => ToolResult::error(format!(
-                "unknown action `{other}`: list, status, output, wait, stop"
-            )),
+            JobAction::Stop => {
+                job.task
+                    .stop(Duration::from_millis(reg.settings.stop_grace_ms))
+                    .await;
+                let view = reg.view(id, Some(&viewer)).unwrap_or(job);
+                ToolResult::success(view.line())
+            }
         }
     }
+}
+
+/// A page of output: a header (range, totals, losses, raw log, next offset),
+/// then the lines as they were printed, within `budget` bytes. A page that
+/// holds a line always moves the cursor: a first line longer than the
+/// budget is shown cut (and marked), and the cursor goes past it.
+fn render_page(page: &crate::shell::background::Page, budget: usize) -> String {
+    let mut body = String::new();
+    let mut shown = 0u64;
+    let mut cut = false;
+    for (_, line) in &page.lines {
+        let room = budget.saturating_sub(body.len());
+        if line.len() < room {
+            body.push_str(line);
+            body.push('\n');
+            shown += 1;
+            continue;
+        }
+        if shown == 0 {
+            // The first line alone exceeds the page: an excerpt, cut on a
+            // character boundary, with room for the marker.
+            let mut end = budget.saturating_sub(PAGE_CUT.len() + 1).min(line.len());
+            while !line.is_char_boundary(end) {
+                end -= 1;
+            }
+            body.push_str(&line[..end]);
+            body.push_str(PAGE_CUT);
+            body.push('\n');
+            shown = 1;
+            cut = true;
+        }
+        break;
+    }
+    let start = page.lines.first().map(|(n, _)| n - 1);
+    let next = start.map_or(page.next_offset, |s| s + shown);
+    let name = page.stream.name();
+    let mut head = match start {
+        Some(s) if shown > 0 => format!(
+            "{name}: lines {}–{} of {} complete ({} bytes received)",
+            s + 1,
+            s + shown,
+            page.total_lines,
+            page.received_bytes
+        ),
+        _ => format!(
+            "{name}: no complete line from offset {next} ({} complete, {} bytes received)",
+            page.total_lines, page.received_bytes
+        ),
+    };
+    if page.evicted > 0 {
+        head.push_str(&format!(
+            "; {} earlier line(s) no longer in memory",
+            page.evicted
+        ));
+    }
+    if page.dropped_before > 0 {
+        head.push_str(&format!(
+            " (the {} before this page are among them)",
+            page.dropped_before
+        ));
+    }
+    if cut {
+        head.push_str("; the line shown was truncated to fit the page");
+    }
+    head.push_str(&format!("; raw log: {}", page.raw_log.display()));
+    if page.raw_log_capped {
+        head.push_str(" (capped: it stopped growing)");
+    }
+    if let Some(e) = &page.raw_log_error {
+        head.push_str(&format!(" (write error: {e})"));
+    }
+    head.push_str(&format!("; next offset {next}"));
+    let mut out = format!("{head}\n{body}");
+    if let Some(p) = &page.partial
+        && next == page.total_lines
+    {
+        let room = budget.saturating_sub(body.len()).max(256);
+        let mut end = room.min(p.len());
+        while !p.is_char_boundary(end) {
+            end -= 1;
+        }
+        out.push_str(&format!(
+            "[line in progress, not yet complete; it does not move the offset]\n{}{}\n",
+            &p[..end],
+            if end < p.len() { PAGE_CUT } else { "" }
+        ));
+    }
+    out
 }
 
 #[cfg(all(test, unix))]
@@ -662,16 +852,20 @@ mod tests {
         out[i..i + 16].to_string()
     }
 
+    fn session_registry(c: &ToolContext) -> Arc<JobRegistry> {
+        Arc::clone(&c.extensions.get::<JobsHandle>().expect("a session registry").0)
+    }
+
     async fn start(c: &ToolContext, cmd: &str, extra: Value) -> ToolResult {
         let mut input = json!({ "command": cmd, "background": true });
         if let (Some(a), Some(b)) = (input.as_object_mut(), extra.as_object()) {
             a.extend(b.clone());
         }
-        BashTool.execute(input, c).await
+        BashTool::with_jobs(session_registry(c)).execute(input, c).await
     }
 
     async fn job(c: &ToolContext, input: Value) -> ToolResult {
-        JobTool.execute(input, c).await
+        JobTool::new(session_registry(c)).execute(input, c).await
     }
 
     #[tokio::test]
@@ -695,17 +889,14 @@ mod tests {
         // Another agent cannot see, read or stop it.
         for action in ["status", "output", "wait", "stop"] {
             let r = job(&b, json!({ "action": action, "job_id": id })).await;
-            assert!(
-                r.is_error && r.content.contains("no job"),
-                "{action}: {}",
-                r.content
-            );
+            assert!(r.is_error, "{action}: {}", r.content);
+            assert_eq!(r.content, NO_ACCESSIBLE_JOB, "{action}");
         }
         assert!(
             job(&b, json!({ "action": "list" }))
                 .await
                 .content
-                .contains("No background job")
+                .contains("You have no jobs")
         );
 
         let w = job(

@@ -1637,7 +1637,7 @@ async fn run_loop(
                                 "tool",
                                 &tool_name,
                                 &registered_tool_names,
-                                "Call ToolSearch with a keyword to find the right tool, then call that tool by its exact name.",
+                                "Use one of the available tools above, with its exact name.",
                             )),
                         };
                         // Measured when the call ends, not when it is published.

@@ -23,6 +23,33 @@ pub async fn prefs_get(state: State<'_, AppState>) -> IpcResult<Preferences> {
         .map_err(join_error)
 }
 
+/// Shows the light or the dark icon in the Dock (macOS; elsewhere nothing).
+#[tauri::command]
+pub fn app_icon_show(app: tauri::AppHandle, dark: bool) -> IpcResult<()> {
+    #[cfg(target_os = "macos")]
+    {
+        let shown = app.run_on_main_thread(move || {
+            use objc2::{AllocAnyThread, MainThreadMarker};
+            use objc2_app_kit::{NSApplication, NSImage};
+            use objc2_foundation::NSData;
+            const LIGHT: &[u8] = include_bytes!("../../icons/app-light.png");
+            const DARK: &[u8] = include_bytes!("../../icons/app-dark.png");
+            let Some(mtm) = MainThreadMarker::new() else {
+                return;
+            };
+            let data = NSData::with_bytes(if dark { DARK } else { LIGHT });
+            if let Some(image) = NSImage::initWithData(NSImage::alloc(), &data) {
+                let app = NSApplication::sharedApplication(mtm);
+                unsafe { app.setApplicationIconImage(Some(&image)) };
+            }
+        });
+        shown.map_err(|e| crate::services::error(crate::contract::IpcErrorCode::Internal, e.to_string()))?;
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, dark);
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn prefs_set(state: State<'_, AppState>, prefs: Preferences) -> IpcResult<()> {
     save_preferences(&state, prefs).await

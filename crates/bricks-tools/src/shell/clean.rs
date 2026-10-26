@@ -111,6 +111,11 @@ impl TerminalCleaner {
         out
     }
 
+    /// The unfinished line held so far, as it reads now (not emitted).
+    pub fn current_line(&self) -> &str {
+        &self.line
+    }
+
     /// Flush what is left (an unfinished line, an incomplete character).
     pub fn finish(&mut self) -> String {
         let mut out = String::new();

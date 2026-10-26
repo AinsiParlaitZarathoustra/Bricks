@@ -241,6 +241,15 @@ impl Log {
     }
 }
 
+/// Where a page of a task's output starts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutputPosition {
+    /// After this many lines (0-based).
+    Offset(u64),
+    /// The last `limit` complete lines still in memory.
+    Tail,
+}
+
 /// A page of a task's output.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Page {
@@ -250,6 +259,8 @@ pub struct Page {
     /// Lines that existed before the requested offset but are no longer in
     /// memory (read the raw log for them).
     pub dropped_before: u64,
+    /// Lines of the stream no longer in memory at all (the oldest ones).
+    pub evicted: u64,
     /// Lines seen so far on this stream.
     pub total_lines: u64,
     /// Offset to ask for next (0-based count of lines to skip).
@@ -643,14 +654,20 @@ impl Task {
         let _ = rx.wait_for(|d| *d).await;
     }
 
-    /// Lines from `offset` (0-based), at most `limit`.
-    pub fn read(&self, stream: Stream, offset: u64, limit: usize) -> Page {
+    /// At most `limit` complete lines from `position`: the page's start is
+    /// chosen and its lines copied under the stream's one lock, so a tail is
+    /// the end of the stream at that instant.
+    pub fn read(&self, stream: Stream, position: OutputPosition, limit: usize) -> Page {
         let log = self.logs[match stream {
             Stream::Stdout => 0,
             Stream::Stderr => 1,
         }]
         .lock();
-        let start = offset.max(log.first);
+        let requested = match position {
+            OutputPosition::Offset(offset) => offset,
+            OutputPosition::Tail => log.total.saturating_sub(limit as u64),
+        };
+        let start = requested.max(log.first);
         let skip = (start - log.first) as usize;
         let lines: Vec<(u64, String)> = log
             .lines
@@ -663,10 +680,17 @@ impl Task {
         let next = start + lines.len() as u64;
         Page {
             stream,
-            dropped_before: log.first.saturating_sub(offset),
+            dropped_before: log.first.saturating_sub(requested),
+            evicted: log.first,
             total_lines: log.total,
             next_offset: next,
-            partial: (!log.partial.is_empty() && next == log.total).then(|| log.partial.clone()),
+            partial: {
+                // The cleaner holds the unfinished line until it ends: it is
+                // part of the line in progress.
+                let mut current = log.partial.clone();
+                current.push_str(log.cleaner.current_line());
+                (!current.is_empty() && next == log.total).then_some(current)
+            },
             raw_log: log.raw_path.clone(),
             raw_log_capped: log.raw_capped,
             raw_log_error: log.raw_error.clone(),

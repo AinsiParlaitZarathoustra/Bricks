@@ -6,10 +6,12 @@
 //! aliases persist between calls because a command that ends normally
 //! publishes its changes; variables that are not exported do not persist.
 //! Commands run side by side. Stdin is empty unless `input` is given. A
-//! command still running after `yield_time_ms` is handed over as a task: the
-//! call returns `Running` with its ids, and the command goes on, readable and
-//! stoppable with `BashTaskStatus` / `BashTaskOutput` / `BashTaskStop` and
-//! `Job`. `timeout` still ends it. `background: true` starts a task at once.
+//! command still running after `yield_time_ms` is handed over as a job: the
+//! call returns `Running` with its `job_id`, and the command goes on, followed
+//! with the `Job` tool. `timeout` still ends it. `background: true` starts a
+//! job at once. Both need the session's job registry ([`BashTool::with_jobs`]);
+//! without one, Bash runs only commands that end in the call, and refuses the
+//! others before anything starts.
 //!
 //! Paths: the shell resolves relative paths against its own current
 //! directory, which `cd` changes. Other tools keep resolving against the
@@ -25,7 +27,34 @@ use std::time::Duration;
 /// output compressor).
 pub const STDERR_MARKER: &str = "--- stderr ---";
 
-pub struct BashTool;
+/// The Bash tool. Built on a job registry ([`BashTool::with_jobs`], what
+/// [`crate::shell_with_jobs`] does), its commands can be handed over and
+/// started in the background as jobs; without one ([`BashTool::default`]),
+/// only commands that end in the call run.
+#[derive(Default, Clone)]
+pub struct BashTool {
+    jobs: Option<Arc<crate::jobs::JobRegistry>>,
+}
+
+impl BashTool {
+    /// Bash on the session's job registry (the one `Job` reads).
+    pub fn with_jobs(registry: Arc<crate::jobs::JobRegistry>) -> Self {
+        Self {
+            jobs: Some(registry),
+        }
+    }
+
+    /// The registry its jobs are recorded in, if any.
+    pub fn registry(&self) -> Option<&Arc<crate::jobs::JobRegistry>> {
+        self.jobs.as_ref()
+    }
+}
+
+/// Why a command that may become a job cannot run here.
+#[cfg(unix)]
+const NO_REGISTRY: &str = "this Bash has no job registry, so a command that may be handed over \
+    as a job cannot run (nothing was started). Give `yield_time_ms` at least equal to `timeout` \
+    so the call waits for the end, or assemble the tools with shell_with_jobs(registry).";
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -88,11 +117,12 @@ impl Tool for BashTool {
         "Run a bash command in this session. Each call is its own process, so calls run side by \
          side; the working directory, exported variables, PATH, functions and aliases persist \
          between calls (plain shell variables do not). stdin is empty unless `input` is given. \
-         `timeout` is in milliseconds (default 120000, max 600000) and a timed-out command returns \
-         its partial output. A command still running after `yield_time_ms` (default 10000) returns \
-         as Running with a task id and keeps going: read it with BashTaskOutput / BashTaskStatus, \
-         stop it with BashTaskStop. For servers, watchers and other long-running processes use \
-         `background: true` (optionally `ready_pattern`) — do not end a command with `&`."
+         `timeout` (ms, default 120000, max 600000) ends the command; a timed-out command returns \
+         its partial output. `yield_time_ms` (default 10000) only gives control back: a command \
+         still running then returns as Running with a `job_id` and keeps going until it ends or \
+         its timeout. For servers, watchers and other long-running processes use \
+         `background: true` (optionally `ready_pattern`) — do not end a command with `&`. Both \
+         kinds are jobs: follow them with the Job tool (list, status, output, wait, stop)."
     }
 
     fn permission_level(&self) -> PermissionLevel {
@@ -102,13 +132,21 @@ impl Tool for BashTool {
         ToolCategory::Shell
     }
 
+    fn job_registry(&self) -> Option<Arc<crate::jobs::JobRegistry>> {
+        self.jobs.clone()
+    }
+
+    fn on_job_registry(&self, registry: &Arc<crate::jobs::JobRegistry>) -> Option<Box<dyn Tool>> {
+        Some(Box::new(BashTool::with_jobs(Arc::clone(registry))))
+    }
+
     fn input_schema(&self) -> Value {
         serde_json::json!({
             "type": "object",
             "properties": {
                 "command": { "type": "string", "description": "The bash command to execute" },
                 "timeout": { "type": "integer", "description": "Timeout in milliseconds (default 120000, max 600000); ends the command, also after a hand-over" },
-                "background": { "type": "boolean", "description": "Start as a supervised background task and return its task id" },
+                "background": { "type": "boolean", "description": "Start as a background job and return its job_id" },
                 "input": { "type": "string", "description": "Text to give the command on stdin (default: empty stdin)" },
                 "ready_pattern": { "type": "string", "description": "Background only: regex on output lines meaning the task is ready" },
                 "ready_timeout": { "type": "integer", "description": "Background only: milliseconds to wait for ready_pattern" },
@@ -190,21 +228,44 @@ impl Tool for BashTool {
                     );
                 }
             }
+            // A command that may become a job needs the registry and the
+            // agent's identity: checked before anything starts.
+            let yield_after = input
+                .yield_time_ms
+                .map(Duration::from_millis)
+                .unwrap_or(config.yield_time);
+            let may_be_a_job = input.background || yield_after < timeout;
+            let jobs = match (&self.jobs, may_be_a_job) {
+                (_, false) => None,
+                (None, true) => return ToolResult::error(NO_REGISTRY),
+                (Some(registry), true) => {
+                    let Some(owner) = ctx.extensions.get::<crate::jobs::JobOwner>() else {
+                        return ToolResult::error(
+                            "this agent has no identity, so its jobs could not be followed: \
+                             nothing was started (the agent was assembled without one).",
+                        );
+                    };
+                    Some((Arc::clone(registry), (*owner).clone()))
+                }
+            };
             if input.background {
                 if input.yield_time_ms.is_some() {
                     return ToolResult::error(
                         "`yield_time_ms` only applies to a foreground command: a background \
-                         command is a task from the start.",
+                         command is a job from the start.",
                     );
                 }
-                return start_background(&input, ctx, &config).await;
+                let Some(jobs) = jobs else {
+                    return ToolResult::error(NO_REGISTRY);
+                };
+                return start_background(&input, ctx, &config, jobs).await;
             }
             if input.ready_pattern.is_some() || input.ready_timeout.is_some() {
                 return ToolResult::error(
                     "`ready_pattern` and `ready_timeout` only apply with `background: true`.",
                 );
             }
-            run_foreground(&input, ctx, &config, timeout).await
+            run_foreground(&input, ctx, &config, timeout, yield_after, jobs).await
         }
         #[cfg(not(unix))]
         {
@@ -224,6 +285,8 @@ async fn run_foreground(
     ctx: &ToolContext,
     config: &ShellConfig,
     timeout: Duration,
+    yield_after: Duration,
+    jobs: Option<(Arc<crate::jobs::JobRegistry>, crate::jobs::JobOwner)>,
 ) -> ToolResult {
     let sessions = shell::session(&ctx.session_id, config);
     let started = std::time::Instant::now();
@@ -241,19 +304,13 @@ async fn run_foreground(
         Err(e) => return launch_failure(e, started),
     };
     let task = Arc::clone(cmd.task());
-    let jobs = ctx.extensions.get::<crate::jobs::JobsHandle>();
-    let owner = ctx.extensions.get::<crate::jobs::JobOwner>();
-    let wants_job = jobs.is_some() && owner.is_some();
-    let yield_after = input
-        .yield_time_ms
-        .map(Duration::from_millis)
-        .unwrap_or(config.yield_time);
     let progress = progress_for(ctx, "Bash");
     let yield_timer = tokio::time::sleep(yield_after);
     tokio::pin!(yield_timer);
     // A hand-over at or after the deadline never happens: the timeout ends
-    // the command, as a timeout (not as a task still running).
-    let mut yield_pending = yield_after < timeout;
+    // the command, as a timeout (not as a job still running). Without a
+    // registry the command was refused unless it cannot be handed over.
+    let mut yield_pending = jobs.is_some() && yield_after < timeout;
     let mut ticker = tokio::time::interval(config.progress_every);
     ticker.tick().await;
     let mut last_bytes = 0u64;
@@ -261,19 +318,16 @@ async fn run_foreground(
     let mut refused: Option<String> = None;
 
     // `None`: the command ended; `Some(slot)`: it is handed over, with the
-    // place reserved for it as a job (if any).
-    let handed_over: Option<Option<crate::jobs::JobSlot>> = loop {
+    // place reserved for it as a job.
+    let handed_over: Option<crate::jobs::JobSlot> = loop {
         tokio::select! {
             _ = task.wait_end() => break None,
             _ = &mut yield_timer, if yield_pending => {
                 yield_pending = false;
-                if !wants_job {
-                    break Some(None);
-                }
-                match jobs.as_ref().map(|j| j.0.reserve()) {
-                    Some(Ok(slot)) => break Some(Some(slot)),
+                match jobs.as_ref().map(|(registry, _)| registry.reserve()) {
+                    Some(Ok(slot)) => break Some(slot),
                     Some(Err(e)) => refused = Some(e),
-                    None => break Some(None),
+                    None => {}
                 }
             }
             _ = ticker.tick() => {
@@ -309,23 +363,17 @@ async fn run_foreground(
         let mut notes = Vec::new();
         if let Some(e) = refused {
             notes.push(format!(
-                "still running after {}: not handed over as a task ({e}); the call waited for it",
+                "still running after {}: not handed over as a job ({e}); the call waited for it",
                 bricks_types::duration::display_ms(yield_after)
             ));
         }
         return finished_result(timeout, outcome, notes);
     };
 
-    let job_id = match (slot, owner.as_ref(), jobs.as_ref()) {
-        (Some(slot), Some(owner), Some(jobs)) => Some(jobs.0.register(
-            slot,
-            (**owner).clone(),
-            Arc::clone(&task),
-            &ctx.working_dir,
-            false,
-        )),
-        _ => None,
+    let Some((registry, owner)) = jobs else {
+        unreachable!("a command is handed over only with a registry");
     };
+    let job_id = registry.register(slot, owner, Arc::clone(&task), &ctx.working_dir, false);
     let partial = task
         .output()
         .unwrap_or_else(|| [Default::default(), Default::default()]);
@@ -357,22 +405,22 @@ fn finished_result(
             ToolStatus::TimedOut,
             None,
             Some(format!(
-                "aucun code de sortie ({} processus arrêtés{})",
+                "no exit code ({} processes stopped{})",
                 outcome.terminated.targeted.len(),
                 if outcome.terminated.forced.is_empty() {
                     String::new()
                 } else {
-                    format!(", dont {} de force", outcome.terminated.forced.len())
+                    format!(", {} of them forcibly", outcome.terminated.forced.len())
                 }
             )),
         ),
-        RunStatus::Cancelled => (ToolStatus::Cancelled, None, Some("annulé".into())),
+        RunStatus::Cancelled => (ToolStatus::Cancelled, None, Some("cancelled".into())),
         RunStatus::Killed { signal } => (
             ToolStatus::Failure,
             None,
             Some(match signal {
-                Some(s) => format!("commande tuée par le signal {s}"),
-                None => "commande terminée sans statut".into(),
+                Some(s) => format!("command killed by signal {s}"),
+                None => "command ended without a status".into(),
             }),
         ),
     };
@@ -393,7 +441,7 @@ fn finished_result(
     for (name, cap) in [("stdout", &outcome.stdout), ("stderr", &outcome.stderr)] {
         if let Some(p) = &cap.raw_path {
             report.notes.push(format!(
-                "{name} brut complet ({} octets) : {}",
+                "{name} full raw output ({} bytes): {}",
                 cap.raw_bytes,
                 p.display()
             ));
@@ -414,37 +462,32 @@ fn finished_result(
 #[cfg(unix)]
 fn handed_over_result(
     task: &shell::background::Task,
-    job_id: Option<String>,
+    job_id: String,
     started: std::time::Instant,
     cwd: &std::path::Path,
     partial: [crate::shell::capture::Captured; 2],
 ) -> ToolResult {
     let st = task.status();
     let cursor_out = task
-        .read(shell::background::Stream::Stdout, 0, 0)
+        .read(shell::background::Stream::Stdout, shell::background::OutputPosition::Offset(0), 0)
         .total_lines;
     let cursor_err = task
-        .read(shell::background::Stream::Stderr, 0, 0)
+        .read(shell::background::Stream::Stderr, shell::background::OutputPosition::Offset(0), 0)
         .total_lines;
-    let mut notes = vec![format!(
-        "Commande encore en cours après {} : tâche {} (pid {}) — {}",
-        bricks_types::duration::display_ms(started.elapsed()),
-        st.id,
-        st.pid,
-        st.command
-    )];
-    if let Some(j) = &job_id {
-        notes.push(format!(
-            "job : {j} (Job status / output / wait / stop) · cwd {}",
-            cwd.display()
-        ));
-    }
-    notes.push(format!(
-        "La suite : BashTaskOutput (task_id \"{0}\", stream, offset = curseur : stdout depuis la \
-         ligne {cursor_out}, stderr depuis la ligne {cursor_err}) ; état : BashTaskStatus ; \
-         arrêt : BashTaskStop (task_id \"{0}\").",
-        st.id
-    ));
+    let notes = vec![
+        format!(
+            "Still running after {}, handed over as job {job_id} (pid {}) in {}: {}",
+            bricks_types::duration::display_ms(started.elapsed()),
+            st.pid,
+            cwd.display(),
+            st.command
+        ),
+        format!(
+            "Follow it with Job: action output, job_id \"{job_id}\", offset {cursor_out} for new \
+             stdout lines ({cursor_err} for stderr); wait to wait for its end; stop to end it. \
+             It is a job like a background command, and its timeout still ends it."
+        ),
+    ];
     let mut report = ToolReport::new(
         ToolStatus::Running,
         ToolBody::Streams {
@@ -455,7 +498,6 @@ fn handed_over_result(
     report.duration = Some(started.elapsed());
     report.notes = notes;
     report.data = Some(serde_json::json!({
-        "task_id": st.id,
         "job_id": job_id,
         "pid": st.pid,
         "state": st.state.label(),
@@ -466,7 +508,12 @@ fn handed_over_result(
 }
 
 #[cfg(unix)]
-async fn start_background(input: &Input, ctx: &ToolContext, config: &ShellConfig) -> ToolResult {
+async fn start_background(
+    input: &Input,
+    ctx: &ToolContext,
+    config: &ShellConfig,
+    (registry, owner): (Arc<crate::jobs::JobRegistry>, crate::jobs::JobOwner),
+) -> ToolResult {
     use crate::shell::background::{Readiness, TaskState};
     let started = std::time::Instant::now();
     let pattern = match input
@@ -480,20 +527,13 @@ async fn start_background(input: &Input, ctx: &ToolContext, config: &ShellConfig
     };
     // The session's jobs: a place reserved before anything starts, limits
     // applied to the task's logs.
-    let jobs = ctx.extensions.get::<crate::jobs::JobsHandle>();
-    let owner = ctx.extensions.get::<crate::jobs::JobOwner>();
     let mut config = config.clone();
-    if let Some(j) = &jobs {
-        config.tasks.memory_bytes = j.0.settings.output_buffer_bytes;
-        config.tasks.max_line_bytes = j.0.settings.max_line_bytes;
-        config.tasks.raw_log_bytes = j.0.settings.raw_log_bytes;
-    }
-    let slot = match (&jobs, &owner) {
-        (Some(j), Some(_)) => match j.0.reserve() {
-            Ok(slot) => Some(slot),
-            Err(e) => return ToolResult::error(e),
-        },
-        _ => None,
+    config.tasks.memory_bytes = registry.settings.output_buffer_bytes;
+    config.tasks.max_line_bytes = registry.settings.max_line_bytes;
+    config.tasks.raw_log_bytes = registry.settings.raw_log_bytes;
+    let slot = match registry.reserve() {
+        Ok(slot) => slot,
+        Err(e) => return ToolResult::error(e),
     };
     let config = &config;
     let sessions = shell::session(&ctx.session_id, config);
@@ -522,50 +562,35 @@ async fn start_background(input: &Input, ctx: &ToolContext, config: &ShellConfig
         task.wait_finished(Duration::from_millis(150)).await;
     }
     let st = task.status();
-    let job_id = match (slot, &jobs, &owner) {
-        (Some(slot), Some(j), Some(o)) => Some(j.0.register(
-            slot,
-            (**o).clone(),
-            Arc::clone(&task),
-            &ctx.working_dir,
-            true,
-        )),
-        _ => None,
-    };
+    let job_id = registry.register(slot, owner, Arc::clone(&task), &ctx.working_dir, true);
     let mut lines = vec![format!(
-        "Tâche {} démarrée (pid {}) : {}",
-        st.id, st.pid, st.command
+        "Started job {job_id} (pid {}) in {}: {}",
+        st.pid,
+        ctx.working_dir.display(),
+        st.command
     )];
-    if let Some(j) = &job_id {
-        lines.push(format!(
-            "job : {j} (Job status / output / wait / stop) · cwd {}",
-            ctx.working_dir.display()
-        ));
-    }
     let status = match &st.state {
         TaskState::Completed { .. } => ToolStatus::Success,
         TaskState::Failed { .. } => ToolStatus::Failure,
         _ => ToolStatus::Running,
     };
-    lines.push(format!("état : {}", st.state.label()));
+    lines.push(format!("state: {}", st.state.label()));
     match &st.readiness {
         Readiness::NotChecked => lines.push(
-            "prête : non vérifié (aucun ready_pattern) — un processus lancé n'est pas forcément prêt".into(),
+            "ready: not checked (no ready_pattern); a started process is not necessarily ready"
+                .into(),
         ),
         Readiness::Waiting => lines.push(format!(
-            "prête : pas encore (motif non vu après {})",
+            "ready: not yet (pattern not seen after {})",
             bricks_types::duration::display_ms(started.elapsed())
         )),
-        Readiness::Ready { after, line } => {
-            lines.push(format!(
-                "prête après {} : {line}",
-                bricks_types::duration::display_ms(*after)
-            ))
-        }
+        Readiness::Ready { after, line } => lines.push(format!(
+            "ready after {}: {line}",
+            bricks_types::duration::display_ms(*after)
+        )),
     }
     lines.push(format!(
-        "Suivi : BashTaskStatus / BashTaskOutput (task_id \"{0}\") ; arrêt : BashTaskStop (task_id \"{0}\").",
-        st.id
+        "Follow it with Job (job_id \"{job_id}\"): status, output, wait, stop."
     ));
     let mut report = ToolReport::new(status, ToolBody::Text(lines.join("\n")));
     if let TaskState::Completed { code } = st.state {
@@ -579,7 +604,6 @@ async fn start_background(input: &Input, ctx: &ToolContext, config: &ShellConfig
     report.data = Some(serde_json::json!({
         "job_id": job_id,
         "cwd": ctx.working_dir.display().to_string(),
-        "task_id": st.id,
         "pid": st.pid,
         "state": st.state.label(),
         "ready": matches!(st.readiness, Readiness::Ready { .. }),
@@ -595,11 +619,10 @@ fn launch_failure(e: std::io::Error, started: std::time::Instant) -> ToolResult 
             stderr: String::new(),
         },
     );
-    report.termination = Some(format!("lancement impossible : {e}"));
+    report.termination = Some(format!("cannot launch: {e}"));
     report.duration = Some(started.elapsed());
     if e.kind() == std::io::ErrorKind::NotFound {
-        report.suggestion =
-            Some("Vérifiez que bash est installé ou disponible dans le PATH.".into());
+        report.suggestion = Some("Check that bash is installed and available on PATH.".into());
     }
     ToolResult::from_report(report)
 }
@@ -633,7 +656,7 @@ async fn run_in_sandbox(
             report.timeout = out.timed_out.then_some(timeout);
             report.duration = Some(started.elapsed());
             report.notes.push(format!(
-                "exécuté dans le bac à sable {} (sans état persistant entre les commandes)",
+                "ran in sandbox {} (no state kept between commands)",
                 sandbox.id()
             ));
             ToolResult::from_report(report)
@@ -642,270 +665,10 @@ async fn run_in_sandbox(
     }
 }
 
-// ─── Background task tools ───────────────────────────────────────────────────
-
-fn find_task(
-    ctx: &ToolContext,
-    id: &str,
-) -> std::result::Result<Arc<shell::background::Task>, ToolResult> {
-    let sessions = shell::session(&ctx.session_id, &shell_config(ctx));
-    sessions.task(id).ok_or_else(|| {
-        let ids: Vec<String> = sessions.tasks().iter().map(|t| t.id.clone()).collect();
-        crate::tool_feedback::not_found(
-            "background task",
-            id,
-            &ids,
-            "Only tasks started in this session with Bash `background: true` (or handed over after `yield_time_ms`) are visible.",
-        )
-    })
-}
-
-fn describe_status(st: &shell::background::TaskStatus) -> String {
-    use shell::background::{Readiness, TaskState};
-    let code = match &st.state {
-        TaskState::Completed { code } => format!(", code {code}"),
-        TaskState::Failed { code: Some(c), .. } => format!(", code {c}"),
-        TaskState::Failed {
-            signal: Some(s), ..
-        } => format!(", signal {s}"),
-        _ => String::new(),
-    };
-    let ready = match &st.readiness {
-        Readiness::NotChecked => "non vérifiée".to_string(),
-        Readiness::Waiting => "pas encore".to_string(),
-        Readiness::Ready { after, .. } => {
-            format!("oui (après {})", bricks_types::duration::display_ms(*after))
-        }
-    };
-    format!(
-        "{} [{}{}] pid {} — {} — prête : {} — lignes stdout {} / stderr {} — {}",
-        st.id,
-        st.state.label(),
-        code,
-        st.pid,
-        bricks_types::duration::display_ms(st.elapsed),
-        ready,
-        st.stdout_lines,
-        st.stderr_lines,
-        st.command
-    )
-}
-
-pub struct BashTaskStatusTool;
-
-#[async_trait]
-impl Tool for BashTaskStatusTool {
-    fn name(&self) -> &str {
-        "BashTaskStatus"
-    }
-    fn description(&self) -> &str {
-        "Status of this session's background shell tasks (all of them, or one `task_id`): state \
-         (running, completed, failed, stopped), exit code once finished, readiness, output size."
-    }
-    fn permission_level(&self) -> PermissionLevel {
-        PermissionLevel::ReadOnly
-    }
-    fn category(&self) -> ToolCategory {
-        ToolCategory::Shell
-    }
-    fn input_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": { "task_id": { "type": "string", "description": "A task id (omit for all)" } }
-        })
-    }
-    async fn execute(&self, input: Value, ctx: &ToolContext) -> ToolResult {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct In {
-            task_id: Option<String>,
-        }
-        let input: In = match crate::tool_feedback::parse_input(self, &input) {
-            Ok(i) => i,
-            Err(e) => return e,
-        };
-        let tasks = match &input.task_id {
-            Some(id) => match find_task(ctx, id) {
-                Ok(t) => vec![t],
-                Err(e) => return e,
-            },
-            None => shell::session(&ctx.session_id, &shell_config(ctx)).tasks(),
-        };
-        if tasks.is_empty() {
-            return ToolResult::success("Aucune tâche de fond dans cette session.");
-        }
-        let statuses: Vec<_> = tasks.iter().map(|t| t.status()).collect();
-        let text = statuses
-            .iter()
-            .map(describe_status)
-            .collect::<Vec<_>>()
-            .join("\n");
-        let data: Vec<Value> = statuses
-            .iter()
-            .map(|s| serde_json::json!({ "task_id": s.id, "state": s.state.label(), "pid": s.pid }))
-            .collect();
-        ToolResult::success(text).with_metadata(Value::Array(data))
-    }
-}
-
-pub struct BashTaskOutputTool;
-
-#[async_trait]
-impl Tool for BashTaskOutputTool {
-    fn name(&self) -> &str {
-        "BashTaskOutput"
-    }
-    fn description(&self) -> &str {
-        "Read a page of a background task's output: `stream` stdout or stderr, `offset` = lines to \
-         skip (use the returned next offset to continue), `limit` lines (default 200, max 2000)."
-    }
-    fn permission_level(&self) -> PermissionLevel {
-        PermissionLevel::ReadOnly
-    }
-    fn category(&self) -> ToolCategory {
-        ToolCategory::Shell
-    }
-    fn input_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "task_id": { "type": "string" },
-                "stream": { "type": "string", "enum": ["stdout", "stderr"] },
-                "offset": { "type": "integer", "description": "Lines to skip (default 0)" },
-                "limit": { "type": "integer", "description": "Lines to return (default 200, max 2000)" }
-            },
-            "required": ["task_id"]
-        })
-    }
-    async fn execute(&self, input: Value, ctx: &ToolContext) -> ToolResult {
-        use shell::background::Stream;
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct In {
-            task_id: String,
-            stream: Option<String>,
-            offset: Option<u64>,
-            limit: Option<usize>,
-        }
-        let input: In = match crate::tool_feedback::parse_input(self, &input) {
-            Ok(i) => i,
-            Err(e) => return e,
-        };
-        let stream = match input.stream.as_deref() {
-            None | Some("stdout") => Stream::Stdout,
-            Some("stderr") => Stream::Stderr,
-            Some(other) => {
-                return ToolResult::error(format!(
-                    "Unknown stream {other:?}: use stdout or stderr."
-                ));
-            }
-        };
-        let task = match find_task(ctx, &input.task_id) {
-            Ok(t) => t,
-            Err(e) => return e,
-        };
-        let page = task.read(
-            stream,
-            input.offset.unwrap_or(0),
-            input.limit.unwrap_or(200).clamp(1, 2000),
-        );
-        let st = task.status();
-        let mut out = format!(
-            "{} — {} — état : {}\n",
-            st.id,
-            stream.name(),
-            st.state.label()
-        );
-        if page.dropped_before > 0 {
-            out.push_str(&format!(
-                "[{} ligne(s) avant cette page ne sont plus en mémoire ; journal brut : {}]\n",
-                page.dropped_before,
-                page.raw_log.display()
-            ));
-        }
-        for (n, line) in &page.lines {
-            out.push_str(&format!("{n:>6} | {line}\n"));
-        }
-        if let Some(p) = &page.partial {
-            out.push_str(&format!("       | {p}   [ligne en cours, non terminée]\n"));
-        }
-        if page.lines.is_empty() && page.partial.is_none() {
-            out.push_str("(aucune ligne à partir de cet offset)\n");
-        }
-        out.push_str(&format!(
-            "[lignes vues : {} ; prochain offset : {}{}]",
-            page.total_lines,
-            page.next_offset,
-            if page.raw_log_capped {
-                " ; journal brut plafonné"
-            } else {
-                ""
-            }
-        ));
-        ToolResult::success(out).with_metadata(serde_json::json!({
-            "task_id": st.id,
-            "stream": stream.name(),
-            "next_offset": page.next_offset,
-            "total_lines": page.total_lines,
-            "state": st.state.label(),
-        }))
-    }
-}
-
-pub struct BashTaskStopTool;
-
-#[async_trait]
-impl Tool for BashTaskStopTool {
-    fn name(&self) -> &str {
-        "BashTaskStop"
-    }
-    fn description(&self) -> &str {
-        "Stop a background task of this session (graceful, then forced). Stopping a finished task \
-         is harmless and reports its final state."
-    }
-    fn permission_level(&self) -> PermissionLevel {
-        PermissionLevel::Execute
-    }
-    fn category(&self) -> ToolCategory {
-        ToolCategory::Shell
-    }
-    fn input_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": { "task_id": { "type": "string" } },
-            "required": ["task_id"]
-        })
-    }
-    async fn execute(&self, input: Value, ctx: &ToolContext) -> ToolResult {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct In {
-            task_id: String,
-        }
-        let input: In = match crate::tool_feedback::parse_input(self, &input) {
-            Ok(i) => i,
-            Err(e) => return e,
-        };
-        let task = match find_task(ctx, &input.task_id) {
-            Ok(t) => t,
-            Err(e) => return e,
-        };
-        let was_finished = task.state().is_finished();
-        let state = task.stop(shell_config(ctx).term_grace).await;
-        let st = task.status();
-        let msg = if was_finished {
-            format!("Déjà terminée : {}", describe_status(&st))
-        } else {
-            format!("Arrêtée : {}", describe_status(&st))
-        };
-        ToolResult::success(msg)
-            .with_metadata(serde_json::json!({ "task_id": st.id, "state": state.label() }))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::jobs::{JobOwner, JobRegistry, JobTool, JobsHandle};
 
     #[test]
     fn invoked_names_are_the_first_words() {
@@ -926,19 +689,41 @@ mod tests {
         }
     }
 
+    /// Bash on a session's registry, for an agent with an identity (what
+    /// `shell_with_jobs` gives a real agent). Background and handed-over
+    /// commands need it.
+    fn with_jobs(dir: &std::path::Path) -> (BashTool, Arc<JobRegistry>, ToolContext) {
+        let registry = JobRegistry::new(Default::default(), None);
+        let c = ctx(dir);
+        c.extensions.insert(JobsHandle(Arc::clone(&registry)));
+        c.extensions.insert(JobOwner {
+            agent_id: "agent-bash-test".into(),
+            root_run_id: "run-bash-test".into(),
+            workspace: dir.to_path_buf(),
+        });
+        (BashTool::with_jobs(Arc::clone(&registry)), registry, c)
+    }
+
+    /// The `job_id` of a background or handed-over result.
+    fn job_id_of(r: &ToolResult) -> String {
+        r.metadata.as_ref().expect("metadata")["job_id"]
+            .as_str()
+            .expect("a job_id")
+            .to_string()
+    }
+
     /// A quick command returns quickly, with all its output: the end of the
     /// output is not waited for once nothing can write to it any more.
     #[cfg(unix)]
     #[tokio::test]
     async fn a_quick_command_does_not_wait_for_the_output_window() {
         let dir = tempfile::tempdir().unwrap();
-        let c = ctx(dir.path());
+        let (bash, _reg, c) = with_jobs(dir.path());
         let big = "seq 1 20000";
-        BashTool
-            .execute(serde_json::json!({ "command": "true" }), &c)
+        bash.execute(serde_json::json!({ "command": "true" }), &c)
             .await;
         let start = std::time::Instant::now();
-        let r = BashTool
+        let r = bash
             .execute(serde_json::json!({ "command": big }), &c)
             .await;
         let took = start.elapsed();
@@ -957,8 +742,8 @@ mod tests {
     #[tokio::test]
     async fn results_carry_structured_data() {
         let dir = tempfile::tempdir().unwrap();
-        let c = ctx(dir.path());
-        let r = BashTool
+        let (bash, _reg, c) = with_jobs(dir.path());
+        let r = bash
             .execute(
                 serde_json::json!({ "command": "echo out; echo err >&2; sh -c 'exit 3'" }),
                 &c,
@@ -989,13 +774,12 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn background_commands_are_tasks_with_ids() {
+    async fn background_commands_are_jobs_with_ids() {
         let dir = tempfile::tempdir().unwrap();
-        let c = ctx(dir.path());
-        BashTool
-            .execute(serde_json::json!({ "command": "true" }), &c)
+        let (bash, reg, c) = with_jobs(dir.path());
+        bash.execute(serde_json::json!({ "command": "true" }), &c)
             .await;
-        let bg = BashTool
+        let bg = bash
             .execute(
                 serde_json::json!({ "command": "sleep 5", "background": true }),
                 &c,
@@ -1003,28 +787,24 @@ mod tests {
             .await;
         assert_eq!(bg.report.as_ref().unwrap().status, ToolStatus::Running);
         assert!(!bg.is_error);
-        assert!(
-            bg.metadata.as_ref().unwrap()["task_id"]
-                .as_str()
-                .unwrap()
-                .starts_with("bg-")
-        );
+        assert!(job_id_of(&bg).starts_with("job_"), "{}", bg.content);
         assert_eq!(
             bg.report.as_ref().unwrap().exit_code,
             None,
             "no code while running"
         );
+        reg.stop_all().await;
         crate::shell::close_session(&c.session_id).await;
     }
 
-    /// A command still running at the yield returns as a task; its output
-    /// and end are read through the task tools, and the deadline still holds.
+    /// A command still running at the yield returns as a job; its output
+    /// and end are read through `Job`, and the deadline still holds.
     #[cfg(unix)]
     #[tokio::test]
-    async fn a_yielded_command_is_a_task_read_to_its_end() {
+    async fn a_yielded_command_is_a_job_read_to_its_end() {
         let dir = tempfile::tempdir().unwrap();
-        let c = ctx(dir.path());
-        let r = BashTool
+        let (bash, reg, c) = with_jobs(dir.path());
+        let r = bash
             .execute(
                 serde_json::json!({ "command": "echo first; sleep 0.8; echo last", "yield_time_ms": 150 }),
                 &c,
@@ -1033,21 +813,16 @@ mod tests {
         let rep = r.report.clone().unwrap();
         assert_eq!(rep.status, ToolStatus::Running, "{}", r.content);
         assert!(!r.is_error);
-        let id = r.metadata.as_ref().unwrap()["task_id"]
-            .as_str()
-            .unwrap()
-            .to_string();
+        let id = job_id_of(&r);
         assert!(
             matches!(&rep.body, ToolBody::Streams { stdout, .. } if stdout.contains("first")),
             "{:?}",
             rep.body
         );
-        let task = shell::session(&c.session_id, &shell_config(&c))
-            .task(&id)
-            .unwrap();
+        let task = reg.view(&id, None).expect("the job").task;
         assert!(task.wait_finished(Duration::from_secs(5)).await);
-        let out = BashTaskOutputTool
-            .execute(serde_json::json!({ "task_id": id }), &c)
+        let out = JobTool::new(Arc::clone(&reg))
+            .execute(serde_json::json!({ "action": "output", "job_id": id }), &c)
             .await;
         assert!(out.content.contains("last"), "{}", out.content);
         crate::shell::close_session(&c.session_id).await;
@@ -1057,21 +832,16 @@ mod tests {
     #[tokio::test]
     async fn the_timeout_still_ends_a_yielded_command() {
         let dir = tempfile::tempdir().unwrap();
-        let c = ctx(dir.path());
-        let r = BashTool
+        let (bash, reg, c) = with_jobs(dir.path());
+        let r = bash
             .execute(
                 serde_json::json!({ "command": "sleep 30", "yield_time_ms": 100, "timeout": 700 }),
                 &c,
             )
             .await;
         assert_eq!(r.report.as_ref().unwrap().status, ToolStatus::Running);
-        let id = r.metadata.as_ref().unwrap()["task_id"]
-            .as_str()
-            .unwrap()
-            .to_string();
-        let task = shell::session(&c.session_id, &shell_config(&c))
-            .task(&id)
-            .unwrap();
+        let id = job_id_of(&r);
+        let task = reg.view(&id, None).expect("the job").task;
         let started = std::time::Instant::now();
         assert!(task.wait_finished(Duration::from_secs(5)).await);
         assert!(started.elapsed() < Duration::from_secs(4), "deadline held");
@@ -1082,7 +852,7 @@ mod tests {
     #[tokio::test]
     async fn progress_is_reported_while_a_command_runs() {
         let dir = tempfile::tempdir().unwrap();
-        let c = ctx(dir.path());
+        let (bash, _reg, c) = with_jobs(dir.path());
         let seen = Arc::new(parking_lot::Mutex::new(Vec::<String>::new()));
         let s = seen.clone();
         c.extensions.insert(crate::shell::ProgressSink(Arc::new(
@@ -1092,7 +862,7 @@ mod tests {
             progress_every: Duration::from_millis(200),
             ..ShellConfig::default()
         });
-        let r = BashTool
+        let r = bash
             .execute(serde_json::json!({ "command": "sleep 0.9" }), &c)
             .await;
         assert!(!r.is_error, "{}", r.content);
@@ -1109,7 +879,7 @@ mod tests {
     async fn a_timeout_before_the_hand_over_is_a_timeout() {
         let dir = tempfile::tempdir().unwrap();
         let c = ctx(dir.path());
-        let r = BashTool
+        let r = BashTool::default()
             .execute(
                 serde_json::json!({ "command": "sleep 30", "timeout": 300, "yield_time_ms": 300 }),
                 &c,
@@ -1117,18 +887,20 @@ mod tests {
             .await;
         let rep = r.report.clone().unwrap();
         assert_eq!(rep.status, ToolStatus::TimedOut, "{}", r.content);
-        assert!(r.metadata.is_none() || r.metadata.as_ref().unwrap().get("task_id").is_none());
+        assert!(r.metadata.is_none() || r.metadata.as_ref().unwrap().get("job_id").is_none());
         crate::shell::close_session(&c.session_id).await;
     }
 
-    #[test]
-    fn unknown_and_misplaced_options_are_refused() {
-        let rt = tokio::runtime::Runtime::new().unwrap();
+    #[tokio::test]
+    async fn unknown_and_misplaced_options_are_refused() {
         let dir = tempfile::tempdir().unwrap();
-        let r = rt.block_on(BashTool.execute(
-            serde_json::json!({ "command": "true", "ready_pattern": "x" }),
-            &ctx(dir.path()),
-        ));
+        let (bash, _reg, c) = with_jobs(dir.path());
+        let r = bash
+            .execute(
+                serde_json::json!({ "command": "true", "ready_pattern": "x" }),
+                &c,
+            )
+            .await;
         assert!(
             r.is_error && r.content.contains("background: true"),
             "{}",

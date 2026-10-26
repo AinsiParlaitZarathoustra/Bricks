@@ -32,6 +32,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   colors: { light: { accent: null, background: null, panel: null }, dark: { accent: null, background: null, panel: null } },
   terminal_ratio: null,
   diagrams: defaultDiagramSettings(),
+  app_icon: 'aligned',
 }
 
 /** An IPC refusal because a project's folder is missing. */

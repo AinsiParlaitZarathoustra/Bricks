@@ -52,7 +52,7 @@ pub type ProgressSinkFn = dyn Fn(&str, &str) + Send + Sync;
 #[serde(default, deny_unknown_fields)]
 pub struct BashSettings {
     /// Milliseconds a foreground command runs before the call returns it as
-    /// a task (`Running`, with a task id) while it goes on. A call's
+    /// a job (`Running`, with a `job_id`) while it goes on. A call's
     /// `yield_time_ms` overrides it; `timeout` still ends the command.
     pub yield_time_ms: u64,
 }

@@ -1431,9 +1431,14 @@ impl AgentBuilder {
                 .insert(bricks_tools::code_scout::SemanticHandle(engine));
         }
 
+        // Jobs: one registry for the agent. The session's (in the
+        // extensions: a session, a sub-agent) takes every tool that works
+        // with jobs; otherwise the tools' own one becomes the agent's.
+        // Tools on different registries are refused here, before any call.
+        let mut tools = assemble_jobs(self.tools, &self.extensions)?;
+
         // Skills: one session (service + trust, this agent's ledger) and the
         // `Skill` tool, registered once.
-        let mut tools = self.tools;
         let skills = self.skills.map(|access| {
             let session = bricks_tools::skill_tool::SkillSession::new(access);
             {
@@ -1528,6 +1533,46 @@ impl AgentBuilder {
     pub async fn run_with(self, prompt: &str) -> bricks_types::Result<AgentOutput> {
         self.build()?.run(prompt).await
     }
+}
+
+
+/// The tools of an agent on one job registry: the one in `extensions`
+/// ([`bricks_tools::jobs::JobsHandle`], a session's or a parent's) when there
+/// is one, else the single one the tools carry, then installed in
+/// `extensions` for the runner. Tools on two different registries with none
+/// in `extensions` are an incomplete assembly: refused.
+fn assemble_jobs(
+    tools: Vec<Box<dyn Tool>>,
+    extensions: &bricks_tools::Extensions,
+) -> bricks_types::Result<Vec<Box<dyn Tool>>> {
+    if let Some(handle) = extensions.get::<bricks_tools::jobs::JobsHandle>() {
+        return Ok(bricks_tools::on_job_registry(tools, &handle.0));
+    }
+    let mut registry: Option<Arc<bricks_tools::jobs::JobRegistry>> = None;
+    for tool in &tools {
+        let Some(r) = tool.job_registry() else {
+            continue;
+        };
+        match &registry {
+            Some(known) if !Arc::ptr_eq(known, &r) => {
+                return Err(CerseiError::Config(format!(
+                    "`{}` is on another job registry than the agent's other job tools: build \
+                     them together with bricks_tools::shell_with_jobs(registry), or give the \
+                     agent a JobsHandle",
+                    tool.name()
+                )));
+            }
+            Some(_) => {}
+            None => registry = Some(r),
+        }
+    }
+    Ok(match registry {
+        Some(r) => {
+            extensions.insert(bricks_tools::jobs::JobsHandle(Arc::clone(&r)));
+            bricks_tools::on_job_registry(tools, &r)
+        }
+        None => tools,
+    })
 }
 
 #[cfg(test)]

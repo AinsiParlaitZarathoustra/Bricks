@@ -24,18 +24,15 @@ pub mod powershell;
 pub mod preview;
 pub mod shell;
 pub mod skill_tool;
-pub mod synthetic_output;
 pub mod todo_write;
 pub mod tool_feedback;
 pub mod tool_primitives;
 pub mod tool_report;
-pub mod tool_search;
 #[cfg(feature = "vms")]
 pub mod vm_tools;
 pub mod web_fetch;
 pub mod web_runtime;
 pub mod web_search;
-pub mod worktree;
 
 use async_trait::async_trait;
 use bricks_mcp::McpManager;
@@ -90,6 +87,17 @@ pub trait Tool: Send + Sync {
     /// whose effects are not file edits (a shell command, an MCP call): a
     /// diff could not represent them, so none is pretended.
     async fn preview(&self, _input: &Value, _ctx: &ToolContext) -> Option<preview::ChangePreview> {
+        None
+    }
+
+    /// The job registry this tool records or reads jobs in (`Bash`, `Job`).
+    fn job_registry(&self) -> Option<Arc<jobs::JobRegistry>> {
+        None
+    }
+
+    /// The same tool on `registry`, for a tool that works with jobs; `None`
+    /// for the others. Used to put a session's tools on its one registry.
+    fn on_job_registry(&self, _registry: &Arc<jobs::JobRegistry>) -> Option<Box<dyn Tool>> {
         None
     }
 
@@ -215,7 +223,7 @@ impl ToolResult {
     pub fn from_report(report: tool_report::ToolReport) -> Self {
         let mut content = report.render_output();
         if !report.notes.is_empty() {
-            content.push_str("--- remarques ---\n");
+            content.push_str("--- notes ---\n");
             for n in &report.notes {
                 content.push_str(&format!("- {n}\n"));
             }
@@ -465,26 +473,23 @@ mod tool_image_tests {
 
 // ─── Built-in tool sets ──────────────────────────────────────────────────────
 
-/// All built-in tools.
+/// All built-in tools: the standard coding tools plus `TodoWrite`. Bash and
+/// Job are on a registry of their own (an agent built with a session's
+/// registry puts them on it). Worktree isolation is managed by the
+/// sub-agent runtime, independently of `all()`.
 pub fn all() -> Vec<Box<dyn Tool>> {
-    let mut tools: Vec<Box<dyn Tool>> = Vec::new();
-    tools.extend(filesystem());
-    tools.extend(shell());
-    tools.extend(web());
+    let mut tools = coding();
     tools.extend(planning());
-    tools.extend(orchestration());
-    tools.push(Box::new(synthetic_output::SyntheticOutputTool));
-    // Last, so it indexes every tool registered above.
-    let search = tool_search::ToolSearchTool::new(&tools);
-    tools.push(Box::new(search));
     tools
 }
 
-/// All coding-oriented tools (filesystem + shell + web).
+/// All coding-oriented tools (filesystem + shell with jobs + web), Bash and
+/// Job on a registry of their own (an agent built with a session's registry
+/// puts them on it).
 pub fn coding() -> Vec<Box<dyn Tool>> {
     let mut tools: Vec<Box<dyn Tool>> = Vec::new();
     tools.extend(filesystem());
-    tools.extend(shell());
+    tools.extend(shell_with_jobs(jobs::JobRegistry::new(Default::default(), None)));
     tools.extend(web());
     tools
 }
@@ -506,16 +511,39 @@ pub fn filesystem() -> Vec<Box<dyn Tool>> {
     ]
 }
 
-/// Shell tools: Bash (with its background task tools), PowerShell.
+/// Shell tools without jobs: Bash (commands that end in the call only; a
+/// command that may become a job is refused before it starts), PowerShell.
 pub fn shell() -> Vec<Box<dyn Tool>> {
     vec![
-        Box::new(bash::BashTool),
-        Box::new(bash::BashTaskStatusTool),
-        Box::new(bash::BashTaskOutputTool),
-        Box::new(bash::BashTaskStopTool),
-        Box::new(jobs::JobTool),
+        Box::new(bash::BashTool::default()),
         Box::new(powershell::PowerShellTool),
     ]
+}
+
+/// Shell tools on one job registry: Bash records its background and
+/// handed-over commands there, Job follows them. What a session uses.
+pub fn shell_with_jobs(registry: Arc<jobs::JobRegistry>) -> Vec<Box<dyn Tool>> {
+    vec![
+        Box::new(bash::BashTool::with_jobs(Arc::clone(&registry))),
+        Box::new(jobs::JobTool::new(registry)),
+        Box::new(powershell::PowerShellTool),
+    ]
+}
+
+/// `tools` with every tool that works with jobs put on `registry`, and Job
+/// added when Bash is there without it: one registry for the agent.
+pub fn on_job_registry(
+    tools: Vec<Box<dyn Tool>>,
+    registry: &Arc<jobs::JobRegistry>,
+) -> Vec<Box<dyn Tool>> {
+    let mut out: Vec<Box<dyn Tool>> = tools
+        .into_iter()
+        .map(|t| t.on_job_registry(registry).unwrap_or(t))
+        .collect();
+    if out.iter().any(|t| t.name() == "Bash") && !out.iter().any(|t| t.name() == "Job") {
+        out.push(Box::new(jobs::JobTool::new(Arc::clone(registry))));
+    }
+    out
 }
 
 /// Web tools: WebFetch, WebSearch (providers, including Exa, are configured
@@ -530,14 +558,6 @@ pub fn web() -> Vec<Box<dyn Tool>> {
 /// Planning tools: TodoWrite.
 pub fn planning() -> Vec<Box<dyn Tool>> {
     vec![Box::new(todo_write::TodoWriteTool)]
-}
-
-/// Orchestration tools: Worktree.
-pub fn orchestration() -> Vec<Box<dyn Tool>> {
-    vec![
-        Box::new(worktree::EnterWorktreeTool),
-        Box::new(worktree::ExitWorktreeTool),
-    ]
 }
 
 /// No tools (for pure chat agents).
@@ -607,6 +627,9 @@ mod unknown_parameter_policy {
             .unwrap_or_default()
     }
 
+    /// The built-in tools with no required parameter, in `all()` order.
+    const UNPROBED: &[&str] = &["CodeScout", "CodeStats", "Job", "WebFetch"];
+
     /// Every tool must reject a parameter it does not declare.
     ///
     /// The probe sends *only* the unknown key. That is deliberate, and is what
@@ -660,9 +683,17 @@ mod unknown_parameter_policy {
             }
         }
 
-        // 22 built-in tools, 18 of them with a required parameter.
-        assert!(
-            covered >= 18,
+        // Every built-in tool is probed but the ones with no required
+        // parameter, named here (Job is probed by tests/jobs_surface.rs).
+        let unprobed: Vec<String> = all()
+            .iter()
+            .filter(|t| required_params(t.as_ref()).is_empty())
+            .map(|t| t.name().to_string())
+            .collect();
+        assert_eq!(unprobed, UNPROBED, "a tool lost or gained its required parameters");
+        assert_eq!(
+            covered,
+            all().len() - UNPROBED.len(),
             "coverage collapsed to {covered} tools; the filter is hiding the registry"
         );
         assert!(

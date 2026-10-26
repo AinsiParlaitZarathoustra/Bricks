@@ -26,6 +26,7 @@ pub fn run() {
             commands::app::models_list,
             commands::app::prefs_get,
             commands::app::prefs_set,
+            commands::app::app_icon_show,
             commands::app::permissions_default_get,
             commands::app::permissions_default_set,
             commands::app::events_subscribe,

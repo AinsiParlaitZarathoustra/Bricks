@@ -136,6 +136,19 @@ mod tests {
     use crate::contract::Theme;
 
     #[test]
+    fn the_app_icon_follows_the_theme_by_default_and_keeps_a_choice() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("preferences.json");
+        std::fs::write(&file, r#"{"theme":"dark"}"#).unwrap();
+        let store = PrefsStore::at(file.clone());
+        let mut p = store.get();
+        assert_eq!(p.app_icon, crate::contract::AppIcon::Aligned, "an older file");
+        p.app_icon = crate::contract::AppIcon::Dark;
+        store.set(p).unwrap();
+        assert_eq!(PrefsStore::at(file).get().app_icon, crate::contract::AppIcon::Dark);
+    }
+
+    #[test]
     fn preferences_round_trip_and_are_clamped() {
         let dir = tempfile::tempdir().unwrap();
         let store = PrefsStore::at(dir.path().join("desktop").join("preferences.json"));

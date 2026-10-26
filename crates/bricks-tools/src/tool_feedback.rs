@@ -808,7 +808,12 @@ mod tests {
     #[test]
     fn not_found_caps_a_huge_list() {
         let avail: Vec<String> = (0..500).map(|i| format!("tool_number_{i}")).collect();
-        let msg = not_found_message("tool", "zzz", &avail, "Call ToolSearch.");
+        let msg = not_found_message(
+            "tool",
+            "zzz",
+            &avail,
+            "Use one of the available tools above, with its exact name.",
+        );
         assert!(msg.chars().count() <= MAX_MESSAGE_CHARS, "{}", msg.len());
         assert!(msg.contains("500 total"), "{msg}");
         assert!(msg.contains("more"), "{msg}");
