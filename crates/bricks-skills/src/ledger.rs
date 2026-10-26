@@ -128,6 +128,13 @@ impl Ledger {
         self.pending.clear();
     }
 
+    /// Keep only the activations `keep` accepts (an earlier message was
+    /// revised: the activations given after it left the context).
+    pub fn retain(&mut self, keep: impl Fn(&ActiveSkill) -> bool) {
+        self.active.retain(keep);
+        self.pending.clear();
+    }
+
     pub fn suspend(&mut self, id: &str, why: String) {
         if let Some(a) = self.active.iter_mut().find(|a| a.id == id) {
             a.suspended = Some(why);

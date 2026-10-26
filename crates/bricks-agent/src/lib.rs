@@ -567,6 +567,37 @@ impl Agent {
         runner::clear_context(self).await
     }
 
+    /// The position, in the active history, of the user message a
+    /// `revise` replaces: the `user_index`-th user-role message, whose text
+    /// is `original` (compared trimmed). An error says why it cannot be
+    /// revised; nothing changes.
+    pub fn revision_point(&self, user_index: usize, original: &str) -> std::result::Result<usize, String> {
+        let messages = self.messages.lock();
+        let Some((position, message)) = messages
+            .iter()
+            .enumerate()
+            .filter(|(_, m)| m.role == Role::User)
+            .nth(user_index)
+        else {
+            return Err("this message is no longer in the active context (it was compacted or cleared)".into());
+        };
+        let is_tool_result = matches!(&message.content, MessageContent::Blocks(blocks)
+            if blocks.iter().any(|b| matches!(b, ContentBlock::ToolResult { .. })));
+        let original = original.trim();
+        let matches = message.get_all_text().trim() == original
+            || message.get_text().is_some_and(|t| t.trim() == original);
+        if is_tool_result || !matches {
+            return Err("this message changed since it was shown: reload the conversation".into());
+        }
+        Ok(position)
+    }
+
+    /// Cut the active history before `position` (see `revision_point`),
+    /// keeping it as a snapshot. Returns the messages removed.
+    pub async fn revise_context(&self, position: usize) -> bricks_types::Result<usize> {
+        runner::revise_context(self, position).await
+    }
+
     /// Whether a long-term memory is attached.
     pub fn has_long_term_memory(&self) -> bool {
         self.long_term_memory.is_some()

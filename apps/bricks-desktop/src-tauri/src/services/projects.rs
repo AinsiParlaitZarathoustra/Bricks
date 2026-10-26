@@ -186,6 +186,53 @@ impl ProjectStore {
         Ok(view(&stored))
     }
 
+    /// The canonical folder a project may move to: it exists, can be read,
+    /// and is no other project's folder.
+    pub fn relocation_target(&self, id: &str, path: &str) -> IpcResult<PathBuf> {
+        if path.trim().is_empty() {
+            return Err(invalid("aucun dossier indiqué"));
+        }
+        let given = PathBuf::from(path.trim());
+        let canonical = std::fs::canonicalize(&given).map_err(|e| folder_missing(&given, e))?;
+        check_folder(&canonical).map_err(|e| {
+            error(
+                IpcErrorCode::FolderMissing,
+                format!("{} : {e}", canonical.display()),
+            )
+        })?;
+        let key = canonical.display().to_string();
+        let state = self.state.lock();
+        if let Some(other) = state.projects.iter().find(|p| p.path == key && p.id != id) {
+            return Err(error(
+                IpcErrorCode::Conflict,
+                format!("ce dossier est déjà celui du projet « {} »", other.name),
+            ));
+        }
+        Ok(canonical)
+    }
+
+    /// Moves a project to another folder, keeping its id (its change
+    /// journal and its place in the list follow it).
+    pub fn relocate(&self, id: &str, canonical: &Path) -> IpcResult<Project> {
+        let key = canonical.display().to_string();
+        let mut state = self.state.lock();
+        if state.projects.iter().any(|p| p.path == key && p.id != id) {
+            return Err(error(
+                IpcErrorCode::Conflict,
+                "ce dossier est déjà celui d'un autre projet",
+            ));
+        }
+        let Some(index) = state.projects.iter().position(|p| p.id == id) else {
+            return Err(not_found("projet inconnu"));
+        };
+        let previous = std::mem::replace(&mut state.projects[index].path, key);
+        if let Err(e) = self.save(&state) {
+            state.projects[index].path = previous;
+            return Err(e);
+        }
+        Ok(view(&state.projects[index]))
+    }
+
     /// Forgets a project. Its files and sessions are left untouched.
     pub fn remove(&self, id: &str) -> IpcResult<()> {
         let mut state = self.state.lock();
@@ -423,6 +470,39 @@ mod tests {
         assert!(!s.is_chat_dir(Path::new(&chats.path)));
         assert!(!s.is_chat_dir(root.path()));
         assert_eq!(s.remove(CHATS_PROJECT_ID).unwrap_err().code, IpcErrorCode::NotFound);
+    }
+
+    #[test]
+    fn a_relocated_project_keeps_its_id_and_refuses_another_projects_folder() {
+        let root = tempfile::tempdir().unwrap();
+        let old = root.path().join("atlas");
+        let new = root.path().join("atlas-moved");
+        let other = root.path().join("other");
+        for d in [&old, &new, &other] {
+            std::fs::create_dir(d).unwrap();
+        }
+        let s = store(root.path());
+        let id = s.add(old.to_str().unwrap()).unwrap().id;
+        s.add(other.to_str().unwrap()).unwrap();
+        std::fs::remove_dir(&old).unwrap();
+        assert!(s.get(&id).unwrap().missing);
+
+        assert_eq!(
+            s.relocation_target(&id, other.to_str().unwrap()).unwrap_err().code,
+            IpcErrorCode::Conflict
+        );
+        assert_eq!(
+            s.relocation_target(&id, old.to_str().unwrap()).unwrap_err().code,
+            IpcErrorCode::FolderMissing
+        );
+        let target = s.relocation_target(&id, new.to_str().unwrap()).unwrap();
+        let moved = s.relocate(&id, &target).unwrap();
+        assert_eq!(moved.id, id);
+        assert!(!moved.missing);
+        assert_eq!(moved.path, new.canonicalize().unwrap().display().to_string());
+        // Re-adding the new folder finds the same project.
+        assert_eq!(s.add(new.to_str().unwrap()).unwrap().id, id);
+        assert_eq!(store(root.path()).get(&id).unwrap().path, moved.path);
     }
 
     #[test]

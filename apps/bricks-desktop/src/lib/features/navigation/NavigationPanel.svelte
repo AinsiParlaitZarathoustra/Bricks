@@ -10,15 +10,10 @@
 	import ConversationList from './ConversationList.svelte';
 	import NewConversationButton from './NewConversationButton.svelte';
 	import ProjectList from './ProjectList.svelte';
-	import SearchBox from './SearchBox.svelte';
-	import SearchResults from './SearchResults.svelte';
+	import SearchDialog from './SearchDialog.svelte';
 
-	let query = $state('');
-	let allProjects = $state(false);
 	let adding = $state(false);
 
-	/** While the query is not empty, the results replace the project and conversation lists. */
-	const searching = $derived(query.trim().length > 0);
 	const chats = $derived(app.chatsProject);
 
 	async function addProject() {
@@ -38,36 +33,31 @@
 	aria-label="Projets et conversations"
 	class="flex h-full min-h-0 flex-col bg-sidebar text-sidebar-foreground"
 >
-	<div class="flex flex-col gap-1.5 p-3 pb-2">
-		<NewConversationButton class="w-full justify-start text-[13px]" />
-		<Button variant="ghost" class="w-full justify-start text-[13px]" onclick={addProject} disabled={adding}>
+	<div class="relative flex flex-col gap-0.5 px-2 pt-7 pb-3">
+		<div class="absolute top-1 right-2">
+			<SearchDialog />
+		</div>
+		<NewConversationButton class="w-full justify-start px-2 text-ui" />
+		<Button variant="ghost" class="w-full justify-start px-2 text-ui" onclick={addProject} disabled={adding}>
 			<FolderPlus class="size-4" aria-hidden="true" />
 			Nouveau projet
 		</Button>
 	</div>
 
-	<div class="px-3 pb-3">
-		<SearchBox bind:query bind:allProjects />
-	</div>
-
 	<ScrollArea class="min-h-0 flex-1">
 		<div class="flex flex-col gap-4 pb-3">
-			{#if searching}
-				<SearchResults bind:query {allProjects} />
-			{:else}
-				{#if app.folders.length > 0}
-					<section class="flex flex-col gap-1 px-2">
-						<h2 class="px-2 text-xs font-medium text-muted-foreground">Projets</h2>
-						<ProjectList />
-					</section>
-				{/if}
+			{#if app.folders.length > 0}
+				<section class="flex flex-col gap-1 px-2">
+					<h2 class="px-2 text-xs font-medium text-muted-foreground">Projets</h2>
+					<ProjectList />
+				</section>
+			{/if}
 
-				{#if chats && app.sessionsOf(chats.id).length > 0}
-					<section class="flex flex-col gap-1 px-2">
-						<h2 class="px-2 text-xs font-medium text-muted-foreground">Conversations</h2>
-						<ConversationList projectId={chats.id} label="Conversations" />
-					</section>
-				{/if}
+			{#if chats && app.sessionsOf(chats.id).length > 0}
+				<section class="flex flex-col gap-1 px-2">
+					<h2 class="px-2 text-xs font-medium text-muted-foreground">Conversations</h2>
+					<ConversationList projectId={chats.id} label="Conversations" />
+				</section>
 			{/if}
 		</div>
 	</ScrollArea>
@@ -75,7 +65,7 @@
 	<div class="border-t border-sidebar-border/50 p-2">
 		<Button
 			variant="ghost"
-			class="w-full justify-start text-[13px]"
+			class="w-full justify-start text-ui"
 			aria-label="Paramètres de Bricks"
 			onclick={() => (ui.settingsOpen = true)}
 		>

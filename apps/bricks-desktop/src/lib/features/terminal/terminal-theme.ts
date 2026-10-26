@@ -3,6 +3,8 @@
 // semantic tokens: there is no hard-coded colour here.
 
 import type { ITheme } from '@xterm/xterm'
+import { readThemeToken, readThemeTokens } from '$lib/theme/resolved-theme'
+import tokens from '$lib/theme/tokens.json'
 
 const COLOUR_TOKENS: Record<string, string> = {
   background: '--code-bg',
@@ -28,20 +30,16 @@ const COLOUR_TOKENS: Record<string, string> = {
   brightWhite: '--card-foreground',
 }
 
-function tokenValue(name: string): string {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
-}
-
 /** xterm theme for the current light or dark mode. Read after `.dark` is set. */
 export function terminalTheme(): ITheme {
-  const theme: Record<string, string> = {}
-  for (const [key, token] of Object.entries(COLOUR_TOKENS)) {
-    const value = tokenValue(token)
-    if (value) theme[key] = value
-  }
-  return theme as ITheme
+  return readThemeTokens(COLOUR_TOKENS) as ITheme
 }
 
 export function terminalFont(): string {
-  return tokenValue('--font-mono') || 'monospace'
+  return readThemeToken('--code-font-family') || 'monospace'
+}
+
+/** xterm expects a size in CSS pixels; the shared code size uses that unit. */
+export function terminalFontSize(): number {
+  return Number.parseFloat(readThemeToken('--code-font-size') || tokens.fontSizes.code)
 }

@@ -69,7 +69,7 @@
   }
 
   const trigger =
-    'group flex w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-start text-[13px] hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
+    'group flex w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-start text-ui hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
   const chevron = 'size-3.5 shrink-0 -rotate-90 text-muted-foreground transition-transform group-data-[state=open]:rotate-0'
 </script>
 
@@ -77,7 +77,7 @@
   aria-label="Bilan de la réponse"
   class="flex flex-col gap-1 rounded-lg border border-border bg-white px-2 py-1.5 text-sm text-card-foreground dark:bg-card"
 >
-  <p class="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-1.5 py-0.5 text-[13px]">
+  <p class="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-1.5 py-0.5 text-ui">
     <span class="inline-flex items-center gap-1.5 font-medium {summary.outcome ? TONE[summary.outcome] : 'text-muted-foreground'}">
       {#if summary.outcome === 'succeeded'}
         <CircleCheck class="size-3.5" aria-hidden="true" />
@@ -117,12 +117,12 @@
         <span class="font-medium">{plural(files.length, 'fichier modifié', 'fichiers modifiés')}</span>
         {#if totals}
           <span title="Somme des opérations d’édition appliquées (pas un diff Git net)">
-            <DiffStat additions={totals.added} deletions={totals.removed} class="text-[13px]" />
+            <DiffStat additions={totals.added} deletions={totals.removed} class="text-ui" />
           </span>
         {/if}
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <ul class="flex flex-col py-0.5 pl-6 text-[13px]">
+        <ul class="flex flex-col py-0.5 pl-6 text-ui">
           {#each files as file (file.key)}
             <li class="flex min-w-0 items-center gap-2 py-0.5">
               <button

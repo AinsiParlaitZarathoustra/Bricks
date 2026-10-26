@@ -47,7 +47,7 @@
     class="flex w-72 max-w-none flex-col items-stretch gap-2.5 rounded-xl border bg-popover px-3.5 py-3 text-popover-foreground shadow-md"
   >
     <div class="flex items-baseline justify-between gap-3">
-      <span class="text-[13px] font-medium">Contexte</span>
+      <span class="text-ui font-medium">Contexte</span>
       <span class="font-mono text-xs text-muted-foreground tabular-nums">{value}</span>
     </div>
     <div class="h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">

@@ -8,7 +8,7 @@ import { errorMessage, ptyKill, ptyOpen, ptyResize, ptyWrite } from '$lib/ipc/cl
 import { app } from '$lib/state/app.svelte';
 import { SCROLLBACK, type TerminalDeps, type TerminalEngine } from './terminal-session.svelte';
 import { TerminalStore } from './terminal-store.svelte';
-import { terminalFont, terminalTheme } from './terminal-theme';
+import { terminalFont, terminalFontSize, terminalTheme } from './terminal-theme';
 
 // xterm's own screen-reader strings are English by default: set them in French
 // (static, shared by every terminal).
@@ -22,7 +22,7 @@ const liveDeps: TerminalDeps = {
 			screenReaderMode: true,
 			scrollback: SCROLLBACK,
 			cursorBlink: true,
-			fontSize: 13,
+			fontSize: terminalFontSize(),
 			lineHeight: 1.2,
 			fontFamily: font,
 			theme
@@ -50,7 +50,7 @@ const liveDeps: TerminalDeps = {
 
 export const terminals = new TerminalStore(liveDeps);
 
-// Geist Mono may finish loading after a terminal measured its glyphs: measure again.
+// Google Sans Code may finish loading after a terminal measured its glyphs: measure again.
 if (typeof document !== 'undefined' && document.fonts) {
 	document.fonts.addEventListener('loadingdone', () => terminals.refreshFonts());
 	void document.fonts.ready.then(() => terminals.refreshFonts());

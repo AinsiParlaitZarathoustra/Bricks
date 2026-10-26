@@ -60,6 +60,17 @@ pub fn append(files: &Path, record: &RunAttachments) -> IpcResult<()> {
         .map_err(|e| io_error("pièces jointes des messages", e))
 }
 
+/// Sets aside the records of the runs of the messages from `user_index` on (a
+/// revision replaced them), in `attachments.revised.jsonl`. The copies stay.
+pub fn set_aside_from(files: &Path, user_index: u32) -> IpcResult<usize> {
+    super::run_labels::move_lines(
+        &files.join(RUNS_FILE),
+        &files.join("attachments.revised.jsonl"),
+        |line| serde_json::from_str::<RunAttachments>(line).is_ok_and(|r| r.base >= user_index),
+    )
+    .map_err(|e| io_error("pièces jointes des messages", e))
+}
+
 /// The records of a session, oldest first. A missing file gives none; a damaged
 /// line is skipped, never fatal.
 pub fn load(files: &Path) -> Vec<RunAttachments> {
@@ -290,5 +301,51 @@ mod tests {
             1,
             "the wrapper of the copy is hidden"
         );
+    }
+}
+
+#[cfg(test)]
+mod revision_tests {
+    use super::*;
+
+    fn run(id: &str, base: u32, copy: &str) -> RunAttachments {
+        RunAttachments {
+            run_id: id.into(),
+            base,
+            prompt: format!("prompt {id}"),
+            refs: vec![AttachmentRef {
+                id: copy.repeat(32),
+                name: format!("{id}.txt"),
+                kind: crate::contract::AttachmentKind::Text,
+                mime: "text/plain".into(),
+                size: 1,
+            }],
+        }
+    }
+
+    #[test]
+    fn a_revision_sets_aside_the_records_from_its_message_on_and_keeps_the_copies_of_the_others() {
+        let root = tempfile::tempdir().unwrap();
+        let files = root.path().join("s.files");
+        std::fs::create_dir_all(&files).unwrap();
+        append(&files, &run("r0", 0, "a")).unwrap();
+        append(&files, &run("r1", 1, "b")).unwrap();
+        append(&files, &run("r2", 2, "c")).unwrap();
+
+        assert_eq!(set_aside_from(&files, 1).unwrap(), 2);
+
+        let kept = load(&files);
+        assert_eq!(kept.iter().map(|r| r.run_id.as_str()).collect::<Vec<_>>(), ["r0"]);
+        assert!(referenced(&files).contains(&"a".repeat(32)));
+        let aside = std::fs::read_to_string(files.join("attachments.revised.jsonl")).unwrap();
+        assert_eq!(aside.lines().count(), 2);
+    }
+
+    #[test]
+    fn a_folder_that_is_gone_moves_nothing_and_writes_nothing() {
+        let root = tempfile::tempdir().unwrap();
+        let files = root.path().join("absent.files");
+        assert_eq!(set_aside_from(&files, 0).unwrap(), 0);
+        assert!(!files.exists());
     }
 }

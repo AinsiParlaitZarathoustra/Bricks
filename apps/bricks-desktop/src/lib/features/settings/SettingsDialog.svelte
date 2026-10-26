@@ -61,7 +61,7 @@
 					{@const Icon = item.icon}
 					<Tabs.Trigger
 						value={item.id}
-						class="h-9 flex-none justify-start gap-2 rounded-md px-3 text-[13px] text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs"
+						class="h-9 flex-none justify-start gap-2 rounded-md px-3 text-ui text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs"
 					>
 						<Icon class="size-4" aria-hidden="true" />
 						{item.label}

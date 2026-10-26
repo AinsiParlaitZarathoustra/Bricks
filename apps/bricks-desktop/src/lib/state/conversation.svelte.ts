@@ -4,6 +4,7 @@
 
 import { SvelteMap } from 'svelte/reactivity'
 import type { HistoryMessage, OpenedSession, RunLabel, RunRecord, SessionItem } from '$lib/ipc/client'
+import { sessionAttachmentPaths, sessionRunUserIndex } from '$lib/ipc/client'
 import type {
   ChangeKind,
   InstanceRecord,
@@ -21,6 +22,7 @@ import type {
   Envelope,
   InstanceState,
   PlanState,
+  PromptBlock,
   RunOutcome,
   SkillSourceInfo,
   SessionPolicy,
@@ -508,6 +510,14 @@ export class Conversation {
   private pendingSubmitLabel: string | null = null
   /** Run records of the stored runs (`opened.run_records`), for the responses. */
   private storedRuns: RunRecord[] = []
+  /**
+   * The index, among the user-role messages of the active history, of the user
+   * items of the stored history (what a `revise` names). A message sent in this
+   * view is found through its run's record instead.
+   */
+  private userIndexes = new Map<string, number>()
+  /** The user item a `revise` sent from this view replaces, until its `history_revised`. */
+  revisingItemId: string | null = null
   /** Runs whose summary (files, commands, time) comes from their record: events never add to it. */
   private recordedRuns = new Set<string>()
   /** Operation keys already counted, per run (see `operationKey`). */
@@ -526,6 +536,7 @@ export class Conversation {
     this.applySnapshot(opened.snapshot)
     this.storedRuns = opened.run_records ?? []
     const userItemIds = this.loadHistory(opened.history)
+    for (const [index, id] of userItemIds) this.userIndexes.set(id, index)
     this.attachRecords(this.storedRuns, userItemIds)
     this.replay(opened.recent_events)
     // Envelopes up to the snapshot are already in this view: a later delivery of one is ignored.
@@ -553,6 +564,54 @@ export class Conversation {
 
   get pendingApprovals(): ApprovalRequest[] {
     return [...this.approvals.values()]
+  }
+
+  /** Where a user message is in the active history, for a `revise`; `null` when unknown. */
+  async userIndexOf(item: UserItem): Promise<number | null> {
+    const known = this.userIndexes.get(item.id)
+    if (known !== undefined) return known
+    if (!item.runId) return null
+    return sessionRunUserIndex(this.sessionId, item.runId)
+  }
+
+  /**
+   * The prompt that replaces a user message: the new text, then the message's own
+   * attachments (the conversation's copies, else the paths the engine reported).
+   */
+  async revisedBlocks(item: UserItem, text: string): Promise<PromptBlock[]> {
+    const blocks: PromptBlock[] = []
+    if (text.trim()) blocks.push({ kind: 'text', text: text.trim() })
+    const ids = item.attachments.flatMap((a) => (a.attachment_id ? [a.attachment_id] : []))
+    const paths = new Map<string, string>()
+    if (ids.length > 0) {
+      for (const r of await sessionAttachmentPaths(this.sessionId, ids)) paths.set(r.id, r.path)
+    }
+    for (const a of item.attachments) {
+      const path = a.attachment_id ? paths.get(a.attachment_id) : a.path
+      if (!path) throw new Error(`La copie de « ${a.path} » est introuvable.`)
+      blocks.push({ kind: a.kind === 'image' ? 'image' : a.kind === 'folder' ? 'folder' : 'file', path })
+    }
+    return blocks
+  }
+
+  /**
+   * After a `revise`: the revised message and everything after it leave the
+   * timeline (the run that replaces it adds its own message).
+   */
+  private applyRevision(userIndex: number) {
+    const id =
+      this.revisingItemId ?? [...this.userIndexes].find(([, index]) => index === userIndex)?.[0] ?? null
+    this.revisingItemId = null
+    for (const [itemId, index] of this.userIndexes) if (index >= userIndex) this.userIndexes.delete(itemId)
+    const at = id ? this.items.findIndex((i) => i.id === id) : -1
+    if (at < 0) return
+    const removed = new Set(this.items.slice(at).flatMap((i) => ('runId' in i && i.runId ? [i.runId] : [])))
+    this.items = this.items.slice(0, at)
+    for (const runId of removed) {
+      this.runs.delete(runId)
+      this.recordedRuns.delete(runId)
+    }
+    this.storedRuns = this.storedRuns.filter((r) => !removed.has(r.run_id))
   }
 
   /** Run of a timeline item. */
@@ -979,6 +1038,10 @@ export class Conversation {
           runId,
         )
         break
+      case 'history_revised':
+        this.applyRevision(env.user_index)
+        this.contextStale = true
+        break
       case 'context_cleared':
         this.lastClear = { at: env.at, messagesRemoved: env.messages_removed }
         this.contextStale = true
@@ -1224,6 +1287,8 @@ export class Conversation {
         this.lastRejection = { command: env.command, reason: env.reason, at: env.at }
         // A refused submit starts no run: its label is not waiting for one.
         if (env.command === 'submit') this.pendingSubmitLabel = null
+        // A refused revision changed nothing: the message stays in the timeline.
+        if (env.command === 'revise') this.revisingItemId = null
         break
       default:
         break

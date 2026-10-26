@@ -13,7 +13,10 @@ export interface ResponseGroup {
   runId: string | null
   /** The assistant items of the response, in order. */
   assistantItemIds: string[]
-  /** The last item of the response: the copy button goes right after it. `null` when empty. */
+  /**
+   * The item the copy button follows: the run's end summary when the history holds
+   * one, else the last item of the response. `null` when empty.
+   */
   anchorItemId: string | null
   /** The run ended (or the stored history, which only holds ended runs). */
   complete: boolean
@@ -31,6 +34,7 @@ interface Open {
   items: TimelineItem[]
   assistants: string[]
   ended: boolean
+  endItemId: string | null
 }
 
 /**
@@ -54,16 +58,19 @@ export function responseGroups(
   for (const item of items) {
     if (item.kind === 'user') {
       close()
-      state.open = { userItemId: item.id, runId: item.runId ?? null, items: [], assistants: [], ended: false }
+      state.open = { userItemId: item.id, runId: item.runId ?? null, items: [], assistants: [], ended: false, endItemId: null }
       continue
     }
     if (item.kind === 'run_end') {
-      if (state.open?.runId === item.runId) state.open.ended = true
+      if (state.open?.runId === item.runId) {
+        state.open.ended = true
+        state.open.endItemId = item.id
+      }
       continue
     }
     const current = state.open
     if (item.runId && current?.runId && current.runId !== item.runId) close()
-    if (!state.open) state.open = { userItemId: null, runId: item.runId ?? null, items: [], assistants: [], ended: false }
+    if (!state.open) state.open = { userItemId: null, runId: item.runId ?? null, items: [], assistants: [], ended: false, endItemId: null }
     const group = state.open
     if (item.runId && !group.runId) group.runId = item.runId
     group.items.push(item)
@@ -90,7 +97,7 @@ function finish(
     userItemId: open.userItemId,
     runId: open.runId,
     assistantItemIds: open.items.filter((i) => i.kind === 'assistant').map((i) => i.id),
-    anchorItemId: last?.id ?? null,
+    anchorItemId: open.endItemId ?? last?.id ?? null,
     complete,
     copyText,
   }

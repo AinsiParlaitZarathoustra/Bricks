@@ -179,7 +179,7 @@
 <div class="flex flex-col gap-6">
 	<section class="flex flex-col gap-3" aria-labelledby="models-providers-title">
 		<div class="flex items-center justify-between gap-2">
-			<h3 id="models-providers-title" class="text-[13px] font-semibold text-foreground">Fournisseurs et modèles</h3>
+			<h3 id="models-providers-title" class="text-ui font-semibold text-foreground">Fournisseurs et modèles</h3>
 			{#if file}
 				<Button variant="outline" size="sm" onclick={() => openDialog({ kind: 'create-provider' })}>
 					<Plus aria-hidden="true" />
@@ -189,12 +189,12 @@
 		</div>
 
 		{#if pageNotice}
-			<p role="alert" class="text-[13px] text-pretty text-destructive">{pageNotice}</p>
+			<p role="alert" class="text-ui text-pretty text-destructive">{pageNotice}</p>
 		{/if}
 
 		{#if !file}
 			{#if loadError}
-				<div role="alert" class="flex flex-col items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-[13px]">
+				<div role="alert" class="flex flex-col items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-ui">
 					<p class="flex items-start gap-2 text-pretty">
 						<TriangleAlert class="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
 						Impossible de lire les fournisseurs : {loadError}
@@ -205,15 +205,15 @@
 					</Button>
 				</div>
 			{:else}
-				<p role="status" class="text-[13px] text-muted-foreground">Lecture des fournisseurs…</p>
+				<p role="status" class="text-ui text-muted-foreground">Lecture des fournisseurs…</p>
 			{/if}
 		{:else}
 			{#if loadError}
-				<p role="alert" class="text-[13px] text-pretty text-destructive">Relecture impossible : {loadError}</p>
+				<p role="alert" class="text-ui text-pretty text-destructive">Relecture impossible : {loadError}</p>
 			{/if}
 
 			{#if file.error}
-				<div role="alert" class="flex flex-col items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-[13px]">
+				<div role="alert" class="flex flex-col items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-ui">
 					<p class="flex items-start gap-2 text-pretty">
 						<TriangleAlert class="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
 						Le fichier des fournisseurs est invalide : {file.error}
@@ -226,7 +226,7 @@
 			{/if}
 
 			{#if unpriced > 0}
-				<div class="flex flex-wrap items-center gap-3 rounded-lg border border-warning/40 bg-warning/5 p-3 text-[13px]">
+				<div class="flex flex-wrap items-center gap-3 rounded-lg border border-warning/40 bg-warning/5 p-3 text-ui">
 					<p class="flex flex-1 items-center gap-2">
 						<TriangleAlert class="size-4 shrink-0 text-warning" aria-hidden="true" />
 						{unpriced === 1 ? '1 modèle sans coûts' : `${unpriced} modèles sans coûts`}
@@ -242,7 +242,7 @@
 
 			{#if providers.length === 0}
 				{#if !file.error}
-					<p class="text-[13px] text-muted-foreground">Aucun fournisseur configuré.</p>
+					<p class="text-ui text-muted-foreground">Aucun fournisseur configuré.</p>
 				{/if}
 			{:else}
 				<ul class="flex flex-col gap-3" aria-label="Fournisseurs">

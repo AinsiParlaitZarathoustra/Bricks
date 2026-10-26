@@ -14,8 +14,8 @@ import type {
   SessionItem,
   SessionSearchHit,
 } from '$lib/ipc/client'
-import type { Command, Envelope, ModelChoice, SessionPolicy } from '$lib/ipc/engine'
-import { Conversation, type Draft } from './conversation.svelte'
+import type { Command, Envelope, ModelChoice, PromptBlock, SessionPolicy } from '$lib/ipc/engine'
+import { Conversation, type Draft, type UserItem } from './conversation.svelte'
 import { defaultDiagramSettings } from '$lib/features/diagrams/settings'
 import { reader } from './reader.svelte'
 
@@ -34,6 +34,11 @@ export const DEFAULT_PREFERENCES: Preferences = {
   diagrams: defaultDiagramSettings(),
 }
 
+/** An IPC refusal because a project's folder is missing. */
+function isFolderMissing(e: unknown): boolean {
+  return typeof e === 'object' && e !== null && 'code' in e && e.code === 'folder_missing'
+}
+
 export type RightView = 'context' | 'changes' | 'reader'
 
 /**
@@ -42,6 +47,13 @@ export type RightView = 'context' | 'changes' | 'reader'
  * the draft of its project), `never` (kept in the background).
  */
 type Reveal = 'always' | 'draft' | 'never'
+
+/** A project whose folder is missing, and what waits for it to be found again. */
+export interface FolderRequest {
+  projectId: string
+  /** The action asked for, run again once the folder is chosen. */
+  retry: (() => Promise<unknown>) | null
+}
 
 interface OpenOptions {
   /** The project draft a new conversation takes over (copied before it is shown). */
@@ -69,6 +81,9 @@ class AppStore {
   currentSessionId = $state<string | null>(null)
   /** Right panel view requested from the top bar. */
   rightView = $state<RightView>('context')
+
+  /** Set while the folder of a project must be found again before an action goes on. */
+  folderRequest = $state<FolderRequest | null>(null)
 
   /** Last user-facing error of an action (shown as a toast by the UI). */
   lastError = $state<{ message: string; at: number } | null>(null)
@@ -148,8 +163,8 @@ class AppStore {
         this.fail(e)
         return []
       })
-      // Every project shows its conversations: they are all loaded now.
-      await Promise.all(projects.filter((p) => !p.missing).map((p) => this.refreshSessions(p.id)))
+      // Every project shows its conversations, a project whose folder is missing too.
+      await Promise.all(projects.map((p) => this.refreshSessions(p.id)))
       const last =
         projects.find((p) => p.id === prefs.last_project_id && !p.missing) ?? projects.find((p) => p.chats)
       if (last) {
@@ -231,6 +246,56 @@ class AppStore {
     }
   }
 
+  /**
+   * Whether the project's folder is missing. When it is, the folder is asked for
+   * (« Dossier de travail introuvable ») and `retry` runs once it is chosen.
+   */
+  requireFolder(projectId: string, retry: (() => Promise<unknown>) | null): boolean {
+    const project = this.projects.find((p) => p.id === projectId)
+    if (!project?.missing || project.chats) return false
+    this.folderRequest = { projectId, retry }
+    return true
+  }
+
+  /**
+   * « Choisir un dossier… »: the native picker, then the project moves there with
+   * its conversations, and the waiting action runs. Cancelling the picker keeps
+   * the request open; nothing else changes.
+   */
+  async chooseFolder(): Promise<boolean> {
+    const request = this.folderRequest
+    if (!request) return false
+    const picked = await openDialog({ directory: true, multiple: false, title: 'Choisir le dossier du projet' })
+    if (!picked || Array.isArray(picked)) return false
+    try {
+      const project = await ipc.projectRelocate(request.projectId, picked)
+      this.projects = this.projects.map((p) => (p.id === project.id ? project : p))
+      await this.refreshSessions(project.id)
+    } catch (e) {
+      this.fail(e)
+      return false
+    }
+    if (this.folderRequest === request) this.folderRequest = null
+    await request.retry?.()
+    return true
+  }
+
+  /** Closes the folder request: the selection and the drafts stay as they are. */
+  cancelFolderRequest() {
+    this.folderRequest = null
+  }
+
+  /** Reloads the projects after a folder went missing; true when `projectId`'s folder is gone. */
+  private async folderVanished(projectId: string): Promise<boolean> {
+    try {
+      const projects = await ipc.projectsList()
+      this.projects = projects
+      return projects.some((p) => p.id === projectId && p.missing)
+    } catch {
+      return false
+    }
+  }
+
   async selectProject(projectId: string) {
     this.currentProjectId = projectId
     this.draftFor(projectId)
@@ -258,6 +323,7 @@ class AppStore {
    */
   async newConversation(projectId = this.currentProjectId): Promise<void> {
     if (!projectId) return
+    if (this.requireFolder(projectId, () => this.newConversation(projectId))) return
     if (projectId !== this.currentProjectId) {
       this.currentProjectId = projectId
       this.setPrefs({ last_project_id: projectId })
@@ -322,6 +388,8 @@ class AppStore {
       this.fail('Choisissez un projet pour démarrer une conversation.')
       return Promise.resolve(null)
     }
+    // The draft is kept; once the folder is found, the composer gets the focus back to send it.
+    if (this.requireFolder(projectId, async () => void (this.composerFocus += 1))) return Promise.resolve(null)
     const pending = this.starting.get(projectId)
     if (pending) return pending
     const shown = this.current
@@ -349,6 +417,7 @@ class AppStore {
       if (!item.project_id)
         return `La session ${sessionId} appartient à un dossier qui n’est pas un projet Bricks (${item.working_dir ?? 'dossier inconnu'}). Ajoutez ce dossier avec « Nouveau projet ».`
       if (this.currentProjectId !== item.project_id) await this.selectProject(item.project_id)
+      if (this.requireFolder(item.project_id, () => this.open(item.project_id!, sessionId))) return null
       const conv = await this.open(item.project_id, sessionId)
       return conv ? null : (this.lastError?.message ?? 'Reprise impossible.')
     } catch (e) {
@@ -365,6 +434,7 @@ class AppStore {
     }
     const projectId = this.projectOf(sessionId) ?? this.currentProjectId
     if (!projectId) return null
+    if (this.requireFolder(projectId, () => this.openSession(sessionId))) return null
     return this.open(projectId, sessionId)
   }
 
@@ -401,6 +471,11 @@ class AppStore {
       if (this.revealed(projectId, options.reveal ?? 'always')) this.show(conv)
       return conv
     } catch (e) {
+      // The folder went missing since the projects were loaded: ask for it, then open again.
+      if (isFolderMissing(e) && (await this.folderVanished(projectId))) {
+        this.requireFolder(projectId, () => this.open(projectId, sessionId, model, reasoning, options))
+        return null
+      }
       this.fail(e)
       return null
     }
@@ -456,6 +531,34 @@ class AppStore {
 
   search(query: string, allProjects = false): Promise<SessionSearchHit[]> {
     return ipc.sessionsSearch(allProjects ? null : this.currentProjectId, query)
+  }
+
+  /**
+   * « Enregistrer et relancer »: replaces a sent message with `text` (its
+   * attachments kept) and runs the conversation again from it. Returns the
+   * refusal message, or null once the engine accepted it.
+   */
+  async reviseMessage(conv: Conversation, item: UserItem, text: string): Promise<string | null> {
+    if (conv.running) return 'Une exécution est en cours : attendez sa fin ou annulez-la.'
+    let index: number | null
+    let blocks: PromptBlock[]
+    try {
+      index = await conv.userIndexOf(item)
+      blocks = await conv.revisedBlocks(item, text)
+    } catch (e) {
+      return ipc.errorMessage(e)
+    }
+    if (index === null) return 'Ce message ne peut pas être modifié : rouvrez la conversation.'
+    if (blocks.length === 0) return 'Le message est vide.'
+    conv.revisingItemId = item.id
+    const error = await this.command(conv.sessionId, {
+      type: 'revise',
+      user_index: index,
+      original: item.text,
+      prompt: { blocks },
+    })
+    if (error) conv.revisingItemId = null
+    return error
   }
 
   /**

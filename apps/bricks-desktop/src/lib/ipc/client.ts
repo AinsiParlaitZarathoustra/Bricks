@@ -121,6 +121,9 @@ export const projectAdd = (path: string) => call<Project>('project_add', { path 
 export const projectRemove = (projectId: string) => call<void>('project_remove', { projectId })
 export const projectRename = (projectId: string, name: string) =>
   call<Project>('project_rename', { projectId, name })
+/** Moves a project to another folder; its conversations follow it. */
+export const projectRelocate = (projectId: string, path: string) =>
+  call<Project>('project_relocate', { projectId, path })
 
 // ─── Project files (references of messages, SVG export) ─────────────────────
 
@@ -187,6 +190,9 @@ export const discardDraft = (draftId: string) => call<void>('discard_draft', { d
 export const promoteDraft = (draftId: string, sessionId: string) =>
   call<AttachmentRef[]>('promote_draft', { draftId, sessionId })
 /** Absolute paths of a session's copies, in the order given: what a submit sends. */
+/** The index of the user message a finished run answered (what `revise` names); null while unknown. */
+export const sessionRunUserIndex = (sessionId: string, runId: string) =>
+  call<number | null>('session_run_user_index', { sessionId, runId })
 export const sessionAttachmentPaths = (sessionId: string, attachmentIds: string[]) =>
   call<ResolvedAttachment[]>('session_attachment_paths', { sessionId, attachmentIds })
 /** A copy for display: an image as a data URL, a text as its beginning. */

@@ -78,7 +78,7 @@
 </script>
 
 <div class="flex flex-col gap-3">
-	<Label for={`${uid}-security`} class="text-[13px] font-semibold text-foreground">Sécurité Mermaid</Label>
+	<Label for={`${uid}-security`} class="text-ui font-semibold text-foreground">Sécurité Mermaid</Label>
 	<Select.Root type="single" value={settings.mermaid.securityLevel} onValueChange={chooseSecurity}>
 		<Select.Trigger id={`${uid}-security`} class="w-full max-w-72">
 			<span class="truncate">{SECURITY_LABEL[settings.mermaid.securityLevel]}</span>
@@ -92,8 +92,8 @@
 </div>
 
 <SettingsGroup title="Diagrammes et SVG">
-	<div class="flex flex-wrap items-center gap-3 p-3 text-[13px]">
-		<Label for={`${uid}-theme`} class="text-[13px]">Thème</Label>
+	<div class="flex flex-wrap items-center gap-3 p-3 text-ui">
+		<Label for={`${uid}-theme`} class="text-ui">Thème</Label>
 		<Select.Root type="single" value={theme} onValueChange={chooseTheme}>
 			<Select.Trigger id={`${uid}-theme`} class="w-44">
 				<span class="truncate">{THEME_LABEL[theme]}</span>
@@ -104,7 +104,7 @@
 				{/each}
 			</Select.Content>
 		</Select.Root>
-		<Label for={`${uid}-look`} class="text-[13px]">Style</Label>
+		<Label for={`${uid}-look`} class="text-ui">Style</Label>
 		<Select.Root type="single" value={settings.mermaid.look} onValueChange={chooseLook}>
 			<Select.Trigger id={`${uid}-look`} class="w-36">
 				<span class="truncate">{LOOK_LABEL[settings.mermaid.look]}</span>
@@ -118,7 +118,7 @@
 	</div>
 	<div class="grid gap-x-6 gap-y-3 p-3 sm:grid-cols-2">
 		{#each controls as control (control.key)}
-			<label class="flex items-center gap-2 text-[13px]">
+			<label class="flex items-center gap-2 text-ui">
 				<input
 					type="checkbox"
 					checked={settings.diagramViewer[control.key]}

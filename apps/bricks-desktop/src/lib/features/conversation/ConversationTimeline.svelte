@@ -1,12 +1,13 @@
 <script lang="ts">
   import { tick, untrack } from 'svelte'
-  import { ArrowDown, LoaderCircle } from '@lucide/svelte'
+  import { ArrowDown } from '@lucide/svelte'
   import { Button } from '$lib/components/ui/button'
   import type { Conversation, TimelineItem } from '$lib/state/conversation.svelte'
   import { OUTCOME_LABEL, plural, truncate } from './format'
   import ApprovalCard from './timeline/ApprovalCard.svelte'
   import SkillsTrustBanner from './timeline/SkillsTrustBanner.svelte'
   import TimelineEntry from './timeline/TimelineEntry.svelte'
+  import WorkingLine from './timeline/WorkingLine.svelte'
 
   let { conversation }: { conversation: Conversation } = $props()
 
@@ -43,22 +44,6 @@
     if (last.kind === 'assistant') return last.text.length + last.thinking.length
     if (last.kind === 'tool') return (last.output?.length ?? 0) + (last.progress?.length ?? 0)
     return 0
-  })
-
-  /** The last item shows its own activity (caret, spinner or pending decision). */
-  const liveTail = $derived.by(() => {
-    const last = conversation.items.at(-1)
-    if (!last) return false
-    switch (last.kind) {
-      case 'assistant':
-        return last.streaming
-      case 'tool':
-        return last.status === 'running'
-      case 'approval':
-        return last.resolved === undefined
-      default:
-        return false
-    }
   })
 
   function updateNearBottom() {
@@ -206,11 +191,9 @@
         <ApprovalCard {approval} {conversation} />
       {/each}
 
-      {#if conversation.running && !liveTail}
-        <p class="flex items-center gap-2 text-xs text-muted-foreground">
-          <LoaderCircle class="size-3.5 animate-spin" aria-hidden="true" />
-          En cours…
-        </p>
+      <!-- A running run whose message is not in the view (it started elsewhere): its time goes last. -->
+      {#if conversation.running && !conversation.items.some((i) => i.kind === 'user' && i.runId === conversation.runningRunId)}
+        <WorkingLine {conversation} />
       {/if}
 
       {#if conversation.skillsTrust}

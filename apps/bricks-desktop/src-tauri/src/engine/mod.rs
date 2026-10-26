@@ -9,6 +9,7 @@ pub mod attachments;
 pub mod catalog;
 pub mod hub;
 pub mod live;
+pub mod relocate;
 pub mod sessions;
 
 use crate::contract::{AppInfo, IpcErrorCode, IpcResult, ProviderInfo};
@@ -200,7 +201,8 @@ impl AppState {
         self.sessions.lock().get(session_id).cloned()
     }
 
-    /// The project whose folder is `dir` (the same folder, once canonical).
+    /// The project whose folder is `dir`: the same folder once canonical, or,
+    /// for a project whose folder vanished, the same path as recorded.
     pub(crate) fn project_id_of_dir(&self, dir: &Path) -> Option<String> {
         if self.projects.is_chat_dir(dir) {
             return Some(crate::services::projects::CHATS_PROJECT_ID.to_string());
@@ -208,7 +210,7 @@ impl AppState {
         self.projects
             .list()
             .into_iter()
-            .find(|p| bricks_agent::control::same_workspace(Path::new(&p.path), dir))
+            .find(|p| relocate::recorded_in(dir, Path::new(&p.path)))
             .map(|p| p.id)
     }
 
@@ -249,6 +251,7 @@ pub(crate) fn credentials_available(p: &ProviderConfig) -> bool {
 pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     use tauri::Manager;
     let state = AppState::load();
+    state.recover_relocations();
     let legacy = state.attachments_dir().to_path_buf();
     let drafts = state.drafts_dir().to_path_buf();
     let sessions = state.sessions_dir().to_path_buf();

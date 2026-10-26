@@ -44,6 +44,7 @@
 		{#snippet child({ props })}
 			<Button
 				{...props}
+				variant="ghost"
 				{size}
 				aria-disabled={blockedReason ? 'true' : undefined}
 				aria-describedby={blockedReason ? uid : undefined}

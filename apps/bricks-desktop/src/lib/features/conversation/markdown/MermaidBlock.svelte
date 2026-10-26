@@ -54,7 +54,7 @@
         securityLevel: level,
         // Read after the mode's class is set: the app's colours of that mode.
         colors: chosen === 'app' ? mermaidColors() : undefined,
-        fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--font-sans').trim() || 'sans-serif',
+        fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--ui-font-family').trim() || 'sans-serif',
         cache,
       })
       if (cancelled || version !== instance) return

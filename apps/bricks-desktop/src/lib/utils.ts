@@ -1,4 +1,12 @@
-export { cn } from "cn";
+import { createCn } from "cn/config";
+
+export const cn = createCn({
+	extend: {
+		classGroups: {
+			"font-size": [{ text: ["ui", "caption", "code", "compact"] }]
+		}
+	}
+});
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type WithoutChild<T> = T extends { child?: any } ? Omit<T, "child"> : T;

@@ -1739,7 +1739,7 @@ impl Controller {
                 tokio::spawn(async move { q.push(None, ev, None).await });
                 Ok(())
             }
-            Command::Submit { ref prompt } => {
+            Command::Submit { ref prompt } | Command::Revise { ref prompt, .. } => {
                 let run_id = format!("run_{}", uuid::Uuid::new_v4().simple());
                 {
                     let mut a = self.inner.activity.lock();
@@ -1762,6 +1762,21 @@ impl Controller {
                         run_id: run_id.clone(),
                     };
                 }
+                // A revision replaces a message that must still be there, as shown.
+                let revision = match &cmd {
+                    Command::Revise {
+                        user_index,
+                        original,
+                        ..
+                    } => match self.agent().revision_point(*user_index, original) {
+                        Ok(position) => Some((*user_index, position)),
+                        Err(e) => {
+                            self.set_activity(Activity::Idle);
+                            return self.reject(&cmd, e);
+                        }
+                    },
+                    _ => None,
+                };
                 // The models and their parameters as configured now: a changed
                 // catalog is applied here, or the run is refused, before
                 // anything is sent.
@@ -1811,7 +1826,14 @@ impl Controller {
                     }
                 }
                 let this = self.clone();
-                tokio::spawn(async move { this.run(run_id, converted).await });
+                tokio::spawn(async move {
+                    if let Some((user_index, position)) = revision
+                        && !this.revise(&cmd, user_index, position).await
+                    {
+                        return;
+                    }
+                    this.run(run_id, converted).await
+                });
                 Ok(())
             }
             Command::Compact | Command::ClearContext | Command::Resume { .. } => {
@@ -1843,6 +1865,40 @@ impl Controller {
                     this.set_activity(Activity::Idle);
                 });
                 Ok(())
+            }
+        }
+    }
+
+    /// Cuts the active context before the revised message, then announces
+    /// it. On failure the context is unchanged, the command is rejected and
+    /// the session is idle again: `false`.
+    async fn revise(&self, cmd: &Command, user_index: usize, position: usize) -> bool {
+        let q = self.inner.queue.clone();
+        match self.agent().revise_context(position).await {
+            Ok(messages_removed) => {
+                q.push(
+                    None,
+                    Event::HistoryRevised {
+                        user_index,
+                        messages_removed,
+                    },
+                    None,
+                )
+                .await;
+                true
+            }
+            Err(e) => {
+                self.set_activity(Activity::Idle);
+                q.push(
+                    None,
+                    Event::CommandRejected {
+                        command: cmd.name().to_string(),
+                        reason: e.to_string(),
+                    },
+                    None,
+                )
+                .await;
+                false
             }
         }
     }

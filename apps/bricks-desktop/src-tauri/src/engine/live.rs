@@ -86,6 +86,9 @@ struct Expected {
     base: Option<u32>,
     /// The copies of attachments the submit carries: kept with the run it starts.
     attachments: Vec<AttachmentRef>,
+    /// A `revise`: the engine may still refuse it after accepting it (its
+    /// context could not be cut), and no run then starts.
+    revision: bool,
 }
 
 /// A labelled run, from its start to its end.
@@ -145,22 +148,32 @@ impl OpenSession {
         label: Option<String>,
         attachments: Vec<AttachmentRef>,
     ) -> Result<(), String> {
-        if !matches!(command, Command::Submit { .. }) {
-            return self.controller.send(command);
-        }
+        // A revision's run puts its message where the revised one was.
+        let revised = match &command {
+            Command::Submit { .. } => None,
+            Command::Revise { user_index, .. } => Some(u32::try_from(*user_index).unwrap_or(u32::MAX)),
+            _ => return self.controller.send(command),
+        };
         let _gate = self.submit_gate.lock().await;
         // A submit is accepted only while idle, and the run appends its
         // messages after the ones there are now: count them while nothing
         // changes them.
         let base = if self.is_busy() {
             None
+        } else if revised.is_some() {
+            revised
         } else {
             Some(run_labels::user_count(&self.controller.history().await))
         };
         self.live
             .lock()
             .expected
-            .push_back(Expected { label, base, attachments });
+            .push_back(Expected {
+                label,
+                base,
+                attachments,
+                revision: revised.is_some(),
+            });
         let sent = self.controller.send(command);
         if sent.is_err() {
             // Refused: nothing started. The record just pushed is the newest.
@@ -351,6 +364,7 @@ pub fn ingest(hub: &Arc<Hub>, entry: &Arc<OpenSession>, env: Envelope) {
     let mut run_label = None;
     let mut attachment_record = None;
     let mut record = None;
+    let mut revised = None;
     {
         let mut live = entry.live.lock();
         live.last_seq = env.seq;
@@ -405,6 +419,18 @@ pub fn ingest(hub: &Arc<Hub>, entry: &Arc<OpenSession>, env: Envelope) {
                 // The run's messages are all in the history now: its label
                 // is placed there, off this task.
                 run_label = live.running_label.take();
+            }
+            // A revision refused after it was accepted starts no run: its
+            // record is dropped so the next run is not taken for it. (A refusal
+            // made at once was already taken back by `send`.)
+            Event::CommandRejected { command, .. }
+                if command == "revise" && live.expected.front().is_some_and(|e| e.revision) =>
+            {
+                live.expected.pop_front();
+            }
+            Event::HistoryRevised { user_index, .. } => {
+                revised = Some(u32::try_from(*user_index).unwrap_or(u32::MAX));
+                count_messages = true;
             }
             Event::ModelChanged { .. }
             | Event::ReasoningChanged { .. }
@@ -465,6 +491,29 @@ pub fn ingest(hub: &Arc<Hub>, entry: &Arc<OpenSession>, env: Envelope) {
     if let Some(attached) = attachment_record {
         spawn_attachment_record(entry, attached);
     }
+    if let Some(user_index) = revised {
+        spawn_set_aside(entry, user_index);
+    }
+}
+
+/// After a revision: what the desktop kept of the replaced messages' runs
+/// (records, labels, attachment records) is set aside, so the new run's
+/// message never shows them. Off the event task.
+fn spawn_set_aside(entry: &OpenSession, user_index: u32) {
+    let session_id = entry.session_id.clone();
+    let files = files_dir(&entry.sessions_dir, &entry.session_id);
+    let records = Arc::clone(&entry.run_records);
+    let labels = Arc::clone(&entry.labels);
+    tauri::async_runtime::spawn_blocking(move || {
+        let results = [
+            records.set_aside_from(&session_id, user_index),
+            labels.set_aside_from(&session_id, user_index),
+            attachment_runs::set_aside_from(&files, user_index),
+        ];
+        for e in results.into_iter().filter_map(Result::err) {
+            eprintln!("bricks-desktop: revision of {session_id} : {}", e.message);
+        }
+    });
 }
 
 /// Appends the copies a run started with to the session's record, off the

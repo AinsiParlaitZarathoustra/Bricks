@@ -1,0 +1,23 @@
+[
+  {
+    "file": "google-sans-flex/GoogleSansFlex-Variable.woff2",
+    "source": "https://github.com/googlefonts/googlesans-flex/releases/tag/v5.000",
+    "source_file": "GoogleSansFlex[ROND,opsz,slnt,wdth,wght].ttf",
+    "source_sha256": "a9ac770798857d5e8ac593ced42b22e40a7c08cec98319f92b0eccc2783a77ba",
+    "woff2_sha256": "af782ae589debfab2f99173808e85a36c99bdb60e28e3872cc74be5fa8c49e16"
+  },
+  {
+    "file": "google-sans-code/GoogleSansCode-Italic-Variable.woff2",
+    "source": "https://github.com/googlefonts/googlesans-code/releases/tag/v7.001",
+    "source_file": "GoogleSansCode-Italic[MONO,wght].ttf",
+    "source_sha256": "57d0d5fb5868b33a5802fed8a36197197f95014dd775836e176045cf81e60dfe",
+    "woff2_sha256": "99324a1242ce9f2041a114a4c1489d007ba1cef561cdf02463ae55f3976d4bc6"
+  },
+  {
+    "file": "google-sans-code/GoogleSansCode-Variable.woff2",
+    "source": "https://github.com/googlefonts/googlesans-code/releases/tag/v7.001",
+    "source_file": "GoogleSansCode[MONO,wght].ttf",
+    "source_sha256": "74642762fae66d5883077794a763e1086394b8cb72f2623e456e06359dc5c64b",
+    "woff2_sha256": "ffc80b7cc3040668925e8d72c08152f8ad0c8603e3ef10aa65eb6b5fddb29f8c"
+  }
+]

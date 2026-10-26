@@ -2,10 +2,10 @@
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import Folder from '@lucide/svelte/icons/folder';
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
+	import FolderX from '@lucide/svelte/icons/folder-x';
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Trash from '@lucide/svelte/icons/trash';
-	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import type { Project } from '$lib/ipc/client';
 	import { app } from '$lib/state/app.svelte';
 	import { Button } from '$lib/components/ui/button';
@@ -14,7 +14,6 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
-	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { cn } from '$lib/utils';
 	import ConversationList from './ConversationList.svelte';
 
@@ -41,8 +40,9 @@
 		else app.collapsedProjects.add(project.id);
 	}
 
+	// A project whose folder is missing asks for its new place first (in app.newConversation).
 	function startConversation(project: Project) {
-		if (project.missing || !app.hasProviders) return;
+		if (!app.hasProviders) return;
 		app.collapsedProjects.delete(project.id);
 		void app.newConversation(project.id);
 	}
@@ -93,7 +93,7 @@
 	}
 </script>
 
-<ul class="flex flex-col gap-0.5" aria-label="Projets">
+<ul class="flex flex-col gap-2" aria-label="Projets">
 	{#each app.folders as project (project.id)}
 		{@const expanded = !app.collapsedProjects.has(project.id)}
 		{@const drafting = project.id === app.currentProjectId && app.currentSessionId === null}
@@ -106,51 +106,34 @@
 			>
 				<button
 					type="button"
-					class={cn(
-						'flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left',
-						project.missing && 'text-muted-foreground'
-					)}
+					class="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left"
 					aria-expanded={expanded}
 					aria-describedby={project.missing ? `${uid}-${project.id}-missing` : undefined}
 					title={project.path}
 					onclick={() => toggle(project)}
 				>
-					{#if expanded}
+					{#if project.missing}
+						<FolderX class="size-4 shrink-0 text-destructive" aria-hidden="true" />
+					{:else if expanded}
 						<FolderOpen class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 					{:else}
 						<Folder class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 					{/if}
-					<span class="truncate text-[12.5px] font-medium">{project.name}</span>
+					<span class="truncate text-compact font-medium">{project.name}</span>
 				</button>
-
 				{#if project.missing}
 					<span id={`${uid}-${project.id}-missing`} class="sr-only">Dossier introuvable</span>
-					<Tooltip.Root>
-						<Tooltip.Trigger>
-							{#snippet child({ props })}
-								<span
-									{...props}
-									class="flex size-7 shrink-0 items-center justify-center rounded-md text-warning"
-								>
-									<TriangleAlert class="size-4" aria-hidden="true" />
-								</span>
-							{/snippet}
-						</Tooltip.Trigger>
-						<Tooltip.Content side="right">Dossier introuvable</Tooltip.Content>
-					</Tooltip.Root>
 				{/if}
 
-				{#if !project.missing}
-					<Button
-						variant="ghost"
-						size="icon-sm"
-						class="shrink-0 text-muted-foreground opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
-						aria-label={`Nouvelle conversation dans ${project.name}`}
-						onclick={() => startConversation(project)}
-					>
-						<Plus class="size-4" aria-hidden="true" />
-					</Button>
-				{/if}
+				<Button
+					variant="ghost"
+					size="icon-sm"
+					class="shrink-0 text-muted-foreground opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
+					aria-label={`Nouvelle conversation dans ${project.name}`}
+					onclick={() => startConversation(project)}
+				>
+					<Plus class="size-4" aria-hidden="true" />
+				</Button>
 
 				<DropdownMenu.Root>
 					<DropdownMenu.Trigger>

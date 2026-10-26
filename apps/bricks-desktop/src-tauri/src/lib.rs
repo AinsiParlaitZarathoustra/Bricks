@@ -35,9 +35,11 @@ pub fn run() {
             commands::projects::project_add,
             commands::projects::project_remove,
             commands::projects::project_rename,
+            commands::projects::project_relocate,
             // Conversations (Haiku 1)
             commands::sessions::sessions_list,
             commands::sessions::sessions_search,
+            commands::sessions::session_run_user_index,
             commands::sessions::session_open,
             commands::sessions::session_close,
             commands::sessions::session_rename,

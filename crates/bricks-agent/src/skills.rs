@@ -547,6 +547,23 @@ impl Agent {
         self.messages.lock().push(msg);
     }
 
+    /// Drop the activations whose text is no longer in `messages` (the
+    /// context was cut before them). A sub-agent profile's activations live
+    /// in its system prompt and stay.
+    pub(crate) fn forget_skills_absent_from(&self, messages: &[Message]) {
+        let Some(s) = &self.skills else {
+            return;
+        };
+        let text: String = messages
+            .iter()
+            .filter_map(|m| serde_json::to_string(m).ok())
+            .collect();
+        s.ledger
+            .lock()
+            .retain(|a| a.origin == Origin::Profile || text.contains(&a.id));
+        self.save_skills();
+    }
+
     pub(crate) fn clear_skills(&self) {
         if let Some(s) = &self.skills {
             s.ledger.lock().clear();

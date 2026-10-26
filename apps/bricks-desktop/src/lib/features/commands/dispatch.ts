@@ -271,6 +271,8 @@ async function runEngine(command: Command, host: SlashHost, line: string): Promi
     }
     case 'approve':
       return refused('Les demandes d’approbation se traitent dans la conversation.')
+    case 'revise':
+      return refused('Un message se modifie depuis la conversation (crayon du message).')
     default: {
       const unknown: never = command
       return refused(`Commande inconnue : ${JSON.stringify(unknown)}`)

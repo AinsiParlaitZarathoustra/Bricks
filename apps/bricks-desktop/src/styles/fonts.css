@@ -1,0 +1,24 @@
+/* Generated from src/lib/theme/tokens.json. Font files are bundled locally. */
+@font-face {
+	font-family: 'Google Sans Flex';
+	src: url('../assets/fonts/google-sans-flex/GoogleSansFlex-Variable.woff2') format('woff2');
+	font-weight: 1 1000;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Google Sans Code';
+	src: url('../assets/fonts/google-sans-code/GoogleSansCode-Variable.woff2') format('woff2');
+	font-weight: 300 800;
+	font-style: normal;
+	font-display: swap;
+}
+
+@font-face {
+	font-family: 'Google Sans Code';
+	src: url('../assets/fonts/google-sans-code/GoogleSansCode-Italic-Variable.woff2') format('woff2');
+	font-weight: 300 800;
+	font-style: italic;
+	font-display: swap;
+}

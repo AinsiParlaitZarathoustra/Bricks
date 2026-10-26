@@ -74,7 +74,7 @@
 </script>
 
 <div
-  class={['md leading-relaxed break-words text-foreground', className]}
+  class={['md syntax-markdown leading-relaxed break-words text-foreground', className]}
   class:streaming
   use:markdownClicks={{
     onLinkResult,
@@ -174,38 +174,8 @@
     background: var(--code-bg);
     color: var(--code-foreground);
     padding: 0.05rem 0.3rem;
-    font-family: var(--font-mono);
+    font-family: var(--code-font-family);
     font-size: 0.8125em;
-  }
-  .md :global(.hljs-keyword),
-  .md :global(.hljs-selector-tag),
-  .md :global(.hljs-built_in),
-  .md :global(.hljs-type),
-  .md :global(.hljs-title.class_) {
-    color: var(--primary);
-  }
-  .md :global(.hljs-string),
-  .md :global(.hljs-addition) {
-    color: var(--success);
-  }
-  .md :global(.hljs-addition) {
-    color: var(--diff-add);
-  }
-  .md :global(.hljs-deletion) {
-    color: var(--diff-del);
-  }
-  .md :global(.hljs-number),
-  .md :global(.hljs-literal),
-  .md :global(.hljs-attr),
-  .md :global(.hljs-variable),
-  .md :global(.hljs-template-variable) {
-    color: var(--info);
-  }
-  .md :global(.hljs-comment),
-  .md :global(.hljs-quote),
-  .md :global(.hljs-meta) {
-    color: var(--muted-foreground);
-    font-style: italic;
   }
   .md :global([id]) {
     scroll-margin-top: 0.75rem;
@@ -288,7 +258,7 @@
   .md :global(.file-ref) {
     border-radius: 0.125rem;
     color: var(--primary);
-    font-family: var(--font-mono);
+    font-family: var(--code-font-family);
     font-size: 0.8125em;
     text-decoration: underline;
     text-decoration-style: dotted;
@@ -304,7 +274,7 @@
   }
   .md :global(.math-src),
   .md :global(.math-error) {
-    font-family: var(--font-mono);
+    font-family: var(--code-font-family);
     font-size: 0.8125em;
     color: var(--muted-foreground);
     white-space: pre-wrap;

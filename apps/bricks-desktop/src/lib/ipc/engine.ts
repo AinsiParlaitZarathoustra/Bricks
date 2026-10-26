@@ -1,9 +1,9 @@
 // Engine protocol types, mirroring `bricks_agent::control::protocol`
-// (schema 7, see docs/cli.md). These are the JSON shapes the engine
+// (schema 8, see docs/cli.md). These are the JSON shapes the engine
 // serializes; the desktop bridge forwards them unchanged.
 // Owner: orchestrator. Keep in sync with protocol.rs.
 
-export const SCHEMA_VERSION = 7
+export const SCHEMA_VERSION = 8
 
 export type PlanStatus = 'pending' | 'in_progress' | 'completed'
 
@@ -409,6 +409,8 @@ export type Event =
       applies: string
     }
   | { type: 'context_cleared'; messages_removed: number }
+  /** A `revise` cut the active context before the user message at `user_index`; its new run follows. */
+  | { type: 'history_revised'; user_index: number; messages_removed: number }
   | { type: 'session_saved' }
   | { type: 'title_changed'; title: string }
   | { type: 'plan_updated'; plan: PlanState }
@@ -552,6 +554,11 @@ export interface Prompt {
 
 export type Command =
   | { type: 'submit'; prompt: Prompt }
+  /**
+   * Replaces the user message at `user_index` (among the user-role messages of the
+   * active history; `original` is its text as shown) and runs again from it.
+   */
+  | { type: 'revise'; user_index: number; original: string; prompt: Prompt }
   | { type: 'cancel' }
   | { type: 'set_model'; model?: string; reasoning?: string }
   | { type: 'set_reasoning'; profile: string | null }

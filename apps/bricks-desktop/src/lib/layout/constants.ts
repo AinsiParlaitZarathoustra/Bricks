@@ -15,6 +15,16 @@ export const WIDE_BREAKPOINT = 1200;
  */
 export const NARROW_BREAKPOINT = 1000;
 
+/**
+ * The top bar. On macOS the window's title bar is an overlay (src-tauri/tauri.macos.conf.json):
+ * the bar is drawn under the system buttons, whose position `trafficLightPosition` there
+ * matches `height`, and leaves `macSystemButtons` px free on its left for them.
+ */
+export const TOP_BAR = {
+	height: 52,
+	macSystemButtons: 92
+} as const;
+
 /** Starting sizes used when the caller provides no saved preference. */
 export const LAYOUT_DEFAULTS = {
 	leftWidth: 260,

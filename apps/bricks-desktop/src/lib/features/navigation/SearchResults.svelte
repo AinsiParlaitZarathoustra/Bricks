@@ -6,13 +6,13 @@
 	import { displayTitle, highlightParts, relativeDate } from './format';
 
 	interface Props {
-		/** The text being searched; the parent clears it once a result is opened. */
+		/** The text being searched; cleared once a result is opened. */
 		query?: string;
-		/** Search every project instead of the current one. */
-		allProjects?: boolean;
+		/** Called once a result is opened. */
+		onopened?: () => void;
 	}
 
-	let { query = $bindable(''), allProjects = false }: Props = $props();
+	let { query = $bindable(''), onopened }: Props = $props();
 
 	const DEBOUNCE_MS = 250;
 	const clock = createClock();
@@ -41,13 +41,12 @@
 	// Identifies the latest request, so a slow earlier response never overwrites a newer one.
 	let request = 0;
 
-	// Re-runs when the debounced text or the scope changes. app.search reads the current
-	// project itself, so switching project while searching also re-runs it.
+	// Re-runs when the debounced text changes. The search covers every project.
 	$effect(() => {
-		void runSearch(debounced, allProjects);
+		void runSearch(debounced);
 	});
 
-	async function runSearch(text: string, everywhere: boolean) {
+	async function runSearch(text: string) {
 		const mine = ++request;
 		if (!text) {
 			hits = [];
@@ -57,7 +56,7 @@
 		}
 		loading = true;
 		try {
-			const found = await app.search(text, everywhere);
+			const found = await app.search(text, true);
 			if (mine !== request) return;
 			hits = found;
 			failure = null;
@@ -84,13 +83,14 @@
 				app.fail(new Error('Le projet de cette conversation est introuvable.'));
 				return;
 			}
-			if (project.missing) {
-				app.fail(new Error(`Le dossier du projet « ${project.name} » est introuvable.`));
+			if (app.requireFolder(projectId, () => openHit(hit))) {
+				onopened?.();
 				return;
 			}
 			await app.selectProject(projectId);
 		}
 		query = '';
+		onopened?.();
 		await app.openSession(session.id);
 	}
 </script>

@@ -58,12 +58,12 @@
 
 <div class="flex min-w-0 max-w-full items-center justify-center gap-2">
   <!-- The page's h1 is the sr-only « Bricks » (AppShell): the conversation title is its h2. -->
-  <h2 class="flex min-w-0 items-center text-[13px] font-medium text-foreground">
+  <h2 class="flex min-w-0 items-center text-ui font-medium text-foreground">
     {#if editing && conversation}
       <Input
         bind:ref={inputEl}
         bind:value={draft}
-        class="h-7 w-64 max-w-full text-[13px]"
+        class="h-7 w-64 max-w-full text-ui"
         aria-label="Titre de la conversation"
         maxlength={200}
         onkeydown={onKeydown}

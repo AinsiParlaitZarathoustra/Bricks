@@ -6,6 +6,7 @@
 	import GitCompareIcon from '@lucide/svelte/icons/git-compare';
 	import BookOpenIcon from '@lucide/svelte/icons/book-open';
 	import PanelToggle from './PanelToggle.svelte';
+	import { TOP_BAR } from './constants.js';
 	import { cn } from '$lib/utils.js';
 
 	interface Props {
@@ -28,6 +29,8 @@
 		/** Visibility of the reader view of the right column. Toggle shown only when onToggleReader is provided. */
 		readerPressed?: boolean;
 		onToggleReader?: () => void;
+		/** Leaves room on the left for the macOS window buttons drawn over the bar. */
+		systemButtons?: boolean;
 		class?: string;
 	}
 
@@ -45,6 +48,7 @@
 		onToggleChanges,
 		readerPressed = false,
 		onToggleReader,
+		systemButtons = false,
 		class: className
 	}: Props = $props();
 
@@ -59,9 +63,11 @@
 <header
 	data-tauri-drag-region
 	class={cn(
-		'grid h-11 shrink-0 grid-cols-[minmax(0,1fr)_minmax(0,min(28rem,50%))_minmax(0,1fr)] items-center gap-2 border-b border-transparent bg-background px-3',
+		'grid shrink-0 grid-cols-[minmax(0,1fr)_minmax(0,min(28rem,50%))_minmax(0,1fr)] items-center gap-2 border-b border-transparent bg-background px-3',
 		className
 	)}
+	style:height="{TOP_BAR.height}px"
+	style:padding-left={systemButtons ? `${TOP_BAR.macSystemButtons}px` : undefined}
 >
 	<div data-tauri-drag-region class="flex min-w-0 items-center justify-self-start">
 		{#if onToggleLeft}

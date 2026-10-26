@@ -58,13 +58,13 @@
 
 <section aria-label="Lecteur" class="flex h-full min-h-0 flex-col bg-background">
   {#if tabs.length === 0}
-    <p class="p-4 text-[13px] text-muted-foreground">Aucun fichier ouvert.</p>
+    <p class="p-4 text-ui text-muted-foreground">Aucun fichier ouvert.</p>
   {:else}
     <div role="tablist" aria-label="Fichiers ouverts" class="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border/50 px-1.5 py-1">
       {#each tabs as tab (tab.id)}
         <div
           class={[
-            'group flex shrink-0 items-center rounded-md text-[13px]',
+            'group flex shrink-0 items-center rounded-md text-ui',
             tab.id === active?.id ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/60',
           ]}
         >
@@ -112,7 +112,7 @@
             {/if}
           {/each}
         </div>
-        <span class="ml-auto min-w-0 truncate font-mono text-[11px] text-muted-foreground" title={active.fullPath}>
+        <span class="ml-auto min-w-0 truncate font-mono text-caption text-muted-foreground" title={active.fullPath}>
           {active.fullPath}
         </span>
       </div>
@@ -124,7 +124,7 @@
         role="region"
         aria-label={`Contenu de ${active.title}`}
         tabindex="0"
-        class="min-h-0 flex-1 overflow-auto outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+        class="min-h-0 flex-1 overflow-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
       >
         {#if active.mode === 'changes'}
           <div class="flex flex-col gap-3 p-2">
@@ -173,7 +173,7 @@
             {#each highlighted as html, i (i)}
               <div class="grid grid-cols-[3.5rem_minmax(0,1fr)]">
                 <span class="px-2 text-right text-muted-foreground tabular-nums select-none">{active.window.start + i}</span>
-                <span class="hljs pr-3 whitespace-pre">{@html html || ' '}</span>
+                <span class="hljs syntax-reader pr-3 whitespace-pre">{@html html || ' '}</span>
               </div>
             {/each}
           </div>
@@ -207,28 +207,3 @@
     {/if}
   {/if}
 </section>
-
-<style>
-  .hljs :global(.hljs-keyword),
-  .hljs :global(.hljs-selector-tag),
-  .hljs :global(.hljs-built_in),
-  .hljs :global(.hljs-type),
-  .hljs :global(.hljs-title.class_) {
-    color: var(--primary);
-  }
-  .hljs :global(.hljs-string) {
-    color: var(--success);
-  }
-  .hljs :global(.hljs-number),
-  .hljs :global(.hljs-literal),
-  .hljs :global(.hljs-attr),
-  .hljs :global(.hljs-variable) {
-    color: var(--info);
-  }
-  .hljs :global(.hljs-comment),
-  .hljs :global(.hljs-quote),
-  .hljs :global(.hljs-meta) {
-    color: var(--muted-foreground);
-    font-style: italic;
-  }
-</style>

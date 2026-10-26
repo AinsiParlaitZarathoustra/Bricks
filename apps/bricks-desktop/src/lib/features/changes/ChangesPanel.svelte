@@ -11,7 +11,7 @@
 </script>
 
 <div class="flex h-full min-h-0 flex-col">
-	<h2 class="px-3 pt-3 pb-2 text-[13px] font-medium">Modifications</h2>
+	<h2 class="px-3 pt-3 pb-2 text-ui font-medium">Modifications</h2>
 	<Tabs.Root bind:value={tab} class="flex min-h-0 flex-1 flex-col gap-0">
 		<Tabs.List class="mx-3 grid grid-cols-3">
 			<Tabs.Trigger value="conversation" class="min-w-0 truncate text-xs">Conversation</Tabs.Trigger>
@@ -27,13 +27,13 @@
 			</Tabs.Trigger>
 			<Tabs.Trigger value="git" class="min-w-0 truncate text-xs">Git</Tabs.Trigger>
 		</Tabs.List>
-		<Tabs.Content value="conversation" class="min-h-0 flex-1 overflow-y-auto px-3 pt-3 pb-3 outline-none">
+		<Tabs.Content value="conversation" class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pt-3 pb-3 outline-none">
 			<ConversationChanges />
 		</Tabs.Content>
-		<Tabs.Content value="historique" class="min-h-0 flex-1 overflow-y-auto px-3 pt-3 pb-3 outline-none">
+		<Tabs.Content value="historique" class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pt-3 pb-3 outline-none">
 			<HistoryChanges />
 		</Tabs.Content>
-		<Tabs.Content value="git" class="min-h-0 flex-1 overflow-y-auto px-3 pt-3 pb-3 outline-none">
+		<Tabs.Content value="git" class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pt-3 pb-3 outline-none">
 			<GitChanges />
 		</Tabs.Content>
 	</Tabs.Root>

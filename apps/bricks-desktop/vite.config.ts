@@ -2,12 +2,13 @@ import { svelte } from '@sveltejs/vite-plugin-svelte'
 import tailwindcss from '@tailwindcss/vite'
 import { defineConfig } from 'vite'
 import path from 'node:path'
+import { designTokensPlugin } from './scripts/design-tokens-plugin.js'
 
 const host = process.env.TAURI_DEV_HOST
 
 // Tauri expects a fixed port and must see Rust compile errors.
 export default defineConfig({
-  plugins: [tailwindcss(), svelte()],
+  plugins: [designTokensPlugin(), tailwindcss(), svelte()],
   resolve: {
     alias: { $lib: path.resolve('./src/lib') },
   },

@@ -27,6 +27,23 @@ pub async fn session_close(state: State<'_, AppState>, session_id: String, cance
     state.close_session(&session_id, cancel).await
 }
 
+/// The index, among the user-role messages of the session's history, of the
+/// message a finished run answered (what a `revise` command names). `None`
+/// while the run has no record yet, or when its message is not known.
+#[tauri::command]
+pub async fn session_run_user_index(state: State<'_, AppState>, session_id: String, run_id: String) -> IpcResult<Option<u32>> {
+    let records = std::sync::Arc::clone(&state.run_records);
+    tokio::task::spawn_blocking(move || {
+        Ok(records
+            .list(&session_id)?
+            .into_iter()
+            .find(|r| r.run_id == run_id)
+            .and_then(|r| r.user_index))
+    })
+    .await
+    .map_err(crate::services::join_error)?
+}
+
 #[tauri::command]
 pub async fn session_rename(state: State<'_, AppState>, session_id: String, title: String) -> IpcResult<SessionItem> {
     state.rename_session(&session_id, &title).await

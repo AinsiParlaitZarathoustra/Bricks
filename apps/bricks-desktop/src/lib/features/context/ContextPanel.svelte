@@ -29,7 +29,7 @@
 		<EmptyState title="Aucun projet ouvert" icon={FolderOpenIcon} />
 	{:else}
 		<ScrollArea class="h-full" bind:viewportRef={viewport}>
-			<div class="flex flex-col gap-3 p-3">
+			<div class="flex flex-col gap-3 px-3 pt-5 pb-3">
 				{#if conversation}
 					<PendingApprovals {approvals} />
 				{/if}

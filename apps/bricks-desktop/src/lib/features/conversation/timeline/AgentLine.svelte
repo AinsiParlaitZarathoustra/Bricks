@@ -47,8 +47,8 @@
     />
     <span class="flex min-w-0 flex-1 flex-col gap-0.5">
       <span class="flex min-w-0 items-baseline gap-2.5">
-        <span class="shrink-0 font-mono text-[13px] text-foreground">{agent.spawn.profile}</span>
-        <span class="min-w-0 flex-1 truncate text-[13px] text-muted-foreground">{description}</span>
+        <span class="shrink-0 font-mono text-ui text-foreground">{agent.spawn.profile}</span>
+        <span class="min-w-0 flex-1 truncate text-ui text-muted-foreground">{description}</span>
         {#if !stale}
           <span class="shrink-0 font-mono text-xs text-muted-foreground tabular-nums">
             {formatDuration(agentDurationMs(agent, now))}

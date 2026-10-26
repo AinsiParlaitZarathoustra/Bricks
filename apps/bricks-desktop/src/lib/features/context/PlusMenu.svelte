@@ -13,7 +13,7 @@
 
 <DropdownMenu.Root>
 	<DropdownMenu.Trigger
-		class={[buttonVariants({ variant: 'ghost', size: 'sm' }), 'h-7 px-2 text-[13px]']}
+		class={[buttonVariants({ variant: 'ghost', size: 'sm' }), 'h-7 px-2 text-ui']}
 		disabled={!enabled}
 	>
 		<EllipsisIcon aria-hidden="true" />

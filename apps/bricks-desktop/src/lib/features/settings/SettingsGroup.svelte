@@ -17,7 +17,7 @@
 
 <section aria-labelledby={headingId} class={cn('flex flex-col gap-3', className)}>
 	<div class="flex flex-col gap-1">
-		<h3 id={headingId} class="text-[13px] font-semibold text-foreground">{title}</h3>
+		<h3 id={headingId} class="text-ui font-semibold text-foreground">{title}</h3>
 		{#if description}
 			<p class="text-xs text-pretty text-muted-foreground">{description}</p>
 		{/if}

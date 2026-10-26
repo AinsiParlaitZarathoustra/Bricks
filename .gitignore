@@ -76,3 +76,7 @@ service-account.json
 # Temp Folder For test and dump
 /joy
 TOOL-CALLING-RELIABILITY.md
+
+# Local browser comparisons, screenshots and generated test reports.
+/output/
+/.playwright-cli/

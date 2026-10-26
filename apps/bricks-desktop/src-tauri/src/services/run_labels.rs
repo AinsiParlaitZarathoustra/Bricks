@@ -103,11 +103,38 @@ impl RunLabelStore {
         check_session_id(session_id)?;
         let mut state = self.state.lock();
         state.deleted.insert(session_id.to_string());
+        // What earlier revisions set aside goes with the session.
+        let aside = self.dir.join(format!("{session_id}.revised.jsonl"));
+        if let Err(e) = std::fs::remove_file(&aside)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            return Err(io_error("étiquettes des commandes", e));
+        }
         match std::fs::remove_file(self.path(session_id)) {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(io_error("étiquettes des commandes", e)),
         }
+    }
+
+    /// Sets aside the labels of the messages from `user_index` on (a
+    /// revision replaced them), in `<session_id>.revised.jsonl`. Blocking
+    /// I/O: call from `spawn_blocking`.
+    pub fn set_aside_from(&self, session_id: &str, user_index: u32) -> IpcResult<usize> {
+        check_session_id(session_id)?;
+        let state = self.state.lock();
+        if state.deleted.contains(session_id) {
+            return Ok(0);
+        }
+        move_lines(
+            &self.path(session_id),
+            &self.dir.join(format!("{session_id}.revised.jsonl")),
+            |line| {
+                serde_json::from_str::<RunLabel>(line)
+                    .is_ok_and(|l| l.user_index.is_some_and(|i| i >= user_index))
+            },
+        )
+        .map_err(|e| io_error("étiquettes des commandes", e))
     }
 
     /// Whether the session has a labels file (for the deletion check).
@@ -171,6 +198,35 @@ pub(crate) fn check_session_id(id: &str) -> IpcResult<()> {
     } else {
         Err(invalid("identifiant de conversation invalide"))
     }
+}
+
+/// Moves the lines of a JSON-lines file that `moves` accepts to the end of
+/// `aside` (kept, so a revision can be looked at again); the others stay, and
+/// the file is rewritten atomically. Moved lines are written aside first, so
+/// an interruption keeps them in both files, never in neither. Returns how
+/// many lines moved; a missing file moves none.
+pub(crate) fn move_lines(path: &Path, aside: &Path, moves: impl Fn(&str) -> bool) -> std::io::Result<usize> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(e),
+    };
+    let (moved, kept): (Vec<&str>, Vec<&str>) = text
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .partition(|l| moves(l));
+    if moved.is_empty() {
+        return Ok(0);
+    }
+    for line in &moved {
+        append_line(aside, line)?;
+    }
+    let mut rest = kept.join("\n");
+    if !rest.is_empty() {
+        rest.push('\n');
+    }
+    super::paths::write_atomic(path, rest.as_bytes())?;
+    Ok(moved.len())
 }
 
 /// Appends one line, starting a new line first when the file does not end
@@ -333,5 +389,103 @@ mod tests {
         assert_eq!(normalize_label("   "), None);
         let long = "é".repeat(MAX_LABEL_CHARS + 10);
         assert_eq!(normalize_label(&long).unwrap().chars().count(), MAX_LABEL_CHARS);
+    }
+}
+
+#[cfg(test)]
+mod revision_tests {
+    use super::*;
+
+    fn indexed(run: &str, index: Option<u32>) -> RunLabel {
+        RunLabel {
+            run_id: run.into(),
+            label: "/skill debug".into(),
+            prompt: format!("prompt of {run}"),
+            at: 1,
+            user_index: index,
+        }
+    }
+
+    fn aside_of(root: &Path) -> PathBuf {
+        root.join("run-labels").join("s1.revised.jsonl")
+    }
+
+    #[test]
+    fn a_revision_sets_aside_the_labels_from_its_message_on_and_keeps_the_others() {
+        let root = tempfile::tempdir().unwrap();
+        let store = RunLabelStore::at(root.path().join("run-labels"));
+        let first = indexed("run_a", Some(0));
+        let second = indexed("run_b", Some(1));
+        let third = indexed("run_c", Some(2));
+        let unindexed = indexed("run_old", None);
+        for label in [&first, &second, &third, &unindexed] {
+            store.append("s1", label).unwrap();
+        }
+
+        assert_eq!(store.set_aside_from("s1", 1).unwrap(), 2);
+
+        assert_eq!(store.list("s1").unwrap(), vec![first, unindexed]);
+        let aside = std::fs::read_to_string(aside_of(root.path())).unwrap();
+        assert_eq!(aside.lines().count(), 2);
+        assert!(aside.contains("run_b") && aside.contains("run_c"), "{aside}");
+    }
+
+    #[test]
+    fn setting_aside_twice_moves_nothing_the_second_time() {
+        let root = tempfile::tempdir().unwrap();
+        let store = RunLabelStore::at(root.path().join("run-labels"));
+        store.append("s1", &indexed("run_a", Some(0))).unwrap();
+        store.append("s1", &indexed("run_b", Some(1))).unwrap();
+
+        assert_eq!(store.set_aside_from("s1", 1).unwrap(), 1);
+        assert_eq!(store.set_aside_from("s1", 1).unwrap(), 0);
+        assert_eq!(store.list("s1").unwrap().len(), 1);
+        assert_eq!(std::fs::read_to_string(aside_of(root.path())).unwrap().lines().count(), 1);
+    }
+
+    #[test]
+    fn a_session_without_labels_file_moves_none_and_writes_no_aside_file() {
+        let root = tempfile::tempdir().unwrap();
+        let store = RunLabelStore::at(root.path().join("run-labels"));
+        assert_eq!(store.set_aside_from("s1", 0).unwrap(), 0);
+        assert!(!aside_of(root.path()).exists());
+    }
+
+    #[test]
+    fn a_damaged_line_stays_where_it_is() {
+        let root = tempfile::tempdir().unwrap();
+        let store = RunLabelStore::at(root.path().join("run-labels"));
+        store.append("s1", &indexed("run_a", Some(3))).unwrap();
+        let file = root.path().join("run-labels").join("s1.jsonl");
+        let mut text = std::fs::read_to_string(&file).unwrap();
+        text.push_str("pas du json\n");
+        std::fs::write(&file, text).unwrap();
+
+        assert_eq!(store.set_aside_from("s1", 0).unwrap(), 1);
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "pas du json\n");
+    }
+
+    #[test]
+    fn nothing_is_set_aside_once_the_session_is_deleted() {
+        let root = tempfile::tempdir().unwrap();
+        let store = RunLabelStore::at(root.path().join("run-labels"));
+        store.append("s1", &indexed("run_a", Some(0))).unwrap();
+        store.append("s1", &indexed("run_b", Some(1))).unwrap();
+        assert_eq!(store.set_aside_from("s1", 1).unwrap(), 1);
+        assert!(aside_of(root.path()).exists());
+        store.delete("s1").unwrap();
+        assert_eq!(store.set_aside_from("s1", 0).unwrap(), 0);
+        assert!(!aside_of(root.path()).exists(), "deleting the session removes its set-aside labels");
+        assert!(!root.path().join("run-labels").join("s1.jsonl").exists());
+    }
+
+    #[test]
+    fn move_lines_of_a_missing_file_is_none_and_keeps_the_aside_file_as_it_was() {
+        let root = tempfile::tempdir().unwrap();
+        let aside = root.path().join("aside.jsonl");
+        std::fs::write(&aside, "déjà là\n").unwrap();
+        let moved = move_lines(&root.path().join("absent.jsonl"), &aside, |_| true).unwrap();
+        assert_eq!(moved, 0);
+        assert_eq!(std::fs::read_to_string(&aside).unwrap(), "déjà là\n");
     }
 }

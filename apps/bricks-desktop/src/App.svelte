@@ -2,6 +2,7 @@
   // Root: wires the shell, the global state and the feature entry points.
   // Owner: orchestrator.
   import { onMount } from 'svelte'
+  import { getCurrentWindow } from '@tauri-apps/api/window'
   import { toast } from 'svelte-sonner'
   import { Toaster } from '$lib/components/ui/sonner'
   import * as Tooltip from '$lib/components/ui/tooltip'
@@ -24,6 +25,7 @@
   import { reader } from '$lib/state/reader.svelte'
   import TerminalPanel from '$lib/features/terminal/TerminalPanel.svelte'
   import SettingsDialog from '$lib/features/settings/SettingsDialog.svelte'
+  import FolderMissingDialog from '$lib/features/navigation/FolderMissingDialog.svelte'
   import InspectorHost from '$lib/features/commands/InspectorHost.svelte'
   import { ui } from '$lib/state/ui.svelte'
   import { Button } from '$lib/components/ui/button'
@@ -38,9 +40,27 @@
   // saved pixel height, read by AppShell once to derive the ratio when none is saved.
   let terminalRatio = $state<number | null>(null)
   let legacyTerminalHeight = $state<number | undefined>(undefined)
+  // macOS draws its window buttons over the top bar, except in full screen.
+  let fullscreen = $state(false)
+  const systemButtons = $derived(app.info?.platform === 'macos' && !fullscreen)
+
+  /** Follows the window's full-screen state; a no-op outside Tauri. */
+  function watchFullscreen(): Promise<() => void> {
+    try {
+      const appWindow = getCurrentWindow()
+      const sync = () => {
+        appWindow.isFullscreen().then((value) => (fullscreen = value), () => {})
+      }
+      sync()
+      return appWindow.onResized(sync).catch(() => () => {})
+    } catch {
+      return Promise.resolve(() => {})
+    }
+  }
 
   onMount(() => {
     const disposeTheme = initTheme('system')
+    const unlistenResize = watchFullscreen()
     app.init().then(() => {
       const p = app.prefs
       setTheme(p.theme)
@@ -54,6 +74,7 @@
     })
     return () => {
       disposeTheme()
+      void unlistenResize.then((unlisten) => unlisten())
       app.dispose()
     }
   })
@@ -126,7 +147,7 @@
       {onLayoutChange}
     >
       {#snippet topbar(controls)}
-        <TopBar {...controls} changesPressed={app.rightView === 'changes' && rightOpen} onToggleChanges={toggleChanges} readerPressed={app.rightView === 'reader' && rightOpen} onToggleReader={toggleReader}>
+        <TopBar {...controls} {systemButtons} changesPressed={app.rightView === 'changes' && rightOpen} onToggleChanges={toggleChanges} readerPressed={app.rightView === 'reader' && rightOpen} onToggleReader={toggleReader}>
           {#snippet title()}
             <ConversationTitle conversation={app.current} />
           {/snippet}
@@ -176,6 +197,7 @@
     </AppShell>
   {/if}
   <SettingsDialog bind:open={ui.settingsOpen} />
+  <FolderMissingDialog />
   <InspectorHost />
   <AgentInspectorHost />
   <Toaster richColors />

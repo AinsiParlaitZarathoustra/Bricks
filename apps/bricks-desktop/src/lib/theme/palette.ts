@@ -5,10 +5,11 @@
 //   - accent      -> --primary, --ring, --sidebar-primary (+ readable foregrounds)
 //   - background  -> --background (central surface), with its text colours
 //   - panel       -> --sidebar (navigation and side panels), with its text colours
-// A role without a value keeps the theme token of src/app.css. Status, error and diff colours are
+// A role without a value keeps the theme token from tokens.json. Status, error and diff colours are
 // never customised. Values are `#rrggbb` strings; `null` in the stored ColorSet means "theme token".
 
 import type { ColorSet } from '$lib/ipc/bindings/ColorSet';
+import tokenSource from './tokens.json';
 
 export type Hex = string;
 export type ColorRole = 'accent' | 'background' | 'panel';
@@ -147,7 +148,7 @@ export function mutedTextOn(background: Hex, text: Hex): Hex {
 
 // ─── Theme tokens (defaults) ─────────────────────────────────────────────────
 
-/** Björn Ottosson's OKLCH to sRGB, used once to turn the tokens of src/app.css into hex. */
+/** Björn Ottosson's OKLCH to sRGB, used once to turn the tokens from tokens.json into hex. */
 export function oklchToHex(l: number, c: number, hueDegrees: number): Hex {
 	const h = (hueDegrees * Math.PI) / 180;
 	const a = c * Math.cos(h);
@@ -181,25 +182,33 @@ interface TokenColors {
 	panelForeground: Hex;
 }
 
-/** The values of src/app.css (`:root` and `.dark`), in hex. Keep in step with that file. */
+/** The palette defaults derived from the same source as the generated CSS theme tokens. */
+const themeColors = tokenSource.colors as unknown as Record<ResolvedMode, Record<string, [number, number, number] | string>>;
+
+function tokenHex(mode: ResolvedMode, name: string): Hex {
+	const value = themeColors[mode][name];
+	if (!Array.isArray(value)) throw new Error(`Expected an OKLCH token for ${mode}.${name}`);
+	return oklchToHex(value[0], value[1], value[2]);
+}
+
 export const TOKENS: Record<ResolvedMode, TokenColors> = {
 	light: {
-		accent: oklchToHex(0.52, 0.12, 38),
-		accentForeground: oklchToHex(0.985, 0.005, 85),
-		background: oklchToHex(0.985, 0.004, 85),
-		foreground: oklchToHex(0.235, 0.012, 60),
-		mutedForeground: oklchToHex(0.52, 0.012, 65),
-		panel: oklchToHex(0.967, 0.007, 82),
-		panelForeground: oklchToHex(0.235, 0.012, 60)
+		accent: tokenHex('light', 'primary'),
+		accentForeground: tokenHex('light', 'primary-foreground'),
+		background: tokenHex('light', 'background'),
+		foreground: tokenHex('light', 'foreground'),
+		mutedForeground: tokenHex('light', 'muted-foreground'),
+		panel: tokenHex('light', 'sidebar'),
+		panelForeground: tokenHex('light', 'sidebar-foreground')
 	},
 	dark: {
-		accent: oklchToHex(0.74, 0.12, 42),
-		accentForeground: oklchToHex(0.2, 0.01, 50),
-		background: oklchToHex(0.19, 0.006, 60),
-		foreground: oklchToHex(0.94, 0.008, 80),
-		mutedForeground: oklchToHex(0.74, 0.01, 75),
-		panel: oklchToHex(0.205, 0.006, 65),
-		panelForeground: oklchToHex(0.94, 0.008, 80)
+		accent: tokenHex('dark', 'primary'),
+		accentForeground: tokenHex('dark', 'primary-foreground'),
+		background: tokenHex('dark', 'background'),
+		foreground: tokenHex('dark', 'foreground'),
+		mutedForeground: tokenHex('dark', 'muted-foreground'),
+		panel: tokenHex('dark', 'sidebar'),
+		panelForeground: tokenHex('dark', 'sidebar-foreground')
 	}
 };
 

@@ -56,7 +56,7 @@
 <Select.Root bind:open type="single" value={shown} onValueChange={handleChange} {disabled}>
   <Select.Trigger
     size="sm"
-    class="max-w-56 min-w-0 text-[13px] border-transparent bg-transparent text-muted-foreground shadow-none hover:bg-muted hover:text-foreground data-[state=open]:bg-muted dark:bg-transparent dark:hover:bg-muted"
+    class="max-w-56 min-w-0 text-ui border-transparent bg-transparent text-muted-foreground shadow-none hover:bg-muted hover:text-foreground data-[state=open]:bg-muted dark:bg-transparent dark:hover:bg-muted"
     aria-label={`Effort de raisonnement : ${triggerLabel}`}
   >
     <span class="truncate">{triggerLabel}</span>

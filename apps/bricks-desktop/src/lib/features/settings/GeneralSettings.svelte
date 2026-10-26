@@ -43,19 +43,19 @@
 
 <div class="flex flex-col gap-6">
 	<section aria-labelledby="default-permissions" class="flex flex-col gap-3">
-		<h3 id="default-permissions" class="text-[13px] font-semibold text-foreground">
+		<h3 id="default-permissions" class="text-ui font-semibold text-foreground">
 			Permissions des nouvelles conversations
 		</h3>
 		{#if policy}
 			<PolicyEditor {policy} disabled={saving} onchange={save} />
 		{/if}
 		{#if loadError}
-			<p role="alert" class="text-[13px] text-pretty text-destructive">
+			<p role="alert" class="text-ui text-pretty text-destructive">
 				Lecture impossible : {loadError}
 			</p>
 		{/if}
 		{#if saveError}
-			<p role="alert" class="text-[13px] text-pretty text-destructive">
+			<p role="alert" class="text-ui text-pretty text-destructive">
 				Le réglage n’a pas été enregistré : {saveError}
 			</p>
 		{/if}

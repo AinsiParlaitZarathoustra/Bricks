@@ -1,0 +1,49 @@
+/* Shared syntax colors; preserve context-specific token sets where renderers differ. */
+.syntax-markdown.md .hljs-keyword,
+.syntax-markdown.md .hljs-selector-tag,
+.syntax-markdown.md .hljs-built_in,
+.syntax-markdown.md .hljs-type,
+.syntax-markdown.md .hljs-title.class_,
+.hljs.syntax-reader .hljs-keyword,
+.hljs.syntax-reader .hljs-selector-tag,
+.hljs.syntax-reader .hljs-built_in,
+.hljs.syntax-reader .hljs-type,
+.hljs.syntax-reader .hljs-title.class_ {
+	color: var(--primary);
+}
+
+.syntax-markdown.md .hljs-string,
+.syntax-markdown.md .hljs-addition,
+.hljs.syntax-reader .hljs-string {
+	color: var(--success);
+}
+
+.syntax-markdown.md .hljs-addition {
+	color: var(--diff-add);
+}
+
+.syntax-markdown.md .hljs-deletion {
+	color: var(--diff-del);
+}
+
+.syntax-markdown.md .hljs-number,
+.syntax-markdown.md .hljs-literal,
+.syntax-markdown.md .hljs-attr,
+.syntax-markdown.md .hljs-variable,
+.syntax-markdown.md .hljs-template-variable,
+.hljs.syntax-reader .hljs-number,
+.hljs.syntax-reader .hljs-literal,
+.hljs.syntax-reader .hljs-attr,
+.hljs.syntax-reader .hljs-variable {
+	color: var(--info);
+}
+
+.syntax-markdown.md .hljs-comment,
+.syntax-markdown.md .hljs-quote,
+.syntax-markdown.md .hljs-meta,
+.hljs.syntax-reader .hljs-comment,
+.hljs.syntax-reader .hljs-quote,
+.hljs.syntax-reader .hljs-meta {
+	color: var(--muted-foreground);
+	font-style: italic;
+}

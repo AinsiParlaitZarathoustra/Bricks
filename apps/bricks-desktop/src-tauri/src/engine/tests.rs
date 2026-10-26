@@ -13,7 +13,7 @@ use bricks_agent::control::{
 use bricks_tools::preview::ChangeKind;
 use bricks_types::{Message, Role};
 use crate::services::conversations::message_text;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tauri::ipc::{Channel, InvokeResponseBody};
@@ -46,7 +46,8 @@ async fn open_scripted_as(
     open_scripted_full(state, project_id, wd, script, session, None).await
 }
 
-/// As [`open_scripted_as`], with the personal skills of `home` usable when given.
+/// As [`open_scripted_as`], with the skills installed in the store of `home`
+/// (`home/skills`) usable when given.
 async fn open_scripted_full(
     state: &AppState,
     project_id: &str,
@@ -62,7 +63,7 @@ async fn open_scripted_full(
         state.sessions_dir().to_path_buf(),
     );
     cfg.interactive = false;
-    cfg.skills = home.map(|h| SkillsSetup::with_home(Some(h.to_path_buf())));
+    cfg.skills = home.map(|h| SkillsSetup::with_store(Some(h.join("skills"))));
     let (controller, mut stream) = Controller::open(
         cfg,
         OpenOptions {
@@ -399,9 +400,9 @@ fn submit_json(text: &str) -> serde_json::Value {
     serde_json::to_value(Command::Submit { prompt: Prompt::text(text) }).unwrap()
 }
 
-/// A personal skill `name` under `home`, with its procedure as the body.
+/// A skill `name` installed in the store of `home`, with its procedure as the body.
 fn write_skill(home: &Path, name: &str, body: &str) {
-    let dir = home.join(".agents").join("skills").join(name);
+    let dir = home.join("skills").join(name);
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("SKILL.md"),
@@ -822,4 +823,165 @@ async fn revealing_a_file_of_an_unknown_agent_is_refused() {
         Err(crate::contract::IpcError { code: IpcErrorCode::NotFound, .. })
     ));
     let _ = state.close_session(&id, false).await;
+}
+
+// ─── Missing folders, relocation and its journal ─────────────────────────────
+
+/// A stored conversation of `wd` with one answered exchange, closed: only its files remain.
+async fn stored_session(state: &AppState, project_id: &str, wd: &Path) -> String {
+    let entry = open_scripted(state, project_id, wd, Script::new(vec![Reply::text("ok")])).await;
+    let id = entry.session_id.clone();
+    entry
+        .controller
+        .send(Command::Submit {
+            prompt: Prompt::text("un premier message assez long"),
+        })
+        .unwrap();
+    entry.controller.wait_idle().await;
+    state.close_session(&id, false).await.unwrap();
+    id
+}
+
+/// A folder under `root`, created and canonical.
+fn folder(root: &Path, name: &str) -> PathBuf {
+    let dir = root.join(name);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::canonicalize(&dir).unwrap()
+}
+
+fn journal_file(home: &Path, project_id: &str) -> PathBuf {
+    home.join("desktop").join("relocations").join(format!("{project_id}.json"))
+}
+
+#[tokio::test]
+async fn a_project_whose_folder_is_deleted_still_lists_its_sessions() {
+    let home = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let wd = folder(root.path(), "projet");
+    let (state, project) = state_with_project(home.path(), &wd);
+    let id = stored_session(&state, &project, &wd).await;
+
+    std::fs::remove_dir_all(&wd).unwrap();
+    assert!(state.projects.get(&project).unwrap().missing);
+
+    let listed = state.sessions_list(&project).await.unwrap();
+    let ids: Vec<&str> = listed.iter().map(|s| s.id.as_str()).collect();
+    assert_eq!(ids, [id.as_str()]);
+    assert_eq!(listed[0].project_id.as_deref(), Some(project.as_str()));
+}
+
+#[tokio::test]
+async fn a_folder_that_is_gone_still_belongs_to_its_project_by_its_exact_path() {
+    let home = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let wd = folder(root.path(), "projet");
+    let (state, project) = state_with_project(home.path(), &wd);
+    std::fs::remove_dir_all(&wd).unwrap();
+
+    assert_eq!(state.project_id_of_dir(&wd).as_deref(), Some(project.as_str()));
+    assert_eq!(state.project_id_of_dir(&wd.join("sub")), None);
+}
+
+#[tokio::test]
+async fn relocating_moves_the_stored_sessions_and_keeps_the_project_id() {
+    let home = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let wd = folder(root.path(), "ancien");
+    let (state, project) = state_with_project(home.path(), &wd);
+    let id = stored_session(&state, &project, &wd).await;
+    std::fs::remove_dir_all(&wd).unwrap();
+    let moved = folder(root.path(), "nouveau");
+
+    let relocated = state
+        .relocate_project(&project, moved.to_str().unwrap())
+        .await
+        .unwrap();
+
+    assert_eq!(relocated.id, project);
+    assert_eq!(relocated.path, moved.display().to_string());
+    assert!(!relocated.missing);
+    let meta = SessionMeta::load(&files_dir(state.sessions_dir(), &id))
+        .unwrap()
+        .expect("the session is still stored");
+    assert_eq!(meta.working_dir, moved);
+    let listed = state.sessions_list(&project).await.unwrap();
+    assert_eq!(listed.iter().map(|s| s.id.as_str()).collect::<Vec<_>>(), [id.as_str()]);
+    assert!(!journal_file(home.path(), &project).exists(), "the journal is removed once done");
+}
+
+#[tokio::test]
+async fn relocating_onto_the_folder_of_another_project_is_a_conflict() {
+    let home = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let wd_a = folder(root.path(), "a");
+    let wd_b = folder(root.path(), "b");
+    let (state, project_a) = state_with_project(home.path(), &wd_a);
+    state.projects.add(wd_b.to_str().unwrap()).unwrap();
+
+    let err = state
+        .relocate_project(&project_a, wd_b.to_str().unwrap())
+        .await
+        .unwrap_err();
+
+    assert_eq!(err.code, IpcErrorCode::Conflict);
+    assert_eq!(state.projects.get(&project_a).unwrap().path, wd_a.display().to_string());
+    assert!(!journal_file(home.path(), &project_a).exists());
+}
+
+#[tokio::test]
+async fn a_leftover_journal_is_finished_when_the_store_already_has_the_new_path() {
+    let home = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let from = folder(root.path(), "ancien");
+    let (state, project) = state_with_project(home.path(), &from);
+    let id = stored_session(&state, &project, &from).await;
+    let to = folder(root.path(), "nouveau");
+    // The store moved; the sessions and the journal did not.
+    state.projects.relocate(&project, &to).unwrap();
+    let journal = serde_json::json!({
+        "schema": 1,
+        "project_id": project,
+        "from": from,
+        "to": to,
+        "sessions": [id],
+    });
+    std::fs::create_dir_all(journal_file(home.path(), &project).parent().unwrap()).unwrap();
+    std::fs::write(journal_file(home.path(), &project), journal.to_string()).unwrap();
+
+    state.recover_relocations();
+
+    let meta = SessionMeta::load(&files_dir(state.sessions_dir(), &id)).unwrap().unwrap();
+    assert_eq!(meta.working_dir, to);
+    assert!(!journal_file(home.path(), &project).exists());
+}
+
+#[tokio::test]
+async fn a_leftover_journal_is_undone_when_the_store_still_has_the_old_path() {
+    let home = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let from = folder(root.path(), "ancien");
+    let (state, project) = state_with_project(home.path(), &from);
+    let id = stored_session(&state, &project, &from).await;
+    let to = folder(root.path(), "nouveau");
+    // The session was already rewritten to the new folder when the run stopped.
+    let dir = files_dir(state.sessions_dir(), &id);
+    let mut meta = SessionMeta::load(&dir).unwrap().unwrap();
+    meta.working_dir = to.clone();
+    meta.save(&dir).unwrap();
+    let journal = serde_json::json!({
+        "schema": 1,
+        "project_id": project,
+        "from": from,
+        "to": to,
+        "sessions": [id],
+    });
+    std::fs::create_dir_all(journal_file(home.path(), &project).parent().unwrap()).unwrap();
+    std::fs::write(journal_file(home.path(), &project), journal.to_string()).unwrap();
+
+    state.recover_relocations();
+
+    let meta = SessionMeta::load(&dir).unwrap().unwrap();
+    assert_eq!(meta.working_dir, from, "back in the folder the project still has");
+    assert_eq!(state.projects.get(&project).unwrap().path, from.display().to_string());
+    assert!(!journal_file(home.path(), &project).exists());
 }

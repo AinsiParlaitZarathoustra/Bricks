@@ -15,7 +15,7 @@
 //! run's record must be written.
 
 use super::io_error;
-use super::run_labels::{append_line, check_session_id};
+use super::run_labels::{append_line, check_session_id, move_lines};
 use crate::contract::{IpcResult, RunCommand, RunFile, RunRecord, RunUsageRecord};
 use bricks_agent::control::{Envelope, Event, RunOutcome, WrittenFile, cap_text};
 use bricks_tools::preview::ChangeKind;
@@ -117,11 +117,38 @@ impl RunRecordStore {
         check_session_id(session_id)?;
         let mut state = self.state.lock();
         state.deleted.insert(session_id.to_string());
+        // What earlier revisions set aside goes with the session.
+        let aside = self.dir.join(format!("{session_id}.revised.jsonl"));
+        if let Err(e) = std::fs::remove_file(&aside)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            return Err(io_error("enregistrements des exécutions", e));
+        }
         match std::fs::remove_file(self.path(session_id)) {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(io_error("enregistrements des exécutions", e)),
         }
+    }
+
+    /// Sets aside the records of the runs of the messages from `user_index`
+    /// on (a revision replaced them), in `<session_id>.revised.jsonl`.
+    /// Blocking I/O: call from `spawn_blocking`.
+    pub fn set_aside_from(&self, session_id: &str, user_index: u32) -> IpcResult<usize> {
+        check_session_id(session_id)?;
+        let state = self.state.lock();
+        if state.deleted.contains(session_id) {
+            return Ok(0);
+        }
+        move_lines(
+            &self.path(session_id),
+            &self.dir.join(format!("{session_id}.revised.jsonl")),
+            |line| {
+                serde_json::from_str::<RunRecord>(line)
+                    .is_ok_and(|r| r.user_index.is_some_and(|i| i >= user_index))
+            },
+        )
+        .map_err(|e| io_error("enregistrements des exécutions", e))
     }
 
     /// Whether the session has a records file (for the deletion check).
@@ -1481,5 +1508,68 @@ mod tests {
         );
         assert_eq!(listed[1].usage, None);
         assert_eq!(listed[1].assistant_text, "deux");
+    }
+}
+
+#[cfg(test)]
+mod revision_tests {
+    use super::*;
+
+    fn at_index(run: &str, index: Option<u32>) -> RunRecord {
+        RunRecord {
+            version: RECORD_VERSION,
+            run_id: run.into(),
+            user_index: index,
+            started_at: 1,
+            finished_at: Some(6),
+            outcome: Some("succeeded".into()),
+            files: vec![],
+            commands: vec![],
+            assistant_text: format!("texte de {run}"),
+            usage: None,
+        }
+    }
+
+    #[test]
+    fn a_revision_sets_aside_the_records_of_its_message_and_later_ones() {
+        let root = tempfile::tempdir().unwrap();
+        let store = RunRecordStore::at(root.path().join("run-records"));
+        let first = at_index("run_a", Some(0));
+        let second = at_index("run_b", Some(1));
+        let third = at_index("run_c", Some(4));
+        let unproven = at_index("run_x", None);
+        for record in [&first, &second, &third, &unproven] {
+            store.append("s1", record).unwrap();
+        }
+
+        assert_eq!(store.set_aside_from("s1", 1).unwrap(), 2);
+
+        assert_eq!(store.list("s1").unwrap(), vec![first, unproven]);
+        let aside = std::fs::read_to_string(root.path().join("run-records").join("s1.revised.jsonl")).unwrap();
+        assert_eq!(aside.lines().count(), 2);
+        assert!(aside.contains("run_b") && aside.contains("run_c"), "{aside}");
+    }
+
+    #[test]
+    fn a_session_without_records_moves_none() {
+        let root = tempfile::tempdir().unwrap();
+        let store = RunRecordStore::at(root.path().join("run-records"));
+        assert_eq!(store.set_aside_from("s1", 0).unwrap(), 0);
+        assert!(store.list("s1").unwrap().is_empty());
+    }
+
+    #[test]
+    fn nothing_is_set_aside_once_the_session_is_deleted() {
+        let root = tempfile::tempdir().unwrap();
+        let store = RunRecordStore::at(root.path().join("run-records"));
+        let aside = root.path().join("run-records").join("s1.revised.jsonl");
+        store.append("s1", &at_index("run_a", Some(0))).unwrap();
+        store.append("s1", &at_index("run_b", Some(1))).unwrap();
+        assert_eq!(store.set_aside_from("s1", 1).unwrap(), 1);
+        assert!(aside.exists());
+        store.delete("s1").unwrap();
+        assert_eq!(store.set_aside_from("s1", 0).unwrap(), 0);
+        assert!(!aside.exists(), "deleting the session removes its set-aside records");
+        assert!(store.list("s1").unwrap().is_empty());
     }
 }

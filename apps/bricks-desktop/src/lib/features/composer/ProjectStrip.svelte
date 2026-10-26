@@ -77,7 +77,7 @@
 
 <!-- A conversation without a project has no folder or Git state to show. -->
 {#if !project?.chats}
-<div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-[13px]">
+<div class="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-ui">
   {#if shown.kind === 'idle'}
     <p class="text-muted-foreground">Aucun projet sélectionné : créez-en un avec « Nouveau projet ».</p>
   {:else if project}

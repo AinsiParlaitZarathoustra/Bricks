@@ -254,6 +254,15 @@ impl AppState {
                     .is_some_and(|d| self.projects.is_chat_dir(d))
             });
             all
+        } else if project.missing {
+            // A vanished folder resolves to nothing: its conversations are the
+            // ones recorded under its exact path (listed, to be moved with it).
+            let folder = PathBuf::from(&project.path);
+            let mut all = list_sessions(self.sessions_dir())
+                .await
+                .map_err(|e| io_error("conversations", e))?;
+            all.retain(|s| s.working_dir.as_deref() == Some(folder.as_path()));
+            all
         } else {
             let scope = SessionScope::Workspace(PathBuf::from(&project.path));
             list_sessions_in(self.sessions_dir(), &scope)
@@ -397,7 +406,9 @@ impl AppState {
         // A submit's attachment copies are checked here (an image needs a model
         // with image input) and kept with the run it starts.
         let copies = match &command {
-            Command::Submit { prompt } => self.submit_copies(&entry, prompt)?,
+            Command::Submit { prompt } | Command::Revise { prompt, .. } => {
+                self.submit_copies(&entry, prompt)?
+            }
             _ => Vec::new(),
         };
         let label = display.as_deref().and_then(normalize_label);
@@ -443,7 +454,7 @@ impl AppState {
 
     /// Takes the session out of the registry, cancels its work, waits for
     /// its save, closes it and stops its consumer.
-    async fn retire(&self, entry: &Arc<OpenSession>) {
+    pub(super) async fn retire(&self, entry: &Arc<OpenSession>) {
         self.sessions.lock().remove(&entry.session_id);
         if !settle(&entry.controller, SETTLE).await {
             eprintln!(

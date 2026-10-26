@@ -9,6 +9,7 @@
   import RunEndCard from './RunEndCard.svelte'
   import ResponseCopy from './ResponseCopy.svelte'
   import AgentLine from './AgentLine.svelte'
+  import WorkingLine from './WorkingLine.svelte'
 
   let { item, conversation }: { item: TimelineItem; conversation: Conversation } = $props()
 
@@ -18,6 +19,10 @@
 
 {#if item.kind === 'user'}
   <UserMessage {item} {conversation} />
+  <!-- The run at work shows its time right under the message that started it. -->
+  {#if item.runId && item.runId === conversation.runningRunId}
+    <WorkingLine {conversation} />
+  {/if}
 {:else if item.kind === 'assistant'}
   <AssistantMessage {item} {conversation} />
 {:else if item.kind === 'tool'}

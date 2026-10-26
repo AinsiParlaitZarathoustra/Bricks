@@ -691,6 +691,47 @@ pub(crate) async fn clear_context(agent: &Agent) -> Result<usize> {
     Ok(n)
 }
 
+/// Cut the active history before `position` (a past user message is being
+/// revised). The history as it was is kept as a snapshot (stored with the
+/// session) and stays in the raw history. Returns the messages removed.
+pub(crate) async fn revise_context(agent: &Agent, position: usize) -> Result<usize> {
+    let before = agent.messages.lock().clone();
+    if position > before.len() {
+        return Err(CerseiError::InvalidInput(format!(
+            "the revised message is not in the active context ({position} of {})",
+            before.len()
+        )));
+    }
+    let removed = before.len() - position;
+    let number = agent.snapshots.lock().len() + 1;
+    let memory_key = match (&agent.memory, &agent.session_id) {
+        (Some(memory), Some(session_id)) => {
+            let key = bricks_memory::session_keys::snapshot(session_id, number);
+            memory.store(&key, &before).await?;
+            Some(key)
+        }
+        _ => None,
+    };
+    agent.snapshots.lock().push(crate::CompactionSnapshot {
+        number,
+        messages: before,
+        memory_key,
+    });
+    agent.compaction_state.lock().applied = number;
+    let kept = {
+        let mut messages = agent.messages.lock();
+        messages.truncate(position);
+        messages.clone()
+    };
+    agent.forget_skills_absent_from(&kept);
+    agent
+        .context
+        .lock()
+        .invalidate("a past message was revised");
+    save_session(agent).await?;
+    Ok(removed)
+}
+
 /// The long-term memory's maintenance after a run, reported as its own
 /// phase: started, then finished (completed, cancelled or failed). The
 /// answer was already delivered; a failure here never changes it.

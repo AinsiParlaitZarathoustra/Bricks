@@ -6,10 +6,13 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "tokens:generate": "node scripts/generate-tokens.mjs",
+    "tokens:check": "node scripts/generate-tokens.mjs --check",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json",
     "tauri": "tauri",
     "test:unit": "vitest run --config tests/vitest.config.ts",
+    "test:styles": "node scripts/compare-css-centralization.mjs",
     "test:e2e": "wdio run tests/e2e/wdio.conf.ts",
     "test:types": "tsc -p tests/tsconfig.json"
   },

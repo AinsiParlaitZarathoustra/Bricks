@@ -120,6 +120,21 @@
 		items[next]?.focus();
 	}
 
+	/**
+	 * Marks a title clipped by its row (`data-clipped`), so only long titles fade out.
+	 * Re-checked when the row is resized and when the title changes.
+	 */
+	function fadeWhenClipped(title: string) {
+		return (element: HTMLElement) => {
+			void title;
+			const update = () => element.toggleAttribute('data-clipped', element.scrollWidth > element.clientWidth + 0.5);
+			const observer = new ResizeObserver(update);
+			observer.observe(element);
+			update();
+			return () => observer.disconnect();
+		};
+	}
+
 	function askDelete(session: SessionItem) {
 		keepFocus = true;
 		deleteTarget = session;
@@ -138,19 +153,19 @@
 		<li>
 			<div
 				class={cn(
-					'group flex items-center gap-1 rounded-md pr-1 transition-colors',
+					'group relative flex items-center rounded-md transition-colors',
 					current ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'hover:bg-sidebar-accent/60'
 				)}
 			>
 				{#if editingId === session.id}
-					<div class={cn('min-w-0 flex-1 py-1 pr-1.5', nested ? 'pl-7' : 'pl-1.5')}>
+					<div class={cn('min-w-0 flex-1 py-1 pr-9', nested ? 'pl-7' : 'pl-1.5')}>
 						<Input
 							{@attach focusAndSelect}
 							bind:value={draft}
 							aria-label="Nouveau titre de la conversation"
 							maxlength={200}
 							autocomplete="off"
-							class="h-8 text-[12.5px]"
+							class="h-8 text-compact"
 							onkeydown={onRenameKey}
 							onblur={() => void endRename(true, false)}
 						/>
@@ -160,7 +175,7 @@
 						type="button"
 						data-session-item={session.id}
 						class={cn(
-							'flex min-w-0 flex-1 items-center gap-2 rounded-md py-1.5 pr-2 text-left',
+							'flex min-w-0 flex-1 items-center gap-2 rounded-md py-1.5 pr-2 text-left group-focus-within:pr-9 group-hover:pr-9 group-has-[[data-state=open]]:pr-9',
 							nested ? 'pl-8' : 'pl-2'
 						)}
 						aria-current={current ? 'true' : undefined}
@@ -172,7 +187,11 @@
 						}}
 						onkeydown={(event) => onItemKeydown(event, session)}
 					>
-						<span class="min-w-0 flex-1 truncate text-[12.5px]">{displayTitle(session.title)}</span>
+						<span
+							{@attach fadeWhenClipped(session.title)}
+							class="title-fade min-w-0 flex-1 overflow-hidden text-compact whitespace-nowrap"
+							>{displayTitle(session.title)}</span
+						>
 						{#if session.running}
 							<StatusDot status="running" label="Conversation en cours" />
 						{/if}
@@ -186,7 +205,7 @@
 								{...props}
 								variant="ghost"
 								size="icon-sm"
-								class="shrink-0 text-muted-foreground opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
+								class="absolute top-1/2 right-1 shrink-0 -translate-y-1/2 text-muted-foreground opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
 								aria-label={`Actions pour la conversation ${displayTitle(session.title)}`}
 							>
 								<EllipsisVertical class="size-4" aria-hidden="true" />
@@ -247,3 +266,12 @@
 		</AlertDialog.Footer>
 	</AlertDialog.Content>
 </AlertDialog.Root>
+
+<style>
+	/* A clipped title fades out over its last pixels instead of ending on an ellipsis. */
+	.title-fade:global([data-clipped]) {
+		--fade: 24px;
+		-webkit-mask-image: linear-gradient(to right, #000 calc(100% - var(--fade)), transparent);
+		mask-image: linear-gradient(to right, #000 calc(100% - var(--fade)), transparent);
+	}
+</style>

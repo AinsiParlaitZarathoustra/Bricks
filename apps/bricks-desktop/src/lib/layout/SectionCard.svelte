@@ -39,7 +39,7 @@
 	class={cn('rounded-lg border border-border bg-card text-card-foreground', className)}
 >
 	<div class="flex items-center gap-1 pr-1">
-		<svelte:element this={headingTag} class="min-w-0 flex-1 text-[13px] font-medium">
+		<svelte:element this={headingTag} class="min-w-0 flex-1 text-ui font-medium">
 			<Collapsible.Trigger
 				class="group flex w-full min-w-0 items-center gap-2 rounded-lg px-3 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
 			>

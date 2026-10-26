@@ -314,6 +314,13 @@ pub enum Event {
     ContextCleared {
         messages_removed: usize,
     },
+    /// A `revise` cut the active context before the user message at
+    /// `user_index` (among the user-role messages); the run that replaces
+    /// it follows.
+    HistoryRevised {
+        user_index: usize,
+        messages_removed: usize,
+    },
     SessionSaved,
     /// The model named the session (its first title was the shortened
     /// first prompt).
@@ -551,6 +558,7 @@ impl Event {
             Event::ModelChanged { .. } => "model_changed",
             Event::ReasoningChanged { .. } => "reasoning_changed",
             Event::ContextCleared { .. } => "context_cleared",
+            Event::HistoryRevised { .. } => "history_revised",
             Event::SessionSaved => "session_saved",
             Event::TitleChanged { .. } => "title_changed",
             Event::PlanUpdated { .. } => "plan_updated",
@@ -691,6 +699,20 @@ pub enum Command {
     /// Start a run. Refused while a run is active (never queued silently),
     /// or when one of the prompt's `skills` cannot be used.
     Submit { prompt: Prompt },
+    /// Replace a past user message and run again from it: the active
+    /// context is cut before that message (the context as it was is kept
+    /// as a snapshot, and stays in the raw history), then `prompt` is
+    /// submitted as by `submit`. `user_index` is the message's index among
+    /// the user-role messages of the active history; `original` its text,
+    /// as the person saw it. Refused, with nothing changed, while anything
+    /// runs, when that message is not there with that text (the history
+    /// changed, or it was compacted away), or for the same reasons as a
+    /// submit.
+    Revise {
+        user_index: usize,
+        original: String,
+        prompt: Prompt,
+    },
     /// Cancel the active run, or else the memory maintenance in progress.
     /// Always accepted immediately.
     Cancel,
@@ -784,6 +806,7 @@ impl Command {
     pub fn name(&self) -> &'static str {
         match self {
             Command::Submit { .. } => "submit",
+            Command::Revise { .. } => "revise",
             Command::Cancel => "cancel",
             Command::SetModel { .. } => "set_model",
             Command::SetReasoning { .. } => "set_reasoning",

@@ -32,7 +32,7 @@
 
 <ul
   aria-label={agentName ? `Fichiers modifiés par ${agentName}` : 'Fichiers modifiés'}
-  class={inline ? 'contents' : 'flex flex-col gap-0.5 py-0.5 text-[13px]'}
+  class={inline ? 'contents' : 'flex flex-col gap-0.5 py-0.5 text-ui'}
 >
   {#each item.files as file, i (`${file.absolute ?? file.path}#${i}`)}
     <li class="flex min-w-0 items-center gap-2">

@@ -3,7 +3,7 @@
  *
  * - `theme.mode` is the user's choice: 'light' | 'dark' | 'system'.
  * - `theme.resolved` is what is actually shown: 'light' | 'dark'.
- * - The `dark` class is toggled on <html>; CSS tokens live in src/app.css.
+ * - The `dark` class is toggled on <html>; CSS tokens are generated from src/lib/theme/tokens.json.
  *
  * Persistence is the caller's job (prefs IPC): read the saved value, pass it
  * to `initTheme()` once at startup, and call `setTheme()` when the user picks
@@ -14,12 +14,13 @@
  * the mode changes and when the user edits a colour, so no caller has to
  * remember to apply them at start-up.
  *
- * `fontsReady` resolves once the bundled Geist faces are loaded (the terminal
+ * `fontsReady` resolves once the bundled Google Sans faces are loaded (the terminal
  * refits after it).
  */
 
 import { app } from '$lib/state/app.svelte';
 import { applyPaletteVariables, paletteVariables } from './palette';
+import tokens from './tokens.json';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 export type ResolvedTheme = 'light' | 'dark';
@@ -83,16 +84,16 @@ if (typeof document !== 'undefined') {
 	});
 }
 
-/** Resolves once the bundled Geist faces (UI and mono) are loaded. Never rejects: the fallback fonts stay if a face fails. */
+/** Resolves once the bundled Google Sans faces (UI and mono) are loaded. Never rejects: the fallback fonts stay if a face fails. */
 export const fontsReady: Promise<void> = loadBundledFonts();
 
 async function loadBundledFonts(): Promise<void> {
 	if (typeof document === 'undefined' || !document.fonts) return;
 	try {
 		await Promise.all([
-			document.fonts.load('400 1em Geist'),
-			document.fonts.load('500 1em Geist'),
-			document.fonts.load('400 1em "Geist Mono"')
+			document.fonts.load(`${tokens.fonts.ui.defaultWeight} 1em "${tokens.fonts.ui.family}"`),
+			document.fonts.load(`500 1em "${tokens.fonts.ui.family}"`),
+			document.fonts.load(`400 1em "${tokens.fonts.code.family}"`)
 		]);
 		await document.fonts.ready;
 	} catch {
