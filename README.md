@@ -9,6 +9,9 @@
 
 [Quick start](#quick-start) · [What it does](#what-it-does) · [Configuration](#configuration) · [The engine as a library](#the-engine-as-a-library) · [Documentation](#documentation) · [License](#license)
 
+
+**<ins>The README is outdated and will be updated very soon.</ins>**
+
 </div>
 
 Bricks is a tool for coding with AI agents. It has three parts:
