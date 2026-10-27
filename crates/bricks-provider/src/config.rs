@@ -297,8 +297,8 @@ pub struct ModelConfig {
     /// The server streams responses. Default false (non-streaming request).
     #[serde(default)]
     pub streaming: bool,
-    /// The server supports tool calls. Default false.
-    #[serde(default)]
+    /// Tool calls: always on. The key is accepted and a `false` is ignored.
+    #[serde(default = "always", deserialize_with = "always_on")]
     pub tool_calls: bool,
     pub limits: Limits,
     #[serde(default)]
@@ -342,6 +342,16 @@ impl Protocol {
             Protocol::ChatCompletions => None,
         }
     }
+}
+
+fn always() -> bool {
+    true
+}
+
+/// A flag that is always on, whatever is written.
+fn always_on<'de, D: Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
+    bool::deserialize(d)?;
+    Ok(true)
 }
 
 fn default_text_only() -> Vec<Modality> {
@@ -1508,6 +1518,16 @@ mod tests {
         assert!(err(&dup).message.contains("listed twice"));
         let unknown = BASIC.replace("[\"text\", \"image\"]", "[\"text\", \"smell\"]");
         assert!(err(&unknown).field.starts_with("input_modalities"));
+    }
+
+    #[test]
+    fn tool_calls_are_always_on() {
+        let absent = BASIC.replace("tool_calls = true\n", "");
+        let off = BASIC.replace("tool_calls = true\n", "tool_calls = false\n");
+        for text in [BASIC.to_string(), absent, off] {
+            let cfg = ProvidersConfig::from_toml_str(&text, "t").unwrap();
+            assert!(cfg.providers[0].models[0].tool_calls);
+        }
     }
 
     #[test]

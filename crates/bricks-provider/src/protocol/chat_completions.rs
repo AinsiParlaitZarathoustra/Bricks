@@ -190,22 +190,18 @@ fn push_assistant(out: &mut Vec<Value>, msg: &Message, ctx: &BuildCtx) {
         })
         .collect();
 
-    let mut m = if tool_calls.is_empty() {
-        // An assistant turn without text (reasoning only, or emptied) is
-        // `null`: some servers refuse an empty string there.
-        let content = if text.is_empty() {
-            Value::Null
-        } else {
-            json!(text)
-        };
-        json!({ "role": "assistant", "content": content })
+    // An assistant turn without text (reasoning only, tool calls only, or
+    // emptied) says `content: null`: some servers refuse an empty string
+    // there, and some refuse a missing `content` too.
+    let content = if text.is_empty() {
+        Value::Null
     } else {
-        let mut m = json!({ "role": "assistant", "tool_calls": tool_calls });
-        if !text.is_empty() {
-            m["content"] = json!(text);
-        }
-        m
+        json!(text)
     };
+    let mut m = json!({ "role": "assistant", "content": content });
+    if !tool_calls.is_empty() {
+        m["tool_calls"] = Value::Array(tool_calls);
+    }
     // Some servers (reasoning models behind this protocol) reject a request
     // with tools whose earlier assistant turns lost their reasoning — every
     // turn, not only tool-call turns (DeepSeek thinking mode answers 400).
@@ -727,8 +723,9 @@ mod tests {
         );
     }
 
-    /// An assistant turn with no text and no tool call is `null`, never
-    /// `""` (some servers refuse an empty string); a text stays a string.
+    /// An assistant turn without text says `content: null`, never `""` nor
+    /// nothing (OpenCode's Beam refuses both), with or without tool calls;
+    /// a text stays a string.
     #[test]
     fn an_assistant_turn_without_text_has_null_content() {
         let mut r = req();
@@ -737,11 +734,26 @@ mod tests {
             signature: String::new(),
         }]));
         r.messages.push(Message::user("next"));
+        r.messages.push(Message::assistant_blocks(vec![
+            ContentBlock::Thinking {
+                thinking: "plan".into(),
+                signature: String::new(),
+            },
+            ContentBlock::ToolUse {
+                id: "c".into(),
+                name: "t".into(),
+                input: json!({}),
+            },
+        ]));
+        r.messages.push(Message::user("again"));
         r.messages.push(Message::assistant("done"));
         let body = build_body(&ctx(&compat(), true), &r).unwrap();
-        assert_eq!(body["messages"][0]["role"], "assistant");
-        assert!(body["messages"][0]["content"].is_null());
-        assert_eq!(body["messages"][2]["content"], "done");
+        let m = &body["messages"];
+        assert!(m[0].get("content").is_some_and(Value::is_null));
+        assert!(m[2].get("content").is_some_and(Value::is_null), "{}", m[2]);
+        assert_eq!(m[2]["tool_calls"][0]["id"], "c");
+        assert_eq!(m[4]["content"], "done");
+        assert!(m[4].get("tool_calls").is_none());
     }
 
     #[test]

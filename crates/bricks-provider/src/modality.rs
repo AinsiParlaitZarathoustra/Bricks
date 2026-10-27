@@ -284,11 +284,6 @@ pub fn validate_messages(
     caps: &Capabilities,
     protocol: Protocol,
 ) -> Result<(), String> {
-    if has_tools && !caps.tool_calls {
-        return Err(
-            "tools were provided, but this model does not declare `tool_calls = true`".into(),
-        );
-    }
     let eff = caps.effective(protocol);
     for m in requested_outputs {
         if !eff.output.contains(m) {
@@ -518,15 +513,10 @@ mod tests {
     }
 
     #[test]
-    fn tools_require_the_declaration() {
+    fn tools_are_always_allowed() {
         let mut c = caps(&[Text], &[Text], &[]);
         c.tool_calls = false;
-        assert!(
-            validate_messages(&[], &[], true, &c, Protocol::Responses)
-                .unwrap_err()
-                .contains("tool_calls")
-        );
-        assert!(validate_messages(&[], &[], false, &c, Protocol::Responses).is_ok());
+        assert!(validate_messages(&[], &[], true, &c, Protocol::Responses).is_ok());
     }
 
     #[test]
