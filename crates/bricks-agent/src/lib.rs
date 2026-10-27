@@ -303,7 +303,8 @@ pub struct Agent {
     pub(crate) retry_after_max_wait: std::time::Duration,
     cost_tracker: Arc<CostTracker>,
     auto_compact: bool,
-    tool_result_budget: usize,
+    /// Set by the builder; `None`: scaled to the model.
+    tool_result_budget: Option<usize>,
     /// Occupation, measurements and session totals of the context.
     pub(crate) context: Arc<parking_lot::Mutex<context::ContextManager>>,
     /// Reduces tool outputs and saves their originals.
@@ -990,7 +991,7 @@ pub struct AgentBuilder {
     cancel_token: Option<tokio_util::sync::CancellationToken>,
     auto_compact: bool,
     compact_threshold: Option<f64>,
-    tool_result_budget: usize,
+    tool_result_budget: Option<usize>,
     turns_elapsed_cadence: u32,
     compression_level: Option<bricks_compression::CompressionLevel>,
     context_policy: Option<context::ContextPolicy>,
@@ -1037,7 +1038,7 @@ impl Default for AgentBuilder {
             cancel_token: None,
             auto_compact: true,
             compact_threshold: None,
-            tool_result_budget: 50_000,
+            tool_result_budget: None,
             turns_elapsed_cadence: 10,
             compression_level: None,
             context_policy: None,
@@ -1286,7 +1287,7 @@ impl AgentBuilder {
     }
 
     pub fn tool_result_budget(mut self, chars: usize) -> Self {
-        self.tool_result_budget = chars;
+        self.tool_result_budget = Some(chars);
         self
     }
 

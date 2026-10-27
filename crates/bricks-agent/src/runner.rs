@@ -160,6 +160,21 @@ pub fn apply_tool_result_budget(messages: &mut [Message], budget_chars: usize) -
     })
 }
 
+/// The smallest budget of tool results kept in the active history.
+const MIN_TOOL_RESULT_BUDGET: usize = 50_000;
+
+/// Chars of tool results kept in the active history: the configured budget,
+/// or else a quarter of the model's declared input (about four chars a
+/// token), never under [`MIN_TOOL_RESULT_BUDGET`]. Beyond, compaction
+/// takes over.
+pub(crate) fn tool_result_budget(configured: Option<usize>, model: &ModelView) -> usize {
+    configured.unwrap_or_else(|| {
+        usize::try_from(model.limits.max_input_tokens)
+            .unwrap_or(usize::MAX)
+            .max(MIN_TOOL_RESULT_BUDGET)
+    })
+}
+
 /// Like [`apply_tool_result_budget`]; `placeholder(tool_use_id, len)` writes
 /// the replacement text (normally naming the saved original). The six most
 /// recent messages are never touched.
@@ -1123,6 +1138,7 @@ async fn run_loop(
         // Apply tool result budget to keep context manageable. Removed
         // results name their saved original, and the measurement of the old
         // history no longer applies.
+        let tool_result_chars = tool_result_budget(agent.tool_result_budget, &model_view(agent));
         let removed = {
             let mut msgs = agent.messages.lock();
             let refs = agent.raw_refs.lock();
@@ -1130,7 +1146,7 @@ async fn run_loop(
             let protected = agent.active_skill_markers();
             apply_tool_result_budget_protected(
                 &mut msgs,
-                agent.tool_result_budget,
+                tool_result_chars,
                 &protected,
                 |id, len| {
                     let saved = refs.get(id).cloned().or_else(|| {
@@ -3128,6 +3144,27 @@ mod dispatch_tests {
             1_000_000,
             |_, _| unreachable!()
         ));
+    }
+
+    #[test]
+    fn the_tool_result_budget_follows_the_model_unless_set() {
+        let model = |input| ModelView {
+            selection: "m".into(),
+            limits: bricks_provider::ModelLimits {
+                max_input_tokens: input,
+                max_output_tokens: 0,
+            },
+            reasoning_resent: false,
+            token_counting: false,
+            limits_reported: true,
+        };
+        assert_eq!(tool_result_budget(None, &model(1_000_000)), 1_000_000);
+        assert_eq!(
+            tool_result_budget(None, &model(8_000)),
+            MIN_TOOL_RESULT_BUDGET
+        );
+        assert_eq!(tool_result_budget(None, &model(0)), MIN_TOOL_RESULT_BUDGET);
+        assert_eq!(tool_result_budget(Some(20_000), &model(1_000_000)), 20_000);
     }
 }
 

@@ -423,7 +423,7 @@ Méthode
 - Lis le code avant de le modifier, puis fais le changement le plus simple qui résout le problème. Respecte les conventions existantes.
 - Si une approche échoue, analyse pourquoi et change de stratégie plutôt que d'insister.";
 
-const PARALLEL_BULLET: &str = "- Parallélise les appels indépendants lorsque c'est utile. Utilise l'outil le plus adapté : recherche et lecture dédiées pour explorer, outil d'exécution pour les commandes.";
+const PARALLEL_BULLET: &str = "- Regroupe dans une même réponse les appels indépendants, par exemple la lecture de plusieurs fichiers déjà repérés. Utilise l'outil le plus adapté : recherche et lecture dédiées pour explorer, outil d'exécution pour les commandes.";
 
 const FOUNDATION_TAIL: &str = "
 Rigueur et honnêteté
