@@ -6,8 +6,9 @@
 // - The numerator is the active occupation (`context_used.tokens`) whatever its
 //   provenance (measured, counted, mixed or estimated). The provenance stays in
 //   the engine data; the line shows the number alone.
-// - The denominator is the model's total window (`context_window.total`). No
-//   silent replacement by the input limit: a missing window shows `—`.
+// - The denominator is the input budget (`input_limit`, the model's
+//   `max_input_tokens`). The output is a separate limit, never added to it. A
+//   missing budget shows `—`.
 // - A missing numerator shows `—`. A stale measure (model change, compaction,
 //   clear) shows `—` for both figures until the next `context` event.
 // - Cumulative billed totals are never a numerator.
@@ -37,7 +38,7 @@ export function formatCost(usd: number): string {
 export interface ContextFigures {
 	/** Occupation of the next request, `null` when unknown or stale. */
 	used: number | null;
-	/** Total window of the model, `null` when not reported or stale. */
+	/** Input budget of the model, `null` when not reported or stale. */
 	total: number | null;
 }
 
@@ -48,7 +49,7 @@ function isCount(n: unknown): n is number {
 export function contextFigures(status: ContextStatus | null, stale: boolean): ContextFigures {
 	if (!status || stale) return { used: null, total: null };
 	const used = status.context_used?.tokens;
-	const total = status.context_window?.total;
+	const total = status.input_limit;
 	return {
 		used: isCount(used) ? used : null,
 		total: isCount(total) && total > 0 ? total : null
@@ -66,7 +67,7 @@ export function contextLine(status: ContextStatus | null, stale: boolean): strin
 /**
  * The composer ring. `ratio` is the drawn fill, bounded to 0–1; `percent` the
  * real share (it may exceed 100). Both are `null` when the occupation or the
- * window is unknown or stale: the ring is then neutral, without a figure.
+ * input budget is unknown or stale: the ring is then neutral, without a figure.
  */
 export interface ContextGauge {
 	used: number | null;

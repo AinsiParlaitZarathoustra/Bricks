@@ -291,7 +291,6 @@ mod tests {
             profiles: Vec::new(),
             default_profile: None,
             max_input_tokens: 1000,
-            context_window_tokens: None,
             input: input.iter().map(|s| s.to_string()).collect(),
             priced: false,
         };

@@ -110,8 +110,7 @@ export interface ContextUsed {
 
 export interface ContextWindow {
   model: string
-  /** Total window when known. */
-  total: number | null
+  /** The input budget (usable with the maximum output reserved). */
   max_input_tokens: number
   max_output_tokens: number | null
 }
@@ -658,7 +657,6 @@ export interface ModelChoice {
   profiles: ProfileChoice[]
   default_profile: string | null
   max_input_tokens: number
-  context_window_tokens: number | null
   /** Input modalities (`text`, `image`, ...). */
   input: string[]
   priced: boolean

@@ -50,7 +50,6 @@ pub struct ModelChoice {
     pub profiles: Vec<ProfileChoice>,
     pub default_profile: Option<String>,
     pub max_input_tokens: u64,
-    pub context_window_tokens: Option<u64>,
     /// Input modalities the model declares (`text`, `image`, ...).
     pub input: Vec<String>,
     /// A price is configured (otherwise costs are unknown).
@@ -94,7 +93,6 @@ impl ModelCatalog for bricks_provider::ProviderRegistry {
                         .collect(),
                     default_profile: r.reasoning.default.clone(),
                     max_input_tokens: r.limits.max_input_tokens,
-                    context_window_tokens: r.limits.context_window_tokens,
                     input: r.declared.input.iter().map(|m| m.to_string()).collect(),
                     priced: r.pricing.is_some(),
                 })
@@ -856,16 +854,24 @@ impl Controller {
         let agent = Arc::new(agent);
         meta.save(&files_dir(&cfg, &meta.id))?;
         let queue = Arc::new(EventQueue::new(&meta.id, cfg.queue_capacity));
+        // A resumed session's history is in the agent from the start: the
+        // first context status counts it, not only the prompt and the tools.
+        // An unreadable history still opens (as before): the first run
+        // reports the error when it tries again.
+        let mut history_warning = None;
         let message_count = if resumed {
-            session_store(&cfg)
-                .load(&meta.id)
-                .await
-                .map(|m| m.len())
-                .unwrap_or(0)
+            match agent.restore_history().await {
+                Ok(n) => n.unwrap_or(0),
+                Err(e) => {
+                    history_warning = Some(format!("history not loaded: {e}"));
+                    0
+                }
+            }
         } else {
             0
         };
         let mut all_warnings = project.bricks.diagnostics.clone();
+        all_warnings.extend(history_warning);
         all_warnings.extend(warnings);
         all_warnings.extend(
             profiles

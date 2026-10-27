@@ -386,11 +386,7 @@ fn apply_model_patch(table: &mut Table, patch: &ModelPatch) -> IpcResult<()> {
     if let Some(prices) = &patch.pricing {
         write_prices(table, prices)?;
     }
-    if patch.max_input_tokens.is_some()
-        || patch.max_output_tokens.is_some()
-        || patch.context_window_tokens.is_some()
-        || patch.clear_context_window
-    {
+    if patch.max_input_tokens.is_some() || patch.max_output_tokens.is_some() {
         let limits = table
             .get_mut("limits")
             .and_then(Item::as_table_like_mut)
@@ -401,15 +397,28 @@ fn apply_model_patch(table: &mut Table, patch: &ModelPatch) -> IpcResult<()> {
         if let Some(v) = patch.max_output_tokens {
             set_count(limits, "max_output_tokens", v)?;
         }
-        if patch.clear_context_window && patch.context_window_tokens.is_some() {
-            return Err(invalid(
-                "fenêtre de contexte : valeur et suppression demandées ensemble",
-            ));
-        }
-        if patch.clear_context_window {
-            limits.remove("context_window_tokens");
-        } else if let Some(v) = patch.context_window_tokens {
-            set_count(limits, "context_window_tokens", v)?;
+        // A former shared window goes: an input left unchanged keeps the
+        // budget it gave with the maximum output, `min(input, window - output)`.
+        if let Some(window) = limits.remove("context_window_tokens") {
+            let count = |limits: &dyn TableLike, key: &str| {
+                limits
+                    .get(key)
+                    .and_then(Item::as_integer)
+                    .and_then(|n| u64::try_from(n).ok())
+            };
+            if patch.max_input_tokens.is_none()
+                && let (Some(window), Some(input), Some(output)) = (
+                    window.as_integer().and_then(|n| u64::try_from(n).ok()),
+                    count(limits, "max_input_tokens"),
+                    count(limits, "max_output_tokens"),
+                )
+            {
+                set_count(
+                    limits,
+                    "max_input_tokens",
+                    input.min(window.saturating_sub(output)),
+                )?;
+            }
         }
     }
     // The profile list is replaced as a whole. The default must still name a
@@ -957,33 +966,6 @@ mod tests {
     }
 
     #[test]
-    fn an_optional_limit_is_added_then_removed() {
-        let set = model_update(
-            "local",
-            "big",
-            ModelPatch {
-                context_window_tokens: Some(40000),
-                ..Default::default()
-            },
-        );
-        let with = apply(PROVIDERS, &set, "test").unwrap();
-        assert!(with.contains("context_window_tokens = 40000"));
-        let clear = model_update(
-            "local",
-            "big",
-            ModelPatch {
-                clear_context_window: true,
-                ..Default::default()
-            },
-        );
-        let without = apply(&with, &clear, "test").unwrap();
-        assert_eq!(
-            without, PROVIDERS,
-            "adding then clearing gives the file back"
-        );
-    }
-
-    #[test]
     fn an_environment_variable_name_is_checked_and_refused_beside_an_inline_key() {
         for name in ["bad name", "1STARTS_WITH_DIGIT", "A-DASH"] {
             let err = apply(
@@ -1512,11 +1494,25 @@ mod tests {
     }
 
     #[test]
-    fn a_model_edit_keeps_the_context_window_it_does_not_touch() {
+    fn a_limits_edit_folds_the_former_window_into_the_input() {
         let text = PROVIDERS.replace(
             "max_input_tokens = 8000\nmax_output_tokens = 1000\n",
-            "max_input_tokens = 8000\nmax_output_tokens = 1000\ncontext_window_tokens = 16000\n",
+            "max_input_tokens = 8000\nmax_output_tokens = 1000\ncontext_window_tokens = 8500\n",
         );
+        // The output changes, the input is left: it keeps the budget the
+        // window gave with the new maximum output (8500 - 2000).
+        let edit = model_update(
+            "local",
+            "small",
+            ModelPatch {
+                max_output_tokens: Some(2000),
+                ..Default::default()
+            },
+        );
+        let next = apply(&text, &edit, "test").unwrap();
+        assert!(next.contains("max_input_tokens = 6500"), "{next}");
+        assert!(!next.contains("context_window_tokens"));
+        // An input given explicitly is kept as given.
         let edit = model_update(
             "local",
             "small",
@@ -1528,9 +1524,8 @@ mod tests {
         let next = apply(&text, &edit, "test").unwrap();
         assert_eq!(
             next,
-            text.replace("max_input_tokens = 8000", "max_input_tokens = 9000")
+            PROVIDERS.replace("max_input_tokens = 8000", "max_input_tokens = 9000")
         );
-        assert!(next.contains("context_window_tokens = 16000"));
     }
 
     // ─── Creation, documents, prices ───

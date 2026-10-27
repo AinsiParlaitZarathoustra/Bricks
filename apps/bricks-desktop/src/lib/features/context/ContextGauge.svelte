@@ -1,6 +1,6 @@
 <script lang="ts">
   // The composer's context ring, left of the model select: occupation of the
-  // next request over the model window (the same figures as the context card).
+  // next request over the input budget (the same figures as the context card).
   // Hover or focus shows a small panel. Unknown or stale: a neutral ring.
   import * as Tooltip from '$lib/components/ui/tooltip'
   import type { Conversation } from '$lib/state/conversation.svelte'
@@ -17,7 +17,7 @@
   const R = 6.5
   const CIRCUMFERENCE = 2 * Math.PI * R
   const dash = $derived(gauge.ratio === null ? 0 : gauge.ratio * CIRCUMFERENCE)
-  const label = $derived(gauge.percent === null ? 'Contexte : inconnu' : `Contexte : ${value}`)
+  const label = $derived(gauge.percent === null ? 'Contexte d’entrée : inconnu' : `Contexte d’entrée : ${value}`)
 </script>
 
 <Tooltip.Root delayDuration={150}>
@@ -47,7 +47,7 @@
     class="flex w-72 max-w-none flex-col items-stretch gap-2.5 rounded-xl border bg-popover px-3.5 py-3 text-popover-foreground shadow-md"
   >
     <div class="flex items-baseline justify-between gap-3">
-      <span class="text-ui font-medium">Contexte</span>
+      <span class="text-ui font-medium">Contexte d’entrée</span>
       <span class="font-mono text-xs text-muted-foreground tabular-nums">{value}</span>
     </div>
     <div class="h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">

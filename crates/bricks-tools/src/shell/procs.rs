@@ -548,7 +548,10 @@ mod imp {
             let pids: Vec<u32> = pids.iter().copied().filter(|&p| p > 0).collect();
             if mode == Mode::Auto
                 && let Some((report, wake, targets)) = kernel::open(&pids)
-                && let Ok(reports) = AsyncFd::new(report)
+                // SAFETY: `report` is an `OwnedFd` moved into the `AsyncFd`,
+                // which owns it until it drops: nothing else closes or
+                // replaces that descriptor meanwhile.
+                && let Ok(reports) = unsafe { AsyncFd::register(report) }
             {
                 let pending = targets.iter().copied().collect();
                 let watch = Watch {

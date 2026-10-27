@@ -318,6 +318,9 @@ pub struct Agent {
     pub(crate) compaction_state: Arc<parking_lot::Mutex<runner::CompactionState>>,
     /// Configuration diagnostics, reported once at the first run.
     pub(crate) config_notes: parking_lot::Mutex<Vec<String>>,
+    /// Messages of the stored history loaded when the session opened
+    /// ([`Agent::restore_history`]), announced by the first run.
+    pub(crate) restored_unannounced: parking_lot::Mutex<Option<usize>>,
     /// Cadence (in turns) at which `HookEvent::TurnsElapsed` fires. Default
     /// 10. Setting to 0 disables the event entirely. Used by the
     /// `SkillNudgeHook` for agent-curated skill review.
@@ -599,6 +602,19 @@ impl Agent {
     /// keeping it as a snapshot. Returns the messages removed.
     pub async fn revise_context(&self, position: usize) -> bricks_types::Result<usize> {
         runner::revise_context(self, position).await
+    }
+
+    /// Load the session's stored history now, before any run, so the
+    /// context measured until then is the whole history's (an estimate until
+    /// the next server measurement). The first run announces it and checks
+    /// the session's skills, as when it loads the history itself. Returns
+    /// the number of messages loaded.
+    pub async fn restore_history(&self) -> bricks_types::Result<Option<usize>> {
+        let loaded = runner::load_session_history(self).await?;
+        if loaded.is_some() {
+            *self.restored_unannounced.lock() = loaded;
+        }
+        Ok(loaded)
     }
 
     /// Whether a long-term memory is attached.
@@ -1527,6 +1543,7 @@ impl AgentBuilder {
             raw_refs: Arc::new(parking_lot::Mutex::new(std::collections::HashMap::new())),
             compaction_state: Arc::new(parking_lot::Mutex::new(runner::CompactionState::default())),
             config_notes: parking_lot::Mutex::new(bricks.diagnostics),
+            restored_unannounced: parking_lot::Mutex::new(None),
             turns_elapsed_cadence: if self.turns_elapsed_cadence == 0 {
                 u32::MAX
             } else {

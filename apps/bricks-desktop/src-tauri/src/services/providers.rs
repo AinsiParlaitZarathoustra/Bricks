@@ -108,7 +108,6 @@ fn provider_view(p: &ProviderConfig, has_credentials: bool) -> ProviderView {
                 tool_calls: m.tool_calls,
                 max_input_tokens: m.limits.max_input_tokens,
                 max_output_tokens: m.limits.max_output_tokens,
-                context_window_tokens: m.limits.context_window_tokens,
                 reasoning_default: m.reasoning.default.clone(),
                 profiles: m
                     .reasoning

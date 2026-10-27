@@ -5,11 +5,7 @@ import type { ReasoningProfileEdit } from "./ReasoningProfileEdit";
 /**
  * Fields of a model the desktop form edits. `None` = unchanged.
  */
-export type ModelPatch = { name: string | null, api_model: string | null, max_input_tokens: number | null, max_output_tokens: number | null, context_window_tokens: number | null, 
-/**
- * Remove `context_window_tokens` (unknown window).
- */
-clear_context_window: boolean, input_modalities: Array<string> | null, 
+export type ModelPatch = { name: string | null, api_model: string | null, max_input_tokens: number | null, max_output_tokens: number | null, input_modalities: Array<string> | null, 
 /**
  * MIME types of the accepted documents; empty removes the key. Leaving
  * `document` out of `input_modalities` removes it too.

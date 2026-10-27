@@ -153,9 +153,7 @@ pub struct ContextUsed {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContextWindow {
     pub model: String,
-    /// Total window shared by input and output; `None` when the
-    /// configuration does not state one.
-    pub total: Option<u64>,
+    /// The input budget (usable with the maximum output reserved).
     pub max_input_tokens: u64,
     /// `None` when the provider does not report it.
     pub max_output_tokens: Option<u64>,
@@ -429,7 +427,6 @@ impl ModelView {
                 limits: ModelLimits {
                     max_input_tokens: provider.context_window(label),
                     max_output_tokens: 0,
-                    context_window_tokens: None,
                 },
                 reasoning_resent: true,
                 token_counting: false,
@@ -676,17 +673,13 @@ impl ContextManager {
         } else {
             view.max_output as u64
         };
-        let input_limit = limits.input_budget(reserved_output);
+        // The input budget is the declared one: the output is a separate
+        // limit, never taken from it.
+        let input_limit = limits.max_input_tokens;
         let mut notes = Vec::new();
         if !model.limits_reported {
             notes.push(
                 "the provider reports no model limits: only its prompt budget is known".to_string(),
-            );
-        } else if limits.context_window_tokens.is_none() {
-            notes.push(
-                "no total context window configured (limits.context_window_tokens): input and \
-                 output limits are applied separately"
-                    .to_string(),
             );
         }
         if used.provenance == Provenance::Estimated
@@ -697,7 +690,6 @@ impl ContextManager {
         ContextStatus {
             context_window: ContextWindow {
                 model: model.selection.clone(),
-                total: limits.context_window_tokens,
                 max_input_tokens: limits.max_input_tokens,
                 max_output_tokens: model.limits_reported.then_some(limits.max_output_tokens),
             },
@@ -777,13 +769,12 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn model(input: u64, output: u64, window: Option<u64>, resent: bool) -> ModelView {
+    fn model(input: u64, output: u64, resent: bool) -> ModelView {
         ModelView {
             selection: "p/m".into(),
             limits: ModelLimits {
                 max_input_tokens: input,
                 max_output_tokens: output,
-                context_window_tokens: window,
             },
             reasoning_resent: resent,
             token_counting: false,
@@ -814,7 +805,7 @@ mod tests {
     fn without_usage_the_context_is_estimated_never_zero() {
         let mgr = ContextManager::default();
         let msgs = vec![Message::user("hello there, please read the file")];
-        let used = mgr.context_used(&model(1000, 100, None, true), &view(&msgs, &[]));
+        let used = mgr.context_used(&model(1000, 100, true), &view(&msgs, &[]));
         assert_eq!(used.provenance, Provenance::Estimated);
         assert!(used.tokens > 0 && used.upper_bound >= used.tokens);
         assert_eq!(used.measured_tokens, 0);
@@ -823,7 +814,7 @@ mod tests {
     #[test]
     fn a_response_without_usage_keeps_the_estimate_and_is_counted_apart() {
         let mut mgr = ContextManager::default();
-        let m = model(1000, 100, None, true);
+        let m = model(1000, 100, true);
         let msgs = vec![Message::user("hi")];
         assert!(!mgr.record_response(&m, &view(&msgs, &[]), &Usage::default(), None));
         assert_eq!(mgr.totals().requests_without_usage, 1);
@@ -837,15 +828,15 @@ mod tests {
     #[test]
     fn cache_reads_and_writes_count_in_the_occupation_not_the_window() {
         let mut mgr = ContextManager::default();
-        let m = model(200_000, 8_000, Some(200_000), true);
+        let m = model(200_000, 8_000, true);
         let msgs = vec![Message::user("long cached prompt")];
         mgr.record_response(&m, &view(&msgs, &[]), &usage(100, 50_000, 2_000, 0), None);
         let st = mgr.status(&m, &view(&msgs, &[]));
         assert_eq!(st.context_used.tokens, 52_100);
         assert_eq!(st.context_used.provenance, Provenance::Measured);
-        // The window is the configured one: the cache does not enlarge it.
-        assert_eq!(st.context_window.total, Some(200_000));
-        assert_eq!(st.input_limit, 199_000);
+        // The budget is the configured one: the cache does not enlarge it.
+        assert_eq!(st.context_window.max_input_tokens, 200_000);
+        assert_eq!(st.input_limit, 200_000);
     }
 
     #[test]
@@ -853,7 +844,7 @@ mod tests {
         let tools: Vec<ToolDefinition> = Vec::new();
         for (resent, expected_delta) in [(true, 504), (false, 104)] {
             let mut mgr = ContextManager::default();
-            let m = model(100_000, 8_000, None, resent);
+            let m = model(100_000, 8_000, resent);
             let mut msgs = vec![Message::user("question")];
             let req_len = msgs.len();
             let reply = Message::assistant_blocks(vec![
@@ -887,7 +878,7 @@ mod tests {
     #[test]
     fn appended_tool_results_are_estimated_on_top_of_the_measurement() {
         let mut mgr = ContextManager::default();
-        let m = model(100_000, 8_000, None, true);
+        let m = model(100_000, 8_000, true);
         let mut msgs = vec![Message::user("go")];
         mgr.record_response(&m, &view(&msgs, &[]), &usage(5_000, 0, 0, 0), None);
         msgs.push(Message::user_blocks(vec![ContentBlock::ToolResult {
@@ -910,7 +901,7 @@ mod tests {
     #[test]
     fn invalidation_and_model_change_drop_the_measurement() {
         let mut mgr = ContextManager::default();
-        let a = model(100_000, 8_000, None, true);
+        let a = model(100_000, 8_000, true);
         let msgs = vec![Message::user("go")];
         mgr.record_response(&a, &view(&msgs, &[]), &usage(5_000, 0, 0, 10), None);
         assert_eq!(
@@ -936,7 +927,7 @@ mod tests {
     #[test]
     fn changed_tools_or_instructions_invalidate_the_measurement() {
         let mut mgr = ContextManager::default();
-        let m = model(100_000, 8_000, None, true);
+        let m = model(100_000, 8_000, true);
         let msgs = vec![Message::user("go")];
         mgr.record_response(&m, &view(&msgs, &[]), &usage(5_000, 0, 0, 10), None);
         let tools = vec![ToolDefinition {
@@ -953,7 +944,7 @@ mod tests {
     #[test]
     fn only_current_measurements_clear_the_invalidation() {
         let mut mgr = ContextManager::default();
-        let m = model(100_000, 8_000, None, true);
+        let m = model(100_000, 8_000, true);
         let msgs = vec![Message::user("go")];
         let req = view(&msgs, &[]);
         let old_version = mgr.version();
@@ -983,7 +974,7 @@ mod tests {
     #[test]
     fn totals_include_compaction_once_and_never_decrease() {
         let mut mgr = ContextManager::default();
-        let m = model(100_000, 8_000, None, true);
+        let m = model(100_000, 8_000, true);
         let msgs = vec![Message::user("go")];
         mgr.record_response(&m, &view(&msgs, &[]), &usage(1_000, 200, 100, 50), None);
         mgr.record_compaction_usage(&usage(3_000, 0, 0, 400));
@@ -997,13 +988,19 @@ mod tests {
     #[test]
     fn output_reserve_and_margin_shape_the_budget() {
         let mgr = ContextManager::default();
-        // Shared 32k window: reserving 8k of output leaves 24k for the prompt.
-        let m = model(30_000, 8_000, Some(32_000), true);
+        // The input budget is the declared one, whatever output is reserved.
+        let m = model(24_000, 8_000, true);
         let msgs = vec![Message::user("hi")];
         let mut v = view(&msgs, &[]);
         v.max_output = 8_000;
         let st = mgr.status(&m, &v);
         assert_eq!(st.input_limit, 24_000);
+        v.max_output = 1_000;
+        assert_eq!(
+            mgr.status(&m, &v).input_limit,
+            24_000,
+            "less output frees nothing"
+        );
         assert_eq!(st.reserved_output, 8_000);
         assert_eq!(st.margin, 1_024);
         assert_eq!(mgr.decide(&st), BudgetDecision::Fits);
@@ -1015,7 +1012,7 @@ mod tests {
     #[test]
     fn many_small_messages_end_up_exceeding_the_budget() {
         let mgr = ContextManager::default();
-        let m = model(4_000, 500, None, true);
+        let m = model(4_000, 500, true);
         let msgs: Vec<Message> = (0..400)
             .map(|i| Message::user(format!("note {i}: ok")))
             .collect();
@@ -1029,22 +1026,19 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_window_is_reported_not_invented() {
+    fn the_input_budget_is_the_declared_input_limit() {
         let mgr = ContextManager::default();
         let msgs = vec![Message::user("hi")];
-        let st = mgr.status(&model(10_000, 1_000, None, true), &view(&msgs, &[]));
-        assert_eq!(st.context_window.total, None);
-        assert!(
-            st.notes
-                .iter()
-                .any(|n| n.contains("no total context window"))
-        );
+        let st = mgr.status(&model(10_000, 1_000, true), &view(&msgs, &[]));
+        assert_eq!(st.input_limit, 10_000);
+        assert_eq!(st.context_window.max_input_tokens, 10_000);
+        assert!(st.notes.is_empty(), "{:?}", st.notes);
     }
 
     #[test]
     fn calibration_scales_later_estimates() {
         let mut mgr = ContextManager::default();
-        let m = model(100_000, 8_000, None, true);
+        let m = model(100_000, 8_000, true);
         let msgs = vec![Message::user("word ".repeat(2_000))];
         let raw = mgr.context_used(&m, &view(&msgs, &[])).tokens;
         mgr.record_response(&m, &view(&msgs, &[]), &usage(raw * 3 / 2, 0, 0, 1), None);

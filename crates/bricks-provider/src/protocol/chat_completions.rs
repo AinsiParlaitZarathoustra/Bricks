@@ -191,7 +191,14 @@ fn push_assistant(out: &mut Vec<Value>, msg: &Message, ctx: &BuildCtx) {
         .collect();
 
     let mut m = if tool_calls.is_empty() {
-        json!({ "role": "assistant", "content": text })
+        // An assistant turn without text (reasoning only, or emptied) is
+        // `null`: some servers refuse an empty string there.
+        let content = if text.is_empty() {
+            Value::Null
+        } else {
+            json!(text)
+        };
+        json!({ "role": "assistant", "content": content })
     } else {
         let mut m = json!({ "role": "assistant", "tool_calls": tool_calls });
         if !text.is_empty() {
@@ -718,6 +725,23 @@ mod tests {
             4,
             "a tool-result-only user turn adds no empty user message"
         );
+    }
+
+    /// An assistant turn with no text and no tool call is `null`, never
+    /// `""` (some servers refuse an empty string); a text stays a string.
+    #[test]
+    fn an_assistant_turn_without_text_has_null_content() {
+        let mut r = req();
+        r.messages.push(Message::assistant_blocks(vec![ContentBlock::Thinking {
+            thinking: "plan".into(),
+            signature: String::new(),
+        }]));
+        r.messages.push(Message::user("next"));
+        r.messages.push(Message::assistant("done"));
+        let body = build_body(&ctx(&compat(), true), &r).unwrap();
+        assert_eq!(body["messages"][0]["role"], "assistant");
+        assert!(body["messages"][0]["content"].is_null());
+        assert_eq!(body["messages"][2]["content"], "done");
     }
 
     #[test]

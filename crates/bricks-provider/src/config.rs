@@ -349,27 +349,44 @@ fn default_text_only() -> Vec<Modality> {
 }
 
 /// Declared limits. They do not change the server's own limits.
+///
+/// `max_input_tokens` is the input budget usable with the maximum output
+/// reserved: for a window shared by input and output (128 000, output up to
+/// 32 000), it is 96 000. There is no third value.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "FileLimits")]
 pub struct Limits {
     pub max_input_tokens: u64,
     pub max_output_tokens: u64,
-    /// Total window shared by input and output, when the server shares it.
-    #[serde(default)]
-    pub context_window_tokens: Option<u64>,
 }
 
-impl Limits {
-    /// Tokens available for the prompt once the output budget (which includes
-    /// reasoning on all three protocols) is reserved. With a shared window this
-    /// is `min(max_input, window - reserved_output)`.
-    pub fn input_budget(&self, reserved_output: u64) -> u64 {
-        match self.context_window_tokens {
-            Some(window) => self
+/// The limits as written, with the former shared window.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FileLimits {
+    max_input_tokens: u64,
+    max_output_tokens: u64,
+    /// Former total window: read once and folded into the input budget.
+    #[serde(default)]
+    context_window_tokens: Option<u64>,
+}
+
+impl TryFrom<FileLimits> for Limits {
+    type Error = String;
+
+    /// A former window keeps the budget it gave with the maximum output
+    /// reserved: `min(input, window - output)`.
+    fn try_from(f: FileLimits) -> Result<Self, String> {
+        let max_input_tokens = match f.context_window_tokens {
+            Some(window) => f
                 .max_input_tokens
-                .min(window.saturating_sub(reserved_output)),
-            None => self.max_input_tokens,
-        }
+                .min(window.saturating_sub(f.max_output_tokens)),
+            None => f.max_input_tokens,
+        };
+        Ok(Self {
+            max_input_tokens,
+            max_output_tokens: f.max_output_tokens,
+        })
     }
 }
 
@@ -1083,20 +1100,6 @@ impl ModelConfig {
                 "must be greater than 0".into(),
             ));
         }
-        if let Some(w) = l.context_window_tokens {
-            if w < l.max_output_tokens {
-                return Err(e(
-                    "limits.context_window_tokens",
-                    "must be at least max_output_tokens".into(),
-                ));
-            }
-            if w < l.max_input_tokens {
-                return Err(e(
-                    "limits.context_window_tokens",
-                    "must be at least max_input_tokens".into(),
-                ));
-            }
-        }
 
         // Token counting.
         if let Some(tc) = &self.token_counting {
@@ -1264,7 +1267,6 @@ tool_calls = true
 [providers.models.limits]
 max_input_tokens = 96000
 max_output_tokens = 32000
-context_window_tokens = 128000
 
 [providers.models.pricing]
 currency = "USD"
@@ -1510,28 +1512,30 @@ mod tests {
 
     #[test]
     fn limits_rules() {
-        let small_window = BASIC.replace(
-            "context_window_tokens = 128000",
-            "context_window_tokens = 1000",
+        let l = ProvidersConfig::from_toml_str(BASIC, "t")
+            .unwrap()
+            .providers[0]
+            .models[0]
+            .limits;
+        assert_eq!((l.max_input_tokens, l.max_output_tokens), (96000, 32000));
+        // A former shared window keeps the budget it gave with the maximum
+        // output reserved.
+        let legacy = BASIC.replace(
+            "max_output_tokens = 32000\n",
+            "max_output_tokens = 32000\ncontext_window_tokens = 100000\n",
         );
-        assert_eq!(err(&small_window).field, "limits.context_window_tokens");
-        let l = Limits {
-            max_input_tokens: 96000,
-            max_output_tokens: 32000,
-            context_window_tokens: Some(128000),
-        };
-        assert_eq!(l.input_budget(32000), 96000);
-        assert_eq!(
-            l.input_budget(64000),
-            64000,
-            "a larger output reserve shrinks the prompt budget"
+        let l = ProvidersConfig::from_toml_str(&legacy, "t")
+            .unwrap()
+            .providers[0]
+            .models[0]
+            .limits;
+        assert_eq!(l.max_input_tokens, 68000);
+        // A window too small for the output leaves no input: refused.
+        let tiny = BASIC.replace(
+            "max_output_tokens = 32000\n",
+            "max_output_tokens = 32000\ncontext_window_tokens = 1000\n",
         );
-        let unshared = Limits {
-            max_input_tokens: 5,
-            max_output_tokens: 1,
-            context_window_tokens: None,
-        };
-        assert_eq!(unshared.input_budget(1), 5);
+        assert_eq!(err(&tiny).field, "limits.max_input_tokens");
     }
 
     #[test]

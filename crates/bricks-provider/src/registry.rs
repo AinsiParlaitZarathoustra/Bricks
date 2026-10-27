@@ -586,7 +586,7 @@ mod tests {
         let m = reg().resolve("custom/flash").unwrap();
         assert!(m.pricing.is_some());
         assert!(m.declared.tool_calls && m.declared.streaming);
-        assert_eq!(m.limits.input_budget(m.limits.max_output_tokens), 96000);
+        assert_eq!(m.limits.max_input_tokens, 96000);
         assert_eq!(m.api_key_env(), Some("BRICKS_CUSTOM_API_KEY"));
     }
 

@@ -2356,7 +2356,6 @@ mod tests {
                 .collect(),
             default_profile: default.map(String::from),
             max_input_tokens: 100_000,
-            context_window_tokens: None,
             input: vec!["text".into()],
             priced: false,
         };

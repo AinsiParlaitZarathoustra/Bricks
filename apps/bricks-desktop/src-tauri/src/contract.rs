@@ -877,8 +877,6 @@ pub struct ModelView {
     pub max_input_tokens: u64,
     #[ts(type = "number")]
     pub max_output_tokens: u64,
-    #[ts(type = "number | null")]
-    pub context_window_tokens: Option<u64>,
     pub reasoning_default: Option<String>,
     pub profiles: Vec<ModelProfileView>,
     pub priced: bool,
@@ -941,10 +939,6 @@ pub struct ModelPatch {
     pub max_input_tokens: Option<u64>,
     #[ts(type = "number | null")]
     pub max_output_tokens: Option<u64>,
-    #[ts(type = "number | null")]
-    pub context_window_tokens: Option<u64>,
-    /// Remove `context_window_tokens` (unknown window).
-    pub clear_context_window: bool,
     pub input_modalities: Option<Vec<String>>,
     /// MIME types of the accepted documents; empty removes the key. Leaving
     /// `document` out of `input_modalities` removes it too.

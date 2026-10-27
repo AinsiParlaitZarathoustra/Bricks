@@ -163,24 +163,12 @@ mod retry_after_tests {
 
 // ─── Provider trait ──────────────────────────────────────────────────────────
 
-/// Declared token limits of the bound model.
+/// Declared token limits of the bound model: the input budget (usable with
+/// the maximum output reserved) and the output limit, applied separately.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ModelLimits {
     pub max_input_tokens: u64,
     pub max_output_tokens: u64,
-    /// Total window shared by input and output, when configured. `None`
-    /// means the configuration does not state one: nothing is inferred.
-    pub context_window_tokens: Option<u64>,
-}
-
-impl ModelLimits {
-    /// Tokens available for the prompt once `reserved_output` is set aside.
-    pub fn input_budget(&self, reserved_output: u64) -> u64 {
-        match self.context_window_tokens {
-            Some(w) => self.max_input_tokens.min(w.saturating_sub(reserved_output)),
-            None => self.max_input_tokens,
-        }
-    }
 }
 
 /// What the context manager needs to know about the bound model.

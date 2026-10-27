@@ -792,6 +792,57 @@ pub(crate) async fn maintain_memory(
     send(agent, tx, AgentEvent::MemoryMaintenanceFinished(result)).await;
 }
 
+/// Load the stored history of the agent's session into it, when it has none
+/// yet: the active and raw histories (one stored pair) and the
+/// pre-compaction snapshots. The context is then an estimate of the whole
+/// history until the next measurement. Returns the number of messages
+/// loaded, `None` when there was nothing to load.
+pub(crate) async fn load_session_history(agent: &Agent) -> Result<Option<usize>> {
+    let (Some(memory), Some(session_id)) = (&agent.memory, &agent.session_id) else {
+        return Ok(None);
+    };
+    if !agent.messages.lock().is_empty() {
+        return Ok(None);
+    }
+    // Both histories from one stored pair (one generation).
+    let stored = memory.load_histories(session_id).await?;
+    let history = stored.active;
+    if history.is_empty() {
+        return Ok(None);
+    }
+    let count = history.len();
+    // An older session without a raw history starts from the active one.
+    let raw = if stored.raw.is_empty() {
+        history.clone()
+    } else {
+        stored.raw
+    };
+    // Pre-compaction snapshots, numbered from 1 without gaps; later
+    // compactions continue the numbering instead of overwriting.
+    let mut snapshots = Vec::new();
+    loop {
+        let number = snapshots.len() + 1;
+        let key = bricks_memory::session_keys::snapshot(session_id, number);
+        match memory.load(&key).await {
+            Ok(messages) if !messages.is_empty() => snapshots.push(crate::CompactionSnapshot {
+                number,
+                messages,
+                memory_key: Some(key),
+            }),
+            _ => break,
+        }
+    }
+    *agent.raw_history.lock() = raw;
+    agent.compaction_state.lock().applied = snapshots.len();
+    *agent.snapshots.lock() = snapshots;
+    agent.messages.lock().extend(history);
+    agent
+        .context
+        .lock()
+        .invalidate("the session was restored from storage");
+    Ok(Some(count))
+}
+
 /// The agentic loop of one run.
 async fn run_loop(
     agent: &Agent,
@@ -815,65 +866,31 @@ async fn run_loop(
     agent
         .extensions
         .insert(bricks_tools::memory_tools::RunMemory(long_term.clone()));
-    // Load session history (skip if messages were pre-populated via with_messages)
-    if agent.messages.lock().is_empty()
-        && let (Some(memory), Some(session_id)) = (&agent.memory, &agent.session_id)
-    {
-        // Both histories from one stored pair (one generation).
-        let stored = memory.load_histories(session_id).await?;
-        let history = stored.active;
-        if !history.is_empty() {
-            let count = history.len();
-            // An older session without a raw history starts from the
-            // active one.
-            let raw = if stored.raw.is_empty() {
-                history.clone()
-            } else {
-                stored.raw
-            };
-            *agent.raw_history.lock() = raw;
-            // Pre-compaction snapshots, numbered from 1 without gaps; later
-            // compactions continue the numbering instead of overwriting.
-            let mut snapshots = Vec::new();
-            loop {
-                let number = snapshots.len() + 1;
-                let key = bricks_memory::session_keys::snapshot(session_id, number);
-                match memory.load(&key).await {
-                    Ok(messages) if !messages.is_empty() => {
-                        snapshots.push(crate::CompactionSnapshot {
-                            number,
-                            messages,
-                            memory_key: Some(key),
-                        })
-                    }
-                    _ => break,
-                }
-            }
-            agent.compaction_state.lock().applied = snapshots.len();
-            *agent.snapshots.lock() = snapshots;
-            agent.messages.lock().extend(history);
-            agent
-                .context
-                .lock()
-                .invalidate("the session was restored from storage");
-            let _ = event_tx
-                .send(AgentEvent::SessionLoaded {
-                    session_id: session_id.clone(),
-                    message_count: count,
-                })
-                .await;
-            agent.emit(AgentEvent::SessionLoaded {
+    // Load session history (skip if messages were pre-populated via
+    // with_messages), or announce the one restored when the session opened.
+    let loaded = if agent.messages.lock().is_empty() {
+        load_session_history(agent).await?
+    } else {
+        agent.restored_unannounced.lock().take()
+    };
+    if let (Some(count), Some(session_id)) = (loaded, &agent.session_id) {
+        let _ = event_tx
+            .send(AgentEvent::SessionLoaded {
                 session_id: session_id.clone(),
                 message_count: count,
-            });
-            // The session's skills: checked against their sources before
-            // anything of them is used again.
-            for ev in agent.restore_skills() {
-                send(agent, Some(&event_tx), ev).await;
-            }
-            agent.readd_missing_skills();
+            })
+            .await;
+        agent.emit(AgentEvent::SessionLoaded {
+            session_id: session_id.clone(),
+            message_count: count,
+        });
+        // The session's skills: checked against their sources before
+        // anything of them is used again.
+        for ev in agent.restore_skills() {
+            send(agent, Some(&event_tx), ev).await;
         }
-    } // end session load guard
+        agent.readd_missing_skills();
+    }
 
     let mut notes = std::mem::take(&mut *agent.config_notes.lock());
     notes.extend(agent.connect_mcp().await);
@@ -2130,10 +2147,7 @@ async fn run_compaction(
         .map(|s| est.text(s).tokens)
         .unwrap_or(0)
         + est.tools(&tools).tokens;
-    let input_limit = model
-        .limits
-        .input_budget(policy.summary_max_tokens as u64)
-        .max(1);
+    let input_limit = model.limits.max_input_tokens.max(1);
     let plan = CompactionPlan {
         keep_recent_messages: policy.keep_recent_messages,
         max_recent_tokens: (input_limit as f64 * policy.max_recent_ratio) as u64,

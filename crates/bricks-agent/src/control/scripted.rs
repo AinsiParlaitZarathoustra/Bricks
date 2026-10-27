@@ -124,7 +124,6 @@ impl Provider for ScriptedProvider {
             limits: ModelLimits {
                 max_input_tokens: 100_000,
                 max_output_tokens: 8_000,
-                context_window_tokens: None,
             },
             reasoning_resent: false,
             token_counting: false,
@@ -263,7 +262,6 @@ impl ScriptedCatalog {
                         .collect(),
                     default_profile: None,
                     max_input_tokens: 100_000,
-                    context_window_tokens: None,
                     input: vec!["text".into(), "image".into()],
                     priced: false,
                 })

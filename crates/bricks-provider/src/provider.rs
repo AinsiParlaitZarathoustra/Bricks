@@ -384,11 +384,9 @@ impl Provider for ConfiguredProvider {
         &self.model.provider_id
     }
 
-    /// The prompt budget: `max_input_tokens`, reduced when the window is shared
-    /// with the output (whose reserve includes reasoning on all protocols).
+    /// The prompt budget: `max_input_tokens`.
     fn context_window(&self, _model: &str) -> u64 {
-        let l = &self.model.limits;
-        l.input_budget(l.max_output_tokens)
+        self.model.limits.max_input_tokens
     }
 
     fn image_transport(&self) -> crate::ImageTransport {
@@ -412,7 +410,6 @@ impl Provider for ConfiguredProvider {
             limits: crate::ModelLimits {
                 max_input_tokens: m.limits.max_input_tokens,
                 max_output_tokens: m.limits.max_output_tokens,
-                context_window_tokens: m.limits.context_window_tokens,
             },
             reasoning_resent: match m.protocol {
                 crate::config::Protocol::ChatCompletions => m.compat.reasoning_field.is_some(),
