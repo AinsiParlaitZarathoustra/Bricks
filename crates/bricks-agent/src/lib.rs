@@ -786,6 +786,11 @@ impl Agent {
             Some(o) => {
                 let mut o = o.clone();
                 o.tools_available = tools.to_vec();
+                o.ask_timer = self
+                    .extensions
+                    .get::<crate::control::AskTimer>()
+                    .map(|t| *t)
+                    .unwrap_or_default();
                 let replace = o.replace_system_prompt && o.custom_system_prompt.is_some();
                 if !replace {
                     o.git_status = self.request_env.git(&self.working_dir).await;

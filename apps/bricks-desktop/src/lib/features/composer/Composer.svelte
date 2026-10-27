@@ -1270,7 +1270,7 @@
           {#if running && !isSlashLine}
             <Button
               size="icon"
-              class="relative -top-1 -left-1 rounded-full"
+              class="relative -top-1 -left-1 rounded-full bg-destructive text-white hover:bg-destructive/90"
               aria-label="Arrêter la génération"
               title="Arrêter"
               onclick={cancel}
@@ -1299,12 +1299,6 @@
         </div>
       </div>
     </div>
-
-    {#if running}
-      <p class="px-1 text-xs text-muted-foreground" role="status">
-        Une génération est en cours : le brouillon sera conservé.
-      </p>
-    {/if}
   </div>
 </section>
 

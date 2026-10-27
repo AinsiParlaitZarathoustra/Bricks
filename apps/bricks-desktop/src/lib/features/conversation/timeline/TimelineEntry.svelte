@@ -4,6 +4,7 @@
   import AssistantMessage from './AssistantMessage.svelte'
   import ToolRow from './ToolRow.svelte'
   import ApprovalCard from './ApprovalCard.svelte'
+  import QuestionCard from './QuestionCard.svelte'
   import EditRow from './EditRow.svelte'
   import NoticeLine from './NoticeLine.svelte'
   import RunEndCard from './RunEndCard.svelte'
@@ -27,6 +28,10 @@
   <AssistantMessage {item} {conversation} />
 {:else if item.kind === 'tool'}
   <ToolRow {item} {conversation} />
+{:else if item.kind === 'question'}
+  {#if !item.outcome}
+    <QuestionCard question={item.question} {conversation} />
+  {/if}
 {:else if item.kind === 'approval'}
   <ApprovalCard approval={item.approval} resolved={item.resolved} {conversation} />
 {:else if item.kind === 'edit'}

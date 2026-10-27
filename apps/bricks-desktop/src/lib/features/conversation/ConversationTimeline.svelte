@@ -5,6 +5,7 @@
   import type { Conversation, TimelineItem } from '$lib/state/conversation.svelte'
   import { OUTCOME_LABEL, plural, truncate } from './format'
   import ApprovalCard from './timeline/ApprovalCard.svelte'
+  import QuestionCard from './timeline/QuestionCard.svelte'
   import SkillsTrustBanner from './timeline/SkillsTrustBanner.svelte'
   import TimelineEntry from './timeline/TimelineEntry.svelte'
   import WorkingLine from './timeline/WorkingLine.svelte'
@@ -33,6 +34,16 @@
       (approval) =>
         !conversation.items.some(
           (item) => item.kind === 'approval' && item.approval.approval_id === approval.approval_id,
+        ),
+    ),
+  )
+
+  /** Waiting questions with no card in the timeline (e.g. after a reload). */
+  const orphanQuestions = $derived(
+    conversation.pendingQuestions.filter(
+      (question) =>
+        !conversation.items.some(
+          (item) => item.kind === 'question' && item.question.question_id === question.question_id,
         ),
     ),
   )
@@ -127,6 +138,8 @@
     switch (item.kind) {
       case 'approval':
         return item.resolved ? null : `Autorisation demandée : ${item.approval.tool}.`
+      case 'question':
+        return item.outcome ? null : `Question : ${item.question.question}`
       case 'run_end': {
         const run = conversation.runs.get(item.runId)
         const label = run?.outcome ? OUTCOME_LABEL[run.outcome] : 'fin de l’exécution'
@@ -166,7 +179,7 @@
     role="region"
     aria-label="Conversation"
     tabindex="0"
-    class="min-h-0 flex-1 overflow-y-auto overscroll-contain focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:outline-none"
+    class="top-fade min-h-0 flex-1 overflow-y-auto overscroll-contain focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:outline-none"
   >
     <div
       bind:this={listEl}
@@ -189,6 +202,10 @@
 
       {#each orphanApprovals as approval (approval.approval_id)}
         <ApprovalCard {approval} {conversation} />
+      {/each}
+
+      {#each orphanQuestions as question (question.question_id)}
+        <QuestionCard {question} {conversation} />
       {/each}
 
       <!-- A running run whose message is not in the view (it started elsewhere): its time goes last. -->
@@ -221,3 +238,13 @@
 
   <p class="sr-only" role="status">{announcement}</p>
 </div>
+
+<style>
+  /* Text scrolling under the top edge fades out instead of being cut. The fade
+     covers the list's top padding, so the first message is never dimmed. */
+  .top-fade {
+    --fade: 24px;
+    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 var(--fade));
+    mask-image: linear-gradient(to bottom, transparent, #000 var(--fade));
+  }
+</style>

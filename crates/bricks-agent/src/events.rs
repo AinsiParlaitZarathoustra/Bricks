@@ -162,6 +162,14 @@ pub enum AgentEvent {
         decision: crate::control::Decision,
         by: crate::control::DecidedBy,
     },
+    /// The model asks the person a question (`Ask`).
+    QuestionAsked(crate::control::QuestionRequest),
+    /// How it ended: an answer, or a skip and why.
+    QuestionResolved {
+        question_id: String,
+        tool_call_id: String,
+        outcome: crate::control::QuestionOutcome,
+    },
     /// A tool call whose change was previewed succeeded: these files were
     /// written.
     EditApplied {

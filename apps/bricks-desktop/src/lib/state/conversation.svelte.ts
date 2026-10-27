@@ -23,6 +23,8 @@ import type {
   InstanceState,
   PlanState,
   PromptBlock,
+  QuestionOutcome,
+  QuestionRequest,
   RunOutcome,
   SkillSourceInfo,
   SessionPolicy,
@@ -78,6 +80,15 @@ export interface ToolItem {
   output?: string
   durationMs?: number
   progress?: string
+}
+
+/** A question of `Ask` and, once closed, how it ended. */
+export interface QuestionItem {
+  kind: 'question'
+  id: string
+  runId?: string
+  question: QuestionRequest
+  outcome?: QuestionOutcome
 }
 
 export interface ApprovalItem {
@@ -148,6 +159,7 @@ export type TimelineItem =
   | AssistantItem
   | ToolItem
   | ApprovalItem
+  | QuestionItem
   | EditItem
   | NoticeItem
   | RunEndItem
@@ -462,6 +474,8 @@ export class Conversation {
   agents = new SvelteMap<string, AgentInfo>()
   changesets = new SvelteMap<string, ChangeSet>()
   approvals = new SvelteMap<string, ApprovalRequest>()
+  /** Questions of `Ask` waiting for the person. */
+  questions = new SvelteMap<string, QuestionRequest>()
   skillsTrust = $state<{ project: string; sources: SkillSourceInfo[] } | null>(null)
 
   /** Active run id (`null` when idle). */
@@ -562,6 +576,10 @@ export class Conversation {
     return this.runningRunId !== null
   }
 
+  get pendingQuestions(): QuestionRequest[] {
+    return [...this.questions.values()]
+  }
+
   get pendingApprovals(): ApprovalRequest[] {
     return [...this.approvals.values()]
   }
@@ -658,6 +676,8 @@ export class Conversation {
     this.busy = s.activity.state === 'busy' ? s.activity.what : null
     this.approvals.clear()
     for (const a of s.pending_approvals) this.approvals.set(a.approval_id, a)
+    this.questions.clear()
+    for (const q of s.pending_questions ?? []) this.questions.set(q.question_id, q)
     if (s.plan) this.applyPlan(s.plan)
     if (s.permission_policy) this.applyPermissions(s.permission_policy, s.permission_revision)
   }
@@ -1001,6 +1021,19 @@ export class Conversation {
         if (item) item.resolved = { decision: env.decision, by: env.by }
         break
       }
+      case 'question_asked':
+        this.closeAssistant()
+        this.questions.set(env.question.question_id, env.question)
+        this.items.push({ kind: 'question', id: localId('q'), runId, question: env.question })
+        break
+      case 'question_resolved': {
+        this.questions.delete(env.question_id)
+        const item = this.items.findLast(
+          (i): i is QuestionItem => i.kind === 'question' && i.question.question_id === env.question_id,
+        )
+        if (item) item.outcome = env.outcome
+        break
+      }
       case 'permission_policy_changed':
         this.applyPermissions(env.policy, env.revision)
         break
@@ -1068,6 +1101,11 @@ export class Conversation {
         break
       case 'run_finished': {
         this.closeAssistant()
+        // Nothing waits once the run is over: a question still open is closed.
+        for (const item of this.items) {
+          if (item.kind === 'question' && !item.outcome) item.outcome = { state: 'skipped', reason: 'cancelled' }
+        }
+        this.questions.clear()
         const id = runId ?? this.runningRunId
         const run = this.run(id ?? undefined)
         if (run) {

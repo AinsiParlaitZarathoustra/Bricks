@@ -242,6 +242,17 @@ pub enum Event {
         decision: Decision,
         by: DecidedBy,
     },
+    /// A question for the person (`Ask`), waiting for an answer.
+    QuestionAsked {
+        question: crate::control::QuestionRequest,
+    },
+    /// How a question ended: answered, or skipped (`user`, `timeout`,
+    /// `cancelled`, `non_interactive`).
+    QuestionResolved {
+        question_id: String,
+        tool_call_id: String,
+        outcome: crate::control::QuestionOutcome,
+    },
     /// The session's permission policy changed (by a person); calls
     /// decided from now on follow `revision`.
     PermissionPolicyChanged {
@@ -549,6 +560,8 @@ impl Event {
             Event::ToolFinished { .. } => "tool_finished",
             Event::ApprovalRequested { .. } => "approval_requested",
             Event::ApprovalResolved { .. } => "approval_resolved",
+            Event::QuestionAsked { .. } => "question_asked",
+            Event::QuestionResolved { .. } => "question_resolved",
             Event::PermissionPolicyChanged { .. } => "permission_policy_changed",
             Event::EditApplied { .. } => "edit_applied",
             Event::MemoryRecalled { .. } => "memory_recalled",
@@ -674,6 +687,10 @@ pub struct Prompt {
     /// if one cannot be used, the command is refused and nothing is sent.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skills: Vec<String>,
+    /// The question timer the person set, captured when the message is
+    /// received and kept for the whole run (absent: no timer).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ask_timer: Option<crate::control::AskTimer>,
 }
 
 impl Prompt {
@@ -681,6 +698,7 @@ impl Prompt {
         Self {
             blocks: vec![PromptBlock::Text { text: text.into() }],
             skills: Vec::new(),
+            ask_timer: None,
         }
     }
 
@@ -793,6 +811,12 @@ pub enum Command {
     SetPermissionPolicy {
         policy: crate::permission::SessionPolicy,
     },
+    /// Answer a question of `Ask`: a choice, a free text, or a skip. The
+    /// first resolution accepted closes it.
+    AnswerQuestion {
+        question_id: String,
+        answer: crate::control::QuestionAnswer,
+    },
     /// Answer an approval request.
     Approve {
         approval_id: String,
@@ -822,6 +846,7 @@ impl Command {
             Command::TrustProjectSkills { .. } => "trust_project_skills",
             Command::SetPermissionPolicy { .. } => "set_permission_policy",
             Command::Approve { .. } => "approve",
+            Command::AnswerQuestion { .. } => "answer_question",
         }
     }
 }

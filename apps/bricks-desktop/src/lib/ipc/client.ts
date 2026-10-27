@@ -32,6 +32,8 @@ import type { PermissionsDefault } from './bindings/PermissionsDefault'
 import type { Command, ModelChoice, SessionPolicy, Snapshot } from './engine'
 
 export type * from './bindings/AppIcon'
+export type * from './bindings/AskTimerMode'
+export type * from './bindings/AskTimerPrefs'
 export type * from './bindings/AppInfo'
 export type * from './bindings/ChangeJournalInfo'
 export type * from './bindings/ChangeRecord'

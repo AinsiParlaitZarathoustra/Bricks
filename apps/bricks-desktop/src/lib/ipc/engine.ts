@@ -155,6 +155,38 @@ export interface ChangePreview {
   refusal: string | null
 }
 
+/** The question timer a person set, carried by each message (absent: none). */
+export type AskTimer = { mode: 'off' } | { mode: 'smart' } | { mode: 'custom'; seconds: number }
+
+export interface QuestionOption {
+  label: string
+  description?: string
+}
+
+/** A question of `Ask`, waiting for the person. */
+export interface QuestionRequest {
+  question_id: string
+  tool_call_id: string
+  question: string
+  options: QuestionOption[]
+  recommended?: number
+  timeout_seconds?: number
+  /** When the engine skips it (milliseconds since the epoch). */
+  deadline_at?: number
+}
+
+export type SkipReason = 'user' | 'timeout' | 'cancelled' | 'non_interactive'
+
+export type QuestionOutcome =
+  | { state: 'chosen'; choice: number }
+  | { state: 'other'; text: string }
+  | { state: 'skipped'; reason: SkipReason }
+
+export type QuestionAnswer =
+  | { kind: 'choice'; choice: number }
+  | { kind: 'other'; text: string }
+  | { kind: 'skip' }
+
 export interface ApprovalRequest {
   approval_id: string
   tool_call_id: string
@@ -377,6 +409,8 @@ export type Event =
       decision: Decision
       by: DecidedBy
     }
+  | { type: 'question_asked'; question: QuestionRequest }
+  | { type: 'question_resolved'; question_id: string; tool_call_id: string; outcome: QuestionOutcome }
   | { type: 'permission_policy_changed'; policy: SessionPolicy; revision: number }
   | {
       type: 'edit_applied'
@@ -550,6 +584,8 @@ export type PromptBlock =
 export interface Prompt {
   blocks: PromptBlock[]
   skills?: string[]
+  /** The question timer of this message, kept for its whole run. */
+  ask_timer?: AskTimer
 }
 
 export type Command =
@@ -580,6 +616,7 @@ export type Command =
   | { type: 'trust_project_skills'; allow: boolean }
   | { type: 'set_permission_policy'; policy: SessionPolicy }
   | { type: 'approve'; approval_id: string; decision: Decision; reason?: string }
+  | { type: 'answer_question'; question_id: string; answer: QuestionAnswer }
 
 export type Activity =
   | { state: 'idle' }
@@ -599,6 +636,8 @@ export interface Snapshot {
   context: ContextStatus
   usage: Usage
   pending_approvals: ApprovalRequest[]
+  /** Questions of `Ask` waiting for the person. */
+  pending_questions?: QuestionRequest[]
   memory_space: string | null
   permission_policy: SessionPolicy
   permission_revision: number

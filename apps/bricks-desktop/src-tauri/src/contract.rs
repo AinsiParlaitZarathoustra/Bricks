@@ -512,6 +512,8 @@ pub struct Preferences {
     pub diagrams: DiagramSettings,
     /// Which icon the app shows in the Dock.
     pub app_icon: AppIcon,
+    /// The timer of the questions the model asks (`Ask`).
+    pub ask_timer: AskTimerPrefs,
 }
 
 impl Default for Preferences {
@@ -530,8 +532,36 @@ impl Default for Preferences {
             terminal_ratio: None,
             diagrams: DiagramSettings::default(),
             app_icon: AppIcon::Aligned,
+            ask_timer: AskTimerPrefs::default(),
         }
     }
+}
+
+/// The question timer: off by default; `smart` lets the model choose each
+/// question's duration, `custom` imposes `seconds` (30–3600).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(default)]
+pub struct AskTimerPrefs {
+    pub enabled: bool,
+    pub mode: AskTimerMode,
+    pub seconds: u32,
+}
+
+impl Default for AskTimerPrefs {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            mode: AskTimerMode::Smart,
+            seconds: 300,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum AskTimerMode {
+    Smart,
+    Custom,
 }
 
 /// The app's icon: always the light or the dark one, or the one of the

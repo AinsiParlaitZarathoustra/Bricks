@@ -3,6 +3,7 @@
 	// Open conversations keep theirs.
 	import { onMount } from 'svelte';
 	import DiagramSettings from './DiagramSettings.svelte';
+	import AskTimerSettings from './AskTimerSettings.svelte';
 	import PolicyEditor from '$lib/features/permissions/PolicyEditor.svelte';
 	import { unchosenPolicy } from '$lib/features/permissions/policy';
 	import { errorMessage, permissionsDefaultGet, permissionsDefaultSet } from '$lib/ipc/client';
@@ -62,4 +63,5 @@
 	</section>
 
 	<DiagramSettings />
+	<AskTimerSettings />
 </div>

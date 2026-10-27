@@ -5,6 +5,7 @@
 //! [`Envelope`]s. See `docs/cli.md` for the schema.
 
 pub mod approval;
+pub mod ask;
 pub mod attach;
 pub mod controller;
 pub mod protocol;
@@ -16,6 +17,10 @@ pub mod slash;
 pub mod title;
 
 pub use approval::{ApprovalBroker, ApprovalRequest, BrokerApprover, DecidedBy, Decision};
+pub use ask::{
+    AskBroker, AskTimer, AskTool, QuestionAnswer, QuestionOption, QuestionOutcome, QuestionRequest,
+    SkipReason,
+};
 pub use controller::{
     Activity, Controller, EngineConfig, EventStream, ModelCatalog, ModelChoice, OpenOptions,
     ProfileChoice, ProjectContext, ProjectLoader, SessionChoice, SkillsSetup, Snapshot,

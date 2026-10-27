@@ -349,6 +349,9 @@ pub struct Snapshot {
     pub context: crate::context::ContextStatus,
     pub usage: Usage,
     pub pending_approvals: Vec<ApprovalRequest>,
+    /// Questions of `Ask` waiting for the person.
+    #[serde(default)]
+    pub pending_questions: Vec<super::ask::QuestionRequest>,
     pub memory_space: Option<String>,
     /// The session's permission policy and its revision.
     pub permission_policy: SessionPolicy,
@@ -378,6 +381,8 @@ struct Inner {
     meta: parking_lot::Mutex<SessionMeta>,
     queue: Arc<EventQueue>,
     broker: Arc<ApprovalBroker>,
+    /// The session's questions (`Ask`) and the timer captured per message.
+    ask: Arc<super::ask::AskBroker>,
     /// The open session's permission policy (shared with its sub-agents).
     permissions: parking_lot::RwLock<PolicyCell>,
     activity: parking_lot::Mutex<Activity>,
@@ -563,12 +568,17 @@ fn build_agent(
     meta: &SessionMeta,
     provider: Box<dyn Provider>,
     broker: &Arc<ApprovalBroker>,
+    ask: &Arc<super::ask::AskBroker>,
     permissions: &PolicyCell,
     profiles: &Arc<crate::agents::ProfileCatalog>,
     skills: Option<bricks_skills::SkillAccess>,
 ) -> Result<(Agent, Option<Arc<crate::agents::AgentSpawner>>), String> {
     let settings = &project.bricks.agent;
-    let (tools, spawner) = session_tools(cfg, project, meta, profiles);
+    let (mut tools, spawner) = session_tools(cfg, project, meta, profiles);
+    // Questions for the person, when someone can answer them.
+    if cfg.interactive && !tools.iter().any(|t| t.name() == "Ask") {
+        tools.push(Box::new(super::ask::AskTool::new(Arc::clone(ask))));
+    }
     let ext = bricks_tools::Extensions::default();
     // The session's background jobs (their logs kept with the session).
     let jobs = bricks_tools::jobs::JobRegistry::new(
@@ -799,6 +809,7 @@ impl Controller {
             opts.reasoning.as_deref(),
         )?;
         let broker = ApprovalBroker::new(cfg.interactive);
+        let ask = super::ask::AskBroker::new(cfg.interactive);
         let profiles = profile_catalog(&project, &meta);
         let skills = skill_access(&cfg, &meta.working_dir);
         let permissions = session_permissions(&cfg, &meta.id)?;
@@ -808,6 +819,7 @@ impl Controller {
             &meta,
             provider,
             &broker,
+            &ask,
             &permissions,
             &profiles,
             skills.clone(),
@@ -853,6 +865,7 @@ impl Controller {
             meta: parking_lot::Mutex::new(meta),
             queue: queue.clone(),
             broker,
+            ask,
             permissions: parking_lot::RwLock::new(permissions),
             activity: parking_lot::Mutex::new(Activity::Idle),
             maintenance: parking_lot::Mutex::new(None),
@@ -982,6 +995,7 @@ impl Controller {
             context: agent.context_status(),
             usage: agent.usage(),
             pending_approvals: self.inner.broker.pending(),
+            pending_questions: self.inner.ask.pending(),
             memory_space: meta.memory_space.clone(),
             permission_policy: self.inner.permissions.read().get().0,
             permission_revision: self.inner.permissions.read().revision(),
@@ -1608,6 +1622,13 @@ impl Controller {
                     Err(e) => self.reject(&cmd, e),
                 }
             }
+            Command::AnswerQuestion {
+                ref question_id,
+                ref answer,
+            } => match self.inner.ask.respond(question_id, answer.clone()) {
+                Ok(()) => Ok(()),
+                Err(e) => self.reject(&cmd, e),
+            },
             Command::Approve {
                 ref approval_id,
                 decision,
@@ -1777,6 +1798,17 @@ impl Controller {
                     },
                     _ => None,
                 };
+                // The question timer of this message, kept for its whole run:
+                // a change of setting applies from the next message.
+                let timer = match prompt.ask_timer.unwrap_or_default().check() {
+                    Ok(t) => t,
+                    Err(e) => {
+                        self.set_activity(Activity::Idle);
+                        return self.reject(&cmd, e);
+                    }
+                };
+                self.inner.ask.set_timer(timer);
+                self.agent().extensions.insert(timer);
                 // The models and their parameters as configured now: a changed
                 // catalog is applied here, or the run is refused, before
                 // anything is sent.
@@ -2001,6 +2033,7 @@ impl Controller {
             &meta,
             provider,
             &self.inner.broker,
+            &self.inner.ask,
             &permissions,
             &profiles,
             skills.clone(),
@@ -2111,6 +2144,7 @@ impl Controller {
         // queue instead of filling a large buffer first.
         let (tx, rx) = mpsc::channel::<AgentEvent>(16);
         self.inner.broker.begin_run(tx.clone(), token.clone());
+        self.inner.ask.begin_run(tx.clone(), token.clone());
         let (done_tx, done_rx) = tokio::sync::oneshot::channel();
         let translator = tokio::spawn(translate(
             rx,
@@ -2125,6 +2159,21 @@ impl Controller {
             .insert(crate::runner::RootRunHint(run_id.clone()));
         let result = crate::runner::run_prepared(&agent, &converted.input, tx, token.clone()).await;
         self.inner.broker.end_run();
+        // A question left open by a cancelled run is closed as cancelled.
+        for question in self.inner.ask.end_run() {
+            q.push(
+                Some(run_id.as_str()),
+                Event::QuestionResolved {
+                    question_id: question.question_id,
+                    tool_call_id: question.tool_call_id,
+                    outcome: super::ask::QuestionOutcome::Skipped {
+                        reason: super::ask::SkipReason::Cancelled,
+                    },
+                },
+                None,
+            )
+            .await;
+        }
         // Every event of the run is in the channel now (the agent keeps a
         // sender for tool progress, so the channel itself never closes).
         let _ = done_tx.send(());
@@ -2400,6 +2449,16 @@ async fn translate(
                 budget,
             },
             AgentEvent::ApprovalRequested(r) => Event::ApprovalRequested { approval: r },
+            AgentEvent::QuestionAsked(question) => Event::QuestionAsked { question },
+            AgentEvent::QuestionResolved {
+                question_id,
+                tool_call_id,
+                outcome,
+            } => Event::QuestionResolved {
+                question_id,
+                tool_call_id,
+                outcome,
+            },
             AgentEvent::ApprovalResolved {
                 approval_id,
                 tool_call_id,

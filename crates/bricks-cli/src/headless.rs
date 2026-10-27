@@ -384,6 +384,7 @@ pub async fn run(global: &Global, launch: &std::path::Path, args: RunArgs) -> i3
     }
     if let Err(e) = ctl.send(Command::Submit {
         prompt: Prompt {
+            ask_timer: None,
             blocks,
             skills: args.skills.clone(),
         },

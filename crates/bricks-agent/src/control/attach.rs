@@ -278,6 +278,7 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("src/deep")).unwrap();
         std::fs::write(dir.path().join("src/deep/x.rs"), "").unwrap();
         let prompt = Prompt {
+            ask_timer: None,
             blocks: vec![
                 PromptBlock::Text {
                     text: "Regarde".into(),
@@ -326,6 +327,7 @@ mod tests {
         );
 
         let gone = Prompt {
+            ask_timer: None,
             blocks: vec![PromptBlock::File {
                 path: "missing.rs".into(),
             }],
@@ -349,6 +351,7 @@ mod tests {
         let shot = |limits| {
             convert(
                 &Prompt {
+                    ask_timer: None,
                     blocks: vec![
                         PromptBlock::Text {
                             text: "vois".into(),
@@ -376,6 +379,7 @@ mod tests {
         };
         assert!(shot(too_big).unwrap_err().contains("limit"));
         let image = Prompt {
+            ask_timer: None,
             blocks: vec![PromptBlock::Image {
                 path: "a b.rs".into(),
             }],
@@ -394,6 +398,7 @@ mod tests {
         // 3 MB of two-byte characters: the budget is read, and the file is not.
         std::fs::write(dir.path().join("huge.txt"), "é".repeat(1_500_000)).unwrap();
         let prompt = Prompt {
+            ask_timer: None,
             blocks: vec![PromptBlock::File {
                 path: "huge.txt".into(),
             }],
@@ -415,12 +420,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("src")).unwrap();
         let as_file = Prompt {
+            ask_timer: None,
             blocks: vec![PromptBlock::File { path: "src".into() }],
             skills: Vec::new(),
         };
         let err = convert(&as_file, dir.path(), AttachLimits::default()).unwrap_err();
         assert!(err.contains("is a folder"), "{err}");
         let missing = Prompt {
+            ask_timer: None,
             blocks: vec![PromptBlock::File {
                 path: "nope.txt".into(),
             }],

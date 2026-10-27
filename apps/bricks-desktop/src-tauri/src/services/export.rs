@@ -66,6 +66,8 @@ fn export_bindings() {
         DiagramViewerSettings,
         Theme,
         AppIcon,
+        AskTimerPrefs,
+        AskTimerMode,
         SlashCommandInfo,
         SlashAction,
         SlashPresent,

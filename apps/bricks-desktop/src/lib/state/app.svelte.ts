@@ -14,7 +14,15 @@ import type {
   SessionItem,
   SessionSearchHit,
 } from '$lib/ipc/client'
-import type { Command, Envelope, ModelChoice, PromptBlock, SessionPolicy } from '$lib/ipc/engine'
+import type {
+  AskTimer,
+  Command,
+  Envelope,
+  ModelChoice,
+  PromptBlock,
+  QuestionAnswer,
+  SessionPolicy,
+} from '$lib/ipc/engine'
 import { Conversation, type Draft, type UserItem } from './conversation.svelte'
 import { defaultDiagramSettings } from '$lib/features/diagrams/settings'
 import { reader } from './reader.svelte'
@@ -33,6 +41,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   terminal_ratio: null,
   diagrams: defaultDiagramSettings(),
   app_icon: 'aligned',
+  ask_timer: { enabled: false, mode: 'smart', seconds: 300 },
 }
 
 /** An IPC refusal because a project's folder is missing. */
@@ -534,6 +543,18 @@ class AppStore {
     return ipc.sessionsSearch(allProjects ? null : this.currentProjectId, query)
   }
 
+  /** The question timer of the preferences, as the engine takes it. */
+  askTimer(): AskTimer {
+    const t = this.prefs.ask_timer
+    if (!t.enabled) return { mode: 'off' }
+    return t.mode === 'custom' ? { mode: 'custom', seconds: t.seconds } : { mode: 'smart' }
+  }
+
+  /** Answers a question of `Ask` (a choice, a free text, or a skip). Returns the refusal. */
+  answerQuestion(conv: Conversation, questionId: string, answer: QuestionAnswer): Promise<string | null> {
+    return this.command(conv.sessionId, { type: 'answer_question', question_id: questionId, answer })
+  }
+
   /**
    * « Enregistrer et relancer »: replaces a sent message with `text` (its
    * attachments kept) and runs the conversation again from it. Returns the
@@ -572,8 +593,14 @@ class AppStore {
     // announce itself before the call returns. A refusal takes it back.
     const submitted = command.type === 'submit' ? this.conversations.get(sessionId) : undefined
     submitted?.setPendingSubmitLabel(display || null)
+    // Every message carries the question timer as set now: the engine keeps it
+    // for the whole run the message starts.
+    const sent: Command =
+      command.type === 'submit' || command.type === 'revise'
+        ? { ...command, prompt: { ...command.prompt, ask_timer: this.askTimer() } }
+        : command
     try {
-      await ipc.sessionCommand(sessionId, command, display ?? null)
+      await ipc.sessionCommand(sessionId, sent, display ?? null)
       return null
     } catch (e) {
       submitted?.setPendingSubmitLabel(null)

@@ -105,6 +105,8 @@ fn sanitize(mut p: Preferences) -> Preferences {
     p.terminal_height = p
         .terminal_height
         .clamp(*TERMINAL_HEIGHT.start(), *TERMINAL_HEIGHT.end());
+    // A custom duration stays within what the engine accepts.
+    p.ask_timer.seconds = p.ask_timer.seconds.clamp(30, 3_600);
     p.colors = ThemeColors {
         light: sanitize_colors(p.colors.light),
         dark: sanitize_colors(p.colors.dark),
@@ -133,7 +135,7 @@ fn is_colour(value: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::contract::Theme;
+    use crate::contract::{AskTimerMode, AskTimerPrefs, Theme};
 
     #[test]
     fn the_app_icon_follows_the_theme_by_default_and_keeps_a_choice() {
@@ -369,5 +371,98 @@ mod tests {
             prefs.diagrams.mermaid.theme,
             crate::contract::MermaidTheme::Forest
         ));
+    }
+
+    #[test]
+    fn the_question_timer_is_off_by_default_and_smart_when_enabled() {
+        assert_eq!(
+            Preferences::default().ask_timer,
+            AskTimerPrefs {
+                enabled: false,
+                mode: AskTimerMode::Smart,
+                seconds: 300,
+            }
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("preferences.json");
+        std::fs::write(&file, r#"{"left_width":300}"#).unwrap();
+        assert_eq!(
+            PrefsStore::at(file).get().ask_timer,
+            AskTimerPrefs::default(),
+            "a file from before the question timer keeps it off"
+        );
+    }
+
+    #[test]
+    fn the_question_timer_seconds_are_kept_between_30_and_3600() {
+        let seconds = |s: u32| {
+            let p = Preferences {
+                ask_timer: AskTimerPrefs {
+                    enabled: true,
+                    mode: AskTimerMode::Custom,
+                    seconds: s,
+                },
+                ..Preferences::default()
+            };
+            sanitize(p).ask_timer.seconds
+        };
+        assert_eq!(seconds(0), 30);
+        assert_eq!(seconds(29), 30);
+        assert_eq!(seconds(30), 30);
+        assert_eq!(seconds(300), 300);
+        assert_eq!(seconds(3_600), 3_600);
+        assert_eq!(seconds(3_601), 3_600);
+        assert_eq!(seconds(u32::MAX), 3_600);
+    }
+
+    #[test]
+    fn a_stored_question_timer_is_clamped_when_read_and_when_saved() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("preferences.json");
+        std::fs::write(
+            &file,
+            r#"{"ask_timer":{"enabled":true,"mode":"custom","seconds":5}}"#,
+        )
+        .unwrap();
+        let store = PrefsStore::at(file.clone());
+        let p = store.get();
+        assert_eq!(
+            p.ask_timer,
+            AskTimerPrefs {
+                enabled: true,
+                mode: AskTimerMode::Custom,
+                seconds: 30,
+            }
+        );
+        store.set(p).unwrap();
+        let saved: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        assert_eq!(saved["ask_timer"]["seconds"], 30);
+        assert_eq!(saved["ask_timer"]["mode"], "custom");
+    }
+
+    #[test]
+    fn the_question_timer_keeps_the_wire_shape_and_an_unknown_mode_falls_back() {
+        let wire = serde_json::to_value(AskTimerPrefs {
+            enabled: true,
+            mode: AskTimerMode::Custom,
+            seconds: 120,
+        })
+        .unwrap();
+        assert_eq!(
+            wire,
+            serde_json::json!({"enabled": true, "mode": "custom", "seconds": 120})
+        );
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("preferences.json");
+        std::fs::write(
+            &file,
+            r#"{"left_width":310,"ask_timer":{"enabled":true,"mode":"invented","seconds":60}}"#,
+        )
+        .unwrap();
+        let p = PrefsStore::at(file).get();
+        assert_eq!(p.ask_timer, AskTimerPrefs::default(), "an unknown mode is ignored");
+        assert_eq!(p.left_width, 310, "the other preferences are kept");
     }
 }

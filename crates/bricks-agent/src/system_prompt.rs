@@ -172,6 +172,9 @@ pub struct SystemPromptOptions {
     /// (CodeScout, delegation) and the specialised sections; it grants
     /// nothing.
     pub tools_available: Vec<String>,
+    /// The question timer of the current message (decides the `Ask`
+    /// bullet's last sentence).
+    pub ask_timer: crate::control::AskTimer,
     /// Whether a memory backend is configured.
     pub has_memory: bool,
     /// Whether auto-compact is enabled.
@@ -215,7 +218,7 @@ pub fn build_system_prompt(opts: &SystemPromptOptions) -> String {
 
     // ── CACHEABLE sections ──────────────────────────────────────────────
     // 1. The Bricks foundation, once.
-    let mut parts: Vec<String> = vec![bricks_foundation(&opts.tools_available)];
+    let mut parts: Vec<String> = vec![bricks_foundation_with(&opts.tools_available, opts.ask_timer)];
 
     // 2. A sub-agent's role: one task from another agent, its result for it.
     if prefix == SystemPromptPrefix::SubAgent {
@@ -376,6 +379,24 @@ const CODE_STATS_BULLET: &str = "- Utilise CodeStats pour compter le code, les c
 const BASH_BULLET: &str = "- Utilise Bash pour les commandes, scripts et opérations mal couverts par les outils dédiés.";
 const BASH_JOB_BULLET: &str = "- Utilise Bash pour les commandes, scripts et opérations mal couverts par les outils dédiés, et Job pour suivre celles qui continuent en arrière-plan.";
 
+/// The foundation's bullet kept only when `Ask` is announced; the timer adds
+/// its rule ([`ask_bullet`]).
+const ASK_BULLET: &str = "- Utilise Ask seulement pour une décision qui revient à l'utilisateur et que le contexte ne permet pas de trancher.";
+
+/// The `Ask` bullet for the active timer.
+fn ask_bullet(timer: crate::control::AskTimer) -> String {
+    use crate::control::AskTimer;
+    match timer {
+        AskTimer::Off => ASK_BULLET.to_string(),
+        AskTimer::Smart => format!(
+            "{ASK_BULLET} Choisis `timeout_seconds` selon l'enjeu ; sans réponse à temps, la question est passée."
+        ),
+        AskTimer::Custom { seconds } => format!(
+            "{ASK_BULLET} Le délai de {seconds} s est imposé ; sans réponse à temps, la question est passée."
+        ),
+    }
+}
+
 /// The foundation's bullet kept only when `ViewImage` is announced.
 const VIEW_IMAGE_BULLET: &str = "- Utilise ViewImage pour voir une image du disque.";
 
@@ -467,6 +488,11 @@ fn edit_bullet(has: &dyn Fn(&str) -> bool) -> Option<String> {
 /// name a tool keep only the announced ones (a bullet with none of its tools
 /// is left out); everything else is fixed.
 pub fn bricks_foundation(tools: &[String]) -> String {
+    bricks_foundation_with(tools, crate::control::AskTimer::Off)
+}
+
+/// [`bricks_foundation`] with the `Ask` bullet for `ask_timer`.
+pub fn bricks_foundation_with(tools: &[String], ask_timer: crate::control::AskTimer) -> String {
     let has = |name: &str| tools.iter().any(|t| t == name);
     let mut bullets = vec![explore_bullet(&has)];
     if has("ViewImage") {
@@ -476,6 +502,9 @@ pub fn bricks_foundation(tools: &[String]) -> String {
     if has("Bash") {
         let bash = if has("Job") { BASH_JOB_BULLET } else { BASH_BULLET };
         bullets.push(bash.to_string());
+    }
+    if has("Ask") {
+        bullets.push(ask_bullet(ask_timer));
     }
     if has("CodeScout") {
         bullets.push(CODE_SCOUT_BULLET.to_string());
