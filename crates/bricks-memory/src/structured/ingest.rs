@@ -23,7 +23,7 @@ use super::extract::{ExtractError, ExtractionRequest, Validated, bounded, valida
 use super::index::Item;
 use super::model::*;
 use super::store::{P, W, alias_key, as_i64, as_str, as_strings, q};
-use super::{MemoryError, MemoryResult, StructuredMemory};
+use super::{MemoryError, MemoryResult, Processing, StructuredMemory};
 use std::collections::{HashMap, HashSet};
 use tokio_util::sync::CancellationToken;
 
@@ -78,6 +78,16 @@ impl StructuredMemory {
     /// graph (begin counts the nodes, commit walks every version chain), so
     /// bulk ingestion records its episodes together.
     pub async fn record_all(&self, inputs: Vec<EpisodeInput>) -> MemoryResult<Vec<Recorded>> {
+        self.record_all_with(inputs, self.extractor.is_some()).await
+    }
+
+    /// [`Self::record_all`] for a processing with or without an extractor:
+    /// without one, the episodes are never extracted.
+    pub async fn record_all_with(
+        &self,
+        inputs: Vec<EpisodeInput>,
+        extracted: bool,
+    ) -> MemoryResult<Vec<Recorded>> {
         for input in &inputs {
             if !valid_space(&input.space) {
                 return Err(MemoryError::Config(format!(
@@ -111,6 +121,7 @@ impl StructuredMemory {
                 P::new()
                     .s("id", &id)
                     .s("space", &input.space)
+                    .os("project_id", input.project_id.as_deref())
                     .os("session_id", input.session_id.as_deref())
                     .s("role", &input.role)
                     .os("author", input.author.as_deref())
@@ -120,7 +131,7 @@ impl StructuredMemory {
                     .os("source_ref", input.source_ref.as_deref())
                     .i("ikey", self.store.next_ikey()),
             ));
-            if self.extractor.is_none() {
+            if !extracted {
                 ops.push((
                     W::SetExtraction,
                     P::new()
@@ -159,12 +170,21 @@ impl StructuredMemory {
     /// embedding call: recording and recall go on meanwhile, and the
     /// memory's write lock is only taken for each local write.
     pub async fn process(&self, cancel: &CancellationToken) -> MemoryResult<IngestReport> {
+        self.process_with(cancel, &self.processing()).await
+    }
+
+    /// [`Self::process`] with the extractor and limits of `processing`.
+    pub async fn process_with(
+        &self,
+        cancel: &CancellationToken,
+        processing: &Processing,
+    ) -> MemoryResult<IngestReport> {
         let _pass = self.maintenance.lock().await;
-        let mut report = self.extract_pending(cancel).await?;
+        let mut report = self.extract_pending_with(cancel, processing).await?;
         if cancel.is_cancelled() {
             return Ok(report);
         }
-        let applied = self.apply_extracted().await?;
+        let applied = self.apply_extracted_with(&processing.extraction).await?;
         merge(&mut report, applied);
         let embedded = self.embed_pending_until(cancel).await;
         merge(&mut report, embedded);
@@ -175,8 +195,13 @@ impl StructuredMemory {
     /// retry) extraction, cached extractions not applied, records without a
     /// vector of the current model.
     pub fn pending_work(&self) -> MemoryResult<usize> {
+        self.pending_work_with(&self.processing())
+    }
+
+    /// [`Self::pending_work`] for `processing`.
+    pub fn pending_work_with(&self, processing: &Processing) -> MemoryResult<usize> {
         let mut n = 0;
-        if self.extractor.is_some() {
+        if processing.extractor.is_some() {
             for id in self.store.ids(
                 q::PENDING_EPISODES,
                 P::new().list("states", &["pending".into(), "failed".into()]),
@@ -184,7 +209,7 @@ impl StructuredMemory {
                 let state = self.store.query(q::EPISODE_STATE, P::new().s("id", &id))?;
                 let retryable = state.first().is_some_and(|row| {
                     as_str(&row[0]).as_deref() != Some("failed")
-                        || as_i64(&row[1]).unwrap_or(0) < self.config.extraction.max_attempts as i64
+                        || as_i64(&row[1]).unwrap_or(0) < processing.extraction.max_attempts as i64
                 });
                 n += usize::from(retryable);
             }
@@ -208,8 +233,18 @@ impl StructuredMemory {
     /// episodes and cache each validated output on its episode. Nothing
     /// else is written: a stop after this stage costs no model call later.
     pub async fn extract_pending(&self, cancel: &CancellationToken) -> MemoryResult<IngestReport> {
+        self.extract_pending_with(cancel, &self.processing()).await
+    }
+
+    /// [`Self::extract_pending`] with the extractor of `processing`.
+    pub async fn extract_pending_with(
+        &self,
+        cancel: &CancellationToken,
+        processing: &Processing,
+    ) -> MemoryResult<IngestReport> {
         let mut report = IngestReport::default();
-        let Some(extractor) = self.extractor.clone() else {
+        let limits = &processing.extraction;
+        let Some(extractor) = processing.extractor.clone() else {
             return Ok(report);
         };
         let ids = self.store.ids(
@@ -224,14 +259,13 @@ impl StructuredMemory {
             let Some(row) = state.first() else { continue };
             let st = as_str(&row[0]).unwrap_or_default();
             let attempts = as_i64(&row[1]).unwrap_or(0);
-            if st == "failed" && attempts >= self.config.extraction.max_attempts as i64 {
+            if st == "failed" && attempts >= limits.max_attempts as i64 {
                 continue;
             }
             let Some(episode) = self.store.episode(&id)? else {
                 continue;
             };
-            let (content, truncated) =
-                bounded(&episode.content, self.config.extraction.max_input_chars);
+            let (content, truncated) = bounded(&episode.content, limits.max_input_chars);
             let req = ExtractionRequest {
                 episode_id: id.clone(),
                 space: episode.space.clone(),
@@ -244,7 +278,7 @@ impl StructuredMemory {
             let out = extractor
                 .extract(&req, cancel)
                 .await
-                .and_then(|raw| validate(&raw, &content, &self.config.extraction).map(|_| raw));
+                .and_then(|raw| validate(&raw, &content, limits).map(|_| raw));
             let _w = self.write.lock().await;
             if !matches!(out, Err(ExtractError::Cancelled))
                 && self
@@ -288,6 +322,14 @@ impl StructuredMemory {
 
     /// Stage 2: apply every cached extraction (no model call).
     pub async fn apply_extracted(&self) -> MemoryResult<IngestReport> {
+        self.apply_extracted_with(&self.config.extraction).await
+    }
+
+    /// [`Self::apply_extracted`] with the extraction limits `limits`.
+    pub async fn apply_extracted_with(
+        &self,
+        limits: &super::ExtractionConfig,
+    ) -> MemoryResult<IngestReport> {
         let _w = self.write.lock().await;
         let mut report = IngestReport::default();
         let ids = self.store.ids(
@@ -302,8 +344,8 @@ impl StructuredMemory {
             let Some(episode) = self.store.episode(&id)? else {
                 continue;
             };
-            let (content, _) = bounded(&episode.content, self.config.extraction.max_input_chars);
-            match validate(&raw, &content, &self.config.extraction) {
+            let (content, _) = bounded(&episode.content, limits.max_input_chars);
+            match validate(&raw, &content, limits) {
                 Ok(v) => {
                     self.apply(&episode, v, &mut report)?;
                     report.applied_from_cache += 1;

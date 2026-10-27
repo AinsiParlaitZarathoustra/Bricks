@@ -18,6 +18,7 @@ pub mod glob_tool;
 pub mod grep_tool;
 pub mod jobs;
 pub mod lsp_tool;
+pub mod memory_tools;
 pub mod mcp_tool;
 pub mod permissions;
 pub mod powershell;

@@ -64,6 +64,7 @@ fn corpus(n: usize) -> Vec<EpisodeInput> {
             };
             EpisodeInput {
                 space: "project:measure".into(),
+                project_id: None,
                 session_id: Some(format!("s{}", i / 20)),
                 role: "user".into(),
                 author: None,

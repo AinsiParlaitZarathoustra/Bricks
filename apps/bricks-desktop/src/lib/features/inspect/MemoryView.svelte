@@ -1,178 +1,212 @@
 <script lang="ts">
-	// Long-term memory of the session (`/memory`): the space, the last recall and the
-	// last maintenance pass. Read-only: no editor and no new memory engine here.
-	import { onMount } from 'svelte';
+	// The long-term memory (`/memory`, `/memory global`, the settings): the entries of the
+	// project's or the global memory, 50 per page, searched and filtered by type. Reading
+	// works whether the memory is on or off. A note is one entry, never also an exchange.
 	import type { InspectorState } from '$lib/state/ui.svelte';
+	import type { MemoryEntry, MemoryEntryFilter, MemoryEntryPage, MemoryScope } from '$lib/ipc/client';
 	import * as ipc from '$lib/ipc/client';
 	import { app } from '$lib/state/app.svelte';
+	import * as Tabs from '$lib/components/ui/tabs';
+	import * as Select from '$lib/components/ui/select';
+	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
+	import { Input } from '$lib/components/ui/input';
 	import { Skeleton } from '$lib/components/ui/skeleton';
-	import LoaderIcon from '@lucide/svelte/icons/loader';
-	import RefreshIcon from '@lucide/svelte/icons/refresh-cw';
-	import {
-		countOrDash,
-		formatClock,
-		formatTokens,
-		plural,
-		readMaintenanceReport
-	} from './format';
+	import { formatInt } from './format';
 
 	let { args }: { args: InspectorState['args'] } = $props();
 
+	const PAGE = 50;
 	const uid = $props.id();
-	const conv = $derived(app.current);
-	const memory = $derived(conv?.memory ?? null);
 
-	/** From the snapshot read on open (fresh), not from the conversation's cache. */
-	let space = $state<string | null>(null);
-	let snapshotRunning = $state(false);
-	let loaded = $state(false);
-	let loading = $state(false);
+	/** The open project, when it has a memory (not the conversations of no project). */
+	const project = $derived(app.currentProject && !app.currentProject.chats ? app.currentProject : null);
+
+	let scope = $derived<MemoryScope>(args.scope === 'global' || !project ? 'global' : 'project');
+	let filter = $state<MemoryEntryFilter>('all');
+	let query = $state('');
+	let offset = $state(0);
+	let page = $state<MemoryEntryPage | null>(null);
 	let loadError = $state<string | null>(null);
 
-	onMount(() => {
-		void load();
+	const FILTERS: { value: MemoryEntryFilter; label: string }[] = [
+		{ value: 'all', label: 'Tout' },
+		{ value: 'notes', label: 'Notes' },
+		{ value: 'exchanges', label: 'Échanges' },
+		{ value: 'facts', label: 'Faits' },
+		{ value: 'fact_history', label: 'Historique des faits' }
+	];
+	const KIND: Record<MemoryEntry['kind'], string> = {
+		note: 'Note',
+		exchange: 'Échange',
+		fact: 'Fait'
+	};
+	const ROLE: Record<string, string> = {
+		user: 'message',
+		assistant: 'réponse',
+		tool: 'outil'
+	};
+	const STATUS: Record<string, string> = {
+		active: 'actif',
+		proposed: 'proposé',
+		superseded: 'remplacé',
+		contested: 'contesté',
+		retracted: 'retiré',
+		unsupported: 'sans source'
+	};
+
+	const filterLabel = $derived(FILTERS.find((f) => f.value === filter)?.label ?? '');
+	const factsShown = $derived(filter === 'facts' || filter === 'fact_history');
+
+	// Reads the page for the current scope, filter, search and offset. The search waits for
+	// typing to pause; an older answer never replaces a newer one.
+	let request = 0;
+	$effect(() => {
+		const read = { scope, filter, query: query.trim(), offset, projectId: project?.id ?? null };
+		const id = ++request;
+		const timer = setTimeout(async () => {
+			try {
+				const result = await ipc.memoryEntries(
+					read.scope,
+					read.scope === 'project' ? read.projectId : null,
+					read.filter,
+					read.query,
+					read.offset,
+					PAGE
+				);
+				if (id !== request) return;
+				page = result;
+				loadError = null;
+			} catch (e) {
+				if (id !== request) return;
+				loadError = ipc.errorMessage(e);
+			}
+		}, read.query ? 250 : 0);
+		return () => clearTimeout(timer);
 	});
 
-	async function load() {
-		const current = app.current;
-		if (!current) {
-			loaded = true;
-			return;
-		}
-		loading = true;
-		try {
-			const snap = await ipc.sessionSnapshot(current.sessionId);
-			space = snap.memory_space;
-			snapshotRunning = snap.maintenance_running;
-			loadError = null;
-		} catch (e) {
-			loadError = ipc.errorMessage(e);
-		} finally {
-			loaded = true;
-			loading = false;
-		}
+	function choose(next: () => void) {
+		next();
+		offset = 0;
 	}
 
-	// The snapshot says whether a pass was running when the view opened; a finished
-	// event observed since then settles it.
-	const running = $derived(
-		memory ? memory.maintenanceRunning || (snapshotRunning && !memory.lastMaintenance) : snapshotRunning
-	);
-	const report = $derived(readMaintenanceReport(memory?.lastMaintenance?.report));
+	function when(at: number): string {
+		return new Date(at).toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' });
+	}
 
-	const OUTCOME: Record<string, string> = {
-		completed: 'terminé',
-		cancelled: 'annulé',
-		failed: 'en échec'
-	};
+	/** The title of a conversation of the loaded lists, when known. */
+	function conversation(sessionId: string): string | null {
+		for (const list of app.sessionsByProject.values()) {
+			const found = list.find((s) => s.id === sessionId);
+			if (found) return found.title || 'Sans titre';
+		}
+		return null;
+	}
+
+	/** Where an entry comes from: its project (global memory), its conversation. */
+	function source(e: MemoryEntry): string {
+		const parts: string[] = [];
+		if (scope === 'global' && e.project_id) parts.push(`Projet ${e.project_name ?? e.project_id}`);
+		if (e.session_id) parts.push(conversation(e.session_id) ?? 'Conversation fermée');
+		return parts.join(' · ');
+	}
 </script>
 
-<div class="flex min-w-0 flex-col gap-5">
-	<div class="flex justify-end gap-2">
-		<Button variant="ghost" size="sm" onclick={load} disabled={loading}>
-			<RefreshIcon class={loading ? 'animate-spin' : undefined} aria-hidden="true" />
-			Actualiser
-		</Button>
+<div class="flex min-w-0 flex-col gap-4">
+	<div class="flex flex-wrap items-center gap-2">
+		<Tabs.Root value={scope} onValueChange={(v) => choose(() => (scope = v as MemoryScope))}>
+			<Tabs.List aria-label="Mémoire affichée">
+				<Tabs.Trigger value="project" disabled={!project}>Projet</Tabs.Trigger>
+				<Tabs.Trigger value="global">Globale</Tabs.Trigger>
+			</Tabs.List>
+		</Tabs.Root>
+		<Input
+			type="search"
+			placeholder="Rechercher"
+			aria-label="Rechercher dans la mémoire"
+			class="h-8 min-w-40 flex-1 text-ui"
+			value={query}
+			oninput={(event) => choose(() => (query = event.currentTarget.value))}
+		/>
+		<Select.Root
+			type="single"
+			value={filter}
+			onValueChange={(v) => choose(() => (filter = v as MemoryEntryFilter))}
+		>
+			<Select.Trigger id={`${uid}-filter`} aria-label="Type" class="h-8 w-48 text-ui">
+				<span class="truncate">{filterLabel}</span>
+			</Select.Trigger>
+			<Select.Content>
+				{#each FILTERS as f (f.value)}
+					<Select.Item value={f.value} label={f.label}>{f.label}</Select.Item>
+				{/each}
+			</Select.Content>
+		</Select.Root>
 	</div>
 
-	<section class="flex flex-col gap-2" aria-labelledby="{uid}-space">
-		<h3 id="{uid}-space" class="text-sm font-medium">Espace de mémoire</h3>
-		{#if !loaded}
-			<Skeleton class="h-5 w-64" />
-		{:else if loadError !== null}
-			<p role="alert" class="text-sm text-destructive">
-				Impossible de lire l’espace de mémoire : {loadError}
-			</p>
-		{:else if space !== null}
-			<p class="font-mono text-sm break-all">{space}</p>
-		{:else}
-			<p class="text-sm text-pretty text-muted-foreground">
-				La mémoire à long terme n’est pas configurée pour ce projet : activez la section [memory] dans
-				bricks.toml.
-			</p>
-		{/if}
-	</section>
+	{#if factsShown}
+		<p class="text-caption text-muted-foreground">Aucun fait n’est extrait automatiquement.</p>
+	{/if}
 
-	<section class="flex flex-col gap-2" aria-labelledby="{uid}-recall">
-		<h3 id="{uid}-recall" class="text-sm font-medium">Dernier rappel</h3>
-		{#if memory?.lastRecall}
-			<p class="text-sm text-pretty tabular-nums">
-				{plural(memory.lastRecall.items, 'élément rappelé', 'éléments rappelés')}, environ
-				{formatTokens(memory.lastRecall.tokens)} sur {formatTokens(memory.lastRecall.budget)} autorisés.
-				{#if memory.lastRecall.omitted > 0}
-					{plural(
-						memory.lastRecall.omitted,
-						'élément écarté par le budget.',
-						'éléments écartés par le budget.'
-					)}
-				{/if}
-			</p>
-			<p class="text-xs text-muted-foreground">Rappel du {formatClock(memory.lastRecall.at)}.</p>
-		{:else}
-			<p class="text-sm text-muted-foreground">Aucun rappel dans cette session.</p>
-		{/if}
-	</section>
-
-	<section class="flex flex-col gap-2" aria-labelledby="{uid}-maintenance">
-		<h3 id="{uid}-maintenance" class="text-sm font-medium">Maintenance</h3>
-		{#if running}
-			<p role="status" class="flex items-center gap-2 text-sm text-muted-foreground">
-				<LoaderIcon class="size-4 animate-spin" aria-hidden="true" />
-				Maintenance en cours.
-			</p>
-		{/if}
-
-		{#if memory?.lastMaintenance}
-			{@const last = memory.lastMaintenance}
-			<p class="text-sm">
-				Dernier passage : <span class="font-medium">{OUTCOME[last.outcome] ?? last.outcome}</span>,
-				à {formatClock(last.at)}.
-			</p>
-
-			{#if report}
-				<dl class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-sm">
-					<dt class="text-muted-foreground">Épisodes extraits</dt>
-					<dd class="tabular-nums">{countOrDash(report.extracted)}</dd>
-
-					<dt class="text-muted-foreground">Faits créés</dt>
-					<dd class="tabular-nums">{countOrDash(report.factsCreated)}</dd>
-
-					<dt class="text-muted-foreground">Faits mis à jour</dt>
-					<dd class="tabular-nums">{countOrDash(report.factsUpdated)}</dd>
-
-					<dt class="text-muted-foreground">Intégrations calculées</dt>
-					<dd class="tabular-nums">{countOrDash(report.embedded)}</dd>
-
-					<dt class="text-muted-foreground">Échecs d’extraction</dt>
-					<dd class="tabular-nums">{countOrDash(report.failed)}</dd>
-
-					<dt class="text-muted-foreground">Erreurs d’intégration</dt>
-					<dd class="tabular-nums">{countOrDash(report.embeddingErrors)}</dd>
-
-					<dt class="text-muted-foreground">Restant à traiter</dt>
-					<dd class="tabular-nums">{countOrDash(report.pending)}</dd>
-
-					<dt class="text-muted-foreground">Interrompu</dt>
-					<dd>{report.cancelled === null ? '—' : report.cancelled ? 'oui' : 'non'}</dd>
-				</dl>
-
-				{#if report.errors.length > 0}
-					<ul class="flex list-disc flex-col gap-1 pl-4 text-xs text-pretty text-destructive">
-						{#each report.errors as error, i (i)}
-							<li>{error}</li>
-						{/each}
-					</ul>
-				{/if}
-			{:else if !last.error}
-				<p class="text-sm text-muted-foreground">Aucun rapport détaillé pour ce passage.</p>
-			{/if}
-
-			{#if last.error}
-				<p role="alert" class="text-sm text-destructive">Erreur : {last.error}</p>
-			{/if}
-		{:else if !running}
-			<p class="text-sm text-muted-foreground">Aucun passage de maintenance dans cette session.</p>
-		{/if}
-	</section>
+	{#if loadError !== null}
+		<p role="alert" class="text-ui text-pretty text-destructive">{loadError}</p>
+	{:else if page === null}
+		<div class="flex flex-col gap-2">
+			<Skeleton class="h-14 w-full" />
+			<Skeleton class="h-14 w-full" />
+		</div>
+	{:else if page.entries.length === 0}
+		<p class="text-ui text-muted-foreground">Aucune mémoire</p>
+	{:else}
+		<ul class="flex flex-col divide-y divide-border rounded-lg border border-border">
+			{#each page.entries as entry (entry.id)}
+				<li class="flex min-w-0 flex-col gap-1.5 px-3 py-2.5">
+					<div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-caption text-muted-foreground">
+						<Badge variant="secondary">{KIND[entry.kind]}</Badge>
+						{#if entry.kind === 'exchange' && entry.role}
+							<span>{ROLE[entry.role] ?? entry.role}</span>
+						{/if}
+						{#if entry.status}
+							<span>{STATUS[entry.status] ?? entry.status}</span>
+						{/if}
+						<time datetime={new Date(entry.at).toISOString()}>{when(entry.at)}</time>
+						{#if source(entry)}
+							<span class="min-w-0 truncate">{source(entry)}</span>
+						{/if}
+					</div>
+					<p class="text-ui break-words whitespace-pre-wrap">{entry.text}</p>
+					{#if entry.evidence.length > 0}
+						<ul class="flex flex-col gap-1 border-l-2 border-border pl-2 text-caption text-muted-foreground">
+							{#each entry.evidence as proof, i (i)}
+								<li class="break-words">« {proof.quote} »</li>
+							{/each}
+						</ul>
+					{/if}
+				</li>
+			{/each}
+		</ul>
+		<div class="flex items-center justify-between gap-2 text-caption text-muted-foreground">
+			<span class="tabular-nums">
+				{formatInt(offset + 1)}–{formatInt(offset + page.entries.length)} sur {formatInt(page.total)}
+			</span>
+			<div class="flex gap-2">
+				<Button
+					variant="ghost"
+					size="sm"
+					disabled={offset === 0}
+					onclick={() => (offset = Math.max(0, offset - PAGE))}
+				>
+					Précédent
+				</Button>
+				<Button
+					variant="ghost"
+					size="sm"
+					disabled={offset + PAGE >= page.total}
+					onclick={() => (offset += PAGE)}
+				>
+					Suivant
+				</Button>
+			</div>
+		</div>
+	{/if}
 </div>

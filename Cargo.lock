@@ -650,6 +650,10 @@ dependencies = [
  "bricks-tools",
  "dirs 5.0.1",
  "parking_lot",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]
@@ -879,6 +883,7 @@ dependencies = [
  "bricks-embeddings",
  "bricks-lsp",
  "bricks-mcp",
+ "bricks-memory",
  "bricks-semantic",
  "bricks-skills",
  "bricks-types",

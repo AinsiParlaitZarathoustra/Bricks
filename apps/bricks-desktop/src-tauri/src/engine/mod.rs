@@ -9,6 +9,7 @@ pub mod attachments;
 pub mod catalog;
 pub mod hub;
 pub mod live;
+pub mod memory;
 pub mod relocate;
 pub mod sessions;
 
@@ -60,6 +61,8 @@ pub struct AppState {
     attachments_dir: PathBuf,
     pub(crate) projects: Arc<ProjectStore>,
     pub(crate) prefs: Arc<PrefsStore>,
+    /// The long-term memory stores (global and per project).
+    pub(crate) memory: Arc<bricks_config::MemoryService>,
     /// The skills catalogue of the settings page, outside any session.
     pub(crate) skills: Arc<SkillsCatalogStore>,
     /// Presentation labels of runs started from typed commands.
@@ -112,6 +115,7 @@ impl AppState {
             drafts_dir: desktop.join("drafts"),
             attachments_dir: desktop.join("attachments"),
             prefs: Arc::new(prefs),
+            memory: Arc::new(bricks_config::MemoryService::in_home(&home)),
             skills: Arc::new(SkillsCatalogStore::new(home.join("skills"))),
             run_labels: Arc::new(RunLabelStore::at(desktop.join("run-labels"))),
             run_records: Arc::new(RunRecordStore::at(desktop.join("run-records"))),

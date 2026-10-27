@@ -70,12 +70,23 @@ impl AppState {
                 .unwrap_or_else(|| PathBuf::from(&project.path)),
         };
         let fresh_dir = (project.chats && request.session_id.is_none()).then(|| working_dir.clone());
-        let mut cfg = bricks_config::engine_config(&working_dir, registry, true);
+        let mut cfg = bricks_config::engine_config(&working_dir, Arc::clone(&registry), true);
         // The catalog is the application's: a change reaches every session,
         // at its next run. New sessions start from this home's default policy.
         cfg.catalog = Arc::clone(&self.catalog) as Arc<dyn bricks_agent::control::ModelCatalog>;
         cfg.permissions = Some(self.permissions.clone());
         cfg.generated_titles = true;
+        // The memory is the desktop's setting, resolved at the start of each
+        // run; the `[memory]` section of `bricks.toml` is not read.
+        cfg.project_loader = Some(Arc::new(
+            bricks_config::Projects::new(Arc::clone(&registry), true).without_project_memory(),
+        ));
+        cfg.memory_resolver = Some(Arc::new(super::memory::DesktopMemory {
+            service: Arc::clone(&self.memory),
+            prefs: Arc::clone(&self.prefs),
+            projects: Arc::clone(&self.projects),
+            project_id: project.id.clone(),
+        }));
         // Sessions are stored under this application state's home (tests use
         // a temporary one), never the global default.
         cfg.sessions_dir = self.sessions_dir().to_path_buf();

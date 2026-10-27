@@ -26,4 +26,9 @@ app_icon: AppIcon,
 /**
  * The timer of the questions the model asks (`Ask`).
  */
-ask_timer: AskTimerPrefs, };
+ask_timer: AskTimerPrefs, 
+/**
+ * The long-term memory (global and per project), off by default.
+ * Applies from the next run.
+ */
+memory_enabled: boolean, };

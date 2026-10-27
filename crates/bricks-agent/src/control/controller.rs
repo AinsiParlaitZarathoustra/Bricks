@@ -163,6 +163,27 @@ pub struct EngineConfig {
     /// Whether the model names a new session from its first prompt (default
     /// false: the shortened prompt stays the title).
     pub generated_titles: bool,
+    /// Resolves the long-term memory of each run at its start (the
+    /// frontend's setting and stores). When set, it replaces the project's
+    /// memory: a run started with the memory off has none.
+    pub memory_resolver: Option<Arc<dyn MemoryResolver>>,
+}
+
+/// The long-term memory of one run, resolved at its start.
+#[derive(Default)]
+pub struct RunMemory {
+    /// `None`: the memory is off for this run.
+    pub memory: Option<Arc<dyn LongTermMemory>>,
+    /// Held until the run and its maintenance end (the stores' leases).
+    pub guard: Option<Box<dyn std::any::Any + Send + Sync>>,
+    /// Problems to report with the run, never fatal.
+    pub warnings: Vec<String>,
+}
+
+/// Resolves the memory of each run: the setting, the project and the stores
+/// as they are when the run starts. Nothing reads them again during the run.
+pub trait MemoryResolver: Send + Sync {
+    fn resolve(&self, session_id: &str) -> RunMemory;
 }
 
 /// Where a session's skills come from, besides its project.
@@ -296,6 +317,7 @@ impl EngineConfig {
             skills: None,
             permissions: None,
             generated_titles: false,
+            memory_resolver: None,
         }
     }
 }
@@ -579,6 +601,13 @@ fn build_agent(
     if cfg.interactive && !tools.iter().any(|t| t.name() == "Ask") {
         tools.push(Box::new(super::ask::AskTool::new(Arc::clone(ask))));
     }
+    // The memory tools, when the session can have a memory: offered to the
+    // model only in the runs that start with one.
+    if (cfg.memory_resolver.is_some() || project.long_term_memory.is_some())
+        && !tools.iter().any(|t| t.name() == "memory_search")
+    {
+        tools.extend(bricks_tools::memory_tools::memory_tools());
+    }
     let ext = bricks_tools::Extensions::default();
     // The session's background jobs (their logs kept with the session).
     let jobs = bricks_tools::jobs::JobRegistry::new(
@@ -623,7 +652,7 @@ fn build_agent(
     } else if let Some(s) = &project.system_prompt {
         b = b.system_prompt(s.clone());
     }
-    if let Some(m) = &project.long_term_memory {
+    if let (Some(m), None) = (&project.long_term_memory, &cfg.memory_resolver) {
         b = b.long_term_memory(m.clone());
     }
     for s in &project.mcp_servers {
@@ -2139,6 +2168,21 @@ impl Controller {
         )
         .await;
 
+        // The memory of this run, resolved now and kept to its end: recall,
+        // tools, capture and maintenance use it; a change applies from the
+        // next run.
+        let run_memory = match &self.inner.cfg.memory_resolver {
+            Some(resolver) => {
+                let r = resolver.resolve(&self.session_id());
+                agent.set_long_term_memory(r.memory.clone());
+                agent.config_notes.lock().extend(r.warnings.iter().cloned());
+                r
+            }
+            None => RunMemory {
+                memory: agent.long_term_memory(),
+                ..RunMemory::default()
+            },
+        };
         let token = agent.begin_run();
         // Small: the run feels the consumer's pace through the bounded
         // queue instead of filling a large buffer first.
@@ -2254,7 +2298,7 @@ impl Controller {
             let _ = m.save(&files_dir(&self.inner.cfg, &m.id));
         }
 
-        let maintain = result.is_ok() && agent.has_long_term_memory();
+        let maintain = result.is_ok() && run_memory.memory.is_some();
         let maintenance = CancellationToken::new();
         if maintain {
             *self.inner.maintenance.lock() = Some(maintenance.clone());
@@ -2264,7 +2308,11 @@ impl Controller {
         self.set_activity(Activity::Idle);
         if maintain {
             q.push(rid, Event::MemoryMaintenanceStarted, None).await;
-            let ev = match agent.maintain_memory(&maintenance).await {
+            let maintained = match &run_memory.memory {
+                Some(m) => Some(m.maintain(&maintenance).await),
+                None => None,
+            };
+            let ev = match maintained {
                 Some(Ok(report)) => Event::MemoryMaintenanceFinished {
                     outcome: if report.cancelled {
                         MaintenanceOutcome::Cancelled

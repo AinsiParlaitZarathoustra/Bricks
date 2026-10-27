@@ -13,3 +13,9 @@ bricks-memory = { workspace = true, features = ["structured"] }
 bricks-embeddings = { workspace = true }
 dirs = { workspace = true }
 parking_lot = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tokio = { workspace = true }

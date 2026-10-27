@@ -784,7 +784,7 @@ pub(crate) async fn maintain_memory(
     cancel: &tokio_util::sync::CancellationToken,
     tx: Option<&mpsc::Sender<AgentEvent>>,
 ) {
-    let Some(ltm) = &agent.long_term_memory else {
+    let Some(ltm) = agent.long_term_memory() else {
         return;
     };
     send(agent, tx, AgentEvent::MemoryMaintenanceStarted).await;
@@ -809,6 +809,12 @@ async fn run_loop(
         ));
     }
     let event_tx = event_tx.clone();
+    // The long-term memory of this run, read once: recall, the memory
+    // tools and the capture below use it, whatever changes meanwhile.
+    let long_term = agent.long_term_memory();
+    agent
+        .extensions
+        .insert(bricks_tools::memory_tools::RunMemory(long_term.clone()));
     // Load session history (skip if messages were pre-populated via with_messages)
     if agent.messages.lock().is_empty()
         && let (Some(memory), Some(session_id)) = (&agent.memory, &agent.session_id)
@@ -874,12 +880,28 @@ async fn run_loop(
     // Long-term memory: recall for this prompt, within its budget (at most
     // a tenth of the prompt budget), appended to the system prompt.
     *agent.recalled.lock() = None;
-    if let Some(ltm) = &agent.long_term_memory {
+    if let Some(ltm) = &long_term {
         let budget = (agent.memory_recall_tokens as u64)
             .min(context_status(agent).input_limit / 10)
             .max(1) as usize;
         match ltm.recall_context(prompt, budget).await {
+            Ok(Some(r)) if r.items == 0 => {
+                // Nothing recalled, and part of the memory unavailable.
+                notes.extend(r.warnings);
+                send(
+                    agent,
+                    Some(&event_tx),
+                    AgentEvent::MemoryRecalled {
+                        items: 0,
+                        tokens: 0,
+                        omitted: 0,
+                        budget,
+                    },
+                )
+                .await;
+            }
             Ok(Some(r)) => {
+                notes.extend(r.warnings);
                 send(
                     agent,
                     Some(&event_tx),
@@ -1127,11 +1149,7 @@ async fn run_loop(
 
         // Build completion request
         let messages = agent.messages.lock().clone();
-        let tool_defs: Vec<ToolDefinition> = agent
-            .tool_list()
-            .iter()
-            .map(|t| t.to_definition())
-            .collect();
+        let tool_defs = tool_definitions(agent);
 
         // The provider is bound to one configured model and ignores this
         // string; it is only a label for events and metadata.
@@ -1920,7 +1938,7 @@ async fn run_loop(
     // Remember the exchange durably (failures are reported, never fatal).
     // Processing it — extraction, embeddings — is the maintenance phase
     // that follows the answer.
-    if let Some(ltm) = &agent.long_term_memory {
+    if let Some(ltm) = &long_term {
         let now = chrono::Utc::now().timestamp_millis();
         let mut turns = vec![bricks_memory::MemoryTurn {
             role: "user".into(),
@@ -1979,12 +1997,38 @@ pub(crate) fn model_label(agent: &Agent) -> String {
     agent.selection().model_label()
 }
 
+/// The definitions of the tools offered to the model now.
 fn tool_definitions(agent: &Agent) -> Vec<ToolDefinition> {
     agent
         .tool_list()
         .iter()
+        .filter(|t| offered(agent, t.name(), t.permission_level(), t.category()))
         .map(|t| t.to_definition())
         .collect()
+}
+
+/// Whether a tool is offered to the model now. The memory tools only when
+/// the run started with a memory; `memory_write` (like any memory tool) not
+/// when the session's policy denies it: its guidance follows.
+fn offered(
+    agent: &Agent,
+    name: &str,
+    level: bricks_tools::PermissionLevel,
+    category: bricks_tools::ToolCategory,
+) -> bool {
+    if !bricks_tools::memory_tools::MEMORY_TOOLS.contains(&name) {
+        return true;
+    }
+    let on = agent
+        .extensions
+        .get::<bricks_tools::memory_tools::RunMemory>()
+        .is_some_and(|m| m.0.is_some());
+    if !on {
+        return false;
+    }
+    agent.policy_cell().is_none_or(|cell| {
+        cell.verdict(name, level, category).effect != crate::permission::PermissionEffect::Deny
+    })
 }
 
 fn model_view(agent: &Agent) -> ModelView {

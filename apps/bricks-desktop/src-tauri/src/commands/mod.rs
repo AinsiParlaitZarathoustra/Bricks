@@ -5,6 +5,7 @@ pub mod attachments;
 pub mod changes;
 pub mod files;
 pub mod inspect;
+pub mod memory;
 pub mod project_file;
 pub mod projects;
 pub mod providers;

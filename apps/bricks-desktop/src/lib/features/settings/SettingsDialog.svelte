@@ -9,15 +9,17 @@
 	import Cpu from '@lucide/svelte/icons/cpu';
 	import Sparkles from '@lucide/svelte/icons/sparkles';
 	import AppWindow from '@lucide/svelte/icons/app-window';
+	import Brain from '@lucide/svelte/icons/brain';
 	import AppearanceSettings from './AppearanceSettings.svelte';
 	import GeneralSettings from './GeneralSettings.svelte';
 	import ModelSettings from './ModelSettings.svelte';
 	import SkillsSettings from './SkillsSettings.svelte';
 	import ApplicationSettings from './ApplicationSettings.svelte';
+	import MemorySettings from './MemorySettings.svelte';
 
 	let { open = $bindable(false) }: { open?: boolean } = $props();
 
-	type SectionId = 'appearance' | 'general' | 'models' | 'skills' | 'application';
+	type SectionId = 'appearance' | 'general' | 'memory' | 'models' | 'skills' | 'application';
 
 	const SECTIONS: {
 		id: SectionId;
@@ -26,6 +28,7 @@
 	}[] = [
 		{ id: 'appearance', label: 'Apparence', icon: Palette },
 		{ id: 'general', label: 'Général', icon: SlidersHorizontal },
+		{ id: 'memory', label: 'Mémoire', icon: Brain },
 		{ id: 'models', label: 'Modèles', icon: Cpu },
 		{ id: 'skills', label: 'Skills', icon: Sparkles },
 		{ id: 'application', label: 'Application', icon: AppWindow }
@@ -74,6 +77,9 @@
 			</Tabs.Content>
 			<Tabs.Content value="general" class="min-h-0 flex-1 overflow-y-auto p-6">
 				<GeneralSettings />
+			</Tabs.Content>
+			<Tabs.Content value="memory" class="min-h-0 flex-1 overflow-y-auto p-6">
+				<MemorySettings />
 			</Tabs.Content>
 			<Tabs.Content value="models" class="min-h-0 flex-1 overflow-y-auto p-6">
 				<ModelSettings />

@@ -16,8 +16,8 @@
 //! Nothing a user or a model wrote is ever spliced into a query.
 //!
 //! ```text
-//! (:Episode {id, space, session_id, role, author, content, occurred_at,
-//!            recorded_at, source_ref, extraction_state, extraction_attempts,
+//! (:Episode {id, space, project_id, session_id, role, author, content,
+//!            occurred_at, recorded_at, source_ref, extraction_state, extraction_attempts,
 //!            extraction_json, extraction_error, embedding, embed_model, ikey})
 //! (:Entity  {id, space, type, name, name_norm, aliases})
 //! (:Fact    {id, space, subject_id, subject_name, predicate, value,
@@ -54,7 +54,7 @@ pub type StoreResult<T> = Result<T, String>;
 pub mod q {
     pub const EPISODE_EXISTS: &str = "MATCH (e {id: $id}) RETURN e.id";
     pub const EPISODE: &str = "MATCH (e {id: $id}) RETURN e.id, e.space, e.session_id, \
-        e.role, e.author, e.content, e.occurred_at, e.recorded_at, e.source_ref";
+        e.role, e.author, e.content, e.occurred_at, e.recorded_at, e.source_ref, e.project_id";
     pub const EPISODE_STATE: &str = "MATCH (e {id: $id}) RETURN e.extraction_state, \
         e.extraction_attempts, e.extraction_json";
     pub const PENDING_EPISODES: &str = "MATCH (e:Episode) WHERE e.extraction_state IN $states \
@@ -73,7 +73,8 @@ pub mod q {
         f.valid_from, f.valid_until, f.asserted_at, f.superseded_until, f.ended_by, f.recorded_at, \
         f.superseded_at, f.retracted_at, f.statement ORDER BY f.id";
     pub const ALL_EPISODES: &str = "MATCH (e:Episode) RETURN e.id, e.space, e.session_id, \
-        e.role, e.author, e.content, e.occurred_at, e.recorded_at, e.source_ref ORDER BY e.id";
+        e.role, e.author, e.content, e.occurred_at, e.recorded_at, e.source_ref, e.project_id \
+        ORDER BY e.id";
     pub const FACT: &str = "MATCH (f {id: $id}) RETURN f.id, f.space, f.subject_id, f.subject_name, \
         f.predicate, f.value, f.value_norm, f.object_id, f.negated, f.origin, f.status, f.confidence, \
         f.valid_from, f.valid_until, f.asserted_at, f.superseded_until, f.ended_by, f.recorded_at, \
@@ -92,6 +93,7 @@ pub mod q {
     pub const INDEXED_ITEMS: &str = "MATCH (n) WHERE n.ikey IS NOT NULL AND n.embed_model = $model \
         RETURN n.ikey, n.id, labels(n), n.embedding";
     pub const IKEY: &str = "MATCH (n {id: $id}) RETURN n.ikey";
+    pub const EMBED_MODEL: &str = "MATCH (n {id: $id}) RETURN n.embed_model";
     pub const MAX_IKEY: &str = "MATCH (n) WHERE n.ikey IS NOT NULL RETURN max(n.ikey)";
     pub const UNEMBEDDED: &str = "MATCH (n) WHERE n.ikey IS NOT NULL AND n.embed_model <> $model \
         RETURN n.id, labels(n) ORDER BY n.id";
@@ -106,13 +108,22 @@ pub mod q {
     pub(super) const DELETE_NODE: &str = "MATCH (n {id: $id}) DETACH DELETE n";
     pub(super) const CLEAR_EMBEDDINGS: &str =
         "MATCH (n) WHERE n.ikey IS NOT NULL SET n.embed_model = ''";
+    /// Every record of the memory, with its relations (the metadata and the
+    /// schema version stay).
+    pub(super) const CLEAR_RECORDS: [&str; 4] = [
+        "MATCH (n:Fact) DETACH DELETE n",
+        "MATCH (n:Episode) DETACH DELETE n",
+        "MATCH (n:Entity) DETACH DELETE n",
+        "MATCH (n:Alias) DETACH DELETE n",
+    ];
 }
 
 /// Typed write operations. The parameters (`P`) of each are listed with it;
 /// node operations find their node by its `id`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum W {
-    /// `id space session_id role author content occurred_at recorded_at source_ref ikey`
+    /// `id space project_id session_id role author content occurred_at recorded_at source_ref
+    /// ikey`
     InsertEpisode,
     /// `id state attempts json error`
     SetExtraction,
@@ -153,6 +164,8 @@ pub enum W {
     DeleteNode,
     /// (no parameter)
     ClearEmbeddings,
+    /// (no parameter)
+    ClearRecords,
 }
 
 /// The key of an alias node: the space and the normalised name.
@@ -443,6 +456,7 @@ impl Store {
                     "occurred_at",
                     "recorded_at",
                     "source_ref",
+                    "project_id",
                     "ikey",
                 ] {
                     props.push((k, p.take(k)));
@@ -620,6 +634,12 @@ impl Store {
                 .map(|_| ())
                 .map_err(err),
             W::ClearEmbeddings => s.execute(q::CLEAR_EMBEDDINGS).map(|_| ()).map_err(err),
+            W::ClearRecords => {
+                for statement in q::CLEAR_RECORDS {
+                    s.execute(statement).map_err(err)?;
+                }
+                Ok(())
+            }
         }
     }
 
@@ -789,6 +809,7 @@ fn episode_row(r: &[Value]) -> Episode {
         occurred_at: as_i64(&r[6]),
         recorded_at: as_i64(&r[7]).unwrap_or(0),
         source_ref: as_str(&r[8]),
+        project_id: r.get(9).and_then(as_str),
     }
 }
 

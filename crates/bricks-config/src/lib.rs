@@ -9,8 +9,11 @@ mod memory;
 mod paths;
 mod projects;
 mod providers;
+mod scopes;
 
 pub use engine::engine_config;
+pub use memory::open_memories;
 pub use paths::{bricks_home, providers_file_from_env, sessions_dir};
 pub use projects::{Projects, announced_tools};
 pub use providers::load_registry;
+pub use scopes::{MemoryService, RetiredStore};

@@ -118,6 +118,8 @@ impl Origin {
             "assistant" => Self::AssistantProposal,
             "tool" => Self::ToolOutput,
             "summary" => Self::Summary,
+            // A note the model wrote: never a statement of the user.
+            ROLE_NOTE => Self::AssistantProposal,
             _ => Self::Legacy,
         }
     }
@@ -304,11 +306,22 @@ pub struct Evidence {
     pub occurred_at: Option<Millis>,
 }
 
+/// The role of a note written by the model (`memory_write`): an episode of
+/// its own, of model origin.
+pub const ROLE_NOTE: &str = "note";
+
+/// The space of the global memory, shared by every project.
+pub const GLOBAL_SPACE: &str = "global:default";
+
 /// An episode as stored.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Episode {
     pub id: String,
     pub space: String,
+    /// The project that produced it, when known (kept apart from the space:
+    /// a global note keeps its project).
+    #[serde(default)]
+    pub project_id: Option<String>,
     pub session_id: Option<String>,
     pub role: String,
     pub author: Option<String>,
@@ -324,6 +337,9 @@ pub struct Episode {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EpisodeInput {
     pub space: String,
+    /// The project that produced it (provenance, not part of its identity).
+    #[serde(default)]
+    pub project_id: Option<String>,
     pub session_id: Option<String>,
     /// `user`, `assistant`, `tool`, `summary`.
     pub role: String,
@@ -352,8 +368,12 @@ impl EpisodeInput {
     }
 }
 
-/// Spaces: `user:<id>`, `project:<name>`, `space:<name>`.
+/// Spaces: `user:<id>`, `project:<name>`, `space:<name>`, and the one
+/// global space ([`GLOBAL_SPACE`]).
 pub fn valid_space(s: &str) -> bool {
+    if s == GLOBAL_SPACE {
+        return true;
+    }
     let Some((kind, name)) = s.split_once(':') else {
         return false;
     };
@@ -443,5 +463,7 @@ mod tests {
         assert!(valid_space("user:42"));
         assert!(!valid_space("bricks"));
         assert!(!valid_space("team:x"));
+        assert!(valid_space(GLOBAL_SPACE));
+        assert!(!valid_space("global:other"));
     }
 }

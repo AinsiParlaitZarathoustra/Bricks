@@ -134,7 +134,7 @@ pub enum HistoriesSaved {
 // ─── Long-term memory (recall into prompts) ──────────────────────────────────
 
 /// A recalled context block, ready to append to a system prompt.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct RecalledContext {
     pub text: String,
     /// Estimated tokens of `text`.
@@ -142,6 +142,27 @@ pub struct RecalledContext {
     pub items: usize,
     /// Admissible items left out by the budget.
     pub omitted: usize,
+    /// Problems that left part of the memory out (a scope unavailable):
+    /// reported, never fatal.
+    pub warnings: Vec<String>,
+}
+
+/// The two memories a person sees: the current project's, and the global
+/// one shared by every project.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryScope {
+    Project,
+    Global,
+}
+
+impl MemoryScope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Project => "project",
+            Self::Global => "global",
+        }
+    }
 }
 
 /// One turn of a conversation, to remember.
@@ -191,6 +212,37 @@ pub trait LongTermMemory: Send + Sync {
     /// Store the turns of a session durably. Local and quick: no model or
     /// embedding call happens here; [`Self::maintain`] does that work.
     async fn record_turns(&self, session_id: Option<&str>, turns: &[MemoryTurn]) -> Result<()>;
+
+    /// Search one scope for `query`: at most `limit` items, rendered as a
+    /// context block; `None` when nothing matches. Memories without that
+    /// scope refuse.
+    async fn search(
+        &self,
+        scope: MemoryScope,
+        query: &str,
+        limit: usize,
+    ) -> Result<Option<RecalledContext>> {
+        let _ = (query, limit);
+        Err(CerseiError::Config(format!(
+            "the {} memory is not available here",
+            scope.as_str()
+        )))
+    }
+
+    /// Write a note of the model in `scope`, indexed before this returns
+    /// (found by the next search, in the same run). Returns its id.
+    async fn write_note(
+        &self,
+        scope: MemoryScope,
+        session_id: Option<&str>,
+        text: &str,
+    ) -> Result<String> {
+        let _ = (session_id, text);
+        Err(CerseiError::Config(format!(
+            "the {} memory is not available here",
+            scope.as_str()
+        )))
+    }
 
     /// Process what was recorded and not processed yet (extraction,
     /// embeddings). Resumable: a pass that is cancelled or interrupted

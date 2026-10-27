@@ -252,6 +252,14 @@ mod prompt_tests {
         )
     }
 
+    fn without_ask(prompt: &str) -> String {
+        prompt
+            .lines()
+            .filter(|l| !l.starts_with("- Utilise Ask "))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     fn without(line_start: &str) -> String {
         REFERENCE
             .trim_end_matches('\n')
@@ -265,6 +273,10 @@ mod prompt_tests {
     async fn interactive_and_headless_send_the_same_foundation() {
         for interactive in [true, false] {
             let (s, tools) = sent(interactive, "").await;
+            // `Ask` exists only when someone can answer: its line aside, the
+            // foundation is the same.
+            assert_eq!(tools.iter().any(|t| t == "Ask"), interactive);
+            let s = without_ask(&s);
             assert!(tools.iter().any(|t| t == "Agent") && tools.iter().any(|t| t == "CodeScout"));
             assert!(s.starts_with(REFERENCE.trim_end_matches('\n')), "{s}");
             assert_eq!(s.matches("Tu es Bricks").count(), 1);
@@ -272,6 +284,7 @@ mod prompt_tests {
             assert!(s.contains("<working_directory>"));
 
             let (s, tools) = sent(interactive, "[agents]\nenabled = false\n").await;
+            let s = without_ask(&s);
             assert!(!tools.iter().any(|t| t == "Agent" || t == "Agents"));
             assert!(s.starts_with(&without("- Délègue aux sous-agents")), "{s}");
         }

@@ -19,6 +19,7 @@
 //! A failure at 2 or 4 leaves the episode stored and pending; `process`
 //! picks it up again (bounded attempts for extraction).
 
+pub mod browse;
 pub mod clock;
 pub mod config;
 pub mod extract;
@@ -26,14 +27,22 @@ pub mod index;
 mod ingest;
 pub mod model;
 pub mod recall;
+pub mod scoped;
+pub mod service;
 pub mod store;
 
+pub use browse::{
+    ClearReport, EntryCounts, EntryFilter, EntryKind, EntryPage, NoteError, NoteInput, NoteWritten,
+    StoredEntry,
+};
 pub use clock::{Clock, ManualClock, SystemClock};
 pub use config::{ExtractionConfig, MemoryConfig, RecallConfig};
 pub use extract::{Extractor, LlmExtractor};
 pub use ingest::{ForgetReport, IngestReport, Recorded};
 pub use model::*;
 pub use recall::{Recall, RecallItem, RecallQuery, RecallTimings};
+pub use scoped::{RECALL_MAX, ScopedMemory, global_space, project_space};
+pub use service::{Lease, OpenMemories, SharedStore};
 
 use bricks_embeddings::EmbeddingProvider;
 use index::{Item, Projection};
@@ -55,6 +64,9 @@ pub enum MemoryError {
     EmbeddingMismatch { stored: String, configured: String },
     #[error("embedding failed: {0}")]
     Embedding(String),
+    /// A run or a maintenance uses the store (or it is being cleared).
+    #[error("memory store busy: {0}")]
+    InUse(String),
 }
 
 impl From<String> for MemoryError {
@@ -176,6 +188,29 @@ impl MemoryBuilder {
     }
 }
 
+/// What a store's processing uses, apart from the store's identity (file,
+/// space, schema, embedding model): the extractor, its limits and the recall
+/// budgets. Given to each call that needs it, so the users of one shared
+/// handle never mix theirs.
+#[derive(Clone, Default)]
+pub struct Processing {
+    /// Without one, episodes are stored and embedded, never extracted.
+    pub extractor: Option<Arc<dyn Extractor>>,
+    pub extraction: ExtractionConfig,
+    pub recall: RecallConfig,
+}
+
+impl Processing {
+    /// The processing of `config`, with `extractor`.
+    pub fn of(config: &MemoryConfig, extractor: Option<Arc<dyn Extractor>>) -> Self {
+        Self {
+            extractor,
+            extraction: config.extraction.clone(),
+            recall: config.recall.clone(),
+        }
+    }
+}
+
 /// The structured long-term memory.
 pub struct StructuredMemory {
     store: Store,
@@ -208,6 +243,17 @@ impl StructuredMemory {
 
     pub fn config(&self) -> &MemoryConfig {
         &self.config
+    }
+
+    /// The processing this store was opened with.
+    pub fn processing(&self) -> Processing {
+        Processing::of(&self.config, self.extractor.clone())
+    }
+
+    /// Model id and dimensions of the embedder.
+    pub fn embedding_identity(&self) -> (String, usize) {
+        let p = self.projection.read();
+        (p.model.clone(), p.dims)
     }
 
     pub fn now(&self) -> Millis {
@@ -353,6 +399,7 @@ impl crate::LongTermMemory for StructuredMemory {
             tokens: r.tokens,
             items: r.items.len(),
             omitted: r.omitted,
+            warnings: Vec::new(),
         }))
     }
 
@@ -366,6 +413,7 @@ impl crate::LongTermMemory for StructuredMemory {
             .filter(|t| !t.content.trim().is_empty())
             .map(|t| EpisodeInput {
                 space: self.config.space.clone(),
+                project_id: None,
                 session_id: session_id.map(str::to_string),
                 role: t.role.clone(),
                 author: None,
@@ -378,6 +426,54 @@ impl crate::LongTermMemory for StructuredMemory {
             self.record_all(inputs).await?;
         }
         Ok(())
+    }
+
+    /// The project scope is this store's space; there is no global scope.
+    async fn search(
+        &self,
+        scope: crate::MemoryScope,
+        query: &str,
+        limit: usize,
+    ) -> bricks_types::Result<Option<crate::RecalledContext>> {
+        if scope != crate::MemoryScope::Project {
+            return Err(
+                MemoryError::Config("the global memory is not available here".into()).into(),
+            );
+        }
+        let mut q = RecallQuery::new(query);
+        q.spaces = Some(vec![self.config.space.clone()]);
+        q.max_results = Some(limit.clamp(1, 20));
+        let r = self.recall(&q).await?;
+        Ok((!r.items.is_empty()).then(|| crate::RecalledContext {
+            text: r.rendered,
+            tokens: r.tokens,
+            items: r.items.len(),
+            omitted: r.omitted,
+            warnings: Vec::new(),
+        }))
+    }
+
+    async fn write_note(
+        &self,
+        scope: crate::MemoryScope,
+        session_id: Option<&str>,
+        text: &str,
+    ) -> bricks_types::Result<String> {
+        if scope != crate::MemoryScope::Project {
+            return Err(
+                MemoryError::Config("the global memory is not available here".into()).into(),
+            );
+        }
+        let note = NoteInput {
+            space: self.config.space.clone(),
+            project_id: None,
+            session_id: session_id.map(str::to_string),
+            text: text.to_string(),
+        };
+        self.write_note(note, self.extractor.is_some())
+            .await
+            .map(|w| w.id)
+            .map_err(|e| bricks_types::CerseiError::Config(e.to_string()))
     }
 
     async fn maintain(

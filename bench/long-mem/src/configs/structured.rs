@@ -86,6 +86,7 @@ impl Config for StructuredConfig {
             for (n, turn) in session.iter().enumerate() {
                 inputs.push(EpisodeInput {
                     space: "user:longmemeval".into(),
+                    project_id: None,
                     session_id: Some(sid.clone()),
                     role: turn.role.clone(),
                     author: None,

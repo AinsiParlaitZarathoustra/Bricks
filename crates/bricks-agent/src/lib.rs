@@ -276,7 +276,10 @@ pub struct Agent {
     permission_parts: Option<PermissionParts>,
     memory: Option<Arc<dyn Memory>>,
     /// Long-term memory recalled into the prompt and fed with each exchange.
-    pub(crate) long_term_memory: Option<Arc<dyn bricks_memory::LongTermMemory>>,
+    /// Read once at the start of each run: [`Agent::set_long_term_memory`]
+    /// applies from the next run.
+    pub(crate) long_term_memory:
+        parking_lot::RwLock<Option<Arc<dyn bricks_memory::LongTermMemory>>>,
     /// Token budget of the recalled block (also capped at a tenth of the
     /// prompt budget).
     pub(crate) memory_recall_tokens: usize,
@@ -600,7 +603,25 @@ impl Agent {
 
     /// Whether a long-term memory is attached.
     pub fn has_long_term_memory(&self) -> bool {
-        self.long_term_memory.is_some()
+        self.long_term_memory.read().is_some()
+    }
+
+    /// The long-term memory the next run starts with.
+    pub fn long_term_memory(&self) -> Option<Arc<dyn bricks_memory::LongTermMemory>> {
+        self.long_term_memory.read().clone()
+    }
+
+    /// Replace the long-term memory (`None`: off), without rebuilding the
+    /// agent. A run reads it once, at its start: the run in progress keeps
+    /// its own, recall, tools, capture and maintenance included.
+    pub fn set_long_term_memory(&self, memory: Option<Arc<dyn bricks_memory::LongTermMemory>>) {
+        *self.long_term_memory.write() = memory;
+    }
+
+    /// The session's permission policy, when this agent was built with one
+    /// (not a sub-agent given a whole engine).
+    pub(crate) fn policy_cell(&self) -> Option<&permission::PolicyCell> {
+        self.permission_parts.as_ref().map(|(cell, _)| cell)
     }
 
     /// Run the long-term memory's maintenance now (what earlier runs
@@ -609,7 +630,7 @@ impl Agent {
         &self,
         cancel: &tokio_util::sync::CancellationToken,
     ) -> Option<bricks_types::Result<bricks_memory::MaintenanceReport>> {
-        let ltm = self.long_term_memory.as_ref()?;
+        let ltm = self.long_term_memory()?;
         Some(ltm.maintain(cancel).await)
     }
 
@@ -1481,7 +1502,7 @@ impl AgentBuilder {
             permission_policy,
             permission_parts,
             memory: self.memory,
-            long_term_memory: self.long_term_memory,
+            long_term_memory: parking_lot::RwLock::new(self.long_term_memory),
             memory_recall_tokens: self.memory_recall_tokens,
             recalled: parking_lot::Mutex::new(None),
             session_id: self.session_id,

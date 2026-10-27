@@ -22,9 +22,9 @@ pub use ask::{
     SkipReason,
 };
 pub use controller::{
-    Activity, Controller, EngineConfig, EventStream, ModelCatalog, ModelChoice, OpenOptions,
-    ProfileChoice, ProjectContext, ProjectLoader, SessionChoice, SkillsSetup, Snapshot,
-    ToolFactory, ToolInfo, list_sessions, list_sessions_in,
+    Activity, Controller, EngineConfig, EventStream, MemoryResolver, ModelCatalog, ModelChoice,
+    OpenOptions, ProfileChoice, ProjectContext, ProjectLoader, RunMemory, SessionChoice,
+    SkillsSetup, Snapshot, ToolFactory, ToolInfo, list_sessions, list_sessions_in,
 };
 pub use protocol::{
     AttachmentInfo, Command, Envelope, Event, FailureKind, MAX_PATCH_BYTES,

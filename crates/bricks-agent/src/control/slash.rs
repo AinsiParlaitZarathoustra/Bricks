@@ -26,7 +26,10 @@ pub enum Present {
     ModelPicker,
     /// `/effort`: the current model's reasoning profiles.
     EffortPicker,
+    /// `/memory`: the current project's memory.
     Memory,
+    /// `/memory global`: the memory shared by every project.
+    MemoryGlobal,
     Context,
     /// `/context details`.
     ContextDetails,
@@ -341,10 +344,17 @@ pub const COMMANDS: &[SlashCommand] = &[
     SlashCommand {
         name: "memory",
         aliases: &[],
-        args: "",
-        description: "long-term memory: space, last recall, maintenance",
-        description_fr: "mémoire à long terme : espace, dernier rappel, maintenance",
-        build: |_| present(Present::Memory),
+        args: "[global]",
+        description: "long-term memory: the project's, or the global one",
+        description_fr: "mémoire à long terme : celle du projet, ou la mémoire globale",
+        build: |arg| match arg.trim() {
+            "" => present(Present::Memory),
+            "global" => present(Present::MemoryGlobal),
+            _ => Err(SlashError::new(
+                "`/memory` or `/memory global`",
+                "`/memory` ou `/memory global`",
+            )),
+        },
     },
     SlashCommand {
         name: "context",

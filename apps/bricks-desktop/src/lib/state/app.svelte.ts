@@ -42,6 +42,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   diagrams: defaultDiagramSettings(),
   app_icon: 'aligned',
   ask_timer: { enabled: false, mode: 'smart', seconds: 300 },
+  memory_enabled: false,
 }
 
 /** An IPC refusal because a project's folder is missing. */
@@ -207,6 +208,22 @@ class AppStore {
     this.prefsTimer = setTimeout(() => {
       ipc.prefsSet($state.snapshot(this.prefs)).catch((e) => this.fail(e))
     }, 300)
+  }
+
+  /**
+   * Turns the memory on or off, saved at once (not debounced): it applies from the
+   * next run. `null` when saved, else the error.
+   */
+  async setMemoryEnabled(on: boolean): Promise<string | null> {
+    if (this.prefsTimer) clearTimeout(this.prefsTimer)
+    const next = { ...this.prefs, memory_enabled: on }
+    try {
+      await ipc.prefsSet($state.snapshot(next))
+      this.prefs = next
+      return null
+    } catch (e) {
+      return ipc.errorMessage(e)
+    }
   }
 
   // ─── Projects ─────────────────────────────────────────────────────────────

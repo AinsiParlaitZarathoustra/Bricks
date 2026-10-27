@@ -23,7 +23,7 @@ use super::clock::date;
 use super::index::Item;
 use super::model::*;
 use super::store::{P, q};
-use super::{MemoryError, MemoryResult, StructuredMemory};
+use super::{MemoryError, MemoryResult, RecallConfig, StructuredMemory};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Instant;
 
@@ -165,8 +165,16 @@ type Key = (Kind, String);
 impl StructuredMemory {
     /// Recall facts and passages for `query`.
     pub async fn recall(&self, query: &RecallQuery) -> MemoryResult<Recall> {
+        self.recall_with(query, &self.config.recall).await
+    }
+
+    /// [`Self::recall`] with the limits and fusion parameters `cfg`.
+    pub async fn recall_with(
+        &self,
+        query: &RecallQuery,
+        cfg: &RecallConfig,
+    ) -> MemoryResult<Recall> {
         let start = Instant::now();
-        let cfg = &self.config.recall;
         let now = self.now();
         let t = query.valid_at.unwrap_or(now);
         let k = query.known_at.unwrap_or(now);
@@ -258,7 +266,7 @@ impl StructuredMemory {
             .map(|(key, sim, _)| (key.clone(), (*sim as f64).max(0.0)))
             .collect();
         let (relational, stats) = if cfg.weight_relational > 0.0 && cfg.hops > 0 {
-            self.expand(&seeds, &spaces, t, k, query.include_proposed)?
+            self.expand(cfg, &seeds, &spaces, t, k, query.include_proposed)?
         } else {
             (Vec::new(), ExpansionStats::default())
         };
@@ -386,7 +394,7 @@ impl StructuredMemory {
                 full = true;
                 continue;
             }
-            let line = self.render_item(&item, n + 1, t)?;
+            let line = self.render_item(cfg, &item, n + 1, t)?;
             let cost = bricks_types::tokens::estimate_text(&line).tokens;
             if used + cost > max_tokens {
                 out.omitted += 1;
@@ -424,13 +432,13 @@ impl StructuredMemory {
     /// budget. Returns facts ranked by accumulated weight (ties by id).
     fn expand(
         &self,
+        cfg: &RecallConfig,
         seeds: &[(Key, f64)],
         spaces: &HashSet<String>,
         t: Millis,
         k: Millis,
         include_proposed: bool,
     ) -> MemoryResult<(Vec<(Key, f64)>, ExpansionStats)> {
-        let cfg = &self.config.recall;
         let deadline = Instant::now() + cfg.expansion_budget;
         let mut stats = ExpansionStats {
             seeds: seeds.len(),
@@ -555,7 +563,14 @@ impl StructuredMemory {
         Ok((ranked, stats))
     }
 
-    fn render_item(&self, item: &RecallItem, n: usize, t: Millis) -> MemoryResult<String> {
+    /// One recalled item as a line of the context block, numbered `n`.
+    pub(crate) fn render_item(
+        &self,
+        cfg: &RecallConfig,
+        item: &RecallItem,
+        n: usize,
+        t: Millis,
+    ) -> MemoryResult<String> {
         let mut line = String::new();
         if let Some(f) = &item.fact {
             line.push_str(&format!("- [R{n}] {}", f.statement));
@@ -632,7 +647,7 @@ impl StructuredMemory {
                     .as_deref()
                     .map(|s| format!("session {s}"))
                     .unwrap_or_else(|| "no session".into()),
-                clip(&e.content, self.config.recall.passage_chars)
+                clip(&e.content, cfg.passage_chars)
             ));
         }
         Ok(line)

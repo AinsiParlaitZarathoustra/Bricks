@@ -37,6 +37,12 @@ pub fn run() {
             commands::projects::project_remove,
             commands::projects::project_rename,
             commands::projects::project_relocate,
+            // Memory: counts, entries, clearing
+            commands::memory::memory_overview,
+            commands::memory::memory_counts,
+            commands::memory::memory_entries,
+            commands::memory::memory_delete,
+            commands::memory::memory_delete_retired,
             // Conversations (Haiku 1)
             commands::sessions::sessions_list,
             commands::sessions::sessions_search,

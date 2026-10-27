@@ -253,8 +253,9 @@ pub fn build_system_prompt(opts: &SystemPromptOptions) -> String {
         parts.push(SESSION_SKILLS_GUIDANCE.to_string());
     }
 
-    // 7. Session guidance: Memory
-    if opts.has_memory {
+    // 7. Session guidance: Memory, while the run has one (its tools are
+    // offered only then).
+    if has("memory_search") {
         parts.push(SESSION_MEMORY_GUIDANCE.to_string());
     }
 
@@ -399,6 +400,9 @@ fn ask_bullet(timer: crate::control::AskTimer) -> String {
 
 /// The foundation's bullet kept only when `ViewImage` is announced.
 const VIEW_IMAGE_BULLET: &str = "- Utilise ViewImage pour voir une image du disque.";
+const MEMORY_SEARCH_BULLET: &str =
+    "- Use memory_search before asking the user to repeat relevant context.";
+const MEMORY_WRITE_BULLET: &str = "- Use memory_write for durable notes. Write to global memory only for a lasting preference or an explicit request to remember across projects.";
 
 /// The foundation's bullet kept only when a web tool is announced.
 const WEB_BULLET: &str = "- Pour une information incertaine ou susceptible d'avoir changé (API, version, comportement d'une bibliothèque), cherche d'abord dans le code puis, si nécessaire, sur le web en privilégiant les sources officielles.";
@@ -506,6 +510,14 @@ pub fn bricks_foundation_with(tools: &[String], ask_timer: crate::control::AskTi
     if has("Ask") {
         bullets.push(ask_bullet(ask_timer));
     }
+    // Offered only while the run has a memory; `memory_write` only when
+    // writing is allowed or asked.
+    if has("memory_search") {
+        bullets.push(MEMORY_SEARCH_BULLET.to_string());
+    }
+    if has("memory_write") {
+        bullets.push(MEMORY_WRITE_BULLET.to_string());
+    }
     if has("CodeScout") {
         bullets.push(CODE_SCOUT_BULLET.to_string());
     }
@@ -574,9 +586,7 @@ installed with the same tool (`validate`, then `install`).
 const SESSION_MEMORY_GUIDANCE: &str = r#"
 ## Persistent memory
 
-You have access to persistent memory across sessions. Memory files survive across
-conversations and are injected into your context automatically.
-- Store facts about the user's preferences, project decisions, and recurring patterns
+What earlier sessions left in memory is recalled into your context automatically.
 - Before recommending from memory, verify that files and functions still exist
 - Memory records can become stale — if a recalled memory conflicts with current code, trust what you observe now
 "#;
@@ -1069,7 +1079,7 @@ mod tests {
                 branch: "MARK-BRANCH".into(),
                 ..Default::default()
             }),
-            tools_available: tools(&["Skill"]),
+            tools_available: tools(&["Skill", "memory_search"]),
             has_memory: true,
             ..default_opts()
         };
@@ -1207,12 +1217,28 @@ mod tests {
 
     #[test]
     fn test_memory_guidance_conditional() {
+        // The guidance follows the memory tools offered to this request.
         let with = SystemPromptOptions {
-            has_memory: true,
+            tools_available: tools(&["memory_search", "memory_write"]),
             ..Default::default()
         };
-        assert!(build_system_prompt(&with).contains("Persistent memory"));
-        assert!(!build_system_prompt(&default_opts()).contains("Persistent memory"));
+        let prompt = build_system_prompt(&with);
+        assert!(prompt.contains("Persistent memory"));
+        assert!(prompt.contains(MEMORY_SEARCH_BULLET));
+        assert!(prompt.contains(MEMORY_WRITE_BULLET));
+        // Writing denied: memory_write is not offered, nor its guidance.
+        let read_only = build_system_prompt(&SystemPromptOptions {
+            tools_available: tools(&["memory_search"]),
+            ..Default::default()
+        });
+        assert!(read_only.contains(MEMORY_SEARCH_BULLET));
+        assert!(!read_only.contains("memory_write"));
+        // Memory off for the run: no tool, no guidance, whatever `has_memory` says.
+        let off = build_system_prompt(&SystemPromptOptions {
+            has_memory: true,
+            ..Default::default()
+        });
+        assert!(!off.contains("Persistent memory") && !off.contains("memory_search"));
     }
 
     #[test]

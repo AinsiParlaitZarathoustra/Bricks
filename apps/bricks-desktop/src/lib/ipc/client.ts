@@ -12,6 +12,11 @@ import type { GitArea } from './bindings/GitArea'
 import type { GitCommit } from './bindings/GitCommit'
 import type { GitStatus } from './bindings/GitStatus'
 import type { IpcErrorCode } from './bindings/IpcErrorCode'
+import type { MemoryCounts } from './bindings/MemoryCounts'
+import type { MemoryEntryFilter } from './bindings/MemoryEntryFilter'
+import type { MemoryEntryPage } from './bindings/MemoryEntryPage'
+import type { MemoryOverview } from './bindings/MemoryOverview'
+import type { MemoryScope } from './bindings/MemoryScope'
 import type { OpenedSession } from './bindings/OpenedSession'
 import type { OpenSessionRequest } from './bindings/OpenSessionRequest'
 import type { Preferences } from './bindings/Preferences'
@@ -48,6 +53,15 @@ export type * from './bindings/HistoryBlock'
 export type * from './bindings/HistoryMessage'
 export type * from './bindings/HistoryRole'
 export type * from './bindings/IpcErrorCode'
+export type * from './bindings/MemoryCounts'
+export type * from './bindings/MemoryEntry'
+export type * from './bindings/MemoryEntryFilter'
+export type * from './bindings/MemoryEntryKind'
+export type * from './bindings/MemoryEntryPage'
+export type * from './bindings/MemoryEvidence'
+export type * from './bindings/MemoryOverview'
+export type * from './bindings/MemoryScope'
+export type * from './bindings/RetiredMemory'
 export type * from './bindings/OpenedSession'
 export type * from './bindings/OpenSessionRequest'
 export type * from './bindings/Preferences'
@@ -129,6 +143,28 @@ export const projectRename = (projectId: string, name: string) =>
 /** Moves a project to another folder; its conversations follow it. */
 export const projectRelocate = (projectId: string, path: string) =>
   call<Project>('project_relocate', { projectId, path })
+
+// ─── Memory ──────────────────────────────────────────────────────────────────
+
+/** Counts of both memories, notices and the stores of removed projects. */
+export const memoryOverview = (projectId: string | null) =>
+  call<MemoryOverview>('memory_overview', { projectId })
+export const memoryCounts = (scope: MemoryScope, projectId: string | null) =>
+  call<MemoryCounts>('memory_counts', { scope, projectId })
+/** A page of entries (`limit` 1–50), newest first. */
+export const memoryEntries = (
+  scope: MemoryScope,
+  projectId: string | null,
+  filter: MemoryEntryFilter,
+  query: string,
+  offset: number,
+  limit: number,
+) => call<MemoryEntryPage>('memory_entries', { scope, projectId, filter, query, offset, limit })
+/** Clears a memory; refused while a run uses it. */
+export const memoryDelete = (scope: MemoryScope, projectId: string | null) =>
+  call<void>('memory_delete', { scope, projectId })
+export const memoryDeleteRetired = (projectId: string) =>
+  call<void>('memory_delete_retired', { projectId })
 
 // ─── Project files (references of messages, SVG export) ─────────────────────
 

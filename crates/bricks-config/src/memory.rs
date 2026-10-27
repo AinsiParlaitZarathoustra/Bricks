@@ -1,10 +1,11 @@
-//! The long-term memory of a project, opened once per store and
-//! configuration.
+//! The long-term memories: a project's from its `bricks.toml` (CLI and SDK),
+//! and the desktop's two scopes ([`MemoryService`]). Every store is opened
+//! once per process and canonical path ([`open_memories`]).
 
 use crate::paths::bricks_home;
 use bricks_embeddings::{EmbeddingProvider, GeminiEmbeddings, HashingEmbeddings, OpenAiEmbeddings};
 use bricks_memory::structured::extract::LlmExtractor;
-use bricks_memory::structured::{MemoryConfig, StructuredMemory};
+use bricks_memory::structured::{MemoryConfig, OpenMemories, StructuredMemory};
 use bricks_provider::ProviderRegistry;
 use std::path::Path;
 use std::sync::Arc;
@@ -45,17 +46,17 @@ fn embedder(spec: &str) -> Result<Arc<dyn EmbeddingProvider>, String> {
     })
 }
 
-/// Long-term memories opened by this process, by file and configuration:
-/// one store is never opened twice (sessions of several projects may share
-/// the default one).
-pub(crate) type OpenMemories =
-    parking_lot::Mutex<std::collections::HashMap<String, Arc<StructuredMemory>>>;
+/// The stores this process has open: one handle per canonical path (a store
+/// file is locked by the process that opens it).
+pub fn open_memories() -> &'static OpenMemories {
+    static OPEN: std::sync::OnceLock<OpenMemories> = std::sync::OnceLock::new();
+    OPEN.get_or_init(OpenMemories::default)
+}
 
 /// The long-term memory, when `[memory] enabled = true`.
 pub(crate) fn long_term_memory(
     wd: &Path,
     registry: &ProviderRegistry,
-    open: &OpenMemories,
 ) -> Result<Option<(Arc<StructuredMemory>, String)>, String> {
     let text = match std::fs::read_to_string(wd.join("bricks.toml")) {
         Ok(t) => t,
@@ -69,16 +70,7 @@ pub(crate) fn long_term_memory(
         .path
         .clone()
         .unwrap_or_else(|| bricks_home().join("memory").join("memory.grafeo"));
-    let key = format!("{}\n{cfg:?}", path.display());
-    if let Some(m) = open.lock().get(&key) {
-        return Ok(Some((Arc::clone(m), cfg.space.clone())));
-    }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
-    }
-    let mut builder = StructuredMemory::builder(embedder(&cfg.embeddings)?)
-        .path(&path)
-        .config(cfg.clone());
+    let mut extractor = None;
     if let Some(sel) = &cfg.extractor_model {
         let resolved = registry
             .resolve(sel)
@@ -86,17 +78,21 @@ pub(crate) fn long_term_memory(
         let provider = resolved
             .build_provider()
             .map_err(|e| format!("memory.extractor_model: {e}"))?;
-        builder = builder.extractor(Arc::new(LlmExtractor::new(
+        extractor = Some(Arc::new(LlmExtractor::new(
             Arc::new(provider),
             resolved.api_model.clone(),
             cfg.extraction.clone(),
-        )));
+        )) as Arc<dyn bricks_memory::structured::Extractor>);
     }
-    let memory = Arc::new(
-        builder
-            .open()
-            .map_err(|e| format!("long-term memory {}: {e}", path.display()))?,
-    );
-    open.lock().insert(key, Arc::clone(&memory));
+    let memory = open_memories()
+        .open(
+            &path,
+            &cfg.space,
+            embedder(&cfg.embeddings)?,
+            &cfg,
+            extractor,
+        )
+        .map_err(|e| format!("long-term memory {}: {e}", path.display()))?
+        .memory;
     Ok(Some((memory, cfg.space.clone())))
 }

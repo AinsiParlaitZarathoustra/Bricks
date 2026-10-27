@@ -14,6 +14,7 @@ bricks-mcp = { workspace = true }
 bricks-lsp = { workspace = true }
 bricks-semantic = { workspace = true }
 bricks-skills = { workspace = true }
+bricks-memory = { workspace = true }
 async-trait = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -105,7 +105,10 @@ async function runPresent(p: SlashPresent, host: SlashHost): Promise<SlashOutcom
       host.openPicker('effort')
       return DONE
     case 'memory':
-      host.open('memory')
+      host.open('memory', { scope: 'project' })
+      return DONE
+    case 'memory_global':
+      host.open('memory', { scope: 'global' })
       return DONE
     case 'context':
       host.open('context')

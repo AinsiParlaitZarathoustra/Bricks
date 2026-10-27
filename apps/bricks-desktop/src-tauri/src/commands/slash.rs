@@ -66,6 +66,7 @@ fn present_to_ipc(present: Present) -> SlashPresent {
         Present::ModelPicker => SlashPresent::ModelPicker,
         Present::EffortPicker => SlashPresent::EffortPicker,
         Present::Memory => SlashPresent::Memory,
+        Present::MemoryGlobal => SlashPresent::MemoryGlobal,
         Present::Context => SlashPresent::Context,
         Present::ContextDetails => SlashPresent::ContextDetails,
         Present::Cost => SlashPresent::Cost,

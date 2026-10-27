@@ -196,6 +196,7 @@ async fn run_structured(
             // Role and content only: no `has_answer`, no answer, no evidence ids.
             inputs.push(EpisodeInput {
                 space: "user:longmemeval".into(),
+                project_id: None,
                 session_id: Some(sid.clone()),
                 role: turn.role.clone(),
                 author: None,
