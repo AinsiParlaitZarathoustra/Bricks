@@ -1,8 +1,11 @@
-//! Grep tool: search file contents with regex.
+//! Grep tool: search file contents with regex or exact text.
 
 use super::*;
 use crate::tool_primitives::search as psearch;
 use serde::Deserialize;
+
+/// Matches returned when the call gives no `limit`.
+pub const DEFAULT_LIMIT: usize = 100;
 
 pub struct GrepTool;
 
@@ -12,9 +15,10 @@ impl Tool for GrepTool {
         "Grep"
     }
     fn description(&self) -> &str {
-        "Recursively search file contents by regex, in-process (ripgrep-powered). \
-         Respects .gitignore and skips hidden/binary files by default. Prefer this \
-         over running `rg`/`grep` in Bash — no external tools are required."
+        "Recursively search file contents by regex (or exact text with `literal`), in-process \
+         (ripgrep-powered). Respects .gitignore and skips hidden files by default; a file with \
+         a NUL byte in the part read is treated as binary and none of its lines are returned. \
+         Prefer this over running `rg`/`grep` in Bash — no external tools are required."
     }
     fn permission_level(&self) -> PermissionLevel {
         PermissionLevel::ReadOnly
@@ -27,11 +31,13 @@ impl Tool for GrepTool {
         serde_json::json!({
             "type": "object",
             "properties": {
-                "pattern": { "type": "string", "description": "Regex pattern to search for" },
-                "path": { "type": "string", "description": "File or directory to search in (defaults to the working directory)" },
+                "pattern": { "type": "string", "description": "Regex pattern to search for (exact text when `literal` is true)" },
+                "path": { "type": "string", "description": "File or directory to search in, relative to the working directory or absolute (defaults to the working directory)" },
                 "glob": { "type": "string", "description": "Whitelist glob to filter files, e.g. *.rs" },
                 "case_insensitive": { "type": "boolean", "description": "Case-insensitive matching", "default": false },
-                "hidden": { "type": "boolean", "description": "Include hidden files/directories", "default": false }
+                "hidden": { "type": "boolean", "description": "Include hidden files/directories", "default": false },
+                "literal": { "type": "boolean", "description": "Match `pattern` as exact text, without regex syntax", "default": false },
+                "limit": { "type": "integer", "minimum": 0, "description": "Max matching lines to return (default 100). 0 checks the pattern and path and returns no match", "default": DEFAULT_LIMIT }
             },
             "required": ["pattern"]
         })
@@ -48,6 +54,9 @@ impl Tool for GrepTool {
             case_insensitive: bool,
             #[serde(default)]
             hidden: bool,
+            #[serde(default)]
+            literal: bool,
+            limit: Option<usize>,
         }
 
         let input: Input = match crate::tool_feedback::parse_input(self, &input) {
@@ -55,31 +64,48 @@ impl Tool for GrepTool {
             Err(e) => return e,
         };
 
+        // A relative path is relative to the working directory.
         let search_path = input
             .path
-            .unwrap_or_else(|| ctx.working_dir.display().to_string());
+            .as_ref()
+            .map(|p| ctx.working_dir.join(p))
+            .unwrap_or_else(|| ctx.working_dir.clone());
+        if !search_path.exists() {
+            return ToolResult::error(format!("Path does not exist: {}", search_path.display()));
+        }
 
+        let limit = input.limit.unwrap_or(DEFAULT_LIMIT);
         let opts = psearch::GrepOptions {
             glob_filter: input.glob,
-            max_results: Some(250),
+            max_results: Some(limit),
             case_insensitive: input.case_insensitive,
             no_ignore: false,
             hidden: input.hidden,
+            literal: input.literal,
         };
 
-        match psearch::grep(&input.pattern, std::path::Path::new(&search_path), opts).await {
-            Ok(matches) => {
-                if matches.is_empty() {
-                    ToolResult::success("No matches found.")
-                } else {
-                    let output: Vec<String> = matches
-                        .iter()
-                        .map(|m| {
-                            format!("{}:{}:{}", m.file.display(), m.line_number, m.line_content)
-                        })
-                        .collect();
-                    ToolResult::success(output.join("\n"))
+        match psearch::grep_search(&input.pattern, &search_path, opts).await {
+            Ok(found) => {
+                if limit == 0 {
+                    return ToolResult::success("Limit is 0: no match listed.");
                 }
+                if found.matches.is_empty() {
+                    return ToolResult::success("No matches found.");
+                }
+                let mut output = found
+                    .matches
+                    .iter()
+                    .map(|m| format!("{}:{}:{}", m.file.display(), m.line_number, m.line_content))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                // The total is not counted past the limit, never invented.
+                if found.more {
+                    output.push_str(&format!(
+                        "\n\n[Showing the first {} matches; more matches exist. Narrow the search with a more specific pattern, `path` or `glob`, or raise `limit`.]",
+                        found.matches.len()
+                    ));
+                }
+                ToolResult::success(output)
             }
             Err(e) => ToolResult::error(format!("Search failed: {}", e)),
         }

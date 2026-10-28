@@ -26,7 +26,8 @@ pub struct SearchMatch {
 pub struct GrepOptions {
     /// Whitelist glob applied to file paths (e.g. `*.rs`). `None` searches all files.
     pub glob_filter: Option<String>,
-    /// Cap on the number of matches returned. `None` is unlimited.
+    /// Cap on the number of matches returned. `None` is unlimited; `Some(0)`
+    /// checks the pattern and the path, then searches nothing.
     pub max_results: Option<usize>,
     /// Case-insensitive matching.
     pub case_insensitive: bool,
@@ -34,6 +35,17 @@ pub struct GrepOptions {
     pub no_ignore: bool,
     /// When `true`, include hidden files/directories in the search.
     pub hidden: bool,
+    /// When `true`, the pattern is exact text, not a regex.
+    pub literal: bool,
+}
+
+/// What a grep found.
+#[derive(Debug, Default, Clone)]
+pub struct GrepOutcome {
+    /// Matches sorted by `(file, line_number)`, at most `max_results`.
+    pub matches: Vec<SearchMatch>,
+    /// More matches exist than returned (their number is not known).
+    pub more: bool,
 }
 
 /// Search errors.
@@ -62,18 +74,41 @@ impl From<std::io::Error> for SearchError {
     }
 }
 
-/// Recursively search file contents using a regex pattern.
-///
-/// Native and in-process: uses ripgrep's `ignore` crate for a gitignore-aware
-/// parallel directory walk and ripgrep's `grep` crate for matching. No external
-/// `rg`/`grep` binary is required. `path` may be a directory (searched
-/// recursively) or a single file. Results are returned sorted by `(file,
-/// line_number)` for deterministic output.
+/// Recursively search file contents using a regex pattern. See
+/// [`grep_search`]; this drops whether more matches exist.
 pub async fn grep(
     pattern: &str,
     path: &Path,
     opts: GrepOptions,
 ) -> Result<Vec<SearchMatch>, SearchError> {
+    Ok(grep_search(pattern, path, opts).await?.matches)
+}
+
+/// Recursively search file contents using a regex (or literal) pattern.
+///
+/// Native and in-process: uses ripgrep's `ignore` crate for a gitignore-aware
+/// parallel directory walk and ripgrep's `grep` crate for matching. No external
+/// `rg`/`grep` binary is required. `path` may be a directory (searched
+/// recursively) or a single file; a path that does not exist is an error.
+/// Results are sorted by `(file, line_number)`.
+///
+/// The walk stops once more than `max_results` matches are known, and no
+/// file contributes more than that many: a large file is never read to the
+/// end only to be truncated. Which matches are kept when the limit is passed
+/// depends on the order the parallel walk reaches the files.
+///
+/// Binary files: a file is binary when a NUL byte appears in the bytes the
+/// search read. Its reading stops there and none of its lines are returned,
+/// even lines read before the NUL. Only the bytes read are checked: a file
+/// left early because the limit was reached is checked up to that point
+/// (and its read-ahead buffer), not to its end. Binary data without a NUL
+/// byte (and UTF-16 text) is not recognised; a file that is not valid UTF-8
+/// where a line matches is skipped.
+pub async fn grep_search(
+    pattern: &str,
+    path: &Path,
+    opts: GrepOptions,
+) -> Result<GrepOutcome, SearchError> {
     let pattern = pattern.to_string();
     let path = path.to_path_buf();
 
@@ -82,22 +117,62 @@ pub async fn grep(
         .map_err(|e| SearchError::CommandFailed(e.to_string()))?
 }
 
-/// Synchronous core of [`grep`], intended to run on a blocking thread.
+/// Collects one file's matches, at most `room` of them; a NUL byte marks
+/// the file binary and stops its reading.
+struct FileSink<'a> {
+    file: &'a Path,
+    out: Vec<SearchMatch>,
+    room: usize,
+    binary: bool,
+}
+
+impl grep::searcher::Sink for FileSink<'_> {
+    type Error = std::io::Error;
+
+    fn matched(
+        &mut self,
+        _searcher: &grep::searcher::Searcher,
+        mat: &grep::searcher::SinkMatch<'_>,
+    ) -> Result<bool, std::io::Error> {
+        let line = std::str::from_utf8(mat.bytes())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        self.out.push(SearchMatch {
+            file: self.file.to_path_buf(),
+            line_number: mat.line_number().unwrap_or(0) as usize,
+            line_content: line.trim_end_matches(['\n', '\r']).to_string(),
+        });
+        self.room -= 1;
+        Ok(self.room > 0)
+    }
+
+    fn binary_data(
+        &mut self,
+        _searcher: &grep::searcher::Searcher,
+        _binary_byte_offset: u64,
+    ) -> Result<bool, std::io::Error> {
+        self.binary = true;
+        Ok(false)
+    }
+}
+
+/// Synchronous core of [`grep_search`], intended to run on a blocking thread.
 fn grep_blocking(
     pattern: &str,
     path: &Path,
     opts: GrepOptions,
-) -> Result<Vec<SearchMatch>, SearchError> {
-    use grep::regex::RegexMatcherBuilder;
-    use grep::searcher::SearcherBuilder;
-    use grep::searcher::sinks::UTF8;
+) -> Result<GrepOutcome, SearchError> {
+    use bricks_semantic::MatchMode;
+    use grep::searcher::{BinaryDetection, SearcherBuilder};
     use ignore::WalkState;
+    use std::sync::atomic::AtomicUsize;
 
-    let matcher = RegexMatcherBuilder::new()
-        .case_insensitive(opts.case_insensitive)
-        .line_terminator(Some(b'\n'))
-        .build(pattern)
-        .map_err(|e| SearchError::InvalidPattern(e.to_string()))?;
+    let mode = if opts.literal {
+        MatchMode::Literal
+    } else {
+        MatchMode::Regex
+    };
+    let matcher = bricks_semantic::lexical::build_matcher(pattern, mode, opts.case_insensitive)
+        .map_err(SearchError::InvalidPattern)?;
 
     // The walker shared with the code understanding engine: same ignore
     // rules, same hidden-file default.
@@ -109,18 +184,35 @@ fn grep_blocking(
     };
     let mut builder = bricks_semantic::lexical::walk_builder(path, &filters)
         .map_err(SearchError::InvalidPattern)?;
+    // The walker reports a missing root as an entry error, which would
+    // otherwise read as "no matches".
+    if !path.exists() {
+        return Err(SearchError::IoError(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("path does not exist: {}", path.display()),
+        )));
+    }
+    if opts.max_results == Some(0) {
+        return Ok(GrepOutcome::default());
+    }
     let threads = std::thread::available_parallelism()
         .map(|n| n.get())
         .unwrap_or(1);
     builder.threads(threads);
 
+    // One match past the limit proves that more exist.
+    let wanted = opts.max_results.map_or(usize::MAX, |m| m.saturating_add(1));
     let results: Arc<Mutex<Vec<SearchMatch>>> = Arc::new(Mutex::new(Vec::new()));
-    let max = opts.max_results;
+    let found = Arc::new(AtomicUsize::new(0));
 
     builder.build_parallel().run(|| {
         let matcher = matcher.clone();
         let results = Arc::clone(&results);
-        let mut searcher = SearcherBuilder::new().line_number(true).build();
+        let found = Arc::clone(&found);
+        let mut searcher = SearcherBuilder::new()
+            .line_number(true)
+            .binary_detection(BinaryDetection::quit(b'\x00'))
+            .build();
 
         Box::new(move |entry| {
             let entry = match entry {
@@ -131,32 +223,28 @@ fn grep_blocking(
             if !entry.file_type().is_some_and(|t| t.is_file()) {
                 return WalkState::Continue;
             }
+            let room = wanted.saturating_sub(found.load(Ordering::SeqCst));
+            if room == 0 {
+                return WalkState::Quit;
+            }
 
-            let mut local: Vec<SearchMatch> = Vec::new();
-            let file = entry.path().to_path_buf();
-            let search_result = searcher.search_path(
-                &matcher,
-                entry.path(),
-                UTF8(|lnum, line| {
-                    local.push(SearchMatch {
-                        file: file.clone(),
-                        line_number: lnum as usize,
-                        line_content: line.trim_end_matches(['\n', '\r']).to_string(),
-                    });
-                    Ok(true)
-                }),
-            );
+            let mut sink = FileSink {
+                file: entry.path(),
+                out: Vec::new(),
+                room,
+                binary: false,
+            };
+            let search_result = searcher.search_path(&matcher, entry.path(), &mut sink);
             // Ignore per-file read/decoding errors (e.g. permission denied) and
-            // keep walking, mirroring ripgrep's resilience.
-            if search_result.is_err() || local.is_empty() {
+            // keep walking, mirroring ripgrep's resilience. A binary file
+            // gives nothing, not even the lines read before its NUL byte.
+            if search_result.is_err() || sink.binary || sink.out.is_empty() {
                 return WalkState::Continue;
             }
 
-            let mut guard = results.lock().unwrap();
-            guard.extend(local);
-            if let Some(max) = max
-                && guard.len() >= max
-            {
+            let n = sink.out.len();
+            results.lock().unwrap().extend(sink.out);
+            if found.fetch_add(n, Ordering::SeqCst) + n >= wanted {
                 return WalkState::Quit;
             }
             WalkState::Continue
@@ -169,11 +257,15 @@ fn grep_blocking(
 
     // Parallel walk order is nondeterministic — sort for stable output.
     matches.sort_by(|a, b| a.file.cmp(&b.file).then(a.line_number.cmp(&b.line_number)));
-    if let Some(max) = max {
+    let mut more = false;
+    if let Some(max) = opts.max_results
+        && matches.len() > max
+    {
         matches.truncate(max);
+        more = true;
     }
 
-    Ok(matches)
+    Ok(GrepOutcome { matches, more })
 }
 
 /// Bounds and limits of [`glob_walk`].
@@ -675,5 +767,83 @@ mod tests {
         fs::write(tmp.path().join("a.txt"), "x\n").unwrap();
         let r = grep("(unclosed", tmp.path(), GrepOptions::default()).await;
         assert!(matches!(r, Err(SearchError::InvalidPattern(_))));
+    }
+
+    // ── grep_search ──
+
+    #[tokio::test]
+    async fn grep_search_more_flag_tells_whether_matches_were_cut() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("a.txt"), "HIT\nHIT\nHIT\nHIT\nHIT\n").unwrap();
+        let limited = |n: usize| GrepOptions {
+            max_results: Some(n),
+            ..Default::default()
+        };
+
+        let cut = grep_search("HIT", tmp.path(), limited(3)).await.unwrap();
+        assert_eq!(cut.matches.len(), 3);
+        assert!(cut.more, "3 of 5 returned, more must be true");
+
+        let exact = grep_search("HIT", tmp.path(), limited(5)).await.unwrap();
+        assert_eq!(exact.matches.len(), 5);
+        assert!(!exact.more, "exactly the limit: nothing more");
+
+        let all = grep_search("HIT", tmp.path(), GrepOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(all.matches.len(), 5);
+        assert!(!all.more);
+
+        // `Some(0)` returns nothing and claims nothing more.
+        let zero = grep_search("HIT", tmp.path(), limited(0)).await.unwrap();
+        assert!(zero.matches.is_empty() && !zero.more);
+    }
+
+    #[tokio::test]
+    async fn grep_search_literal_option_takes_the_pattern_as_text() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("a.txt"), "a.b\naxb\n").unwrap();
+
+        let literal = GrepOptions {
+            literal: true,
+            ..Default::default()
+        };
+        let exact = grep_search("a.b", tmp.path(), literal).await.unwrap();
+        assert_eq!(exact.matches.len(), 1);
+        assert_eq!(exact.matches[0].line_content, "a.b");
+
+        // Without `literal`, `.` is a regex wildcard and both lines match.
+        let regex = grep_search("a.b", tmp.path(), GrepOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(regex.matches.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn grep_search_binary_file_gives_no_lines_for_nul_before_or_after() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("before.bin"), b"head\0NEEDLE\n").unwrap();
+        fs::write(tmp.path().join("after.bin"), b"NEEDLE\n\0NEEDLE\n").unwrap();
+        fs::write(tmp.path().join("text.txt"), "NEEDLE\n").unwrap();
+
+        let out = grep_search("NEEDLE", tmp.path(), GrepOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(out.matches.len(), 1, "got: {:?}", out.matches);
+        assert!(out.matches[0].file.ends_with("text.txt"));
+    }
+
+    #[tokio::test]
+    async fn grep_search_nonexistent_path_is_an_error() {
+        let r = grep_search(
+            "x",
+            Path::new("/definitely/not/here/bricks-grep-test"),
+            GrepOptions::default(),
+        )
+        .await;
+        assert!(
+            matches!(&r, Err(SearchError::IoError(e)) if e.kind() == std::io::ErrorKind::NotFound),
+            "got: {r:?}"
+        );
     }
 }
