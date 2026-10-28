@@ -90,7 +90,6 @@ pub struct Capabilities {
     pub output: BTreeSet<Modality>,
     pub document_mime_types: Vec<String>,
     pub streaming: bool,
-    pub tool_calls: bool,
 }
 
 impl Capabilities {
@@ -101,7 +100,6 @@ impl Capabilities {
             output: model.output_modalities.iter().copied().collect(),
             document_mime_types: model.document_mime_types.clone(),
             streaming: model.streaming,
-            tool_calls: model.tool_calls,
         }
     }
 
@@ -119,7 +117,6 @@ impl Capabilities {
             output: keep(&self.output, sup.outputs),
             document_mime_types: self.document_mime_types.clone(),
             streaming: self.streaming,
-            tool_calls: self.tool_calls,
         }
     }
 
@@ -280,7 +277,6 @@ fn check_media_block(
 pub fn validate_messages(
     messages: &[Message],
     requested_outputs: &[Modality],
-    has_tools: bool,
     caps: &Capabilities,
     protocol: Protocol,
 ) -> Result<(), String> {
@@ -371,7 +367,6 @@ mod tests {
             output: output.iter().copied().collect(),
             document_mime_types: mimes.iter().map(|s| s.to_string()).collect(),
             streaming: true,
-            tool_calls: true,
         }
     }
 
@@ -404,7 +399,7 @@ mod tests {
     fn undeclared_media_is_refused_with_an_explicit_error() {
         let c = caps(&[Text], &[Text], &[]);
         let msgs = user(vec![ContentBlock::image_url("https://x/y.png")]);
-        let err = validate_messages(&msgs, &[], false, &c, Protocol::ChatCompletions).unwrap_err();
+        let err = validate_messages(&msgs, &[], &c, Protocol::ChatCompletions).unwrap_err();
         assert!(
             err.contains("image block cannot be sent") && err.contains("[text]"),
             "{err}"
@@ -420,13 +415,13 @@ mod tests {
             Protocol::Responses,
             Protocol::AnthropicMessages,
         ] {
-            let err = validate_messages(&video, &[], false, &c, p).unwrap_err();
+            let err = validate_messages(&video, &[], &c, p).unwrap_err();
             assert!(err.contains("video"), "{p}: {err}");
         }
         let audio = user(vec![ContentBlock::audio_bytes("audio/wav", b"RIFF")]);
-        assert!(validate_messages(&audio, &[], false, &c, Protocol::ChatCompletions).is_ok());
-        assert!(validate_messages(&audio, &[], false, &c, Protocol::Responses).is_err());
-        assert!(validate_messages(&audio, &[], false, &c, Protocol::AnthropicMessages).is_err());
+        assert!(validate_messages(&audio, &[], &c, Protocol::ChatCompletions).is_ok());
+        assert!(validate_messages(&audio, &[], &c, Protocol::Responses).is_err());
+        assert!(validate_messages(&audio, &[], &c, Protocol::AnthropicMessages).is_err());
     }
 
     #[test]
@@ -438,14 +433,14 @@ mod tests {
         );
         let audio_url = user(vec![ContentBlock::audio_url("https://x/a.wav")]);
         assert!(
-            validate_messages(&audio_url, &[], false, &c, Protocol::ChatCompletions)
+            validate_messages(&audio_url, &[], &c, Protocol::ChatCompletions)
                 .unwrap_err()
                 .contains("cannot carry audio as URL")
         );
         let img_file = user(vec![ContentBlock::image_file_id("file-1")]);
-        assert!(validate_messages(&img_file, &[], false, &c, Protocol::ChatCompletions).is_err());
-        assert!(validate_messages(&img_file, &[], false, &c, Protocol::Responses).is_ok());
-        assert!(validate_messages(&img_file, &[], false, &c, Protocol::AnthropicMessages).is_ok());
+        assert!(validate_messages(&img_file, &[], &c, Protocol::ChatCompletions).is_err());
+        assert!(validate_messages(&img_file, &[], &c, Protocol::Responses).is_ok());
+        assert!(validate_messages(&img_file, &[], &c, Protocol::AnthropicMessages).is_ok());
         let doc_url = user(vec![ContentBlock::Document {
             source: bricks_types::DocumentSource {
                 source_type: "url".into(),
@@ -458,8 +453,8 @@ mod tests {
             context: None,
             citations: None,
         }]);
-        assert!(validate_messages(&doc_url, &[], false, &c, Protocol::ChatCompletions).is_err());
-        assert!(validate_messages(&doc_url, &[], false, &c, Protocol::Responses).is_ok());
+        assert!(validate_messages(&doc_url, &[], &c, Protocol::ChatCompletions).is_err());
+        assert!(validate_messages(&doc_url, &[], &c, Protocol::Responses).is_ok());
     }
 
     #[test]
@@ -476,10 +471,10 @@ mod tests {
             Protocol::Responses,
             Protocol::AnthropicMessages,
         ] {
-            assert!(validate_messages(&pdf, &[], false, &c, p).is_ok());
-            assert!(validate_messages(&txt, &[], false, &c, p).is_ok());
+            assert!(validate_messages(&pdf, &[], &c, p).is_ok());
+            assert!(validate_messages(&txt, &[], &c, p).is_ok());
             assert!(
-                validate_messages(&zip, &[], false, &c, p)
+                validate_messages(&zip, &[], &c, p)
                     .unwrap_err()
                     .contains("document_mime_types")
             );
@@ -487,36 +482,27 @@ mod tests {
         // No media_type -> cannot be checked.
         let untyped = user(vec![ContentBlock::document_url("https://x/d")]);
         assert!(
-            validate_messages(&untyped, &[], false, &c, Protocol::Responses)
+            validate_messages(&untyped, &[], &c, Protocol::Responses)
                 .unwrap_err()
                 .contains("no media_type")
         );
         let any = caps(&[Text, Document], &[Text], &["*/*"]);
-        assert!(validate_messages(&untyped, &[], false, &any, Protocol::Responses).is_ok());
+        assert!(validate_messages(&untyped, &[], &any, Protocol::Responses).is_ok());
     }
 
     #[test]
     fn requested_outputs_must_be_declared_and_transportable() {
         let c = caps(&[Text], &[Text, Image, Audio], &[]);
-        assert!(validate_messages(&[], &[Text], false, &c, Protocol::ChatCompletions).is_ok());
-        let err =
-            validate_messages(&[], &[Audio], false, &c, Protocol::ChatCompletions).unwrap_err();
+        assert!(validate_messages(&[], &[Text], &c, Protocol::ChatCompletions).is_ok());
+        let err = validate_messages(&[], &[Audio], &c, Protocol::ChatCompletions).unwrap_err();
         assert!(
             err.contains(
                 "declared, but the `chat_completions` adapter cannot transport audio output"
             ),
             "{err}"
         );
-        let err =
-            validate_messages(&[], &[Video], false, &c, Protocol::ChatCompletions).unwrap_err();
+        let err = validate_messages(&[], &[Video], &c, Protocol::ChatCompletions).unwrap_err();
         assert!(err.contains("not declared"), "{err}");
-    }
-
-    #[test]
-    fn tools_are_always_allowed() {
-        let mut c = caps(&[Text], &[Text], &[]);
-        c.tool_calls = false;
-        assert!(validate_messages(&[], &[], true, &c, Protocol::Responses).is_ok());
     }
 
     #[test]
@@ -529,20 +515,20 @@ mod tests {
         };
         let msgs = user(vec![tool_img.clone()]);
         // Anthropic carries media in tool results; the other two do not.
-        assert!(validate_messages(&msgs, &[], false, &c, Protocol::AnthropicMessages).is_ok());
+        assert!(validate_messages(&msgs, &[], &c, Protocol::AnthropicMessages).is_ok());
         assert!(
-            validate_messages(&msgs, &[], false, &c, Protocol::ChatCompletions)
+            validate_messages(&msgs, &[], &c, Protocol::ChatCompletions)
                 .unwrap_err()
                 .contains("inside a tool result")
         );
-        assert!(validate_messages(&msgs, &[], false, &c, Protocol::Responses).is_err());
+        assert!(validate_messages(&msgs, &[], &c, Protocol::Responses).is_err());
         // Model-native media in an assistant turn is not re-sendable.
         let asst = vec![Message::assistant_blocks(vec![ContentBlock::image_bytes(
             "image/png",
             b"x",
         )])];
         assert!(
-            validate_messages(&asst, &[], false, &c, Protocol::AnthropicMessages)
+            validate_messages(&asst, &[], &c, Protocol::AnthropicMessages)
                 .unwrap_err()
                 .contains("model-native")
         );
@@ -561,7 +547,7 @@ mod tests {
             },
         }]);
         assert!(
-            validate_messages(&both, &[], false, &c, Protocol::ChatCompletions)
+            validate_messages(&both, &[], &c, Protocol::ChatCompletions)
                 .unwrap_err()
                 .contains("more than one")
         );

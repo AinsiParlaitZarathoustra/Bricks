@@ -161,12 +161,27 @@ impl AgentsTool {
 #[serde(deny_unknown_fields)]
 struct AgentsInput {
     agents: Vec<AgentSpawnRequest>,
-    /// Former foreground choice: accepted and ignored (always parallel).
-    #[serde(default)]
-    #[allow(dead_code)]
-    background: Option<bool>,
     #[serde(default)]
     fail_fast: bool,
+}
+
+#[cfg(test)]
+mod input_tests {
+    use super::*;
+
+    #[test]
+    fn removed_batch_background_option_is_rejected() {
+        for value in [true, false] {
+            let result = serde_json::from_value::<AgentsInput>(json!({
+                "agents": [{"task": "Inspect the parser"}],
+                "background": value
+            }));
+            let Err(error) = result else {
+                panic!("obsolete background option was accepted");
+            };
+            assert!(error.to_string().contains("unknown field `background`"));
+        }
+    }
 }
 
 #[async_trait]
@@ -236,13 +251,16 @@ pub(crate) fn message_text(
     use super::runtime::MessageOutcome as M;
     use crate::events::InjectRefusal as R;
     match outcome {
-        M::Accepted { message_id, pending } => Ok(format!(
+        M::Accepted {
+            message_id,
+            pending,
+        } => Ok(format!(
             "message {message_id} queued for {id}: it reads it at its next step ({pending} \
              waiting)."
         )),
-        M::Unknown | M::OutOfScope => {
-            Err(format!("no sub-agent `{id}` in your scope; nothing was sent."))
-        }
+        M::Unknown | M::OutOfScope => Err(format!(
+            "no sub-agent `{id}` in your scope; nothing was sent."
+        )),
         M::NotRunning(state) => Err(format!(
             "{id} is {}: nothing reads messages now; nothing was sent (use resume to continue \
              an ended sub-agent).",

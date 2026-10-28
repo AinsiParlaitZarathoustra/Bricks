@@ -297,9 +297,6 @@ pub struct ModelConfig {
     /// The server streams responses. Default false (non-streaming request).
     #[serde(default)]
     pub streaming: bool,
-    /// Tool calls: always on. The key is accepted and a `false` is ignored.
-    #[serde(default = "always", deserialize_with = "always_on")]
-    pub tool_calls: bool,
     pub limits: Limits,
     #[serde(default)]
     pub pricing: Option<PricingConfig>,
@@ -346,16 +343,6 @@ impl Protocol {
             Protocol::ChatCompletions => None,
         }
     }
-}
-
-fn always() -> bool {
-    true
-}
-
-/// A flag that is always on, whatever is written.
-fn always_on<'de, D: Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
-    bool::deserialize(d)?;
-    Ok(true)
 }
 
 fn default_text_only() -> Vec<Modality> {
@@ -1276,7 +1263,6 @@ api_model = "vendor-flash"
 input_modalities = ["text", "image"]
 output_modalities = ["text"]
 streaming = true
-tool_calls = true
 
 [providers.models.limits]
 max_input_tokens = 96000
@@ -1311,7 +1297,6 @@ protocol = "responses"
 input_modalities = ["text"]
 output_modalities = ["text"]
 streaming = true
-tool_calls = true
 
 [providers.models.limits]
 max_input_tokens = 64000
@@ -1398,7 +1383,10 @@ mod tests {
         );
         assert_eq!(e.message, "required field is missing");
 
-        let e = err(&BASIC.replace("streaming = true\ntool_calls = true\n\n[providers.models.limits]\nmax_input_tokens = 96000", "streamin = true\ntool_calls = true\n\n[providers.models.limits]\nmax_input_tokens = 96000"));
+        let e = err(&BASIC.replace(
+            "streaming = true\n\n[providers.models.limits]\nmax_input_tokens = 96000",
+            "streamin = true\n\n[providers.models.limits]\nmax_input_tokens = 96000",
+        ));
         assert_eq!(e.field, "streamin");
         assert!(e.message.contains("unknown field"));
     }
@@ -1515,8 +1503,8 @@ mod tests {
             "input_modalities = [\"text\", \"document\"]",
         );
         assert_eq!(err(&doc).field, "document_mime_types");
-        let ok = doc.replace("streaming = true\ntool_calls = true\n\n[providers.models.limits]\nmax_input_tokens = 96000",
-            "document_mime_types = [\"application/pdf\"]\nstreaming = true\ntool_calls = true\n\n[providers.models.limits]\nmax_input_tokens = 96000");
+        let ok = doc.replace("streaming = true\n\n[providers.models.limits]\nmax_input_tokens = 96000",
+            "document_mime_types = [\"application/pdf\"]\nstreaming = true\n\n[providers.models.limits]\nmax_input_tokens = 96000");
         ProvidersConfig::from_toml_str(&ok, "t").unwrap();
         let dup = BASIC.replace("[\"text\", \"image\"]", "[\"text\", \"text\"]");
         assert!(err(&dup).message.contains("listed twice"));
@@ -1525,12 +1513,16 @@ mod tests {
     }
 
     #[test]
-    fn tool_calls_are_always_on() {
-        let absent = BASIC.replace("tool_calls = true\n", "");
-        let off = BASIC.replace("tool_calls = true\n", "tool_calls = false\n");
-        for text in [BASIC.to_string(), absent, off] {
-            let cfg = ProvidersConfig::from_toml_str(&text, "t").unwrap();
-            assert!(cfg.providers[0].models[0].tool_calls);
+    fn removed_tool_calls_option_is_rejected() {
+        for value in [true, false] {
+            let doc = BASIC.replacen(
+                "streaming = true\n",
+                &format!("streaming = true\ntool_calls = {value}\n"),
+                1,
+            );
+            let error = err(&doc);
+            assert_eq!(error.field, "tool_calls");
+            assert!(error.message.contains("unknown field"));
         }
     }
 
@@ -1594,8 +1586,8 @@ mod tests {
         );
         assert!(err(&rm).field.ends_with(".remove"));
         let rp = BASIC.replacen(
-            "tool_calls = true\n",
-            "tool_calls = true\nremove_parameters = [\"/messages\"]\n",
+            "streaming = true\n",
+            "streaming = true\nremove_parameters = [\"/messages\"]\n",
             1,
         );
         assert_eq!(err(&rp).field, "remove_parameters");

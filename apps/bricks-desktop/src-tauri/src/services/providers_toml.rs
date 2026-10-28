@@ -859,7 +859,6 @@ id = "small"
 name = "Small"
 api_model = "small-1"
 streaming = true
-tool_calls = true
 [providers.models.limits]
 max_input_tokens = 8000
 max_output_tokens = 1000

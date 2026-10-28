@@ -172,7 +172,6 @@ id = "a"
 name = "Example Model"
 api_model = "model-a"
 streaming = true
-tool_calls = true
 [providers.models.limits]
 max_input_tokens = 100000
 max_output_tokens = 4096
@@ -202,7 +201,6 @@ api_model = "model-c"
 protocol = "anthropic_messages"
 auth = "none"
 streaming = true
-tool_calls = true
 [providers.models.limits]
 max_input_tokens = 100000
 max_output_tokens = 8192
@@ -216,7 +214,6 @@ id = "plain"
 name = "Plain"
 api_model = "model-plain"
 streaming = true
-tool_calls = true
 [providers.models.limits]
 max_input_tokens = 100000
 max_output_tokens = 4096

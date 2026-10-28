@@ -52,6 +52,10 @@ let agent = Agent::builder()
       type: 'impl Into<String>',
       description: 'Static system prompt, placed before the dynamic boundary. Cached by providers that support prompt caching.',
     },
+    '.system_prompt_options(opts)': {
+      type: 'SystemPromptOptions',
+      description: 'The Bricks prompt, assembled for each request from the tools that request announces; its request context (environment, model, git, plan) follows the cache boundary. Wins over .system_prompt(s).',
+    },
     '.append_system_prompt(s)': {
       type: 'impl Into<String>',
       description: 'Dynamic section appended after the cache boundary. Rebuilt each turn.',
@@ -82,8 +86,13 @@ let agent = Agent::builder()
     },
     '.permission_policy(p)': {
       type: 'impl PermissionPolicy',
-      description: 'Controls which tools the agent can execute.',
-      default: 'AllowAll',
+      description: 'The approver: answers the calls the session policy asks about (a callback, a stream, or a fixed answer). Alone, it gives the ASK profile.',
+      default: 'none (EXECUTE)',
+    },
+    '.permission_profile(p)': {
+      type: 'SessionPolicy',
+      description: 'The session policy: ASK, EXECUTE or CUSTOM, with its rules. See the Permissions section of the tools page.',
+      default: 'EXECUTE, or ASK with an approver',
     },
     '.memory(m)': {
       type: 'impl Memory',
@@ -122,8 +131,8 @@ let agent = Agent::builder()
     },
     '.tool_result_budget(n)': {
       type: 'usize',
-      description: 'Tool results beyond this many characters are replaced by a placeholder; it names the saved original when the original could be saved (crates/bricks-agent/src/runner.rs:816-843).',
-      default: '50000',
+      description: 'Tool results beyond this many characters are replaced by a placeholder, oldest first; it names the saved original when the original could be saved. Unset, the budget follows the model (crates/bricks-agent/src/runner.rs:170, applied at :1141).',
+      default: 'the model\'s declared input limit, read as characters (about a quarter of its window); at least 50000',
     },
     '.cancel_token(t)': {
       type: 'CancellationToken',
@@ -318,13 +327,13 @@ for call in &output.tool_calls {
 
 | Variant | Fields | Emitted When |
 |---------|--------|-------------|
-| `PermissionRequired(PermissionRequest)` | tool name, input, description, level, id | Tool needs approval (interactive policy) |
+| `PermissionRequired(PermissionRequest)` | tool name, input, description, level, category, id, policy_revision | The policy asked, and the stream approver answers (`InteractivePolicy::via_stream`) |
 | `ApprovalRequested` / `ApprovalResolved` | approval and decision details | An approval is asked and answered (`control` contract) |
 | `EditApplied { tool_call_id, tool, files }` | call ID, tool, changed files | A file change was written |
 | `CostUpdate { turn_cost, cumulative_cost, input_tokens, output_tokens }` | costs and token counts | After each model call |
 | `SubAgentSpawned { agent_id, prompt }` | sub-agent ID, task description | Sub-agent created |
 | `SubAgentComplete { agent_id, result }` | sub-agent ID, `AgentOutput` | Sub-agent finished |
-| `SkillActivated` / `SkillNotActivated` | skill name, source, revision or reason | An Agent Skill was activated or refused |
+| `SkillActivated` / `SkillNotActivated` | skill name, source, revision or reason | An Agent Skill was activated, refused, or withdrawn because it was removed, reinstalled or changed |
 
 ### Terminal Events
 
@@ -350,7 +359,7 @@ Bidirectional control channel. Receive events and send commands back.
     },
     'respond_permission()': {
       type: 'fn(request_id: String, decision: PermissionDecision)',
-      description: 'Sends a PermissionResponse, but run_stream_input ignores it (crates/bricks-agent/src/lib.rs:286-287): no effect in this version. PermissionDecision: Allow, Deny(reason), AllowOnce, AllowForSession.',
+      description: 'Answers a PermissionRequired event. PermissionDecision: Allow, Deny(reason), AllowOnce (this call only; no allow for the session).',
     },
     'cancel()': {
       type: 'fn()',
@@ -406,7 +415,7 @@ When the conversation approaches the context window limit, the agent summarizes 
 Agent::builder()
     .auto_compact(true)           // default
     .compact_threshold(0.85)      // trigger at 85% of the context window
-    .tool_result_budget(50_000)   // default: tool results beyond 50K chars are replaced by a placeholder
+    .tool_result_budget(50_000)   // fixed: tool results beyond 50K chars are replaced by a placeholder (unset: follows the model)
 ```
 
 The compaction pipeline:
@@ -435,5 +444,7 @@ Agent::builder()
     .system_prompt("You are a coding assistant. Always use Rust.")  // static, cached
     .append_system_prompt("Current time: 2024-01-01")               // dynamic, per-turn
 ```
+
+With the Bricks prompt (`system_prompt_options`), the part after the boundary holds the request's date, environment, model, git state and plan; it is built again for each request. See [System Prompts](/docs/system-prompts).
 
 Providers that support prompt caching cache everything before the boundary. Whether caching applies depends on the model's protocol and its `compat` settings (`prompt_cache_markers` for `anthropic_messages`). See `docs/providers.md` in the repository.

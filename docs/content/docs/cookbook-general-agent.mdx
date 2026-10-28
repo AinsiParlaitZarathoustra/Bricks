@@ -73,10 +73,10 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-`bricks::tools::all()` includes the shell, file, web, planning, scheduling and orchestration tools.
+`bricks::tools::all()` includes the shell, file, web and planning tools (`coding()` plus `TodoWrite`).
 
 <Callout type="warn">
-An agent built without `.permission_policy(...)` allows every tool call: the builder's default is `AllowAll`. Set a policy that fits the task, for example `AllowReadOnly`, or a policy that asks before it acts.
+An agent built without `.permission_policy(...)` or `.permission_profile(...)` runs every tool call: the builder's default is EXECUTE. Choose a policy that fits the task: `.permission_policy(DenyAll)` lets reads run and refuses what would be asked, and `.permission_profile(...)` sets ASK or CUSTOM rules.
 </Callout>
 
 <Callout type="warn">
@@ -109,7 +109,7 @@ With a memory attached and the same `session_id`, the history is loaded when the
 
 ## Skills
 
-A skill is a folder with a `SKILL.md` file. The skill loader finds skills in the project's `.agents/skills/` or `.claude/skills/` folders and in your home folder (`~/.agents/skills/`, `~/.claude/skills/`), plus the skills built into the SDK. The agent sees each skill's name and description in a catalog, and activates one with the `Skill` tool to get its instructions. Activating a skill does not run anything by itself. For how the catalog is built and trusted, see `docs/skills.md` in the repository.
+A skill is a folder with a `SKILL.md` file. The skill service reads the skills installed in Bricks' store (`<bricks_home>/skills/`) and the one built-in skill, `create-skills`. It does not read `.agents/skills/` or `.claude/skills/` in a project or in your home folder; an application that wants those folders passes them explicitly. The agent sees each skill's name and description in a catalog, and activates one with the `Skill` tool to get its instructions. Activating a skill does not run anything by itself. For how the catalog is built and trusted, see `docs/skills.md` in the repository.
 
 To give a library agent skills, pass a skill access to the builder with `skills(...)`. The `bricks` command-line tool does this from its configuration.
 

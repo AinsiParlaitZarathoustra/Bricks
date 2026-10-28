@@ -146,7 +146,7 @@ Rules are layered. The built-in files load first, then user files in `~/.bricks/
 
 Compression is a **pre-filter**. After it runs, `bricks-agent` still applies the tool-result budget:
 
-- **`apply_tool_result_budget`**: when the total size of tool results crosses `tool_result_budget` (50,000 characters by default), the oldest results are replaced by a placeholder that names their saved original, or says that none was saved. Results of active skills are kept.
+- **`apply_tool_result_budget`**: when the total size of tool results crosses `tool_result_budget` (by default the model's declared input limit read as characters, about a quarter of its window, and never under 50,000), the oldest results are replaced by a placeholder that names their saved original, or says that none was saved. Results of active skills are kept.
 
 If compression leaves a result unchanged (no rule matched, or an internal error), the budget still applies to it.
 
@@ -190,4 +190,3 @@ Fields emitted per call:
 
 - **[Compression Benchmarks](/docs/compression-benchmarks)** — exact token counts from live OpenAI + Gemini runs, reproducible commands, per-call log dumps.
 - **[Changelog](/docs/changelog)** — the 0.1.7 release notes.
-- **[Abstract Commands](/docs/abstract-commands)** — commands of the Cersei-era `abstract` CLI (historical).

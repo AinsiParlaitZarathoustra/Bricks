@@ -2,6 +2,79 @@
 
 ## [Unreleased]
 
+### Removed — Sprint 15: disconnected APIs and historical harnesses (breaking change)
+
+- Remove the unused agent modules `agent_tool`, `coordinator`, `auto_dream`, `session_memory` and `context_analyzer`, their example-only paths, and the inert `SystemPromptSection` cache API. Native sub-agents, compaction and structured memory remain supported.
+- Remove the ignored top-level `Agents.background` argument and the always-on `tool_calls` model setting. Delete `tool_calls` from existing provider configuration files; unknown keys now fail validation. `async_tool_calls` remains supported. The desktop model contract no longer reports a constant `tool_calls` flag.
+- Remove the unused desktop sidebar component family, its mobile hook and `mode-watcher`, and the historical `abstract` benchmark scripts/pages. Keep the active `tbench-agent` harness and the `@internationalized/date` peer dependency required by `bits-ui`.
+- `scripts/run_tests.sh` runs one Nextest pass and propagates failures without masking pipelines. Repository metadata points to Bricks.
+
+### Changed — the tool-result budget follows the model
+
+- **Default budget.** Tool results kept in the active history are no longer capped at a fixed 50,000 characters: unset, the budget is the model's declared input limit read as characters (about a quarter of its window), never under 50,000. A model with a large window no longer loses each file it read to the next read and reads it again. `.tool_result_budget(n)` still sets a fixed budget.
+- **System prompt.** The parallel-calls bullet now asks to group independent calls in one answer, for example reading several files already found.
+
+### Changed — permissions: one engine, one policy per session (SDK, CLI and desktop breaking change)
+
+- **One engine decides every tool call** (`bricks_agent::permission`), in the desktop application, the `bricks` command and the library. Each session has one `SessionPolicy`: profile ASK (reads and searches run; writes, commands, web and sub-agents are asked), EXECUTE (everything runs) or CUSTOM (an effect per action class, read, write, execute and network, and per tool; a tool's own rule wins). CUSTOM is the only profile that refuses calls. `forbidden` tools are refused in every profile. A policy never chosen behaves as ASK.
+- **Storage outside `bricks.toml`.** The default for new sessions is `~/.bricks/permissions.json`, chosen once by a person. Each new session copies it into its own `permissions.json` in its files folder and keeps it. An unreadable file is an error, never a silent allow; an unreadable stored session policy stops the session from opening.
+- **Revisions.** Each policy change bumps a revision. A request already waiting for a person is not answered by a change; calls decided afterwards follow the new revision (`approval.policy_revision`). Sub-agents share their parent's policy.
+- **Answers cover one call.** The approval card has only Autoriser and Refuser. The `approve` decisions are `allow` and `deny`; there is no "allow for the session".
+- **Desktop.** Settings › General › « Permissions des nouvelles conversations » sets the default. A first-choice bar above the composer appears while a conversation's policy is not chosen. The `/config` view edits the conversation's policy; `/tools` shows each tool's decision and its reason. The « Approbation des outils » preference is removed.
+- **CLI.** `--permissions ask|execute` sets the profile of a run's session. The terminal prompt is `Allow this call? [y]es / [N]o:`. Non-interactive runs still stop with `approval_required` (exit code 3) when a call is asked.
+- **Control protocol, schema 8.** Command `set_permission_policy {policy}`; event `permission_policy_changed {policy, revision}`; `approval_requested.approval.policy_revision`; `approval_resolved.by` is `user`, `non_interactive` or `cancelled`; the snapshot's `permission_policy` and `permission_revision` replace `allowed_for_session`, `approval_rules` and `approval_mode`.
+- **Library.** `PermissionPolicy` is only the approver: `.permission_policy(approver)` sets it (alone, the ASK profile); `.permission_profile(SessionPolicy)`, `.permission_cell(..)` and `.permission_engine_arc(..)` are new. `PermissionRequest` gains `category` and `policy_revision`; `PermissionDecision` is `Allow`, `Deny(reason)` and `AllowOnce`. `SessionPolicy`, `PermissionProfile`, `PermissionEffect`, `CustomRules` and `PermissionVerdict` are in `bricks::prelude`.
+
+### Removed — permission rules and "allow for the session" (SDK and config breaking change)
+
+- `[permissions]` and `[permissions.tools]` in `bricks.toml` are no longer read. The section is reported as a diagnostic (`OBSOLETE_PERMISSIONS`) and its rules, denials included, are not applied. Delete it.
+- From `bricks_tools::permissions`: `AllowReadOnly`, `RuleBased`, `PermissionRule`, `PermissionAction` and the `AllowForSession` decision. Replace `AllowReadOnly` with the approver `DenyAll` (ASK; note that it also refuses the web tools), `RuleBased` with a CUSTOM policy, and `AllowForSession` with `AllowOnce` or `Allow`.
+- The « Approbation des outils » preference (Standard, Toujours demander, Sans confirmation).
+- See `docs/content/docs/migration.mdx` section 16 for the steps.
+
+### Removed — `EnterWorktree`, `ExitWorktree`, `SyntheticOutput` and `ToolSearch` (SDK breaking change)
+
+- The four built-in tools are removed, with their modules (`worktree`, `tool_search`, `synthetic_output`) and `bricks_tools::orchestration()`. No alias: a call to one of them is an unknown tool, and the error lists the available tools. Old sessions that contain such calls still read and display them.
+- Replacements: a manual worktree is `Bash` with `git worktree add -b` and `git worktree remove` (never forced). Sub-agent isolation is unchanged: `Agent` and `Agents` take `isolation: "auto" | "shared" | "worktree"`, and `AgentControl` keeps `inspect_changes`, `apply_changes` and `discard_changes`. `SyntheticOutput` had no consumer and `ToolSearch` has no replacement: the tool catalogue is already in the prompt.
+- `bricks_tools::all()` is `coding()` plus `planning()`: 16 tools, where it had 20. `coding()` is unchanged (15).
+- Migration: `docs/content/docs/migration.mdx`, section 18.
+
+### Removed — built-in skills and default skill folders (SDK breaking change)
+
+- The built-in skills `commit`, `debug`, `remember`, `simplify`, `stuck` and `verify` are removed. Bricks ships one built-in skill, `create-skills`. The memory and git features are unchanged, and those names may be used by a skill a person installs.
+- Bricks no longer reads `~/.claude/skills`, `~/.agents/skills`, `<project>/.claude/skills` or `<project>/.agents/skills`, on the desktop and in the CLI, by default. Those folders are never read, copied, modified or deleted. Embedders pass sources explicitly (`SkillRoot::explicit` in `SkillsSetup::extra_roots`); `bricks_skills::standard_roots` is kept as an opt-in helper. `--trust-project-skills` concerns only explicitly configured sources. Migration: section 15 of `docs/content/docs/migration.mdx`.
+
+### Added — skill store, installation and withdrawal
+
+- **Skill store.** Skills a person installs live in `<bricks_home>/skills/<name>/` (`BRICKS_HOME`, else `~/.bricks`), each a portable Agent Skills folder. A hidden `.bricks-install.json` holds the installation id. Supported fields: `name`, `description`, `license`, `compatibility`, `metadata`, `allowed-tools` (advisory). Claude Code directives (`context`, `agent`, `model`, `effort`, `hooks`, `paths`, `shell`, non-default `disable-model-invocation` or `user-invocable`) make a skill incompatible: it is refused at install, never silently stripped. Store code: `crates/bricks-skills/src/store.rs`.
+- **Settings › Skills.** Three actions beside the list and search: **Ajouter** (name, description, instructions, with errors under the field and the text kept), **Importer** (a folder is copied whole, all files at any depth, into a staging area validated under its final name and published in one step; the chosen folder is left intact; symbolic links and special files are refused; no script runs), and **Supprimer** (only for skills installed in the store, with an inline confirmation). `create-skills` and outside sources cannot be removed.
+- **`Skill` tool actions.** `validate` checks a folder and writes nothing. `install` copies the folder into the store, validates the copy again and publishes it; it is the only action that asks the write permission. `path` gives the folder.
+- **Live changes.** The settings, the composer's skill menu and open conversations (sub-agents included) see a store change at their next request, without a restart.
+- **Withdrawal.** Before each request, every activation is checked against its installation, source and revision. A skill removed, reinstalled or changed is withdrawn: its instructions in the active history become a short note (tool calls and results stay paired), a sub-agent's preloaded copy leaves its system prompt, and a compaction summary written from it is set aside, with the active history rebuilt from the pre-compaction snapshots. A reinstalled skill is not reactivated silently. Limits: a session whose snapshots are missing cannot be checked this way.
+
+### Changed — skill catalog and prompt
+
+- The system prompt's Skill guidance mentions `validate` then `install`. The instructions of `create-skills` are loaded on activation only.
+
+### Removed — `NotebookEdit` (SDK breaking change)
+
+- `NotebookEdit` is removed with its module `notebook_edit` (`NotebookEditTool`) and its registration in `bricks_tools::filesystem()`. A call named `NotebookEdit` is now an unknown tool; no alias or shim is kept, and a custom tool may still use the name. Recorded history still displays it. Migration: section 14 of `docs/content/docs/migration.mdx`.
+
+### Added — `CodeStats`
+
+- **Code statistics tool.** `CodeStats` is a read-only tool of the FileSystem category, in `bricks_tools::filesystem()` (so in `coding()`, `all()` and `ToolSearch`). It counts the code, comment and blank lines of a file or a tree, in total, per language or per file (`summary`, `languages`, `files`), with Tokei 15 in process (`default-features = false`; no external program). Parameters: `path`, `detail`, `language`, `top_n` (1 to 100, limits the rows shown only) and `exclude` (gitignore-style, exclusions only). The walk is the shared Bricks walker plus `.tokeignore`; directory links are never followed; each file is opened without following a final link and checked against the walk before any byte is read. The JSON carries `totals`, `results`, `truncated`, `omitted`, `partial` and `warnings`; `partial` is set only when something expected was not counted. Identical analyses running at once in one session share one walk, and nothing is kept after it ends.
+- **Prompt.** The Bricks foundation names `CodeStats` in one bullet, kept only when the tool is announced: it says to check `partial` before presenting totals as complete.
+
+### Removed — fifteen native tools (SDK breaking change)
+
+- `EnterPlanMode`, `ExitPlanMode`, `CronCreate`, `CronList`, `CronDelete`, `TaskCreate`, `TaskGet`, `TaskUpdate`, `TaskList`, `TaskStop`, `TaskOutput`, `RemoteTrigger`, `Config`, `AskUserQuestion` and `Sleep` are removed with their modules (`plan_mode`, `cron`, `tasks`, `remote_trigger`, `config_tool`, `ask_user`, `sleep`) and registries. `bricks_tools::all()` has 22 tools (was 38; `SendMessage` is now `bricks_agent::agents::SendMessageTool`, registered with the agent tools, and `AgentControl message`, `bricks_tools::send_message`, `MessageRouter` and `MessageRouterHandle` are removed); `scheduling()` is removed and the system prompt has no Task tracking section. A call to a removed tool is an unknown tool. Replacements: `docs/content/docs/migration.mdx`, section 12.
+
+### Added — plan, request context and file icons (Sprint 14.8)
+
+- **Durable plan (TodoWrite).** The conversation's plan is written atomically to `plan.json` in its files folder, with a revision per update, shown as a collapsible block in the desktop, and sent as the new `plan_updated` event (JSONL schema 7). Sub-agents never receive the parent's plan; a session without a plan starts with none. A plan whose run ended with its answer, or whose steps are all done, is cleared when the next message is accepted; after an interruption, a failure or a reopened conversation, unfinished steps stay. A clearing that cannot be saved never refuses the message.
+- **Per-request system prompt.** The Bricks prompt is assembled for each request from the tools that request announces. Its dynamic part, after the cache boundary, carries the date, environment, model (API name, reasoning profile), git state and plan. Data in these blocks and skill activations is XML-escaped. Providers may report `request_identity`.
+- **File icons (desktop).** A local copy of the Logoscrap catalogue (132 SVGs, licences and provenance under `apps/bricks-desktop/public/file-icons`) is resolved offline by file name, extension and folder, in the interface and in Markdown code block headers.
+
 ### Changed — crates renamed
 
 - The SDK is the **Bricks ADK**. The facade is `bricks` (was `cersei`) and the crates use the `bricks-` prefix (`bricks-agent`, `bricks-tools`, …; `bricks_*` imports). Unchanged: `CerseiError`, `CERSEI_*` variables, `.cersei`, `cersei-envd`, `tbench-agent`, Docker names. The table of names, imports and every behaviour change of this release are in `docs/content/docs/migration.mdx`.
@@ -49,6 +122,53 @@
 
 - `Processed::partial_view` is still produced by the output compressor but no longer decides what the runner treats as read.
 - `tool_primitives::fs::edit_file` is kept as it was; the `Edit` tool no longer uses it.
+
+### Added — revising a sent message (control protocol)
+
+- **Command `revise {user_index, original, prompt}`.** Replaces a past user message and runs again from it. `user_index` is the message's index among the user-role messages of the active history; `original` is its text as shown. The active context is cut before that message; the context as it was is kept as a snapshot and stays in the raw history. Refused with `command_rejected` and nothing changed while a run is active, when the message is not in the active history with that text (the history changed, or it was compacted or cleared away), or for the reasons of `submit`.
+- **Event `history_revised {user_index, messages_removed}`**, sent before the new run's `run_started`. A skill activated only in the removed part is dropped from the session's ledger.
+- Both are additions a consumer can ignore: the schema stays at 8. `docs/cli.md` has the command and the event.
+
+### Added — desktop: revisions, moved projects, search
+
+- **Editing a sent message.** « Modifier » and « Copier » on a sent message; « Enregistrer et relancer » sends a `revise`, « Annuler » leaves the message. The run records, run labels and attachment records of the replaced messages are set aside in `<session>.revised.jsonl` and `attachments.revised.jsonl`. New IPC command `session_run_user_index`.
+- **Projects whose folder moved.** A project whose folder is missing stays in the list, with its conversations and a red icon. Opening one of them, « + », a search result or the first message asks for the folder (« Dossier de travail introuvable », « Choisir un dossier… »). The project keeps its id and its conversations follow it. New IPC command `project_relocate`; its journal is in `<home>/desktop/relocations/`, finished or undone at the next start.
+- **Search** is a magnifier beside « Nouvelle conversation », a dialog over the titles and messages of every project. The « Tous les projets » switch is removed.
+- **Working time and copies.** « Travaille depuis … » while a run works. « Copier » of a response is placed after the run's summary.
+
+### Changed — desktop: sidebar and window
+
+- **macOS title bar.** The window uses an overlay title bar; the top bar is 52 px high and leaves room for the system buttons, except in full screen.
+- **Scrolling.** The page does not bounce; the scrollable panes contain their overscroll.
+- **Sidebar.** A long conversation title fades out instead of ending with an ellipsis; more space between projects.
+
+### Added — `ViewImage` and images returned by tools
+
+- **`ViewImage` tool.** Shows the model an image file: PNG, JPEG, GIF or WebP, with the type read from the bytes, never from the name. The model receives the image itself; the result text names the path, the type, the dimensions (not for WebP, whose header is not read) and the size. Read-only, in `bricks_tools::filesystem()`, so in `coding()`, `all()` (now 23 tools) and `ToolSearch`. Refused: a directory, a file that is not one of these types, more than 3,750,000 bytes, and more than 8,000 pixels on a side. A relative `file_path` resolves against the working directory.
+- **Images in a tool result.** `ToolResult.images: Vec<ToolImage>` (`bricks_tools::ToolImage`: media type, base64 data, path, byte size), set with `ToolResult::with_images`. The agent carries them as the model's `ImageTransport` (`Provider::image_transport()`) allows: `ToolResult`, inside the tool result (`anthropic_messages` with image input); `UserTurn`, with the result kept as text and the round's images after all its results, in the same user turn, each after the label `[image from tool call <id>] <path>, <type>, <n> bytes` (`chat_completions` and `responses` with image input); or `None`, with the note `[the image was not shown: the current model does not accept images]` in the result text (no image input). Image input comes from `input_modalities` in `providers.toml`. A provider that does not override `image_transport()` gets `None`. `ToolResult` has a new public field: code that builds it with a struct literal adds `images: Vec::new()`; the constructors are unchanged.
+- **Desktop.** A successful `ViewImage` call shows a thumbnail under its line: the image the model received, read from the open session's history by the new IPC command `session_tool_image`. Reopened conversations no longer show the text and images of tool-result turns as user messages.
+- **MCP** image results are unchanged: they stay text placeholders, `[image <type>, <n> bytes — not shown]`.
+
+### Removed — `BashTaskStatus`, `BashTaskOutput` and `BashTaskStop` (breaking change for SDK and tool users)
+
+- The three tools are removed, with no alias: a call to one of them is an unknown tool. Recorded conversations still display their calls. Migration: section 17 of `docs/content/docs/migration.mdx`.
+- `bricks_tools::shell()` no longer contains them, nor `Job`: it is `Bash` and `PowerShell`. `bricks_tools::all()` has 20 tools (was 23) and `coding()` has 15 (was 18).
+
+### Changed — `Job` follows every background job
+
+- `Job` is the only tool for a command started with `background: true`, and for a foreground command handed over after `yield_time_ms`. Both results give a `job_id` (`job_` and 12 hexadecimal characters). The `task_id` (`bg-N`) is no longer returned.
+- Actions: `list` (default), `status`, `output`, `wait` and `stop`. `output` takes `stream`, `offset` (0-based lines), `limit` (1 to 2000, 200 by default) and `tail` (the last `limit` lines, not with `offset`). `wait` takes `timeout_ms` (1 to 600000, 60000 by default). Unknown fields and out-of-range values are refused, never clamped.
+- An id that is unknown, or belongs to another agent, gets `No accessible job with this id`. A job is visible only to the agent that started it.
+- `output` pages are bounded in bytes. A line longer than the page is cut and marked, and the offset moves past it. A line still in progress is shown apart and does not move the offset. `status` gives the raw log paths: the live logs while the job runs, the durable copies once kept.
+- `stop` is TERM to the process group and tree, then KILL after the grace period; it is idempotent, and a job that already ended is a success. `wait` with a timeout stops nothing.
+- `Bash` names `Job` in its description and results. `yield_time_ms` only gives control back; `timeout` still ends the command.
+
+### Changed — job registry assembly (SDK)
+
+- `bricks_tools::shell_with_jobs(registry)` builds `Bash`, `Job` and `PowerShell` on one `JobRegistry`. `coding()` and `all()` use it on a fresh registry. `on_job_registry(tools, &registry)`, `Tool::job_registry()` and `Tool::on_job_registry()` move a set of tools onto one registry.
+- `Bash` without a registry (`shell()`) refuses, before anything starts, `background: true` and any command that may be handed over (a `yield_time_ms` below its `timeout`). Give `yield_time_ms` at least the `timeout` to have the call wait for the end.
+- `AgentBuilder::build` puts the job tools on the `JobsHandle` of the agent's extensions (sessions and sub-agents have one), or makes the tools' registry the agent's `JobsHandle`. Tools on two different registries are refused with `CerseiError::Config` before any model call.
+- `Task::read(stream, OutputPosition::Offset(n) | OutputPosition::Tail, limit)` returns a `Page`; its `evicted` counts the lines no longer in memory.
 
 ## [0.6.1] — 2026-10-14
 

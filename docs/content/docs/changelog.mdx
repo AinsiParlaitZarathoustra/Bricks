@@ -34,6 +34,26 @@ export function Tag({ type }) {
 
 <Version version="Unreleased" date="Not yet released">
 
+<Tag type="removed" /> **Sprint 15: disconnected APIs and old harnesses (breaking change).** The `agent_tool`, `coordinator`, `auto_dream`, `session_memory` and `context_analyzer` agent modules, the unused prompt section/cache API, the ignored batch `background` argument and the `tool_calls` model setting are removed. Delete `tool_calls` from existing provider files; `async_tool_calls` stays supported. The unused desktop sidebar and the historical `abstract` harnesses/pages are removed. The Rust test launcher uses Nextest. See migration section 19.
+
+<Tag type="changed" /> **Permissions: one engine, one policy per session (breaking change for SDK, CLI and config users).** One engine decides every tool call. Each session has a policy: ASK (reads run; writes, commands, web and sub-agents are asked), EXECUTE (everything runs) or CUSTOM (an effect per action class and per tool; the only profile that refuses calls). The default for new sessions is chosen once and stored in `~/.bricks/permissions.json`; each session keeps its own copy. Settings › General › « Permissions des nouvelles conversations », a first-choice bar above the composer, the `/config` view, and `--permissions ask|execute` on the command line. A request waiting for a person is not answered by a policy change. Answers cover one call: the approval card has Autoriser and Refuser only.
+
+<Tag type="removed" /> **`[permissions]` in `bricks.toml` and "allow for the session" removed.** The section is reported as a diagnostic and not applied; delete it. `AllowReadOnly`, `RuleBased`, `PermissionRule`, `PermissionAction` and `AllowForSession` are gone, and the « Approbation des outils » preference too. Migration steps: section 16 of the migration guide.
+
+<Tag type="removed" /> **Built-in skills and default skill folders removed (breaking change for ADK users).** Bricks ships one built-in skill, `create-skills`; `commit`, `debug`, `remember`, `simplify`, `stuck` and `verify` are gone. Bricks no longer reads `~/.claude/skills`, `~/.agents/skills`, `<project>/.claude/skills` or `<project>/.agents/skills`, and never touches them. Embedders pass sources explicitly (`SkillRoot::explicit`, `SkillsSetup::extra_roots`). Migration: section 15 of the migration guide.
+
+<Tag type="removed" /> **`EnterWorktree`, `ExitWorktree`, `SyntheticOutput` and `ToolSearch` removed (breaking change for SDK and tool users).** Their modules (`worktree`, `tool_search`, `synthetic_output`) and `bricks_tools::orchestration()` are gone, with no alias: a call to one of them is an unknown tool. A manual worktree is `Bash` with `git worktree add` and `git worktree remove` (never forced); sub-agent isolation is unchanged (`Agent` and `Agents` with `isolation`, `AgentControl` for the ChangeSets). `bricks_tools::all()` is `coding()` plus `TodoWrite`: 16 tools, where it had 20. Migration: section 18 of the migration guide.
+
+<Tag type="added" /> **Skill store and installation.** Skills a person installs live in `<bricks_home>/skills/<name>/`, as portable Agent Skills folders. Settings › Skills has **Ajouter**, **Importer** (the folder is copied whole, symbolic links refused, no script run) and **Supprimer** (installed skills only). The `Skill` tool gains `validate` (writes nothing) and `install` (the only write, with the write permission). Claude Code directives make a skill incompatible and are refused at install.
+
+<Tag type="added" /> **Live skill changes and withdrawal.** The settings, the composer and open conversations see a store change at their next request. An activation whose skill was removed, reinstalled or changed is withdrawn before the request: its instructions become a short note, a sub-agent's preloaded copy is dropped, and a compaction summary written from it is rebuilt from the pre-compaction snapshots.
+
+<Tag type="removed" /> **`NotebookEdit` removed (breaking change for ADK users).** The tool, its module (`notebook_edit`) and its registration are gone, with no alias. A call named `NotebookEdit` is an unknown tool; a custom tool may keep the name. Replacement and migration: `docs/content/docs/migration.mdx`, section 14.
+
+<Tag type="added" /> **`CodeStats`.** A read-only tool that counts the code, comment and blank lines of a file or a tree, in total, per language or per file (Tokei 15, in process). `top_n` limits the rows shown, never the analysis; `partial` says when something expected was not counted. It is in `filesystem()`, `coding()` and `all()`, and the system prompt names it in one bullet when it is announced.
+
+<Tag type="removed" /> **Fifteen native tools removed (breaking change for ADK users).** `EnterPlanMode`, `ExitPlanMode`, `CronCreate`, `CronList`, `CronDelete`, the six `Task*` tools, `RemoteTrigger`, `Config`, `AskUserQuestion` and `Sleep` are gone, with their modules (`plan_mode`, `cron`, `tasks`, `remote_trigger`, `config_tool`, `ask_user`, `sleep`) and registries. `bricks_tools::all()` has 22 tools (was 38; `SendMessage` moved to the agent runtime, see below). A call to a removed tool is an unknown tool. The replacements are in the migration guide, section 12; background commands are still `Bash` with `background: true`, `BashTaskStatus`, `BashTaskOutput`, `BashTaskStop` and `Job`.
+
 <Tag type="changed" /> **Crates renamed: Bricks ADK.** The facade is `bricks` (was `cersei`); the crates use the `bricks-` prefix (`bricks-agent`, `bricks-tools`, `bricks-memory`, …) and `bricks_*` imports. `bricks-config`, `bricks-semantic`, `bricks-skills`, `bricks-cli` and `bricks-desktop` keep their names. `CerseiError`, `CERSEI_*` variables and a few external identities keep theirs. The table of names is in the migration guide.
 
 <Tag type="removed" /> **`delegate` and `MultiEdit` are removed.** The `delegate` tool and the `delegate` batch module (`run_batch`, `DelegateConfig`, …) are gone; use the native `Agent` and `Agents` tools, whose parameters differ. `MultiEdit` is gone; `Edit` takes `edits`. Stored histories still display both.
@@ -44,7 +64,9 @@ export function Tag({ type }) {
 
 <Tag type="removed" /> **Turn limits and per-run caps.** `max_turns` is gone from the `[agent]` and `[agents]` settings, from profiles, from `Agent` and `Agents`, and `tbench-agent --max-turns` is no longer accepted. `[agents] max_total_per_run`, `max_batch` and the `background` argument of `Agent` and `Agents` are removed. Old keys are unknown keys: ignored, with a diagnostic. A stored end of an unknown kind (`max_turns`) reads as `Historical { kind }`, an incomplete end, never a success.
 
-<Tag type="changed" /> **`SendMessage`** is an adapter of the same message delivery, and needs the `Execute` permission (it was `None`). It sends nothing without an agent runtime.
+<Tag type="changed" /> **`SendMessage`** is a native tool of the agent runtime (`bricks_agent::agents::SendMessageTool`), registered with the other agent tools; it replaces `AgentControl message`, keeps the same delivery, scope and bounds, and needs the `Execute` permission. A sub-agent gets it only when it may start sub-agents of its own. `bricks_tools::send_message`, `MessageRouter` and `MessageRouterHandle` are removed.
+
+<Tag type="changed" /> **The plan after an answer.** A plan whose run ended with its answer, or whose steps are all done, is cleared when the next message is accepted. After an interruption, a failure or a reopened conversation, unfinished steps stay. If clearing cannot be saved, the message is still sent and a notice says the plan was kept.
 
 <Tag type="changed" /> **Agent manifest.** A record that cannot be read is left out and the others are kept; the original manifest is kept as a `.bak` file before the next save.
 
@@ -57,6 +79,8 @@ export function Tag({ type }) {
 <Tag type="changed" /> **Sub-agent defaults.** `[agents] summary_chars` is `30000`: the answer returned to the parent, the ellipsis included; the full transcript stays on disk. `[agents] max_depth` is `1` (was `2`): the session's agent starts sub-agents, which cannot start their own unless `max_depth` is raised in `bricks.toml`. The output of a tool call inside a sub-agent event is cut to `96 KiB` (was 64 KiB). No other limit changes.
 
 <Tag type="changed" /> **JSONL schema 6.** `tool_finished` and `agent_tool_finished` gain `executed` and `status`; `agent_tool_finished` also gains `output` and `output_truncated`; `edit_applied` files gain `absolute`, `patch` and `patch_truncated`. See `docs/cli.md`.
+
+<Tag type="added" /> **Plan, request context and file icons.** TodoWrite keeps the conversation's plan in `plan.json` (a revision per update, restored when the conversation is reopened) and the desktop shows it in a collapsible block; the new `plan_updated` event is in JSONL schema 7 (`docs/cli.md`). The Bricks system prompt is rebuilt for each request from the tools it announces, with the date, environment, model, git state and plan after the cache boundary; the data in those blocks is escaped. Files, folders and code blocks show icons from a bundled local catalogue, with no network access.
 
 <Tag type="changed" /> **Run end card is compact.** `Terminé · A travaillé MM:SS` (`HH:MM:SS` past one hour; durations are rounded down to the second), then two groups closed by default: `N fichiers modifiés +A −D`, the sum of the applied edit operations (not a Git diff; binary files have no line counts), and `N commandes exécutées`, the commands of the response and of its sub-agents. Refused calls and background polling are not counted, and a command still running is never shown as successful. Tool durations elsewhere stay in milliseconds.
 
@@ -71,6 +95,10 @@ export function Tag({ type }) {
 <Tag type="added" /> **Models page: providers and models from the app.** « Ajouter un fournisseur » and the « + » of a provider add `[[providers]]` and `[[providers.models]]` tables to `providers.toml`. Other tables and comments are kept, and the whole file is validated before writing. A file changed elsewhere is a conflict: nothing is overwritten.
 
 <Tag type="changed" /> **Models page: costs and documents.** The model form requires input, output and cache-read prices in USD per million tokens (`0` allowed), and « Compléter les coûts manquants à 0 » writes `0` for every missing one. The engine's rule is unchanged: a missing price is unknown, not free. The input modalities offered are `text`, `image`, `audio`, `video` and `document` (`pdf` and `file` are no longer offered); `document` takes the accepted types, PDF or any file.
+
+<Tag type="removed" /> **`BashTaskStatus`, `BashTaskOutput` and `BashTaskStop` removed (breaking change for ADK users).** `Job` (`list`, `status`, `output`, `wait`, `stop`) follows the background commands and the commands handed over after `yield_time_ms`, and is the only tool for them. A background or handed-over command is a `job_id`; the `task_id` is gone. `bricks::tools::shell()` no longer has `Job`, and refuses a command that may become a job without a registry; `shell_with_jobs(registry)` has Bash, Job and PowerShell. Migration: section 17 of the migration guide.
+
+<Tag type="changed" /> **`Job` output.** `tail` returns the last lines. Page limits are checked (`limit` 1 to 2000, `timeout_ms` 1 to 600000) and out-of-range values are refused, not clamped. A line longer than a page is cut and marked, and the offset moves past it. An id that is not yours answers the same as an unknown one.
 
 </Version>
 

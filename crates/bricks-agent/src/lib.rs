@@ -1,21 +1,16 @@
 //! bricks-agent: The high-level Agent API with builder pattern, agentic loop,
 //! realtime event streaming, broadcast channels, and reporters.
 
-pub mod agent_tool;
 pub mod agents;
-pub mod auto_dream;
 pub mod bricks_config;
 pub mod compact;
 pub mod context;
-pub mod context_analyzer;
 pub mod control;
-pub mod coordinator;
 pub mod events;
 pub mod permission;
 pub mod reporters;
 mod request_env;
 pub(crate) mod runner;
-pub mod session_memory;
 pub mod skills;
 pub mod subagent;
 pub mod system_prompt;
@@ -394,7 +389,9 @@ impl Agent {
             // The stream answers what the policy asks; the policy still
             // decides.
             match &self.permission_parts {
-                Some((cell, _)) => Arc::new(permission::PermissionEngine::new(cell.clone(), stream)),
+                Some((cell, _)) => {
+                    Arc::new(permission::PermissionEngine::new(cell.clone(), stream))
+                }
                 None => stream,
             }
         } else {
@@ -578,7 +575,11 @@ impl Agent {
     /// `revise` replaces: the `user_index`-th user-role message, whose text
     /// is `original` (compared trimmed). An error says why it cannot be
     /// revised; nothing changes.
-    pub fn revision_point(&self, user_index: usize, original: &str) -> std::result::Result<usize, String> {
+    pub fn revision_point(
+        &self,
+        user_index: usize,
+        original: &str,
+    ) -> std::result::Result<usize, String> {
         let messages = self.messages.lock();
         let Some((position, message)) = messages
             .iter()
@@ -586,7 +587,10 @@ impl Agent {
             .filter(|(_, m)| m.role == Role::User)
             .nth(user_index)
         else {
-            return Err("this message is no longer in the active context (it was compacted or cleared)".into());
+            return Err(
+                "this message is no longer in the active context (it was compacted or cleared)"
+                    .into(),
+            );
         };
         let is_tool_result = matches!(&message.content, MessageContent::Blocks(blocks)
             if blocks.iter().any(|b| matches!(b, ContentBlock::ToolResult { .. })));
@@ -774,7 +778,11 @@ impl Agent {
         if let Some(s) = self.last_system.lock().clone() {
             return Some(s);
         }
-        let names: Vec<String> = self.tool_list().iter().map(|t| t.name().to_string()).collect();
+        let names: Vec<String> = self
+            .tool_list()
+            .iter()
+            .map(|t| t.name().to_string())
+            .collect();
         let base = match &self.prompt_options {
             Some(o) => {
                 let mut o = o.clone();
@@ -863,11 +871,8 @@ impl Agent {
             }
             None => (
                 self.system_prompt.clone(),
-                plan.as_ref().map(|p| {
-                    system_prompt::render_plan_block(p)
-                        .trim_start()
-                        .to_string()
-                }),
+                plan.as_ref()
+                    .map(|p| system_prompt::render_plan_block(p).trim_start().to_string()),
             ),
         };
         let system = self.join_system(base, raw_plan);
@@ -1356,7 +1361,10 @@ impl AgentBuilder {
         // One engine decides every call: a whole one given (a sub-agent's
         // parent), or the policy (shared cell, profile, or the default)
         // with its approver.
-        let (permission_policy, permission_parts): (Arc<dyn PermissionPolicy>, Option<PermissionParts>) = match self.permission_engine {
+        let (permission_policy, permission_parts): (
+            Arc<dyn PermissionPolicy>,
+            Option<PermissionParts>,
+        ) = match self.permission_engine {
             Some(engine) => (engine, None),
             None => {
                 let has_approver = self.permission_approver.is_some();
@@ -1578,7 +1586,6 @@ impl AgentBuilder {
         self.build()?.run(prompt).await
     }
 }
-
 
 /// The tools of an agent on one job registry: the one in `extensions`
 /// ([`bricks_tools::jobs::JobsHandle`], a session's or a parent's) when there

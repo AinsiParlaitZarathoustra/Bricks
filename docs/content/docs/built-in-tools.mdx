@@ -1,6 +1,6 @@
 ---
 title: Built-in Tools Reference
-description: Complete reference for the 38 built-in tools — input schemas, permission levels, and usage notes.
+description: Complete reference for the built-in tools — input schemas, permission levels, and usage notes.
 ---
 
 import { TypeTable } from 'fumadocs-ui/components/type-table';
@@ -8,18 +8,21 @@ import { Callout } from 'fumadocs-ui/components/callout';
 
 # Built-in Tools Reference
 
-38 tools in the categories below. Each tool is available via the composition functions in `bricks::tools`. The sub-agent tools (`Agent`, `Agents`, `AgentControl`, `AgentProfiles`) are not in those sets: see [Sub-agent tools](#sub-agent-tools).
+The 16 tools of `bricks::tools::all()` are in the categories below, and each is available through the composition functions in `bricks::tools`. `Skill` is not in those sets: an agent with a skills service adds it. The sub-agent tools (`Agent`, `Agents`, `AgentControl`, `AgentProfiles`, `SendMessage`) are not in those sets either: see [Sub-agent tools](#sub-agent-tools).
 
 ```text
-bricks::tools::all()           // all 38
-bricks::tools::coding()        // filesystem + shell + web (17)
-bricks::tools::filesystem()    // 9 tools
-bricks::tools::shell()         // 6 tools
-bricks::tools::web()           // 2 tools
-bricks::tools::planning()      // 3 tools
-bricks::tools::scheduling()    // 5 tools
-bricks::tools::orchestration() // 9 tools
+bricks::tools::all()                     // all 16: coding() + planning()
+bricks::tools::coding()                  // filesystem + shell_with_jobs + web (15)
+bricks::tools::filesystem()              // 10 tools
+bricks::tools::shell()                   // 2 tools: Bash, PowerShell (no job registry)
+bricks::tools::shell_with_jobs(registry) // 3 tools: Bash, Job, PowerShell
+bricks::tools::web()                     // 2 tools
+bricks::tools::planning()                // 1 tool (TodoWrite)
 ```
+
+`all()` and `coding()` put `Bash` and `Job` on a registry of their own. An agent
+built with a session's registry puts them on it; see
+[Background Tasks](/docs/background-tasks) and [bricks-tools](/docs/api-tools).
 
 ---
 
@@ -46,6 +49,22 @@ Read a file with optional line offset and limit. Returns content with line numbe
       type: 'integer',
       description: 'Number of lines to read.',
       default: '2000',
+    },
+  }}
+/>
+
+### ViewImage
+
+Show the model an image file (PNG, JPEG, GIF or WebP). The type is read from the file's bytes, not its name. The model receives the image itself; the result text names the path, the type, the dimensions (not for WebP) and the size. Refused: a directory, a file of another type, more than 3,750,000 bytes, and more than 8,000 pixels on a side. A relative `file_path` resolves against the working directory. How the image reaches the model depends on the model: see [Multimodal Input](/docs/multimodal#images-returned-by-tools).
+
+**Permission:** ReadOnly
+
+<TypeTable
+  type={{
+    file_path: {
+      type: 'string',
+      description: 'Path to the image file.',
+      required: true,
     },
   }}
 />
@@ -150,35 +169,43 @@ Search file contents using regex. Uses ripgrep if available, falls back to syste
   }}
 />
 
-### NotebookEdit
+### CodeStats
 
-Edit a Jupyter notebook cell by index.
+Count the code, comment and blank lines of a file or a directory tree, in total, per language or per file (Tokei, in process, no external program). The walk follows `.gitignore`, `.ignore` and `.tokeignore`, nested, and counts hidden files. Directory links are not followed.
 
-**Permission:** Write
+**Permission:** ReadOnly
 
 <TypeTable
   type={{
-    file_path: {
+    path: {
       type: 'string',
-      description: 'Path to .ipynb file.',
-      required: true,
+      description: 'File or directory, relative to the working directory.',
+      default: 'working directory',
     },
-    cell_index: {
+    detail: {
+      type: 'string',
+      description: '"summary" (totals only), "languages" (one row per language) or "files" (one row per file).',
+      default: 'languages',
+    },
+    language: {
+      type: 'string',
+      description: 'Count only the files of this primary language, as Tokei names it (`Rust`, `TypeScript`, `Jupyter Notebooks`). Any case; an unknown name is an error.',
+    },
+    top_n: {
       type: 'integer',
-      description: '0-based cell index to edit.',
-      required: true,
+      description: 'Rows shown, from 1 to 100, sorted by code lines. It limits the rows only, never the analysis.',
+      default: '20',
     },
-    new_source: {
-      type: 'string',
-      description: 'New cell source content.',
-      required: true,
-    },
-    cell_type: {
-      type: 'string',
-      description: 'Cell type: "code" or "markdown".',
+    exclude: {
+      type: 'array',
+      description: 'Gitignore-style globs, relative to the analysed directory. Exclusions only: a `!` pattern is refused.',
     },
   }}
 />
+
+The result is JSON: `totals` (`files`, `code`, `comments`, `blanks`, `lines`), `results`, `truncated`, `omitted`, `partial` and `warnings`. Totals always cover the whole analysis, and `omitted` counts the rows not shown. `partial` is `true` when something expected was not counted (an unreadable file, a file changed during its read, an invalid notebook, a walk error, an overflow): check it before presenting the totals as complete. Lines are Tokei's counting units, not `wc -l`; a shebang line counts as a comment. A file counts for its primary language, with the blocks it embeds (HTML with JavaScript counts as HTML).
+
+A `.tokeignore` file at the root of the tree, with the same syntax as `.gitignore`, is the way to leave out generated folders such as `target/`, `node_modules/`, `dist/` or `coverage/`. Bricks never creates it.
 
 ---
 
@@ -204,13 +231,26 @@ Execute a shell command. Each call is its own process, started from the session'
     },
     yield_time_ms: {
       type: 'integer',
-      description: 'Foreground only: milliseconds before a command still running is handed over as a task (status Running, with task_id and job_id). Not a deadline.',
+      description: 'Foreground only: milliseconds before a command still running is handed over as a job (status Running, with its job_id). Not a deadline.',
       default: '[bash] yield_time_ms (10000)',
     },
     background: {
       type: 'boolean',
-      description: 'Start a supervised background task at once.',
+      description: 'Start a background job at once; the result gives its job_id. Follow it with Job.',
       default: 'false',
+    },
+    ready_pattern: {
+      type: 'string',
+      description: 'Background only. A regex on output lines: the job is ready when a line matches.',
+    },
+    ready_timeout: {
+      type: 'integer',
+      description: 'Background only. Milliseconds to wait for `ready_pattern`.',
+      default: '10000',
+    },
+    input: {
+      type: 'string',
+      description: 'Text given to the command on stdin. Empty stdin by default.',
     },
   }}
 />
@@ -218,6 +258,55 @@ Execute a shell command. Each call is its own process, started from the session'
 <Callout>
 Bash calls are approved by the permission policy at the `Execute` level, whatever the command. No analysis of the command runs before it and none lowers or raises that level. The AST analysis of `bricks_tools::tool_primitives::bash_safety` is an SDK primitive a caller can use on its own; see [Code intelligence](/docs/code-intelligence#bash-command-safety-analysis).
 </Callout>
+
+A command that may become a job (`background: true`, or a `yield_time_ms` below its `timeout`) is recorded by the session's job registry. Without one, as with `bricks::tools::shell()`, it is refused before it starts. A job is followed with [Job](#job).
+
+### Job
+
+The calling agent's background jobs: the commands started with `Bash` and `background: true`, and the foreground commands handed over after `yield_time_ms`. Each job is visible only to the agent that started it. Running is not ready, and ready is not proof that a service works. Stopping a job ends its process group and tree (TERM, then KILL). See [Background Tasks](/docs/background-tasks).
+
+**Permission:** Execute for `stop`; ReadOnly for `list`, `status`, `output` and `wait`.
+
+<TypeTable
+  type={{
+    action: {
+      type: '"list" | "status" | "output" | "wait" | "stop"',
+      description: 'What to do. `list` gives your jobs; the other actions need a `job_id`.',
+      default: 'list',
+    },
+    job_id: {
+      type: 'string',
+      description: 'The job, for every action but list. Given by Bash.',
+    },
+    stream: {
+      type: '"stdout" | "stderr"',
+      description: 'For output.',
+      default: 'stdout',
+    },
+    offset: {
+      type: 'integer',
+      description: 'For output: the 0-based line to start at. Not with tail.',
+      default: '0',
+    },
+    limit: {
+      type: 'integer',
+      description: 'For output: lines to return, from 1 to 2000.',
+      default: '200',
+    },
+    tail: {
+      type: 'boolean',
+      description: 'For output: the last `limit` lines. Not with offset.',
+      default: 'false',
+    },
+    timeout_ms: {
+      type: 'integer',
+      description: 'For wait: from 1 to 600000. A timeout stops nothing.',
+      default: '60000',
+    },
+  }}
+/>
+
+Unknown fields and out-of-range values are refused. `output` returns a header (the range, the complete lines, the bytes received, what is no longer in memory, the raw log path and the next offset), then the lines without numbers. A line longer than the page is cut and marked, and the offset moves past it. A line still in progress is shown apart and does not move the offset.
 
 ### PowerShell
 
@@ -288,21 +377,9 @@ Search the web. DuckDuckGo is used by default, with no key. A keyed provider (Br
 
 ## Planning
 
-### EnterPlanMode
-
-Switch to plan mode — restricts the agent to read-only tools for safe exploration.
-
-**Permission:** None. **No input required.**
-
-### ExitPlanMode
-
-Exit plan mode and return to full tool access.
-
-**Permission:** None. **No input required.**
-
 ### TodoWrite
 
-Create and manage a structured task list with status tracking.
+Create and update the plan of the conversation: the complete list of its steps, with status tracking. The plan is kept with the conversation (`plan.json` in its files folder), shown to the user, and restored when the conversation is reopened.
 
 **Permission:** None
 
@@ -310,7 +387,7 @@ Create and manage a structured task list with status tracking.
   type={{
     todos: {
       type: 'array',
-      description: 'The complete updated todo list.',
+      description: 'The complete updated list of steps. An empty list clears the plan.',
       required: true,
     },
     'todos[].content': {
@@ -328,105 +405,54 @@ Create and manage a structured task list with status tracking.
       description: 'Present continuous form ("Fixing the tests").',
       required: true,
     },
+    explanation: {
+      type: 'string',
+      description: 'Optional: why the plan changed (a step added, dropped or blocked).',
+    },
   }}
 />
+
+- At most one step may be `in_progress`. An invalid update is refused with an error, and the previous plan stays.
+- Each accepted update takes the next revision, clearing included.
+- A conversation has its own plan. A sub-agent never shares its parent's; a sub-agent that has TodoWrite keeps its own plan in memory.
 
 ---
 
-## Scheduling
+## Sub-agent tools
 
-### CronCreate
+`Agent` (one sub-agent), `Agents` (several), `AgentControl` (ids, results,
+resumes, cancellation and ChangeSets), `SendMessage` and `AgentProfiles` (list and
+search the profiles) are native tools. The CLI and the controller register
+them when `[agents] enabled` is true (the default). They are not in
+`bricks::tools::all()`.
 
-Schedule a recurring or one-shot prompt.
+Sub-agents always run in parallel. `Agent` and `Agents` return their ids at
+once; `AgentControl wait` and `result` give the results. There is no
+`background` parameter.
 
-**Permission:** Execute
+**Permission:** `Agent` and `Agents`: Execute. Allowing one allows that
+delegation only: each child's own tool calls go through the policy one by one.
+`AgentControl`: ReadOnly for `list`, `status`, `result`, `wait` and
+`inspect_changes`, Execute for `resume` and `cancel`, Write for
+`apply_changes` and `discard_changes`. `AgentProfiles`: ReadOnly.
 
-<TypeTable
-  type={{
-    schedule: {
-      type: 'string',
-      description: 'Cron expression ("*/5 * * * *") or one-shot ("once:30s").',
-      required: true,
-    },
-    prompt: {
-      type: 'string',
-      description: 'The prompt to execute on each trigger.',
-      required: true,
-    },
-  }}
-/>
+The `AgentControl` actions, by their parameters:
 
-### CronList
+| action | parameters | effect |
+|---|---|---|
+| `list`, `status`, `result` | `agent_id` (`status`, `result`) | instances visible to the caller; state; the kept result |
+| `wait` | `agent_id`, `timeout_ms` (default 60000, at most 600000) | waits for the end; a timeout cancels nothing |
+| `resume` | `agent_id`, `prompt` | starts a new execution of an ended sub-agent, with its launch's profile, model, tools, skills and workspace |
+| `cancel` | `agent_id` | cancels it and its descendants |
+| `inspect_changes`, `apply_changes`, `discard_changes` | `changeset_id` or `agent_id` | a ChangeSet of an isolated sub-agent |
 
-List all scheduled jobs with run counts.
-
-**Permission:** None. **No input required.**
-
-### CronDelete
-
-Delete a scheduled job by ID.
-
-**Permission:** Execute
-
-<TypeTable
-  type={{
-    id: {
-      type: 'string',
-      description: 'Cron job ID to delete.',
-      required: true,
-    },
-  }}
-/>
-
-### Sleep
-
-Pause execution for a duration.
-
-**Permission:** None
-
-<TypeTable
-  type={{
-    duration_ms: {
-      type: 'integer',
-      description: 'Milliseconds to sleep.',
-      required: true,
-      default: 'max 60000',
-    },
-  }}
-/>
-
-### RemoteTrigger
-
-Send an event to another session or agent.
-
-**Permission:** Execute
-
-<TypeTable
-  type={{
-    target_session: {
-      type: 'string',
-      description: 'Target session ID.',
-      required: true,
-    },
-    event_type: {
-      type: 'string',
-      description: 'Event type identifier.',
-      required: true,
-    },
-    payload: {
-      type: 'any',
-      description: 'Event payload (any valid JSON).',
-    },
-  }}
-/>
-
----
-
-## Orchestration
+Their parameters, the limits (`max_depth` = 1, `max_concurrent` = 16, `max_queued`
+= 64, `admission_timeout_ms` = 60000, `summary_chars` = 30000) and the
+isolation rules are in `docs/agents.md` in the repository.
 
 ### SendMessage
 
-Send a message to one of your running sub-agents. It is the same delivery as `AgentControl message` (see [Sub-agent tools](#sub-agent-tools)): the sub-agent reads it at its next model request, never between a tool call and its result. Refusals are explicit (unknown or out of scope, not running, empty, over 16 KiB, 32 messages already waiting); nothing is reported as sent when it was not. Without an agent runtime in the session, nothing is sent.
+Send a message to one of your running sub-agents. It is a native tool registered with the agent runtime, outside `bricks::tools::all()` (see [Sub-agent tools](#sub-agent-tools)). The sub-agent reads it at its next model request, never between a tool call and its result. Refusals are explicit (unknown or out of scope, not running, empty, over 16 KiB, 32 messages already waiting); nothing is reported as sent when it was not. Without an agent runtime in the session, nothing is sent.
 
 **Permission:** Execute
 
@@ -445,245 +471,21 @@ Send a message to one of your running sub-agents. It is the same delivery as `Ag
   }}
 />
 
-### TaskCreate
-
-Create a new task for tracking work.
-
-**Permission:** None
-
-<TypeTable
-  type={{
-    description: {
-      type: 'string',
-      description: 'What this task does.',
-      required: true,
-    },
-    prompt: {
-      type: 'string',
-      description: 'Optional prompt for a sub-agent.',
-    },
-  }}
-/>
-
-### TaskGet
-
-Get a task's current status, description, and output.
-
-**Permission:** None
-
-<TypeTable
-  type={{
-    id: {
-      type: 'string',
-      description: 'Task ID.',
-      required: true,
-    },
-  }}
-/>
-
-### TaskUpdate
-
-Update a task's status and/or output.
-
-**Permission:** None
-
-<TypeTable
-  type={{
-    id: {
-      type: 'string',
-      description: 'Task ID.',
-      required: true,
-    },
-    status: {
-      type: '"pending" | "running" | "completed" | "failed" | "stopped"',
-      description: 'New status.',
-    },
-    output: {
-      type: 'string',
-      description: 'Task result text.',
-    },
-  }}
-/>
-
-### TaskList
-
-List all tasks with their status.
-
-**Permission:** None. **No input required.**
-
-### TaskStop
-
-Stop a running task.
-
-**Permission:** None
-
-<TypeTable
-  type={{
-    id: {
-      type: 'string',
-      description: 'Task ID to stop.',
-      required: true,
-    },
-  }}
-/>
-
-### TaskOutput
-
-Get the full output of a completed task.
-
-**Permission:** None
-
-<TypeTable
-  type={{
-    id: {
-      type: 'string',
-      description: 'Task ID.',
-      required: true,
-    },
-  }}
-/>
-
-### EnterWorktree
-
-Create an isolated git worktree for parallel branch work.
-
-**Permission:** Write
-
-<TypeTable
-  type={{
-    branch: {
-      type: 'string',
-      description: 'Branch name to create and check out.',
-      required: true,
-    },
-    path: {
-      type: 'string',
-      description: 'Directory for the worktree.',
-      default: '<temp dir>/bricks-wt-{branch}',
-    },
-  }}
-/>
-
-### ExitWorktree
-
-Remove a git worktree and return to the original working directory.
-
-**Permission:** Write
-
-<TypeTable
-  type={{
-    path: {
-      type: 'string',
-      description: 'Worktree directory to remove.',
-      required: true,
-    },
-  }}
-/>
-
 ---
-
-### Sub-agent tools
-
-`Agent` (one sub-agent), `Agents` (several), `AgentControl` (ids, results,
-messages, resumes, cancellation and ChangeSets) and `AgentProfiles` (list and
-search the profiles) are native tools. The CLI and the controller register
-them when `[agents] enabled` is true (the default). They are not in
-`bricks::tools::all()`, and the library type `AgentTool` stays for embedders.
-
-Sub-agents always run in parallel. `Agent` and `Agents` return their ids at
-once; `AgentControl wait` and `result` give the results. There is no
-`background` parameter.
-
-**Permission:** `Agent` and `Agents`: Execute. Allowing one allows that
-delegation only: each child's own tool calls go through the policy one by one.
-`AgentControl`: ReadOnly for `list`, `status`, `result`, `wait` and
-`inspect_changes`, Execute for `message`, `resume` and `cancel`, Write for
-`apply_changes` and `discard_changes`. `AgentProfiles`: ReadOnly.
-
-The `AgentControl` actions, by their parameters:
-
-| action | parameters | effect |
-|---|---|---|
-| `list`, `status`, `result` | `agent_id` (`status`, `result`) | instances visible to the caller; state; the kept result |
-| `wait` | `agent_id`, `timeout_ms` (default 60000, at most 600000) | waits for the end; a timeout cancels nothing |
-| `message` | `agent_id`, `message` | queues a message for a running sub-agent (see `SendMessage`) |
-| `resume` | `agent_id`, `prompt` | starts a new execution of an ended sub-agent, with its launch's profile, model, tools, skills and workspace |
-| `cancel` | `agent_id` | cancels it and its descendants |
-| `inspect_changes`, `apply_changes`, `discard_changes` | `changeset_id` or `agent_id` | a ChangeSet of an isolated sub-agent |
-
-Their parameters, the limits (`max_depth` = 1, `max_concurrent` = 16, `max_queued`
-= 64, `admission_timeout_ms` = 60000, `summary_chars` = 30000) and the
-isolation rules are in `docs/agents.md` in the repository.
 
 ## Other
 
-### AskUserQuestion
-
-Ask the user a question and wait for their response.
-
-**Permission:** None
-
-<TypeTable
-  type={{
-    question: {
-      type: 'string',
-      description: 'The question to ask.',
-      required: true,
-    },
-  }}
-/>
-
-### SyntheticOutput
-
-Return structured JSON for programmatic consumption. Used by coordinator mode and SDK integrations.
-
-**Permission:** None
-
-<TypeTable
-  type={{
-    data: {
-      type: 'any',
-      description: 'Structured data to return (any valid JSON).',
-      required: true,
-    },
-  }}
-/>
-
-### Config
-
-Read or modify session-scoped configuration values.
-
-**Permission:** None
-
-<TypeTable
-  type={{
-    action: {
-      type: '"get" | "set" | "list"',
-      description: 'Action to perform.',
-      required: true,
-    },
-    key: {
-      type: 'string',
-      description: 'Config key (for get/set).',
-    },
-    value: {
-      type: 'any',
-      description: 'Value to set.',
-    },
-  }}
-/>
-
 ### Skill
 
-Activates an [Agent Skill](https://agentskills.io/specification) — reads its full instructions — or lists the skills the agent may activate, or locates one of a skill's files. It runs nothing and grants no permission. Present only on agents built with a skills service (`AgentBuilder::skills`; the `bricks` CLI does it).
+Activates an [Agent Skill](https://agentskills.io/specification) — reads its full instructions — lists the skills the agent may activate, locates one of a skill's files, checks a skill folder (`validate`) or installs one in Bricks' store (`install`). Activating runs nothing and grants no permission. Present only on agents built with a skills service (`AgentBuilder::skills`; the `bricks` CLI does it).
 
-**Permission:** ReadOnly
+**Permission:** ReadOnly, except `install`, which writes in the store and asks the write permission.
 
 <TypeTable
   type={{
     action: {
       type: 'string',
-      description: '"activate" (default when `skill` is given), "list", or "resource". `skill: "list"` without an action lists.',
+      description: '"activate" (default when `skill` is given), "list", "resource", "validate" (checks the folder at `path`, writes nothing) or "install" (copies it into the store, validates the copy and publishes it; the folder is left as it was). `skill: "list"` without an action lists.',
     },
     skill: {
       type: 'string',
@@ -699,28 +501,12 @@ Activates an [Agent Skill](https://agentskills.io/specification) — reads its f
     },
     path: {
       type: 'string',
-      description: 'For "resource": a path relative to the skill\'s directory.',
+      description: 'For "resource": a path relative to the skill\'s directory. For "validate" and "install": the skill folder, relative to the working directory.',
     },
   }}
 />
 
-See `docs/skills.md` in the repository for sources, trust, activation and limits.
-
-### ToolSearch
-
-Search for available tools by keyword.
-
-**Permission:** None
-
-<TypeTable
-  type={{
-    query: {
-      type: 'string',
-      description: 'Search query (matches tool names and descriptions).',
-      required: true,
-    },
-  }}
-/>
+See `docs/skills.md` in the repository for sources, the store, activation, withdrawal and limits.
 
 ---
 
@@ -728,7 +514,7 @@ Search for available tools by keyword.
 
 | Level | Tools |
 |-------|-------|
-| **None** (16) | EnterPlanMode, ExitPlanMode, TodoWrite, CronList, Sleep, TaskCreate, TaskGet, TaskUpdate, TaskList, TaskStop, TaskOutput, AskUserQuestion, SyntheticOutput, Config, Skill, ToolSearch |
-| **ReadOnly** (5) | Read, Glob, Grep, WebFetch, WebSearch |
-| **Write** (5) | Write, Edit, NotebookEdit, EnterWorktree, ExitWorktree |
-| **Execute** (6) | Bash, PowerShell, CronCreate, CronDelete, RemoteTrigger, SendMessage |
+| **None** (1) | TodoWrite |
+| **ReadOnly** (10) | Read, ViewImage, Glob, Grep, CodeSearch, CodeScout, CodeStats, WebFetch, WebSearch, Skill (ReadOnly except `install`) |
+| **Write** (3) | Write, Edit, ApplyPatch |
+| **Execute** (4) | Bash, PowerShell, SendMessage, Job (ReadOnly for `list`, `status`, `output`, `wait`) |

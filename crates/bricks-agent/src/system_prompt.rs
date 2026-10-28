@@ -5,8 +5,6 @@
 //! Dynamic components go after (recomputed each turn).
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
 
 // ─── Dynamic boundary marker ────────────────────────────────────────────────
 
@@ -15,45 +13,6 @@ use std::sync::{Mutex, OnceLock};
 // existing `bricks_agent::system_prompt::SYSTEM_PROMPT_DYNAMIC_BOUNDARY`
 // imports keep compiling.
 pub use bricks_types::SYSTEM_PROMPT_DYNAMIC_BOUNDARY;
-
-// ─── Section cache ──────────────────────────────────────────────────────────
-
-fn section_cache() -> &'static Mutex<HashMap<String, Option<String>>> {
-    static CACHE: OnceLock<Mutex<HashMap<String, Option<String>>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-pub fn clear_system_prompt_sections() {
-    if let Ok(mut cache) = section_cache().lock() {
-        cache.clear();
-    }
-}
-
-// ─── Section type (kept for backward compat) ────────────────────────────────
-
-#[derive(Debug, Clone)]
-pub struct SystemPromptSection {
-    pub tag: String,
-    pub content: Option<String>,
-    pub cache_break: bool,
-}
-
-impl SystemPromptSection {
-    pub fn cached(tag: impl Into<String>, content: impl Into<String>) -> Self {
-        Self {
-            tag: tag.into(),
-            content: Some(content.into()),
-            cache_break: false,
-        }
-    }
-    pub fn uncached(tag: impl Into<String>, content: Option<String>) -> Self {
-        Self {
-            tag: tag.into(),
-            content,
-            cache_break: true,
-        }
-    }
-}
 
 // ─── Output style ───────────────────────────────────────────────────────────
 
@@ -218,7 +177,10 @@ pub fn build_system_prompt(opts: &SystemPromptOptions) -> String {
 
     // ── CACHEABLE sections ──────────────────────────────────────────────
     // 1. The Bricks foundation, once.
-    let mut parts: Vec<String> = vec![bricks_foundation_with(&opts.tools_available, opts.ask_timer)];
+    let mut parts: Vec<String> = vec![bricks_foundation_with(
+        &opts.tools_available,
+        opts.ask_timer,
+    )];
 
     // 2. A sub-agent's role: one task from another agent, its result for it.
     if prefix == SystemPromptPrefix::SubAgent {
@@ -377,7 +339,8 @@ const CODE_STATS_BULLET: &str = "- Utilise CodeStats pour compter le code, les c
 
 /// The foundation's bullet kept only when `Bash` is announced; it names Job
 /// only when Job is announced too. How each works is in its description.
-const BASH_BULLET: &str = "- Utilise Bash pour les commandes, scripts et opérations mal couverts par les outils dédiés.";
+const BASH_BULLET: &str =
+    "- Utilise Bash pour les commandes, scripts et opérations mal couverts par les outils dédiés.";
 const BASH_JOB_BULLET: &str = "- Utilise Bash pour les commandes, scripts et opérations mal couverts par les outils dédiés, et Job pour suivre celles qui continuent en arrière-plan.";
 
 /// The foundation's bullet kept only when `Ask` is announced; the timer adds
@@ -504,7 +467,11 @@ pub fn bricks_foundation_with(tools: &[String], ask_timer: crate::control::AskTi
     }
     bullets.extend(edit_bullet(&has));
     if has("Bash") {
-        let bash = if has("Job") { BASH_JOB_BULLET } else { BASH_BULLET };
+        let bash = if has("Job") {
+            BASH_JOB_BULLET
+        } else {
+            BASH_BULLET
+        };
         bullets.push(bash.to_string());
     }
     if has("Ask") {
@@ -866,7 +833,10 @@ mod tests {
     #[test]
     fn the_bash_bullet_names_job_only_when_it_is_announced() {
         let alone = bricks_foundation(&tools(&["Bash"]));
-        assert!(alone.contains(BASH_BULLET) && !alone.contains("Job"), "{alone}");
+        assert!(
+            alone.contains(BASH_BULLET) && !alone.contains("Job"),
+            "{alone}"
+        );
         let with_job = bricks_foundation(&tools(&["Bash", "Job"]));
         assert!(with_job.contains(BASH_JOB_BULLET), "{with_job}");
     }
@@ -1269,17 +1239,6 @@ mod tests {
         assert_eq!(OutputStyle::parse_name("concise"), OutputStyle::Concise);
         assert_eq!(OutputStyle::parse_name("FORMAL"), OutputStyle::Formal);
         assert_eq!(OutputStyle::parse_name("unknown"), OutputStyle::Default);
-    }
-
-    #[test]
-    fn test_clear_section_cache() {
-        {
-            let mut cache = section_cache().lock().unwrap();
-            cache.insert("test".to_string(), Some("content".to_string()));
-        }
-        clear_system_prompt_sections();
-        let cache = section_cache().lock().unwrap();
-        assert!(cache.is_empty());
     }
 
     #[test]

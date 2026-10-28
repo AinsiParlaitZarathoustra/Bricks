@@ -100,8 +100,8 @@ error body that echoes the key back).
 | `auth`, `auth_header`, `headers`, `compat` | no | Overrides for this model (see §4). |
 | `input_modalities`, `output_modalities` | no | Subsets of `text`, `image`, `audio`, `video`, `document`. Default `["text"]`. |
 | `document_mime_types` | with `document` | Accepted MIME types (`type/subtype`, `text/*`, `*/*`). |
-| `streaming`, `tool_calls` | no | Capability flags. **Default `false`**: undeclared means unsupported. `streaming = false` sends a blocking request. |
-| `limits` | yes | `max_input_tokens`, `max_output_tokens`, optional `context_window_tokens` (a window shared by input and output). |
+| `streaming` | no | **Default `false`**: `streaming = false` sends a blocking request. |
+| `limits` | yes | `max_input_tokens` (the input budget usable with the maximum output reserved) and `max_output_tokens`. |
 | `pricing` | no | USD per million tokens, see §9. |
 | `reasoning` | no | Profiles, see §6. |
 | `parameters` | no | Request parameters sent with every request (JSON-compatible, nesting allowed). |
@@ -109,10 +109,12 @@ error body that echoes the key back).
 | `token_counting` | no | Table enabling pre-flight counting with the server: `anthropic_messages` → `messages/count_tokens`, `responses` → `responses/input_tokens`; optional `path`. Refused for `chat_completions` (no documented route). See `docs/context.md` §3. |
 
 **Limits are declarative.** They never change the server's. Bricks uses them to
-cap `max_tokens` at `max_output_tokens`, and to budget the prompt: with a shared
-window the input budget is `min(max_input_tokens, window − reserved output)`,
-because the output reserve includes reasoning tokens on all three protocols.
-Without `context_window_tokens`, no total window is assumed. Token counts
+cap `max_tokens` at `max_output_tokens`, and to budget the prompt at
+`max_input_tokens`. For a window shared by input and output, declare the input
+that remains with the maximum output reserved (128 000 shared, 32 000 output:
+96 000 input); a smaller output frees nothing. A former `context_window_tokens`
+is still read and folded in once: `min(max_input_tokens, window −
+max_output_tokens)`; editing the model in the app removes it. Token counts
 computed locally are **estimates** (a character-class heuristic calibrated on
 the model's reported usage); only the usage a server reports, or a configured
 counting endpoint, measures tokens. See `docs/context.md`.
@@ -161,6 +163,14 @@ wait for one) is not waited for: no retry is sent, and the run fails at once
 with a message naming that key. This budget belongs to the agent's runner. It
 is not `[web.search] max_retry_wait_ms` (default `2000` in the example file),
 which bounds only the single rate-limit wait of a web-search provider.
+
+**What a request is sent as.** A configured provider reports its request's
+identity (`Provider::request_identity`): the model name in the body (`api_model`)
+and the reasoning profile applied with the request's options, resolved the same
+way as the body. The agent's system prompt states both in its `<model>` block,
+for each request. The profile is `None` when the requested id is unknown (that
+request is refused, so nothing is sent). A custom provider that does not override
+the method reports nothing, and its prompt states only the Bricks selection.
 
 ## 6. Reasoning profiles
 
@@ -226,6 +236,24 @@ Tool calls are not a modality: they are carried by every adapter (ids, arguments
 fragmented across stream chunks, results, stop reasons). A document produced *by
 a tool* (a tool result) is distinct from a document produced natively by a model;
 only the former is represented, and only where the table says so.
+
+**Images returned by tools.** A tool returns an image with `ToolResult::with_images`
+(`bricks_tools::ToolImage`). The agent carries it by `Provider::image_transport()`
+(`bricks_provider::ImageTransport`), which is derived from the model's
+`input_modalities` and the adapter's tool-result media:
+
+* `ToolResult` — `image` declared and carried in a tool result (`anthropic_messages`):
+  the image is a block of the tool result, after its text;
+* `UserTurn` — `image` declared, but the result is text only (`chat_completions`,
+  `responses`): the result stays text, and the round's images follow all its
+  results in the same user turn, each after the label
+  `[image from tool call <id>] <path>, <type>, <n> bytes`;
+* `None` — `image` not declared: the result text ends with
+  `[the image was not shown: the current model does not accept images]`.
+
+A provider that does not override `image_transport()` is `None`. The built-in
+`ViewImage` tool is the only built-in tool that returns images; MCP image results
+stay text placeholders (`docs/mcp.md`).
 
 **Desktop form.** The model form offers `text`, `image`, `audio`, `video` and
 `document`. Choosing `document` asks for the accepted types, with two presets: PDF
@@ -340,7 +368,6 @@ id = "llama"
 name = "Llama 3.1 70B"
 api_model = "llama3.1:70b"
 streaming = true
-tool_calls = true
 [providers.models.limits]
 max_input_tokens = 32000
 max_output_tokens = 8000

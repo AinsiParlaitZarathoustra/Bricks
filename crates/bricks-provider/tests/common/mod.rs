@@ -176,7 +176,6 @@ id = "chat"
 name = "Chat"
 api_model = "vendor-chat"
 streaming = true
-tool_calls = true
 input_modalities = ["text", "image", "audio", "document"]
 document_mime_types = ["application/pdf"]
 [providers.models.limits]
@@ -196,7 +195,6 @@ name = "Resp"
 api_model = "vendor-resp"
 protocol = "responses"
 streaming = true
-tool_calls = true
 input_modalities = ["text", "image", "document"]
 document_mime_types = ["application/pdf"]
 [providers.models.limits]
@@ -209,7 +207,6 @@ name = "Anth"
 api_model = "vendor-anth"
 protocol = "anthropic_messages"
 streaming = true
-tool_calls = true
 input_modalities = ["text", "image", "document"]
 document_mime_types = ["application/pdf"]
 [providers.models.limits]

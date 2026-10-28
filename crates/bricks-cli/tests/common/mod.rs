@@ -152,7 +152,6 @@ id = "m"
 name = "Test model"
 api_model = "test-model"
 streaming = true
-tool_calls = true
 
 [providers.models.limits]
 max_input_tokens = 100000

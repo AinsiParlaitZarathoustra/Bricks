@@ -1,6 +1,6 @@
 ---
 title: Migration to Bricks ADK
-description: Renamed crates and import paths, the removed delegation and multi-edit tools, the edit and shell changes, and the settings whose defaults changed. Also lists what keeps its old name.
+description: Renamed crates and import paths, the removed delegation, multi-edit and planning, scheduling and task tools, the edit and shell changes, and the settings whose defaults changed. Also lists what keeps its old name.
 ---
 
 # Migration to Bricks ADK
@@ -45,7 +45,8 @@ Unchanged packages: `bricks-config`, `bricks-semantic`, `bricks-skills`,
 The directories under `crates/` follow the package names. In scripts and CI,
 `cargo run -p cersei-tools …` becomes `cargo run -p bricks-tools …`. The
 `tbench-agent` binary keeps its name. The temporary folders of `EnterWorktree`
-are now named `bricks-wt-<branch>` (they were `cersei-wt-<branch>`).
+(a tool removed since, see section 18) are now named `bricks-wt-<branch>` (they
+were `cersei-wt-<branch>`).
 
 ## 2. Imports and the facade
 
@@ -97,10 +98,8 @@ is now an unknown tool.
 | Removed | Use instead |
 |---|---|
 | the `delegate` tool, `cersei_agent::delegate_tool::DelegateTool` | the native `Agent` tool for one sub-task, `Agents` for several |
-| the batch module `cersei_agent::delegate`: `run_batch`, `DelegateConfig`, `DelegateTask`, `DelegateResult`, `DELEGATE_BLOCKED_TOOLS`, `DEFAULT_MAX_CONCURRENT`, `ProviderFactory` | No function with the same parameters is provided. Start each sub-task yourself, or give the model `AgentTool` |
+| the batch module `cersei_agent::delegate`: `run_batch`, `DelegateConfig`, `DelegateTask`, `DelegateResult`, `DELEGATE_BLOCKED_TOOLS`, `DEFAULT_MAX_CONCURRENT`, `ProviderFactory` | No function with the same parameters is provided. Use the native `Agent` and `Agents` tools |
 
-`ToolsetFactory` is in `bricks_agent::agent_tool` (same type, `Arc<dyn Fn() -> Vec<Box<dyn Tool>> + Send + Sync>`).
-A sub-agent holds one slot of the scheduler, through `AgentTool`.
 
 The native tools have other parameters. They are not an equivalent of
 `delegate`, and no equivalence is promised. `delegate` took `goal`, `tasks`,
@@ -118,8 +117,7 @@ takes a list of `agents` entries and `fail_fast`:
 Rewrite each old task as a complete, self-contained `task`: a sub-agent sees
 nothing of the conversation except its `task` and its `context`.
 
-`AgentTool` stays for embedders, with its guarantees. The CLI and the
-controller register only the native tools, never two tools named `Agent`.
+The CLI and the controller register only the native tools.
 
 ## 4. `MultiEdit` is now `Edit` with `edits`
 
@@ -203,7 +201,7 @@ scripts, data and external systems.
 
 * `CerseiError`, the error type of the SDK.
 * Environment variables that start with `CERSEI_`: for example
-  `CERSEI_MEMORY_PATH_OVERRIDE`, `CERSEI_COORDINATOR_MODE`,
+  `CERSEI_MEMORY_PATH_OVERRIDE`,
   `CERSEI_HOOK_CONTEXT` (the JSON context a shell hook receives),
   `CERSEI_ENVD_SOCKET`, and the `CERSEI_BENCH_*` variables of the benchmarks.
 * The `.cersei` directories used by the VMS crate (`~/.cersei/vms/…`). The
@@ -293,12 +291,53 @@ same message. `agent_state` and the result of `agent_finished` carry
 `execution`, which counts 1 at launch and one more for each resume. These are
 additive: a client that ignores them needs no change.
 
-## 12. Checklist
+## 12. Removed in 14.8.1: fifteen native tools
+
+Fifteen native tools are removed, with their modules and their registries.
+A call to one of them is now an unknown tool, and the result is an error. No
+alias, deprecation shim or replacement with the same name is kept. Old sessions
+that contain such calls still read and display them.
+
+| Removed | Module and helpers | Use instead |
+|---|---|---|
+| `EnterPlanMode`, `ExitPlanMode` | `plan_mode`: `PLAN_MODE`, `is_plan_mode`, `set_plan_mode` | `TodoWrite` keeps the plan of a conversation. No replacement for a read-only mode |
+| `CronCreate`, `CronList`, `CronDelete` | `cron`: `CRON_REGISTRY`, `CronEntry`, `list_crons`, `clear_crons` | No replacement. Schedule the run outside Bricks (cron, a CI job) and start the agent from it |
+| `TaskCreate`, `TaskGet`, `TaskUpdate`, `TaskList`, `TaskStop`, `TaskOutput` | `tasks`: `TASK_REGISTRY`, `TaskEntry`, `TaskStatus`, `get_task`, `list_tasks`, `clear_tasks` | Background commands: `Bash` with `background: true`, then `Job` (section 17). Sub-agent work: `Agent`, `Agents`, `AgentControl`. Plan: `TodoWrite` |
+| `RemoteTrigger` | `remote_trigger`: `TRIGGER_REGISTRY`, `TriggerEvent`, `drain_triggers` | No replacement |
+| `Config` | `config_tool`: `CONFIG_STORE`, `get_config`, `set_config` | `bricks.toml` and `BricksConfig`. Removing the tool removes no configuration |
+| `AskUserQuestion` | `ask_user` | Ask the question in the answer text, and read the reply in the next turn |
+| `Sleep` | `sleep` | No replacement. A short wait is a `Bash` command (`sleep 2`), within its `timeout` |
+
+What changes with it:
+
+* `bricks_tools::all()` had 22 tools, where it had 38. At that point
+  `SyntheticOutput` and `ToolSearch` stayed in it; both were removed in
+  section 18, and `all()` now has 16 tools.
+* `bricks_tools::planning()` is `TodoWrite` alone. `bricks_tools::scheduling()`
+  is removed. `bricks_tools::orchestration()` was `EnterWorktree` and
+  `ExitWorktree`; it is removed too (section 18).
+* `SendMessage` is a native tool of the agent runtime:
+  `bricks_agent::agents::SendMessageTool`, same input (`to`, `content`). The
+  `bricks_tools::send_message` module, its `MessageRouter` trait and
+  `MessageRouterHandle` are removed, and so is the `message` action of
+  `AgentControl`: send with `SendMessage`. The session controller registers it
+  with the other agent tools; a sub-agent gets it only when it may start sub-agents
+  of its own (`[agents] max_depth`). It was never usable without the runtime.
+* The system prompt has no "Task tracking" section, and the coordinator no
+  longer names `TaskStop` or tells the model to use `TaskCreate` or
+  `TaskUpdate`. The event schema stays at 7.
+* A custom or MCP tool may still use one of these names: no name is blocked.
+
+For ADK users: remove the fifteen names from tool lists, `[permissions]`
+rules, prompts and tests, and replace them as shown in the table. The
+background commands are described in [Background Tasks](/docs/background-tasks).
+
+## 13. Checklist
 
 1. Rename the dependency and the imports (`cersei` → `bricks`, `cersei_*` →
    `bricks_*`), and add `bricks-tools` to crates that use `#[derive(Tool)]`.
-2. Replace `delegate` calls and `DelegateTool` with `Agent`, `Agents` or
-   `AgentTool`, and rewrite each task as a self-contained `task`.
+2. Replace `delegate` calls and `DelegateTool` with the native `Agent` or
+   `Agents` tools, and rewrite each task as a self-contained `task`.
 3. Replace `MultiEdit` and `MultiEditTool` with `Edit` (`edits`) and
    `FileEditTool`.
 4. Remove any "read before edit" assumption from prompts, tests and hooks.
@@ -309,3 +348,205 @@ additive: a client that ignores them needs no change.
 7. Read sub-agent results with `AgentControl` `wait` and `result`, and remove
    `background`, `max_turns`, `max_batch` and `max_total_per_run` from calls,
    configuration and profiles.
+8. Remove the fifteen removed tool names from tool lists, permission rules,
+   prompts and tests, and use the replacements of section 12.
+9. Remove `NotebookEdit` from the same places (section 14).
+10. Delete the `[permissions]` sections of your `bricks.toml` files, choose a
+    profile for each session (section 16), and replace the removed policy
+    types and the "allow for the session" answers.
+11. Remove `EnterWorktree`, `ExitWorktree`, `SyntheticOutput` and `ToolSearch`
+    from tool lists, prompts, permission rules and tests, and use the
+    replacements of section 18.
+
+## 14. Removed in 14.8.2: NotebookEdit
+
+The native `NotebookEdit` tool is removed, with its module `notebook_edit`
+and its registration in `bricks_tools::filesystem()`. A call to it is an
+unknown tool, and the result is an error. No alias or shim is kept, and old
+sessions still display the call. No built-in tool replaces it: a notebook is
+JSON, and a custom tool is the way to change a cell. `CodeStats` is new and
+read-only: it counts a notebook's lines, it does not edit one. A custom tool
+may keep the name `NotebookEdit`.
+
+
+## 15. Removed in 14.9: the built-in skills and the old skill roots
+
+Bricks ships one built-in skill, `create-skills`. The former built-in skills
+`commit`, `debug`, `remember`, `simplify`, `stuck` and `verify` are removed;
+the memory and git features themselves are unchanged. A call to one of these
+skills, by name, finds no skill: it is not in the catalog. Their names may be
+used by a skill you install.
+
+Bricks no longer reads `~/.claude/skills`, `~/.agents/skills`,
+`<project>/.claude/skills` or `<project>/.agents/skills`, on the desktop and in
+the CLI. Those folders are never read, copied, modified or deleted by Bricks.
+Nothing is moved for you. A skill you still want is brought back in one of two
+ways:
+
+* in the desktop app, *Settings › Skills*, **Importer**: choose the skill's
+  folder. The whole folder is copied into Bricks' store, and the folder you
+  chose is left as it was;
+* or ask the model to run the `Skill` tool with `action: "install"` and the
+  folder's `path`, after `action: "validate"` if you want to check it first.
+  Installing asks for the write permission.
+
+A skill that uses a Claude Code directive (`context`, `agent`, `model`,
+`effort`, `hooks`, `paths`, `shell`, `disable-model-invocation: true`,
+`user-invocable: false`) is refused at installation. Remove the directive
+first; Bricks does not drop it silently.
+
+Embedders that want the former folders pass them explicitly
+(`SkillRoot::explicit` in `SkillsSetup::extra_roots`, or the opt-in helper
+`bricks_skills::standard_roots`).
+
+## 16. Changed in 14.10: permissions
+
+One engine now decides every tool call, in the desktop application, in the
+`bricks` command and in the library. Each session has one policy, a profile
+(ASK, EXECUTE or CUSTOM) and, for CUSTOM, its rules. The policy is chosen by a
+person and stored with the session, never in `bricks.toml`.
+
+**Removed**
+
+* The `[permissions]` and `[permissions.tools]` sections of `bricks.toml`
+  are not read. A section left there is reported as a diagnostic, and its
+  rules, denials included, are not applied. Delete it.
+* The desktop preference "Approbation des outils" (Standard, Toujours
+  demander, Sans confirmation).
+* From `bricks_tools::permissions`: `AllowReadOnly`, `RuleBased`,
+  `PermissionRule`, `PermissionAction` and the `AllowForSession` decision.
+* The answer "allow for the session" everywhere: the `approve` decision
+  `allow_for_session` (only `allow` and `deny` remain), and
+  `approval_resolved.by = session`.
+* In the snapshot of the control protocol: `allowed_for_session`,
+  `approval_rules` and `approval_mode`, replaced by `permission_policy` and
+  `permission_revision`.
+
+**Changed**
+
+* `PermissionPolicy` is only the approver: who answers the calls the policy
+  asks about. `.permission_policy(approver)` sets it. An agent with an approver
+  and no profile is ASK; an agent with neither is EXECUTE.
+* `PermissionRequest` gains `category` and `policy_revision`.
+  `PermissionDecision` is `Allow`, `Deny(reason)` and `AllowOnce`. An answer
+  covers one call.
+* New: `SessionPolicy`, `PermissionProfile`, `PermissionEffect`, `CustomRules`
+  and `PermissionVerdict` (in the prelude), with `.permission_profile(...)`,
+  `.permission_cell(...)` and `.permission_engine_arc(...)` on the builder.
+* Each policy change bumps a revision. A request already waiting for a person
+  is not answered by a change; calls decided afterwards follow the new revision.
+* Event schema 8: `permission_policy_changed`, `approval.policy_revision`,
+  `approval_resolved.decision` (`allow` or `deny`) and `by` (`user`,
+  `non_interactive` or `cancelled`), and the command `set_permission_policy`.
+* The `bricks` command takes `--permissions ask|execute`. The terminal prompt
+  reads `Allow this call? [y]es / [N]o:`.
+
+**Migrating**
+
+1. Delete the `[permissions]` sections of each `bricks.toml`.
+2. Choose the profile in Bricks (Settings › General › "Permissions des
+   nouvelles conversations", or the first-choice bar above the composer), or
+   pass `--permissions` on the command line. The old defaults (reads allowed,
+   writes and commands asked) are ASK. Rules that allowed everything are
+   EXECUTE. Other rules are CUSTOM rules, set per class and per tool in
+   Bricks.
+3. In the library, replace `AllowReadOnly` with the approver `DenyAll` (ASK).
+   Note that `DenyAll` also refuses the web tools, which `AllowReadOnly` let
+   through: a CUSTOM policy with `custom.tools` set to `allow` for `WebFetch`
+   and `WebSearch` keeps them. Replace `RuleBased` with a CUSTOM policy, and
+   each `AllowForSession` answer with `AllowOnce` (or `Allow`).
+4. In a frontend that answered "allow for the session", change the session's
+   policy instead (`set_permission_policy`).
+5. Read event schema 8 in consumers of the JSONL events.
+
+## 17. Removed: `BashTaskStatus`, `BashTaskOutput` and `BashTaskStop`
+
+These three tools are removed, with no alias. A call to one of them is an
+unknown tool, and the result is an error. Old sessions that contain such calls
+still read and display them. `Job` replaces them: it follows the same background
+commands, and the commands handed over after `yield_time_ms`.
+
+| Removed | Use instead |
+|---|---|
+| `BashTaskStatus { task_id? }` | `Job { action: "status", job_id }`, or `Job { action: "list" }` for all of them |
+| `BashTaskOutput { task_id, stream, offset, limit }` | `Job { action: "output", job_id, stream, offset, limit }`, or `tail` for the last lines |
+| `BashTaskStop { task_id }` | `Job { action: "stop", job_id }` |
+
+What changes with it:
+
+* A background or handed-over command is identified by `job_id` (`job_` and 12
+  hexadecimal characters). The `task_id` of the former tools (`bg-1`, …) is no
+  longer in the results.
+* `bricks_tools::shell()` is `Bash` and `PowerShell`, and `Bash` refuses a
+  command that may become a job. Use `bricks_tools::shell_with_jobs(registry)`
+  for `Bash`, `Job` and `PowerShell` on one registry, or `coding()` and `all()`,
+  which do it on a fresh registry.
+* `bricks_tools::all()` had 20 tools, where it had 23, and `coding()` has 15.
+  It has 16 since section 18.
+* `Job` `output` pages are bounded in bytes. A line longer than the page is cut
+  and marked, and the offset moves past it.
+
+For ADK users: replace the three names in tool lists, prompts, permission rules
+and tests, and read the job id where the code read `task_id`. The `Job` tool and
+its actions are described in [Background Tasks](/docs/background-tasks).
+
+## 18. Removed: `EnterWorktree`, `ExitWorktree`, `SyntheticOutput` and `ToolSearch`
+
+These four built-in tools are removed, with their modules (`worktree`,
+`tool_search` and `synthetic_output`) and the `bricks_tools::orchestration()`
+set. There is no alias. A call to one of them is an unknown tool: the error
+lists the available tools and asks for one of them, by its exact name. Old
+sessions that contain such calls still read and display them.
+
+| Removed | Use instead |
+|---|---|
+| `EnterWorktree { branch, path }` | `Bash` with `git worktree add -b <branch> <path>`. For sub-agents, `Agent` and `Agents` isolate their work themselves (`isolation: "auto"`) |
+| `ExitWorktree { path }` | `Bash` with `git worktree remove <path>`, without `--force`. For a sub-agent's worktree, `AgentControl` with `apply_changes` or `discard_changes` |
+| `SyntheticOutput` | No replacement: nothing in Bricks consumed it. A tool that must return structured data puts it in its result (`ToolResult::with_metadata`) |
+| `ToolSearch` | No replacement: the catalogue of tools is already in the prompt |
+
+What changes with it:
+
+* `bricks_tools::all()` is `coding()` plus `planning()`: 16 tools (the 15 of
+  `coding()`, and `TodoWrite`). Section 17 counted 20, section 12 counted 22.
+* `coding()` is unchanged. `bricks_tools::orchestration()` is removed.
+* Sub-agent isolation is unchanged: `Agent` and `Agents` take
+  `isolation: "auto" | "shared" | "worktree"`, and `AgentControl` keeps
+  `inspect_changes`, `apply_changes` and `discard_changes`.
+* This is a breaking change for SDK integrators. Code that names these tools,
+  imports `bricks_tools::worktree`, `bricks_tools::tool_search` or
+  `bricks_tools::synthetic_output`, or calls `orchestration()` no longer
+  compiles. A permission rule or a tool list that still names them matches no
+  tool.
+
+For ADK users: remove the four names from tool lists, prompts, permission rules
+and tests, and use the replacements above.
+
+
+## 19. Sprint 15: remove disconnected interfaces
+
+Remove imports of `bricks_agent::agent_tool`, `coordinator`, `auto_dream`,
+`session_memory` and `context_analyzer`. They were library APIs with no desktop
+or CLI runtime integration. Sub-agent sessions use the native `Agent`, `Agents`
+and `AgentControl` tools. The memory service uses `LongTermMemory` and
+`StructuredMemory`; automatic compaction stays available.
+
+`SystemPromptSection` and `clear_system_prompt_sections` are removed. Their
+cache did not participate in prompt assembly. The active prompt options
+`extra_cached_sections` and `extra_dynamic_sections` remain available.
+
+Delete every model-level `tool_calls` key from TOML or JSON provider files,
+including `~/.bricks/providers.toml` and explicitly selected files. It used to
+accept `false` and silently treat it as `true`; it is now an unknown field.
+The SDK capability object and desktop `ModelView` no longer expose this
+constant flag. `async_tool_calls`, which controls starting tools while a
+response streams, is unchanged.
+
+Remove the top-level `background` key from `Agents` calls: it was accepted
+but ignored, and is now rejected before any agent starts. The spawner API's
+foreground/background controls and shell background commands are unchanged.
+
+The historical `abstract` harnesses and their documentation have been removed.
+Use `scripts/bench_cli.py` for CLI startup measurements and the active
+`tbench-agent` harness for Terminal-Bench. Run Rust tests with
+`cargo nextest run`, or `scripts/run_tests.sh` for the workspace.

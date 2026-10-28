@@ -6,7 +6,7 @@
 bricks-cli            the `bricks` binary: arguments, configuration, headless / JSONL
 bricks-config         engine assembly shared by the CLI and the desktop
 apps/bricks-desktop   desktop application (Tauri 2 + Svelte 5) over the controller
-bricks-agent          engine: agent loop, controller (commands/events), approvals, compaction
+bricks-agent          engine: agent loop, controller (commands/events), permissions, compaction
   bricks-provider, bricks-tools, bricks-memory, bricks-compression, bricks-web,
   bricks-semantic, bricks-skills, bricks-lsp, bricks-mcp, bricks-embeddings, …
 bricks-types          shared types and the shared HTTP client
@@ -49,7 +49,7 @@ src-cersei/
     ├── cersei-tools/             tool system
     │   └── src/
     │       ├── lib.rs            Tool trait, ToolContext, ToolResult, built-in sets
-    │       ├── permissions.rs    PermissionPolicy trait + built-in policies
+    │       ├── permissions.rs    PermissionPolicy trait (the approver) + built-in approvers
     │       ├── bash.rs           Bash tool (shell state persistence)
     │       ├── file_read.rs      Read tool
     │       ├── file_write.rs     Write tool
@@ -194,10 +194,10 @@ Agent loop emits AgentEvent
 
 2. **Builder pattern** — `AgentBuilder` with `self -> Self` chaining. Validates at `build()` time, not at method call time.
 
-3. **Few process-wide registries** — `bricks-tools` keeps some global registries (for example for shell sessions, tasks, todos, cron jobs and inboxes). `ShellSessions` holds one entry per tool-context session id, and its entry is removed by the cleanup functions. Agent configuration flows through the builder.
+3. **Few process-wide registries** — `bricks-tools` keeps some global registries (for example for shell sessions and inboxes). `ShellSessions` holds one entry per tool-context session id, and its entry is removed by the cleanup functions. There is no global plan: TodoWrite writes to a `PlanService` that the agent carries as the `PlanHandle` extension. One service per session (or per agent instance, for sub-agents and agents built with the library) holds the plan; a session's service keeps it in `plan.json` in the session's files folder, so it survives a restart, and an in-memory service lasts as long as its instance. Each update is validated, written atomically, then published. `get_todos` and `clear_todos` remain as compatibility readers: they act on the service TodoWrite last used for that session id, and hold no copy of a plan. Agent configuration flows through the builder.
 
 4. **Streaming-first** — providers emit `StreamEvent`s. The accumulator is a separate concern. Consumers (callback, broadcast, stream) get events as they arrive.
 
 5. **Headless-first** — no TUI dependency in the SDK. The TUI is an application-layer concern that consumes the engine via events.
 
-6. **Zero-cost defaults** — `AllowAll` permission policy, no hooks, no memory, no broadcast. You only pay for what you configure.
+6. **Zero-cost defaults** — no approver (every call runs), no hooks, no memory, no broadcast. You only pay for what you configure.

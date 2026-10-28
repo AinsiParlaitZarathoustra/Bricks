@@ -1,6 +1,6 @@
 ---
 title: Tools (bricks-tools)
-description: Tool trait, 39 built-in tools, permission system, bash safety analysis, Agent Skills.
+description: Tool trait, built-in tools, permission system, bash safety analysis, Agent Skills.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -9,7 +9,7 @@ import { TypeTable } from 'fumadocs-ui/components/type-table';
 
 # bricks-tools
 
-Tool execution system with 39 built-in tools, a granular permission model, a bash command safety analysis (SDK primitive), and Agent Skills (`SKILL.md`) served by `bricks-skills`.
+Tool execution system with built-in tools, a granular permission model, a bash command safety analysis (SDK primitive), and Agent Skills (`SKILL.md`) served by `bricks-skills`.
 
 ---
 
@@ -38,6 +38,12 @@ pub trait Tool: Send + Sync {
     /// Category for grouping
     fn category(&self) -> ToolCategory { ToolCategory::Custom }
 
+    /// The job registry this tool records or reads jobs in (`Bash`, `Job`)
+    fn job_registry(&self) -> Option<Arc<JobRegistry>> { None }
+
+    /// The same tool on `registry`, for a tool that works with jobs
+    fn on_job_registry(&self, registry: &Arc<JobRegistry>) -> Option<Box<dyn Tool>> { None }
+
     /// Execute with JSON input and context
     async fn execute(&self, input: Value, ctx: &ToolContext) -> ToolResult;
 }
@@ -56,6 +62,7 @@ ToolResult::success("data").with_metadata(json!({"size": 1024}));
 | `ToolResult::success(content)` | Successful execution. Content is returned to the model. |
 | `ToolResult::error(content)` | Execution failed. The model sees the error and can retry or adapt. |
 | `.with_metadata(value)` | Attach structured metadata (not shown to model, available in events). |
+| `.with_images(images)` | Show images to the model with the result: `Vec<ToolImage>` (`bricks::tools::ToolImage`: `media_type`, `data_base64`, `path`, `bytes`). How they reach the model depends on the model; see [Multimodal Input](/docs/multimodal#images-returned-by-tools). |
 
 ### ToolContext
 
@@ -103,25 +110,25 @@ Convenience functions that return pre-configured tool collections:
 
 | Function | Count | Tools Included |
 |----------|-------|----------------|
-| `bricks::tools::all()` | 38 | Everything below, plus `AskUserQuestion`, `SyntheticOutput`, `Config` and `ToolSearch` |
-| `bricks::tools::coding()` | 17 | filesystem + shell + web |
-| `bricks::tools::filesystem()` | 9 | Read, Write, Edit, ApplyPatch, Glob, Grep, CodeSearch, CodeScout, NotebookEdit |
-| `bricks::tools::shell()` | 6 | Bash, BashTaskStatus, BashTaskOutput, BashTaskStop, Job, PowerShell |
+| `bricks::tools::all()` | 16 | `coding()` plus `TodoWrite` |
+| `bricks::tools::coding()` | 15 | filesystem + shell_with_jobs (on a fresh registry) + web |
+| `bricks::tools::filesystem()` | 10 | Read, ViewImage, Write, Edit, ApplyPatch, Glob, Grep, CodeSearch, CodeScout, CodeStats |
+| `bricks::tools::shell()` | 2 | Bash (no job registry: commands that may become a job are refused), PowerShell |
+| `bricks::tools::shell_with_jobs(registry)` | 3 | Bash and Job on `registry`, PowerShell |
 | `bricks::tools::web()` | 2 | WebFetch, WebSearch |
-| `bricks::tools::planning()` | 3 | EnterPlanMode, ExitPlanMode, TodoWrite |
-| `bricks::tools::scheduling()` | 5 | CronCreate, CronList, CronDelete, Sleep, RemoteTrigger |
-| `bricks::tools::orchestration()` | 9 | SendMessage, Tasks (6), Worktree (2) |
+| `bricks::tools::planning()` | 1 | TodoWrite |
 | `bricks::tools::none()` | 0 | Empty (for chat-only agents) |
 
 ### Tool Catalog
 
 The permission level is the one each tool declares in code (`permission_level()`).
 
-**Filesystem (9 tools)**
+**Filesystem (10 tools)**
 
 | Tool | Permission | Description |
 |------|-----------|-------------|
 | `FileReadTool` | ReadOnly | Read files with optional line offset/limit. Numbered lines, binary and encoding detection. |
+| `ViewImageTool` | ReadOnly | Show the model an image file (PNG, JPEG, GIF or WebP); the model receives the image itself. |
 | `FileWriteTool` | Write | Create or overwrite files. Creates parent directories automatically. |
 | `FileEditTool` | Write | String replacement: one replacement, or several (`edits`) applied in order and written all or nothing. Tolerates indentation drift; refuses ambiguous matches. Replaces the former `MultiEditTool`. |
 | `ApplyPatchTool` | Write | Apply a patch with strict parsing and rollback on failure. |
@@ -129,18 +136,17 @@ The permission level is the one each tool declares in code (`permission_level()`
 | `GrepTool` | ReadOnly | Regex search with ripgrep's libraries, gitignore-aware. No external `rg` binary is needed. |
 | `CodeSearchTool` | ReadOnly | Search the workspace's code index. |
 | `CodeScoutTool` | ReadOnly | Code understanding queries (symbols, definitions, references, diagnostics) on the shared engine (`bricks-semantic`). |
-| `NotebookEditTool` | Write | Edit Jupyter notebook cells by index. |
+| `CodeStatsTool` | ReadOnly | Count the code, comment and blank lines of a file or a tree, in total, per language or per file (Tokei, in process). Totals cover the whole analysis; check `partial` before presenting them as complete. |
 
-**Shell (6 tools)**
+**Shell (3 tools)**
 
 | Tool | Permission | Description |
 |------|-----------|-------------|
-| `BashTool` | Execute | Run a command as its own process, started from the session's state. Timeout, output bounded. A command still running after `yield_time_ms` is handed over as a task; `background: true` starts one at once. |
-| `BashTaskStatusTool` | ReadOnly | Status of a background task or a handed-over command started by `Bash`. |
-| `BashTaskOutputTool` | ReadOnly | Output of such a task, with a cursor. |
-| `BashTaskStopTool` | Execute | Stop a background task. |
-| `JobTool` | Execute | List, inspect, read, wait for and stop background jobs of the calling agent. |
+| `BashTool` | Execute | Run a command as its own process, started from the session's state. Timeout, output bounded. A command still running after `yield_time_ms` is handed over as a job; `background: true` starts one at once. With `BashTool::default()` (no registry) such a command is refused before it starts. |
+| `JobTool` | Execute (`stop`) / ReadOnly (`list`, `status`, `output`, `wait`) | List, inspect, read, wait for and stop the jobs of the calling agent. Needs the `JobOwner` identity in the tool context, which the runner sets. |
 | `PowerShellTool` | Execute | Windows PowerShell execution, with one interpreter per session. |
+
+`BashTaskStatus`, `BashTaskOutput` and `BashTaskStop` are removed. A call to one of them is an unknown tool.
 
 **Web (2 tools)**
 
@@ -149,37 +155,23 @@ The permission level is the one each tool declares in code (`permission_level()`
 | `WebFetchTool` | ReadOnly | Fetch a URL as paged Markdown, with a question, or read a stored document. |
 | `WebSearchTool` | ReadOnly | Web search. DuckDuckGo by default; Brave, Tavily or Exa when `bricks.toml` names them in `[web.search]`. |
 
-**Planning (3 tools)**
+**Planning (1 tool)**
 
 | Tool | Permission | Description |
 |------|-----------|-------------|
-| `EnterPlanModeTool` | None | Switch to structured planning mode. |
-| `ExitPlanModeTool` | None | Exit planning mode with approval. |
-| `TodoWriteTool` | None | Create and manage task lists. |
+| `TodoWriteTool` | None | Create and update the plan of a conversation: the complete list of steps, validated (at most one `in_progress`) and written with a revision. Its plan is the `PlanHandle` extension (`todo_write::PlanService`): kept in `plan.json` when the agent has a session folder, in memory otherwise. |
 
-**Scheduling (5 tools)**: see [Background Tasks](/docs/background-tasks) for cron format, one-shot timers, and integration patterns.
+**Sub-agent tools**: `Agent`, `Agents`, `AgentControl` and `AgentProfiles` are described in [Sub-agent tools](/docs/built-in-tools#sub-agent-tools). The native runtime tool `SendMessage` is registered with them, not by `bricks::tools::all()`:
 
 | Tool | Permission | Description |
 |------|-----------|-------------|
-| `CronCreateTool` | Execute | Create a scheduled job. |
-| `CronListTool` | None | List scheduled jobs. |
-| `CronDeleteTool` | Execute | Delete a scheduled job. |
-| `SleepTool` | None | Async sleep for a duration. |
-| `RemoteTriggerTool` | Execute | Invoke a remote trigger. |
+| `bricks_agent::agents::SendMessageTool` | Execute | Native runtime tool: send a message to a running sub-agent (`to`, `content`). Registered with the native agent tools, not by `bricks::tools::all()`. |
 
-**Orchestration (9 tools)**: see [Background Tasks](/docs/background-tasks) for input schemas, state machine, and usage patterns.
+**Other (1 tool)**
 
 | Tool | Permission | Description |
 |------|-----------|-------------|
-| `SendMessageTool` | Execute | Send a message to a running sub-agent of the session, through the agent runtime's router (the same delivery as `AgentControl message`). Without a runtime, nothing is sent. |
-| `TaskCreateTool` | None | Create a long-running background task. |
-| `TaskGetTool` | None | Get task status. |
-| `TaskUpdateTool` | None | Update a running task. |
-| `TaskListTool` | None | List all tasks. |
-| `TaskStopTool` | None | Stop a running task. |
-| `TaskOutputTool` | None | Get task output. |
-| `EnterWorktreeTool` | Write | Create a git worktree for isolated work. |
-| `ExitWorktreeTool` | Write | Exit and clean up worktree. Never forces removal. |
+| `SkillTool` | ReadOnly (`install`: Write) | Manage skills: list, activate (read instructions), resource (locate files), validate a folder, or install a checked copy in Bricks. Activation runs nothing and grants no permission. |
 
 ---
 
@@ -281,7 +273,7 @@ impl Tool for ManualTool {
 ```rust
 let agent = Agent::builder()
     .provider(bricks::provider_from_config(None, "my-provider/my-model")?)
-    .tools(bricks::tools::coding())  // 18 built-in tools
+    .tools(bricks::tools::coding())  // 15 built-in tools
     .tool(SearchTool)                // + your custom tool
     .tool(ManualTool)                // + another
     .build()?;
@@ -291,58 +283,106 @@ let agent = Agent::builder()
 
 ## Permission Levels
 
-Every tool declares a permission level. The agent's `PermissionPolicy` checks this before execution.
+Every tool declares a permission level. The level gives the call its class of action (read, write, execute or network), and the session's permission policy decides the call before it runs. See [Permissions](#permissions-the-engine-and-the-approver) below, and `docs/cli.md#permissions` in the repository for the frontends.
 
 <TypeTable
   type={{
     None: {
       type: 'PermissionLevel::None',
-      description: 'Always allowed. Planning, sleep, status checks.',
+      description: 'Class: read. Planning, status checks. Allowed under ASK and EXECUTE; CUSTOM may refuse it.',
     },
     ReadOnly: {
       type: 'PermissionLevel::ReadOnly',
-      description: 'File reads, searches, listing. No side effects.',
+      description: 'File reads, searches, listing. Class: read (network for the web tools). No side effects.',
     },
     Write: {
       type: 'PermissionLevel::Write',
-      description: 'File creation, modification. Reversible changes.',
+      description: 'File creation, modification. Class: write. Reversible changes.',
     },
     Execute: {
       type: 'PermissionLevel::Execute',
-      description: 'Shell commands, task creation. Side effects.',
+      description: 'Shell commands, task creation, sub-agents. Class: execute. Side effects.',
     },
     Dangerous: {
       type: 'PermissionLevel::Dangerous',
-      description: 'Destructive operations. Requires explicit approval.',
+      description: 'Destructive operations. Class: execute, asked under ASK.',
     },
     Forbidden: {
       type: 'PermissionLevel::Forbidden',
-      description: 'The SDK runner passes it to the policy like any other level (crates/bricks-agent/src/runner.rs:1377). The bricks CLI denies it (crates/bricks-agent/src/control/settings.rs:83). A policy you write must deny it itself.',
+      description: 'Refused by the permission engine in every profile, before any approver is asked.',
     },
   }}
 />
 
-### Built-in Policies
+### Permissions: the engine and the approver
 
-| Policy | Behavior |
-|--------|----------|
-| `AllowAll` | Permit everything. For trusted environments and testing. |
-| `AllowReadOnly` | Only `None` and `ReadOnly` tools. Safe for analysis tasks. |
-| `DenyAll` | Block everything. For pure chat agents. |
-| `RuleBased { rules }` | Ordered rules matching a tool name (`"all"` matches any tool). The first matching rule decides; when no rule matches, the call is allowed. `path_pattern` is not evaluated by `check` (`crates/bricks-tools/src/permissions.rs:76-111`). |
-| `InteractivePolicy::new(handler)` | Defer to a callback function for decisions. |
+Each agent decides its calls with one engine (`bricks_agent::permission`).
+The engine reads the session's **policy**, a `SessionPolicy` with a profile
+and, for CUSTOM, its rules. The calls it says to ask about go to the
+**approver**, a `PermissionPolicy` that answers for one call only.
+
+| Profile | Read | Write | Execute | Network (web tools) |
+|---------|------|-------|---------|---------------------|
+| `PermissionProfile::Ask` | allowed | asked | asked | asked |
+| `PermissionProfile::Execute` | allowed | allowed | allowed | allowed |
+| `PermissionProfile::Custom` | the effect of its class, or of its tool | the same | the same | the same |
+
+A tool's own CUSTOM rule wins over its class. `Forbidden` tools are refused
+in every profile. A policy never chosen behaves as ASK.
+
+| Approver | Answer to a call the policy asks about |
+|----------|-----------------------------------------|
+| `AllowAll` | Allows the call. |
+| `DenyAll` | Refuses the call, with a reason. |
+| `InteractivePolicy::new(handler)` | Calls `handler(&PermissionRequest)`, which returns a `PermissionDecision`. |
+| `InteractivePolicy::via_stream()` | Waits for `respond_permission` on the event stream. |
+
+`PermissionDecision` is `Allow`, `Deny(reason)` or `AllowOnce`. The engine
+turns an allow into a decision for that call only: nothing is granted for
+later calls. A call decided under a policy stays decided by it when the
+policy changes meanwhile; calls decided afterwards follow the new revision
+(`PermissionVerdict::policy_revision`).
+
+The builder chooses the profile and the approver:
+
+- `.permission_policy(approver)` sets the approver. Alone, it gives the ASK profile.
+- `.permission_profile(SessionPolicy)` sets the policy. Without it, an agent with an approver is ASK, and one without an approver is EXECUTE.
+- `.permission_cell(cell)` shares one policy with other agents of the same session, so a change reaches them at their next call. Sub-agents use `.permission_engine_arc(..)` with their parent's engine.
 
 ```rust
-use bricks_tools::permissions::{PermissionAction, PermissionRule};
-// Rule-based example
-let rules = vec![
-    PermissionRule { tool_name: Some("Bash".into()), path_pattern: None, action: PermissionAction::Deny },
-    PermissionRule { tool_name: Some("Read".into()), path_pattern: None, action: PermissionAction::Allow },
-];
-Agent::builder().permission_policy(RuleBased { rules })
+use bricks::prelude::*;
+
+// ASK with an approver that refuses: reads run, writes, commands and web calls are refused.
+let read_only = Agent::builder()
+    .provider(bricks::provider_from_config(None, "my-provider/my-model")?)
+    .tools(bricks::tools::coding())
+    .permission_policy(DenyAll)
+    .build()?;
+
+// EXECUTE: everything runs, nothing is asked.
+let open = Agent::builder()
+    .provider(bricks::provider_from_config(None, "my-provider/my-model")?)
+    .tools(bricks::tools::coding())
+    .permission_profile(SessionPolicy::chosen(PermissionProfile::Execute))
+    .build()?;
+
+// CUSTOM: no shell or sub-agent, writes asked, the web tools allowed.
+let mut policy = SessionPolicy::chosen(PermissionProfile::Custom);
+policy.custom.execute = PermissionEffect::Deny;
+policy.custom.write = PermissionEffect::Ask;
+policy.custom.tools.insert("WebFetch".into(), PermissionEffect::Allow);
+let custom = Agent::builder()
+    .provider(bricks::provider_from_config(None, "my-provider/my-model")?)
+    .tools(bricks::tools::coding())
+    .permission_profile(policy)
+    .permission_policy(DenyAll) // answers the calls that are asked
+    .build()?;
 ```
 
-Policies implement `PermissionPolicy::check`, which returns a `PermissionDecision`: `Allow`, `Deny(reason)`, `AllowOnce` or `AllowForSession`.
+`SessionPolicy` is plain data (serde). The library stores nothing by itself:
+`bricks_agent::permission::PermissionStore` keeps the default for new sessions
+in `permissions.json`, and each frontend keeps every session's policy with the
+session.
 
 ---
 
@@ -373,7 +413,7 @@ Skills are [Agent Skills](https://agentskills.io/specification) (`SKILL.md`), se
 use std::sync::Arc;
 use bricks::skills::{SkillAccess, SkillsService};
 
-let service = Arc::new(SkillsService::standard(project_dir, home_dir));   // project: &Path, home: Option<&Path>
+let service = Arc::new(SkillsService::standard(project_dir, Some(store_dir)));   // project: &Path, store: Option<&Path>
 let access = SkillAccess::new(service);
 let agent = Agent::builder()
     .provider(provider)
@@ -382,7 +422,7 @@ let agent = Agent::builder()
     .build()?;
 ```
 
-Sources by priority: `<project>/.agents/skills`, `<project>/.claude/skills`, `~/.agents/skills`, `~/.claude/skills`, then the built-in `commit`, `debug`, `remember`, `simplify`, `stuck`, `verify`. Project skills reach the model only after a trust decision for the session. `.claude/commands/*.md` and `$ARGUMENTS` templates are not read. See `docs/skills.md` in the repository.
+Sources: the store (`<bricks_home>/skills/<name>/`, where the person's installed skills live) and the built-in `create-skills`. No folder of the project or of the home directory is read: `~/.claude/skills`, `~/.agents/skills`, `<project>/.claude/skills` and `<project>/.agents/skills` are never read, copied or modified. An embedder adds its own folders explicitly, with `SkillRoot::explicit` in `SkillsSetup::extra_roots`; `bricks_skills::standard_roots` is an opt-in helper. A project folder reaches the model only when it is an explicit source and a trust decision was taken for the session. `.claude/commands/*.md` and `$ARGUMENTS` templates are not read. See `docs/skills.md` in the repository.
 
 ## Persistent Shell
 
@@ -396,3 +436,27 @@ Sources by priority: `<project>/.agents/skills`, `<project>/.claude/skills`, `~/
 ```
 
 Closing the agent (`agent.close().await`, async) or dropping it stops the session's processes. Dropping does it synchronously and forced (`crates/bricks-agent/src/lib.rs:515-518`).
+
+## Background Jobs
+
+A job is a command that keeps running after its call returned: one started with `background: true`, or one handed over after `yield_time_ms`. The jobs of a session are kept by a `JobRegistry` (`bricks_tools::jobs`), which holds the quota, the owner of each job, its events and its logs. `JobSettings` (the `[background]` table) sets the limits, with these defaults: `max_jobs` 16, `output_buffer_bytes` 1 MiB per stream, `max_line_bytes` 64 KiB, `raw_log_bytes` 50 MiB per log, `stop_grace_ms` 2000, `max_page_bytes` 64 KiB.
+
+| Function | Tools |
+|---|---|
+| `shell()` | `BashTool::default()` (no registry: a command that may become a job is refused before it starts), `PowerShellTool` |
+| `shell_with_jobs(registry)` | `BashTool` and `JobTool` on `registry`, `PowerShellTool` |
+| `coding()`, `all()` | `shell_with_jobs` on a fresh registry |
+| `on_job_registry(tools, &registry)` | Each tool whose `job_registry()` is set moves to `registry` (`on_job_registry()`); `JobTool` is added when Bash is present without it |
+
+```rust
+use std::sync::Arc;
+
+let registry = bricks_tools::jobs::JobRegistry::new(Default::default(), None);
+let tools = bricks_tools::shell_with_jobs(Arc::clone(&registry));
+```
+
+When an agent is built, `AgentBuilder::build` looks at its job tools. If its extensions hold a `JobsHandle` (sessions and sub-agents get one), the tools are put on that registry. Otherwise the registry of the tools becomes the agent's `JobsHandle`. Tools on two different registries are refused with `CerseiError::Config` before any model call.
+
+A job belongs to the agent that started it: `JobTool` and `Bash` read the `JobOwner` in the tool context, which the runner sets for each agent. Without an owner, `Bash` refuses a command that may become a job, and `Job` answers with an error.
+
+Code that reads a job's output uses `Task::read(stream, OutputPosition::Offset(n) | OutputPosition::Tail, limit)` (`bricks_tools::shell::background`). It returns a `Page`: its lines with their absolute line numbers, its totals, and `evicted`, the number of lines no longer in memory.

@@ -10,8 +10,6 @@ variable.
 |---|---|---|
 | `tbench-agent-linux-amd64` | `tbench_agent.py`, `run_tb_cersei.sh` | `TBENCH_AGENT_BINARY_AMD64` |
 | `tbench-agent-linux-arm64` | same | `TBENCH_AGENT_BINARY_ARM64` |
-| `abstract-linux-amd64` | `abstract_tbench.py`, `run_dry_tb.sh`, `run_tb_full.sh` | `ABSTRACT_BINARY_AMD64` |
-| `abstract-linux-arm64` | same | `ABSTRACT_BINARY_ARM64` |
 
 ## Build `tbench-agent` (current harness)
 
@@ -34,8 +32,7 @@ installed by these scripts.
 ## Recover the historical binaries
 
 The binaries were tracked until Sprint 11.1: `tbench-agent-*` were added in
-commit `54999e4`, `abstract-*` in commit `f5b577d` (last changed in `54999e4`),
-and all four were removed in commit `54079af`. Their blobs are still reachable
+commit `54999e4` and removed in commit `54079af`. Their blobs are still reachable
 from `54999e4`, which holds the versions listed below. To get one back without
 rebuilding:
 
@@ -51,16 +48,3 @@ Compare the checksum with the table below before running it.
 |---|---|---|
 | `tbench-agent-linux-amd64` | 15064528 | `c9c96ee00773b29dafce19f38aa27bb46d5335b36b3eea06d9bfcc5f4432f259` |
 | `tbench-agent-linux-arm64` | 12340016 | `e17c7903de076b09c74fc3f44a0053dd43db30d091e2c5e6685f9dae1aeacc7d` |
-| `abstract-linux-amd64` | 23349008 | `b9bf1971b60b8bca38672a0bfb692ad11c2b516b986c65b65676fd5c2632834b` |
-| `abstract-linux-arm64` | 19846056 | `d1039d0630fe66e89934c5c1587bf21803cea7e971ffd429604cc003e3166bdc` |
-
-## `abstract-*`: historical
-
-`abstract` was the binary of the old `abstract-cli` crate (Cersei era); it no
-longer exists in this workspace, and the exact sources and options of the two
-recorded binaries are unknown. `abstract_tbench.py`, `run_dry_tb.sh`,
-`run_tb_full.sh`, `run_tb_agentrl.sh` (which calls `run_tb_full.sh`), `run.sh`
-(local runs, which expects `target/release/abstract`) and `runner-google.sh`
-(which calls `run_dry_tb.sh`) are kept to read or reproduce old results only.
-A checksum identifies the recorded file; it does not prove where it comes
-from. Run it only in the benchmark's disposable containers.

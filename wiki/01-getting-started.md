@@ -29,7 +29,7 @@ async fn main() -> anyhow::Result<()> {
     let output = Agent::builder()
         .provider(provider_from_config(None, "my-provider/my-model")?) // ~/.bricks/providers.toml
         .tools(bricks::tools::coding())                                 // files, shell, web
-        .permission_policy(AllowAll)                                    // allow all tool calls
+        .permission_policy(AllowAll)                                    // the approver says yes to every call asked
         .run_with("Count the number of .rs files in this directory")
         .await?;
 

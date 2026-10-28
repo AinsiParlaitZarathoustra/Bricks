@@ -517,7 +517,6 @@ api_model = "vendor-m"
 input_modalities = ["text"]
 output_modalities = ["text"]
 streaming = true
-tool_calls = true
 
 [providers.models.limits]
 max_input_tokens = 96000
@@ -635,7 +634,6 @@ api_model = "vendor-m"
 input_modalities = ["text"]
 output_modalities = ["text"]
 streaming = true
-tool_calls = true
 
 [providers.models.limits]
 max_input_tokens = 96000

@@ -17,7 +17,7 @@ workspace (`cargo check -p bricks --examples`).
 
 **Some examples allow every tool.** `simple_agent` and the examples that use
 `AllowAll` can write files and run commands in the folder they are started
-from. Run them in a scratch folder, or change the policy to `AllowReadOnly`.
+from. Run them in a scratch folder, or give them the approver `DenyAll` in place of `AllowAll`.
 
 ## Examples that call a model
 
@@ -48,7 +48,6 @@ cargo run -p bricks --example simple_agent -- acme/fast
 | `benchmark_io` | The in-process cost of the file and shell tools, measured over repeated calls. |
 | `stress_core_infrastructure` | The system prompt builder, compaction and the Bash command analysis. |
 | `stress_tools` | Every tool that can run without external services: schemas, execution and the registry. |
-| `stress_orchestration` | Sub-agents, the coordinator, the task tools and messages between agents. Uses a local echo provider. |
 | `stress_skills` | Agent Skills: sources, trust, and the `Skill` tool, on temporary folders only. |
 | `stress_memory` | Memdir, the CLAUDE.md loader, session storage and graph memory. |
 

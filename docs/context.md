@@ -10,7 +10,7 @@ passed with `AgentBuilder::context_policy`.
 | Value | Rust | Meaning |
 | --- | --- | --- |
 | `contextUsed` | `ContextStatus::context_used` (`ContextUsed`) | Occupation of the active context — what the next request carries — with its **provenance**. |
-| `contextWindow` | `ContextStatus::context_window` (`ContextWindow`) | Limits of the selected model, from its configuration: `max_input_tokens`, `max_output_tokens`, and `total` (`context_window_tokens`) only when configured. |
+| `contextWindow` | `ContextStatus::context_window` (`ContextWindow`) | Limits of the selected model, from its configuration: `max_input_tokens` and `max_output_tokens`. |
 | `totalTokens` | `ContextStatus::total_tokens` / `totals` (`SessionTotals`) | Everything the session consumed. Never decreases; compaction calls are included, once. |
 
 `Agent::context_status()` returns all three; `AgentEvent::ContextUpdate` is
@@ -65,10 +65,13 @@ output`.
 
 ## 2. Budget
 
-The prompt budget of a request is `max_input_tokens`, or, with a configured
-total window, `min(max_input_tokens, context_window_tokens − reserved output)`.
-The reserved output is the request's `max_tokens` bounded by the model's
-`max_output_tokens`; it includes reasoning on all three protocols. A margin is
+The prompt budget of a request (`input_limit`) is the model's
+`max_input_tokens`: the input usable with the maximum output reserved. The
+output is a separate limit (the request's `max_tokens`, bounded by
+`max_output_tokens`, reasoning included); reserving less output frees nothing
+for the input. A former `context_window_tokens` is folded into the input once,
+when the configuration is read: `min(max_input_tokens, window −
+max_output_tokens)`. A margin is
 kept free: `max(safety_margin_tokens, safety_margin_ratio × budget)`.
 
 Before every request:
@@ -87,8 +90,7 @@ than `large_injection_tokens` were added since the last measurement, when the
 upper bound reaches `preflight_ratio` of the budget, or after a rewrite once the
 context is past half of the budget.
 
-When a model has no `context_window_tokens`, the input and output limits are
-applied separately and the status says so; no total is invented. A provider
+The gauges of the app show `context_used.tokens / input_limit`. A provider
 that is not built from configuration (tests, custom implementations) reports
 only its prompt budget, which the status also notes.
 

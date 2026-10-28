@@ -52,7 +52,7 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-`tools::all()` includes shell and file tools, so `AllowAll` lets the agent run commands in the current directory. For a read-only assistant use `tools::coding()` with `AllowReadOnly`.
+`tools::all()` includes shell and file tools, so `AllowAll` lets the agent run commands in the current directory. For a read-only assistant use `tools::coding()` with the approver `DenyAll`: reads run, and writes, commands and web calls are refused.
 
 ## As an HTTP API
 
@@ -76,7 +76,7 @@ async fn handle(Json(req): Json<AgentRequest>) -> std::result::Result<Json<Agent
     let output = Agent::builder()
         .provider(provider)
         .tools(bricks::tools::coding())
-        .permission_policy(AllowReadOnly)
+        .permission_policy(DenyAll)
         .run_with(&req.prompt)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
@@ -170,12 +170,12 @@ Run this under a supervisor such as systemd or a container runtime, so that a cr
 
 ## Sub-agents and orchestration
 
-The agent builder does not add sub-agent tools by itself. `tools::all()` includes the orchestration tools `SendMessage`, the task tools and the worktree tools, but not the sub-agent tools. The `bricks` command-line tool and desktop app add the native `Agent`, `Agents`, `AgentControl` and `AgentProfiles` tools when `[agents] enabled` is set in `bricks.toml`: those tools are backed by a spawner that the session controller creates. An agent built only with `Agent::builder()` does not get them.
+The agent builder does not add sub-agent tools by itself. `tools::all()` is `coding()` plus `TodoWrite`, and the isolation of sub-agent work is carried by `Agent` and `Agents` (`isolation`), not by a separate worktree tool. The sub-agent tools are not in `tools::all()`. The `bricks` command-line tool and desktop app add the native `Agent`, `Agents`, `AgentControl`, `AgentProfiles` and `SendMessage` tools when `[agents] enabled` is set in `bricks.toml`: those tools are backed by a spawner that the session controller creates. An agent built only with `Agent::builder()` does not get them.
 
 ```rust
 let agent = Agent::builder()
     .provider(bricks::provider_from_config(None, "my-provider/my-model")?)
-    .tools(bricks::tools::all())   // SendMessage, task and worktree tools
+    .tools(bricks::tools::all())   // coding() + TodoWrite; no sub-agent tools
     .system_prompt("You are a coordinator. Split the work and check the results.")
     .build()?;
 ```

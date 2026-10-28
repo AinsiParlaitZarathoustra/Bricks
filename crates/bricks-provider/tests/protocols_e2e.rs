@@ -18,7 +18,6 @@ const EXTRA: &str = r#"
 id = "chat_ns"
 name = "Chat non-streaming"
 api_model = "vendor-chat-ns"
-tool_calls = true
 [providers.models.limits]
 max_input_tokens = 1000
 max_output_tokens = 100
@@ -28,7 +27,6 @@ id = "resp_ns"
 name = "Resp non-streaming"
 api_model = "vendor-resp-ns"
 protocol = "responses"
-tool_calls = true
 [providers.models.limits]
 max_input_tokens = 1000
 max_output_tokens = 100
@@ -38,7 +36,6 @@ id = "anth_ns"
 name = "Anth non-streaming"
 api_model = "vendor-anth-ns"
 protocol = "anthropic_messages"
-tool_calls = true
 [providers.models.limits]
 max_input_tokens = 1000
 max_output_tokens = 100
@@ -48,7 +45,6 @@ id = "think"
 name = "Think"
 api_model = "vendor-think"
 streaming = true
-tool_calls = true
 [providers.models.limits]
 max_input_tokens = 1000
 max_output_tokens = 100
@@ -78,7 +74,6 @@ id = "plain"
 name = "No profiles"
 api_model = "vendor-plain"
 streaming = true
-tool_calls = true
 [providers.models.limits]
 max_input_tokens = 1000
 max_output_tokens = 100

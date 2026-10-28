@@ -107,6 +107,9 @@ and headers. Values are never logged.
   JSON, media described by type and size, resource links, and `isError` as
   the tool's failure status, in the uniform rendering
   (`✓ [mcp__kv__lookup] Succès (0.01s)`, `--- structured content ---`).
+  Images are not sent to the model: each one is a text placeholder,
+  `[image <type>, <n> bytes — not shown]`, unchanged. Only the built-in
+  `ViewImage` tool shows an image (`docs/content/docs/multimodal.mdx`).
 * **Messages over `max_message_bytes`.** They close the connection, with the
   reason in the error. HTTP JSON bodies and SSE events are read through a
   bounded client (the workspace's `reqwest`, plugged into `rmcp`).

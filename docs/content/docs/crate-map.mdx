@@ -53,7 +53,7 @@ Providers are configuration, not types: the facade exports
 |---|---|
 | `bricks-types` | Messages, content blocks, errors (`CerseiError`), stream events, and the shared HTTP client (`bricks_types::http`). It depends on no other workspace crate. |
 | `bricks-provider` | The `Provider` trait, the provider registry read from `providers.toml`, and the three protocol adapters: `chat_completions`, `responses` and `anthropic_messages`. Retries, prices and reasoning profiles. |
-| `bricks-tools` | The `Tool` trait and the built-in tools, grouped in sets: `all()`, `coding()`, `filesystem()`, `shell()`, `web()`, `planning()`, `scheduling()` and `orchestration()`. Also the `PermissionPolicy` trait, the change previews, and the shell sessions and background jobs. |
+| `bricks-tools` | The `Tool` trait and the built-in tools, grouped in sets: `all()`, `coding()`, `filesystem()`, `shell()`, `web()` and `planning()`. Also the `PermissionPolicy` trait, the change previews, and the shell sessions and background jobs. |
 | `bricks-tools-derive` | The `#[derive(Tool)]` procedural macro. |
 | `bricks-memory` | The `Memory` trait and its backends: JSONL session storage, an in-memory store, the memory directory, the CLAUDE.md loader. Graph memory (`graph` feature) and structured long-term memory (`structured`) are feature-gated. |
 | `bricks-embeddings` | Embedding providers behind one trait, and a USearch vector index. |
@@ -62,7 +62,7 @@ Providers are configuration, not types: the facade exports
 | `bricks-lsp` | The language server client. |
 | `bricks-web` | Web search with provider fallback, bounded fetching with SSRF filtering, Markdown extraction and passage selection. |
 | `bricks-mcp` | The MCP client over stdio and Streamable HTTP. |
-| `bricks-skills` | Agent Skills (`SKILL.md`): format and validation, sources, trust of project skills, activation. Re-exported as `bricks::skills`. |
+| `bricks-skills` | Agent Skills (`SKILL.md`): format and validation, the skill store (`<bricks_home>/skills`), the built-in `create-skills`, trust of configured project sources, activation. Re-exported as `bricks::skills`. |
 | `bricks-hooks` | The `Hook` trait, hook events and actions, and `ShellHook`. |
 | `bricks-vms` | Sandboxes and VM isolation. |
 | `bricks-agentlang` | The AgentTemplate language: a lexer, parser and interpreter that run agent templates on top of the tools. |

@@ -2,7 +2,33 @@
 
 Feature components plug into these components; keep the props stable.
 
-## Tokens (`src/app.css`)
+## Tokens (`src/lib/theme/tokens.json`)
+
+`src/app.css` is the stylesheet entry point. Edit theme defaults, fonts and shared text sizes in
+`src/lib/theme/tokens.json`: `npm run tokens:generate` writes `src/styles/tokens.generated.css`
+and `src/styles/fonts.css`. Vite generates them on development/build startup and watches the JSON
+in development. `npm run tokens:check` verifies that checked-in outputs match their source.
+The build intentionally updates these tracked generated files when the JSON changes; use
+`tokens:check` for a read-only consistency check. On invalid JSON, development logs the error
+and stays running so it can recover after an edit; production builds fail.
+
+The interface uses locally bundled Google Sans Flex at weight 400 for body text; existing
+medium/semibold headings keep their weights. Code and the terminal use Google Sans Code,
+including a real italic face. Font sources and licences are in `src/assets/fonts/README.md`.
+
+`src/styles/tailwind.css` exposes the tokens as utilities (`text-ui` = 13px,
+`text-caption` = 11px, `text-code` = 13px, `text-compact` = 12.5px). These sizes set no line height;
+existing `text-xs`, `text-sm` and explicit leading remain unchanged. The shared `cn` in
+`src/lib/utils.ts` recognises these names as font sizes, so it preserves text colours when merging.
+
+`src/styles/base.css` owns page defaults, keyboard focus, reduced motion and file icons.
+`src/styles/syntax.css` shares highlighting between Markdown and the reader, retaining their
+context-specific differences. Keep feature layout and feature-specific styles in their components.
+
+`palette.ts` derives its default previews from the JSON. Runtime overrides still apply as CSS
+variables; `resolved-theme.ts` reads the effective variables for the terminal and Mermaid.
+CSS and runtime consumers read `--ui-font-family` / `--code-font-family`; the `--font-sans`
+and `--font-mono` names are declared only in the Tailwind bridge.
 
 Light values are on `:root`, dark values on `.dark` (set by `theme`). Use the Tailwind utilities.
 
@@ -65,8 +91,8 @@ Limits: side panels 200–480 px; centre at least 480 px; terminal at least 120 
 | Width | Mode | Left | Right | Terminal |
 | --- | --- | --- | --- | --- |
 | 1200 px and up | `wide` | inline (if open) | inline (if open) | inline (if open) |
-| 800 to 1199 px | `medium` | inline (if open) | temporary Sheet (on toggle) | inline (if open) |
-| under 800 px | `narrow` | temporary Sheet (on toggle) | temporary Sheet (on toggle) | inline (if open) |
+| 1000 to 1199 px | `medium` | inline (if open) | temporary Sheet (on toggle) | inline (if open) |
+| under 1000 px | `narrow` | temporary Sheet (on toggle) | temporary Sheet (on toggle) | inline (if open) |
 
 - Temporary Sheets are closed whenever the mode changes. Opening one does not change the preference.
 - Toggles in a forced mode act on the Sheet. In `wide` they flip the preference.

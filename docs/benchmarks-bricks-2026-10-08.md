@@ -173,7 +173,6 @@ Pour Python, depuis `bench/general-agents`, installer avec
 `.venv/bin/python bench_agno.py`, `bench_langgraph.py`, `bench_pydantic_ai.py`
 et `bench_crewai.py`. Les appels de modele ne font pas partie de ces suites.
 
-Les anciens scripts `run_tool_bench_claude.sh` et `run_tool_bench_codex.sh`
-ciblent encore `abstract`. Leurs mesures de demarrage, taille et RSS sont
+Les anciens scripts de comparaison `abstract` ont été retirés au Sprint 15. Leurs mesures de demarrage, taille et RSS sont
 couvertes ici par `bench_cli.py` avec Bricks. Leurs sous-commandes historiques
 et scenarios agentiques avec modele reel n'ont pas ete portes ni executes.

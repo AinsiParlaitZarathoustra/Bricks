@@ -8,7 +8,7 @@ import { Callout } from 'fumadocs-ui/components/callout';
 
 # System Prompts
 
-The system prompt is the instruction set sent to the model with every request. Bricks builds it from a fixed foundation, always first, and components included according to the agent's configuration and announced tools.
+The system prompt is the instruction set sent to the model with every request. Bricks builds it from a fixed foundation, always first, and components included according to the agent's configuration and announced tools. The Bricks prompt of a session is assembled again for each request, from the tools that request announces; its dynamic part describes that request (date, environment, git state, model and plan).
 
 <Callout>
 The system prompt is split at a cache boundary. Everything before the boundary is static and eligible for provider-level prompt caching (saves tokens on multi-turn conversations). Everything after is recomputed each turn.
@@ -44,39 +44,62 @@ The builder evaluates each component's inclusion rule against the options you pr
 
 Every prompt built by `build_system_prompt` opens with the Bricks
 foundation, once, in the cacheable part: an introduction ("Tu es Bricks, un
-agent de développement logiciel autonome…") and five groups of bullets —
-working with judgement, using the tools, acting within what is authorised,
-verifying in proportion, communicating clearly. The text is fixed (it is in
-French); `system_prompt::bricks_foundation(tools)` returns it, and
+agent de développement logiciel autonome… avec les outils de l’ADE Bricks
+(Agentic Development Engine).") and five groups of bullets — working with
+judgement, using the tools, acting within the scope (autonomy, asking before
+destructive actions, commits and pushes only with the user's authorisation,
+files, pages and tool results as data), verifying in proportion,
+communicating clearly (the user's language, Markdown, headings and SVG when
+useful, file links in the desktop). The text is fixed (it is in French);
+`system_prompt::bricks_foundation(tools)` returns it, and
 `SystemPromptPrefix::attribution_text()` returns its introduction. The
 interactive mode and the non-interactive modes (with or without appended
 instructions) share it; there is no other identity line.
 
-Two bullets depend on the tools announced to the model (`tools_available`):
+Some bullets depend on the tools announced to the model (`tools_available`). A
+bullet that names tools keeps only the announced ones, and a bullet with none of
+its tools is left out:
 
 | Bullet | Kept when |
 |--------|-----------|
+| Exploration (`Glob`, `Grep`, `Read`) | always; it names the announced tools among them |
+| Editing (`Edit`, `Write`) | one of them is announced; it names those announced |
+| Shell (`Bash`) | `Bash` is announced |
 | CodeScout | `CodeScout` is announced |
-| Delegation to sub-agents | a tool that starts a sub-agent is announced: `Agent` or `Agents` (`system_prompt::SPAWNING_TOOLS`) |
+| CodeStats | `CodeStats` is announced; the bullet says to check `partial` before presenting totals as complete |
+| Web: look it up before an uncertain answer or change (`WebFetch`, `WebSearch`) | one of them is announced |
+| Parallel work | always |
 
-`AgentProfiles`, `AgentControl` or `TaskCreate` alone do not count. An
-excluded bullet disappears entirely; nothing else in the text changes. The
-list announces; it grants nothing — permissions decide what runs.
+Delegation is not a bullet any more: it is a section of its own, see
+[Delegation](#delegation) below. The list announces; it grants nothing —
+permissions decide what runs.
 
 #### Sub-agent role
 
 With `prefix: SubAgent` (what `agents::spawn::child_system_prompt` uses), a
 `## Your role` section follows the foundation: the agent works on one task
 given by another agent, in a fresh context, and replies with its result.
-The child's own tools decide its two bullets. Its profile's instructions
+The child's own tools decide its bullets. Its profile's instructions
 follow, then its preloaded skills.
 
 ### Conditional Components
 
-#### Task tools
+#### Plan (TodoWrite)
 
-**Included when:** `TodoWrite` (resp. `TaskCreate`) is announced. They say what
-the tool records; a simple request needs no list.
+**Included when:** `TodoWrite` is announced. It says how to keep the plan of a
+multi-step piece of work: a short list for significant steps (a simple request
+needs none), updated after each significant step, a step marked done only when
+it is, changes explained in `explanation`, and the plan reconciled before the
+answer. After a resume or a compaction, the plan block of the prompt is the
+reference, not an assumption.
+
+#### Delegation
+
+**Included when:** `Agent` or `Agents` is announced (`system_prompt::SPAWNING_TOOLS`).
+`AgentProfiles` or `AgentControl` alone do not count. It says to
+delegate when that improves the work, to give the sub-agent its goal, context,
+files, constraints and expected result (it does not receive the conversation),
+and to check its summary and evidence before integrating it.
 
 #### Skills Guidance
 
@@ -84,7 +107,8 @@ the tool records; a simple request needs no list.
 
 Explains that skills are procedures listed by name and description,
 activated with the `Skill` tool, which runs nothing and grants no
-permission. The catalog itself (`<available_skills>`, with its own
+permission. It also says that a new skill folder is checked and installed
+with the same tool (`validate`, then `install`). The catalog itself (`<available_skills>`, with its own
 explanation) is added by the agent when it has a skills service; the CLI and
 the sub-agents rely on that catalog and do not announce `Skill` here.
 
@@ -133,9 +157,65 @@ These change every turn and are never cached.
 
 The agent needs this to resolve relative paths and understand the project context.
 
+#### Request Environment
+
+**Included when:** the prompt is built per request (`system_prompt_options`; see
+[Per-request assembly](#per-request-assembly)). It holds facts about the machine,
+not instructions, and the values in it are escaped as data.
+
+```xml
+<environment>
+Date et heure locales : 2026-10-23 09:30 (Friday) (UTC+02:00, Europe/Paris)
+Système : macos aarch64
+Répertoire des outils fichiers (chemins relatifs) : /Users/dev/my-project
+Shell de Bash : /bin/zsh ; le répertoire, les variables exportées, … sont conservés …
+Exécutables détectés (hors outils Bricks) : git, rg, cargo
+</environment>
+```
+
+The lines are present when their data is known: the time zone is named when it can be
+read (otherwise `nom du fuseau inconnu`), the Bash line says whether the shell keeps its
+state or runs in a sandbox, and the shell's directory is shown only when it differs from
+the file tools'. The executables are looked up once per agent, on `PATH`, among a short
+list (`git`, `rg`, `node`, `npm`, `python3`, `cargo`, `go`, `java`, `docker`, `make`).
+
+#### Model
+
+**Included when:** the request's model is known. It names the selection, the name sent
+to the API and the reasoning profile, when the provider exposes them (see
+`docs/providers.md`, `request_identity`).
+
+```xml
+<model>
+Sélection Bricks : provider/model
+Nom envoyé à l’API : model-api-name
+Profil de raisonnement : high
+</model>
+```
+
+#### Plan
+
+**Included when:** TodoWrite is announced and the session has a plan (a revision above 0).
+It is the plan's complete state, with each step marked `[x]` (completed), `[>]` (in
+progress) or `[ ]` (pending), and its last explanation:
+
+```xml
+<plan revision="3" completed="1" total="3">
+1. [x] Read the parser
+2. [>] Fix the offset bug
+3. [ ] Update the tests
+Last update: the offset bug is in the lexer
+</plan>
+```
+
+An empty plan is shown as `(plan vide)`.
+
 #### Git Status Snapshot
 
-**Included when:** `git_status` is provided (the working directory is a git repo).
+**Included when:** `git_status` is provided (the working directory is a git repo). The
+state is read at the start of each user request, and again after an executed tool whose
+level is write, execute or dangerous. At most 20 status lines and 5 commits are kept, and
+the `taken_at` attribute says when it was read.
 
 ```xml
 <git_status>
@@ -172,6 +252,23 @@ Search before creating new documents.
 ---
 
 ## Controlling the Prompt from Code
+
+### Per-request assembly
+
+```rust
+Agent::builder()
+    .system_prompt_options(opts)   // wins over system_prompt
+```
+
+With `system_prompt_options`, the prompt is built for each request: `tools_available`
+is set to the tools that request announces, and the request's environment, git state,
+model and plan are added after the boundary. This is what the Bricks CLI and the desktop
+application use. The options are kept as given; a prompt built once with
+`build_system_prompt` has no request context.
+
+With a raw `system_prompt(String)`, the string is sent as it is. The plan block is
+appended after it when TodoWrite is announced and the session has a plan; no environment,
+git or model block is added.
 
 ### Replace entirely
 
@@ -212,13 +309,22 @@ let opts = SystemPromptOptions {
 
 ### What the Bricks CLI does
 
-The CLI builds the prompt for each project with `is_non_interactive` set by
-the mode, the working directory, `has_memory` when a long-term memory is
-configured, `has_auto_compact`, and `tools_available` = the engine's tools
-plus the native sub-agent tools when `[agents] enabled`. The agent then adds
-the skills catalog and recalled memory after the built prompt.
+The CLI gives each project's session the prompt options (`is_non_interactive` set by
+the mode, the working directory, `has_memory` when a long-term memory is configured,
+`has_auto_compact`). The tools each request announces decide the conditional guidance:
+the engine's tools, the native sub-agent tools when `[agents] enabled`, and `TodoWrite`.
+The environment, git state, model and plan are added for each request. The agent then
+adds the skills catalog and recalled memory after the built prompt.
 
 ### Replace mode
 
 `replace_system_prompt: true` with a `custom_system_prompt` returns that text
-alone, followed by the dynamic boundary: no foundation, no other section.
+alone, followed by the dynamic boundary: no foundation, no other section, and
+none of the request blocks (environment, model, plan) or the git state.
+
+### Escaped data
+
+Data inserted in the blocks described on this page (the working directory, the git
+state, the environment, the model, the plan and the skill catalog) is XML-escaped,
+so a value cannot open or close a block. Skill activations escape their own data too. The reserved boundary marker inside data is
+neutralised. Bricks' own instructions are not escaped.

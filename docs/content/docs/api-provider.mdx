@@ -10,12 +10,14 @@ Abstraction over LLM backends. A provider is one model declared in `~/.bricks/pr
 ## Provider Trait
 
 ```rust
-use bricks::provider::{CompletionResponse, CompletionStream, ModelInfo};
+use bricks::provider::{CompletionResponse, CompletionStream, ImageTransport, ModelInfo, ProviderOptions, RequestIdentity};
 #[async_trait]
 pub trait Provider: Send + Sync {
     fn name(&self) -> &str;
     fn context_window(&self, model: &str) -> u64;
     fn model_info(&self) -> Option<ModelInfo> { None }
+    fn request_identity(&self, options: &ProviderOptions) -> Option<RequestIdentity> { None }
+    fn image_transport(&self) -> ImageTransport { ImageTransport::None }
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionStream>;
     async fn complete_blocking(&self, request: CompletionRequest) -> Result<CompletionResponse>; // default: complete + collect
     async fn count_request_tokens(&self, request: &CompletionRequest) -> Result<Option<u64>>;   // default: Ok(None)
@@ -23,6 +25,10 @@ pub trait Provider: Send + Sync {
 ```
 
 `count_request_tokens` returns `Ok(None)` when no token-counting endpoint is configured for the model; callers then fall back to a local estimate.
+
+`request_identity` names what a request with these `ProviderOptions` is sent as: `api_model`, the model name in the request body, and the reasoning profile applied (`None` when there is none). A configured provider resolves it the way its request body is built; a custom provider returns `None` unless it overrides the method, and the prompt's model block then carries only the Bricks selection and profile. The server may still run another model behind an alias.
+
+`image_transport` says how an image a tool returns (`ToolResult::with_images`) can reach the model: `ImageTransport::ToolResult` (inside the tool result), `UserTurn` (after the results, in the same user turn) or `None` (not shown, the result says so). A configured provider derives it from the model's `input_modalities` and the protocol; the default is `None`. See [Multimodal Input](/docs/multimodal#images-returned-by-tools).
 
 ## Configured Providers
 
@@ -77,7 +83,6 @@ pub struct ModelInfo {
 pub struct ModelLimits {
     pub max_input_tokens: u64,
     pub max_output_tokens: u64,
-    pub context_window_tokens: Option<u64>, // a window shared by input and output, when configured
 }
 ```
 

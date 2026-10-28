@@ -9,9 +9,6 @@
 
 [Quick start](#quick-start) · [What it does](#what-it-does) · [Configuration](#configuration) · [The engine as a library](#the-engine-as-a-library) · [Documentation](#documentation) · [License](#license)
 
-
-**<ins>The README is outdated and will be updated very soon.</ins>**
-
 </div>
 
 Bricks is a tool for coding with AI agents. It has three parts:
@@ -132,11 +129,15 @@ Open a project, then pick a conversation in the sidebar or use `/resume`.
 * **MCP.** A client on the official SDK (`rmcp`), over stdio and Streamable
   HTTP. See [docs/mcp.md](docs/mcp.md).
 * **Skills.** Standard [Agent Skills](https://agentskills.io/specification)
-  (`SKILL.md`) from `.agents/skills` and `.claude/skills` (project and home)
-  plus built-in ones.
+  (`SKILL.md`). Bricks reads the skills you install in its store
+  (`~/.bricks/skills`) and one built-in skill, `create-skills`. It does not
+  read `.claude/skills` or `.agents/skills`, in a project or at home.
+  * Install a skill from a folder in Settings › Skills (Import), or let the
+    model check and install one with the `Skill` tool.
   * The model sees a catalog and activates a skill with the `Skill` tool;
     you can choose one with `/skill` or `--skill`.
-  * A project's skills need your approval for the session.
+  * A skill removed or changed is withdrawn from the conversations that used
+    it, at their next request.
   * Activating a skill gives instructions only: it runs nothing and grants
     no permission. See [docs/skills.md](docs/skills.md).
 * **Long-term memory.** Sourced episodes, entities scoped by
@@ -146,11 +147,15 @@ Open a project, then pick a conversation in the sidebar or use `/resume`.
   * Maintenance (extraction, embeddings) runs after the answer: it is
     resumable and cancellable. Memory is off until `[memory] enabled = true`.
     See [docs/memory.md](docs/memory.md).
-* **Approvals.** `[permissions]` in `bricks.toml` sets the policy; the
-  engine applies it to every frontend.
+* **Permissions.** One engine decides every tool call, for every frontend. Each
+  session has a policy: ASK (reads run, writes, commands, web and sub-agents
+  are asked), EXECUTE (everything runs) or CUSTOM (rules per class and per
+  tool). A person chooses it, and it is stored with the session, not in
+  `bricks.toml`. An answer covers one call.
   * File changes are shown as a diff before anything is written.
   * A change approved for a file that changed meanwhile is recomputed and
     asked again.
+  * See [the permissions of docs/cli.md](docs/cli.md#permissions).
 * **The `bricks` command.** A thin layer over the engine's command/event
   contract, for scripts and CI. JSONL events are versioned, with documented
   exit codes. Sessions can be listed and continued (`bricks sessions`,
@@ -181,7 +186,6 @@ id = "coder"
 name = "My coding model"
 api_model = "qwen2.5-coder:32b"
 streaming = true
-tool_calls = true
 
 [providers.models.limits]
 max_input_tokens = 32000
@@ -192,11 +196,11 @@ max_output_tokens = 4096
 # ./bricks.toml — see docs/bricks.example.toml for every section
 [agent]
 model = "local/coder"            # provider_id/model_id
-
-[permissions]
-write = "ask"                    # file changes: shown as a diff, then asked
-execute = "ask"                  # shell commands
 ```
+
+Permissions are not set in `bricks.toml`: choose the profile in Bricks, or run
+`bricks run --permissions ask "…"` (or `execute`). A `[permissions]` section in
+an older file is reported and not applied: delete it.
 
 Bricks keeps its files in `~/.bricks`: the providers file, the sessions
 (`~/.bricks/sessions`) and the memory. Set `BRICKS_HOME` to move that folder,
@@ -229,7 +233,7 @@ async fn main() -> anyhow::Result<()> {
     let output = Agent::builder()
         .provider(provider_from_config(None, "local/coder")?) // ~/.bricks/providers.toml
         .tools(bricks::tools::coding())                        // files, shell, web
-        .permission_policy(AllowReadOnly)
+        .permission_policy(DenyAll)                            // reads run; writes, commands and web are refused
         .run_with("Explain what src/main.rs does")
         .await?;
     println!("{}", output.text());

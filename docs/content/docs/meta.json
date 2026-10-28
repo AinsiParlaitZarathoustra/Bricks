@@ -72,10 +72,6 @@
     "bench-vs-claude-code",
     "bench-vs-agents",
     "bench-memory",
-    "---Archive---",
-    "abstract",
-    "abstract-commands",
-    "bench-abstract",
     "changelog"
   ]
 }

@@ -225,7 +225,6 @@ impl ConfiguredProvider {
         validate_messages(
             &request.messages,
             &request.output_modalities,
-            !request.tools.is_empty(),
             &m.declared,
             m.protocol,
         )
@@ -395,7 +394,10 @@ impl Provider for ConfiguredProvider {
         let m = &self.model;
         if !m.effective_capabilities().input.contains(&Modality::Image) {
             crate::ImageTransport::None
-        } else if protocol_support(m.protocol).tool_result_media.contains(&Modality::Image) {
+        } else if protocol_support(m.protocol)
+            .tool_result_media
+            .contains(&Modality::Image)
+        {
             crate::ImageTransport::ToolResult
         } else {
             crate::ImageTransport::UserTurn

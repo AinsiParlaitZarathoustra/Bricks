@@ -3,12 +3,11 @@
 //! End-to-end validation of Phase 1 infrastructure:
 //! 1. System prompt builder — build, verify sections, caching boundary
 //! 2. Bash classifier — classify 30 commands, verify risk levels
-//! 3. Context analyzer — analyze multi-message conversations
 //! 4. Auto-compact — trigger compaction on large conversations
 //! 5. Tool result budget — truncate oversized tool results
 //!
 //! ```bash
-//! cargo run --example phase1_stress_test --release
+//! cargo run -p bricks --example stress_core_infrastructure --release
 //! ```
 
 use bricks::prelude::*;
@@ -193,87 +192,6 @@ fn main() {
         check!(
             "No critical level from the substring 'fork'",
             !is_forbidden("git fork --help") && !is_forbidden("grep forkJoin src/")
-        );
-
-        println!();
-    }
-
-    // ── 3. Context Analyzer ──────────────────────────────────────────────
-    println!("  3. Context Analyzer");
-    println!("  ───────────────────");
-    {
-        use bricks_agent::context_analyzer::*;
-
-        // Build a realistic conversation
-        let mut messages = Vec::new();
-        for i in 0..20 {
-            messages.push(Message::user(format!("Read file src/mod_{}.rs", i)));
-            messages.push(Message::assistant_blocks(vec![
-                ContentBlock::Text {
-                    text: format!("Here's mod_{}:", i),
-                },
-                ContentBlock::ToolUse {
-                    id: format!("t{}", i),
-                    name: "Read".into(),
-                    input: serde_json::json!({"file_path": format!("src/mod_{}.rs", i)}),
-                },
-            ]));
-            messages.push(Message::user_blocks(vec![ContentBlock::ToolResult {
-                tool_use_id: format!("t{}", i),
-                content: bricks_types::ToolResultContent::Text(
-                    format!("// module {}\nfn func_{}() {{}}\n", i, i).repeat(50),
-                ),
-                is_error: Some(false),
-            }]));
-        }
-
-        let sys_prompt = "You are a helpful coding assistant with many capabilities.";
-        let tool_defs = r#"[{"name":"Read","description":"Read files"},{"name":"Write","description":"Write files"},{"name":"Edit","description":"Edit files"},{"name":"Bash","description":"Run commands"}]"#;
-
-        let analysis = analyze_context(Some(sys_prompt), Some(tool_defs), &messages);
-
-        check!(
-            "System prompt tokens > 0",
-            analysis.system_prompt_tokens > 0
-        );
-        check!("Tool defs tokens > 0", analysis.tool_definitions_tokens > 0);
-        check!(
-            "Conversation tokens > 0",
-            analysis.conversation_history_tokens > 0
-        );
-        check!("Tool results tokens > 0", analysis.tool_results_tokens > 0);
-        check!(
-            "Total tokens > all parts",
-            analysis.total_tokens
-                >= analysis.conversation_history_tokens + analysis.tool_results_tokens
-        );
-        check!(
-            "Compressibility in 0..1",
-            analysis.compressibility >= 0.0 && analysis.compressibility <= 1.0
-        );
-
-        // Check strategy recommendation
-        let strategy = suggest_compaction(&analysis, 200_000);
-        println!("    Total tokens: {}", analysis.total_tokens);
-        println!(
-            "    Usage: {:.1}%",
-            (analysis.total_tokens as f64 / 200_000.0) * 100.0
-        );
-        println!(
-            "    Compressibility: {:.0}%",
-            analysis.compressibility * 100.0
-        );
-        println!("    Strategy: {:?}", strategy);
-
-        // Verify visualization
-        let viz = format_ctx_viz(&analysis, 200_000);
-        check!(
-            "Viz contains progress bar",
-            viz.contains('[') && viz.contains(']')
-        );
-        check!(
-            "Viz contains categories",
-            viz.contains("System Prompt") || viz.contains("Conversation")
         );
 
         println!();

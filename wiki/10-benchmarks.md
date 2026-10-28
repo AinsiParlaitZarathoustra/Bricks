@@ -21,7 +21,6 @@ cargo run --release --manifest-path examples/benchmark/Cargo.toml
 # Stress tests (correctness + performance)
 cargo run --release -p bricks --example stress_core_infrastructure
 cargo run --release -p bricks --example stress_tools
-cargo run --release -p bricks --example stress_orchestration
 cargo run --release -p bricks --example stress_skills
 cargo run --release -p bricks --example stress_memory
 
@@ -202,7 +201,11 @@ Verified in `crates/bricks-agent/src/compact.rs`:
 
 ## Stress Test Results
 
+> Historical results below include APIs removed in Sprint 15. They are not the current test inventory.
+
 The check counts in the 2026-10-08 report are the current ones: Infrastructure 46, Tools 47, Orchestration 33, Skills 47, Memory 83, total 256, with no failure. The Skills (51) and Memory (85) figures below predate that report and do not match it. The per-subsystem rows in this section are **[unverified]**: no file in the repository records them.
+
+This section is **historical**: it has not been re-measured since `EnterWorktree`, `ExitWorktree`, `SyntheticOutput` and `ToolSearch` were removed. Their rows and checks are not subtracted from the totals above, and the "Registry" row's 24 tools is the count at measurement time.
 
 ### Core Infrastructure (46 checks)
 
@@ -223,9 +226,8 @@ The check counts in the 2026-10-08 report are the current ones: Infrastructure 4
 | Planning | PlanMode, TodoWrite | 4 | All pass |
 | Scheduling | Cron (3), Sleep, RemoteTrigger | 6 | All pass |
 | Orchestration | SendMessage | 3 | All pass |
-| Config/Utility | Config, SyntheticOutput, AskUser | 3 | All pass |
+| Config/Utility | Config, AskUser | 3 | All pass |
 | Web | WebFetch, WebSearch | 4 | Schema only |
-| ToolSearch | 4 queries | 4 | All pass |
 | Performance | Read, Edit, Glob (<500μs) | 3 | All pass |
 | Registry | 24 tools, unique names, valid schemas | 10 | All pass |
 

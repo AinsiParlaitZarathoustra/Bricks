@@ -1,5 +1,5 @@
-# bricks.toml — agent, approvals, context, compression, web and memory
-# settings (annotated example).
+# bricks.toml — agent, context, compression, web and memory settings
+# (annotated example).
 #
 # Put it at the root of the project (`BricksConfig::load(working_dir)` reads
 # `<working_dir>/bricks.toml` and `~/.bricks/rules/*.toml`). Every key is
@@ -19,20 +19,13 @@
 # retry_after_max_wait_ms = 60000  # longest Retry-After a provider may ask for (0: never wait for it).
 #                                  # Above it, no retry is sent and the error says why.
 
-[permissions]
-# The approval policy of every frontend (interface and headless):
-# allow | ask | deny. By tool name first, then by permission level, then
-# `default`. Forbidden tools are always refused.
-default = "ask"
-none = "allow"
-read_only = "allow"
-write = "ask"                    # Write, Edit, ApplyPatch, NotebookEdit: shown as a diff first
-execute = "ask"                  # shell commands
-dangerous = "ask"
-
-[permissions.tools]
-# WebFetch = "allow"
-# Bash = "deny"
+# Permissions are not set in this file. They are chosen in Bricks, per
+# session: Settings › General › "Permissions des nouvelles conversations" for
+# the default of new conversations, the first-choice bar above the composer, or
+# the /config view of a conversation. On the command line, `--permissions
+# ask|execute` sets the profile of the run's session; without it, the session
+# keeps its own choice (none chosen: ask). A `[permissions]` section left in
+# this file is reported and not applied: delete it. See docs/cli.md#permissions.
 
 [context]
 safety_margin_tokens = 1024     # minimum free margin below the prompt budget
@@ -144,7 +137,6 @@ max_session_bytes = 67108864    # documents kept per session (oldest removed bey
 # enabled = true
 # auto_model = "provider_id/model_id"   # what `model: auto` means; absent: inherit
 # max_context_chars = 16000
-# catalog_size = 30
 # summary_chars = 30000       # characters of a child's answer returned to its parent
 # max_concurrent = 16          # descendants working at once in the session (launches, batches, resumes)
 # max_depth = 1                # generations below the session's agent (1: children, no grandchildren)

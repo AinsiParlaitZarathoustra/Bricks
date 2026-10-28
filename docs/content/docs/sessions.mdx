@@ -1,6 +1,6 @@
 ---
 title: Sessions
-description: Session persistence, auto-compact, memory extraction, auto-dream consolidation, and the full session lifecycle.
+description: Session persistence, auto-compact, and the session lifecycle.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -179,13 +179,16 @@ The desktop application also keeps one record per run in
 its shell commands and its file changes, which the message history does not
 hold. A record is written again when a run changes after it ended (a
 background job or a sub-agent finishing later). Deleting a session removes
-its file. Each record also holds the usage of the response (tokens and cost);
+its file. When a sent message is revised, the records of the runs it replaces
+are moved to `<session_id>.revised.jsonl`, beside it; deleting the session
+does not remove that file. Each record also holds the usage of the response (tokens and cost);
 see [Data Flow](/docs/data-flow#run-records-bricks-desktop).
 
 The desktop also keeps the copies of the files attached to the messages in
 `<bricks_home>/sessions/<session_id>.files/`, beside the session's `.jsonl`
 file: the copies in `attachments/` and `attachments.jsonl`, which lists the
-runs sent with copies. Deleting the session deletes this folder with them.
+runs sent with copies. The conversation's plan (TodoWrite) is kept there too,
+as `plan.json`. Deleting the session deletes this folder with them.
 See [Multimodal Input](/docs/multimodal#attachments-in-bricks-desktop).
 
 ### Soft Delete (Tombstones)
@@ -292,98 +295,6 @@ If compaction fails 3 times in a row (e.g., the summary call itself fails), auto
 | GPT-4o, GPT-4 Turbo | 128K tokens |
 | Gemini 2.0 Flash | 1M tokens |
 | Default | 200K tokens |
-
----
-
-## Memory Extraction
-
-After enough conversation, the agent extracts durable facts and persists them to memory files. These facts survive across sessions — they become part of the system prompt context for future conversations.
-
-### Gates
-
-All three conditions must be true for extraction to trigger:
-
-<TypeTable
-  type={{
-    'Message count': {
-      type: 'usize',
-      description: 'At least 20 messages in the conversation.',
-      default: '20',
-    },
-    'Tool calls since last': {
-      type: 'usize',
-      description: 'At least 3 tool calls since the last extraction (skipped on first extraction).',
-      default: '3',
-    },
-    'No pending tools': {
-      type: 'bool',
-      description: 'The last assistant message must not have unresolved tool_use blocks.',
-    },
-  }}
-/>
-
-### Categories
-
-| Category | Label | What it captures |
-|----------|-------|------------------|
-| `UserPreference` | `preference` | User's role, coding style, tool preferences |
-| `ProjectFact` | `project` | Architecture decisions, deadlines, dependencies |
-| `CodePattern` | `pattern` | Recurring code patterns, conventions |
-| `Decision` | `decision` | Why a particular approach was chosen |
-| `Constraint` | `constraint` | Hard requirements ("must support Python 3.8+") |
-
-Each extracted fact has a confidence score (0.0–1.0). Facts are appended to a `## Auto-extracted memories` section in the target memory file.
-
----
-
-## Auto-Dream (Background Consolidation)
-
-Auto-dream is a background process that periodically reviews session transcripts and consolidates insights into long-term memory files. It runs after the agent finishes its work — not during active conversation.
-
-### Three-Gate System
-
-| Gate | Condition | Default | Purpose |
-|------|-----------|---------|---------|
-| Time | Hours since last consolidation | 24h | Prevent running too frequently |
-| Sessions | New sessions since last run | 5 | Ensure enough new material |
-| Lock | No active consolidation process | Stale after 1h | Prevent concurrent runs |
-
-All three gates must pass. They're evaluated in order (cheapest first): time check is a timestamp comparison, session count scans the directory, lock check reads a file.
-
-### Consolidation Phases
-
-The consolidation agent follows four phases:
-
-1. **Orient** — read MEMORY.md, list existing memory files, understand what's already stored
-2. **Gather** — scan recent session transcripts for new insights, search for patterns
-3. **Consolidate** — write or update memory files with new facts, convert relative dates to absolute
-4. **Prune** — update the MEMORY.md index, remove stale pointers, keep under 200 lines
-
-### State Persistence
-
-Consolidation state is stored in `.consolidation_state.json`:
-
-```json
-{
-  "last_consolidated_at": 1712150400,
-  "lock_etag": null
-}
-```
-
-The lock file (`.consolidation_lock`) contains a Unix timestamp. It's considered stale after 1 hour — if a consolidation process crashes, the next one can proceed after the stale period.
-
-```rust
-use bricks_agent::auto_dream::AutoDream;
-
-let dreamer = AutoDream::new(memory_dir, conversations_dir);
-
-if dreamer.should_consolidate() {
-    dreamer.acquire_lock()?;
-    // Run consolidation agent...
-    dreamer.update_state()?;
-    dreamer.release_lock()?;
-}
-```
 
 ---
 

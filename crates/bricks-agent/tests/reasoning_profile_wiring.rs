@@ -76,7 +76,6 @@ id = "m"
 name = "M"
 api_model = "am"
 streaming = true
-tool_calls = true
 [providers.models.limits]
 max_input_tokens = 100000
 max_output_tokens = 4000

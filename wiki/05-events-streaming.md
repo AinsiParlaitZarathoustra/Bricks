@@ -113,7 +113,7 @@ impl AgentStream {
 }
 ```
 
-With `InteractivePolicy::via_stream()`, each tool call emits `PermissionRequired` and waits for `respond_permission(request.id, decision)`. Request ids are unique, including renewed approvals after a preview changes; unknown or already answered ids are ignored. As with other engine policies, the three allow variants authorize this call only; use the session engine's [approval policy](08-permissions.md) for remembered session approvals. Without `run_stream`, this policy denies calls.
+With `InteractivePolicy::via_stream()`, each tool call emits `PermissionRequired` and waits for `respond_permission(request.id, decision)`. Request ids are unique, including renewed approvals after a preview changes; unknown or already answered ids are ignored. An allow authorizes this call only; to change what later calls may do, change the session's [permission policy](08-permissions.md). Without `run_stream`, this policy denies calls.
 
 `inject_message()` queues nonblank user messages, in order, for the next model request. They enter both histories after pending tool results. A message queued during the final answer causes another model turn. Messages submitted after completion are ignored. Cancellation stops permission waits as well as running work; queued input is retained in the histories even if the run is interrupted. Dropping an active stream cancels its run.
 
@@ -212,7 +212,7 @@ The enum is defined in [`crates/bricks-agent/src/events.rs`](../crates/bricks-ag
 
 - **Streaming:** `TextDelta`, `ThinkingDelta`
 - **Tools:** `ToolStart`, `ToolProgress`, `ToolPermissionCheck`, `ToolEnd` (with `duration` and compression stats)
-- **Permissions and approvals:** `PermissionRequired` (declared, not emitted by the engine), `ApprovalRequested`, `ApprovalResolved` (with `decision` and `by`)
+- **Permissions and approvals:** `PermissionRequired` (with the stream approver: a call the policy asks about), `ApprovalRequested`, `ApprovalResolved` (with `decision`, `allow` or `deny`, and `by`), `PermissionPolicyChanged` (the session's policy and its revision)
 - **Turns and model requests:** `TurnStart`, `TurnComplete`, `ModelRequestStart`, `ModelResponseStart`
 - **Context:** `TokenWarning`, `CompactStart`, `CompactEnd`, `CompactionResult`, `ContextUpdate`
 - **Sessions:** `SessionLoaded`, `SessionSaved`

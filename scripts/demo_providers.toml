@@ -14,7 +14,6 @@ id = "scripted"
 name = "Scripted demo model"
 api_model = "demo"
 streaming = true
-tool_calls = true
 
 [providers.models.limits]
 max_input_tokens = 100000

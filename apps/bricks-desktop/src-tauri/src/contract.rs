@@ -872,7 +872,6 @@ pub struct ModelView {
     pub input_modalities: Vec<String>,
     pub output_modalities: Vec<String>,
     pub streaming: bool,
-    pub tool_calls: bool,
     /// Tools start while the answer still streams.
     pub async_tool_calls: bool,
     #[ts(type = "number")]

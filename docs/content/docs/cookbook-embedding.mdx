@@ -25,7 +25,7 @@ async fn ask_agent(prompt: String) -> std::result::Result<String, String> {
     let output = Agent::builder()
         .provider(provider)
         .tools(filesystem())
-        .permission_policy(AllowReadOnly)
+        .permission_policy(DenyAll)
         .run_with(&prompt)
         .await
         .map_err(|e| e.to_string())?;
@@ -59,7 +59,7 @@ async fn agent_endpoint(
     let output = Agent::builder()
         .provider(provider)
         .tools(bricks::tools::coding())
-        .permission_policy(AllowReadOnly)
+        .permission_policy(DenyAll)
         .run_with(prompt)
         .await;
 
@@ -152,5 +152,5 @@ This is a sketch: the `?` conversions from `sqlx` and `serde_json` errors into t
 | Custom hooks | `impl Hook` |
 | Custom reporters | `impl Reporter` |
 | MCP servers | `bricks::mcp::McpServerConfig`, in the agent's configuration |
-| Skills | `SKILL.md` folders read by the skill loader, and `AgentBuilder::skills` |
+| Skills | `SKILL.md` folders: the skill store and the built-in `create-skills`, plus any folder you pass explicitly; `AgentBuilder::skills` |
 | Graph memory | the `graph` feature of `bricks-memory` (not forwarded by the `bricks` facade) |

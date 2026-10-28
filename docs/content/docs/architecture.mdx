@@ -42,9 +42,9 @@ calls the loaders it needs, such as `provider_from_config`.
    typed commands and emits versioned events. The `bricks` command and Bricks
    Desktop use the same contract, so both present the same events and accept the same commands.
    The JSONL schema is documented in `docs/cli.md` in the repository.
-4. **Approvals belong to the engine.** The approval policy in `[permissions]` is
-   applied by the engine for every frontend. A frontend only shows the request
-   and asks the person.
+4. **Permissions belong to the engine.** Each session's policy (ASK, EXECUTE or
+   CUSTOM) is applied by the engine for every frontend. A frontend only shows
+   the calls the engine asks about and answers for one call.
 5. **Few subprocesses.** File, search and web tools run in the process. A
    subprocess starts for a command the agent runs (`Bash`, `PowerShell`, a
    background job), and for a language server when one is configured.
@@ -52,9 +52,9 @@ calls the loaders it needs, such as `provider_from_config`.
 ## What the ADK provides, and what a session is given
 
 The ADK has a built-in tool set, `bricks_tools::all()`, with file, shell,
-web, planning, scheduling and orchestration tools. The `bricks` command and
-Bricks Desktop give a session a smaller set: the coding tools, the skill tool
-when skills are enabled, and the sub-agent tools when `[agents]` is enabled.
+web and planning tools. The `bricks` command and Bricks Desktop give a session
+its own set: the coding tools, the plan, the skill tool when skills are
+enabled, and the sub-agent tools when `[agents]` is enabled.
 The list is in the *Tools of a session* section of `docs/cli.md` in the
 repository. An agent you build with the library chooses its own tools.
 
@@ -71,8 +71,6 @@ and `AgentProfiles`.
   ChangeSet that is inspected and applied separately.
 * A sub-agent is cancelled with the run that started it.
 
-Integrators who spawn sub-agents themselves can use `bricks_agent::agent_tool::AgentTool`,
-which is public.
 
 ## Where to go next
 

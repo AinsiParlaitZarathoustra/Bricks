@@ -1,4 +1,4 @@
-//! The stop contract and the sub-agent invariants (sprint 8), with a spy
+//! The stop contract, with a spy
 //! provider: it counts the providers built and the requests sent, and
 //! answers from a script. No network.
 //!
@@ -9,18 +9,11 @@
 //!   stops (cut answers, no progress) end the run explicitly, with a
 //!   coherent history.
 //! * Repeating calls is told apart from progress by arguments and results.
-//! * A child never has more permissions or tools than its parent, never a
-//!   delegation tool, and is cancelled with its parent.
 
 use async_trait::async_trait;
-use bricks_agent::agent_tool::{AgentTool, ToolsetFactory};
-use bricks_agent::subagent::{DelegationDepth, RunCancellation};
 use bricks_agent::{Agent, Termination, UserInput};
 use bricks_provider::{CompletionRequest, CompletionStream, Provider};
-use bricks_tools::permissions::{AllowAll, DenyAll, PermissionPolicy};
-use bricks_tools::{
-    CostTracker, Extensions, PermissionLevel, Tool, ToolCategory, ToolContext, ToolResult,
-};
+use bricks_tools::{PermissionLevel, Tool, ToolCategory, ToolContext, ToolResult};
 use bricks_types::*;
 use serde_json::{Value, json};
 use std::collections::VecDeque;
@@ -36,7 +29,6 @@ struct Step {
     text: Option<String>,
     calls: Vec<(String, String, Value)>,
     stop: Option<StopReason>,
-    hang: bool,
 }
 
 fn say(text: &str) -> Step {
@@ -53,20 +45,11 @@ fn call(id: &str, name: &str, input: Value) -> Step {
     }
 }
 
-fn hang() -> Step {
-    Step {
-        hang: true,
-        ..Default::default()
-    }
-}
-
 #[derive(Default)]
 struct Spy {
     steps: parking_lot::Mutex<VecDeque<Step>>,
     built: AtomicUsize,
     requests: parking_lot::Mutex<Vec<CompletionRequest>>,
-    /// Streams the consumer dropped while they hung (cancelled requests).
-    dropped: AtomicUsize,
     /// Answer when the script is exhausted (else a loud error).
     fallback: parking_lot::Mutex<Option<Step>>,
 }
@@ -81,10 +64,6 @@ impl Spy {
     fn provider(self: &Arc<Self>) -> SpyProvider {
         self.built.fetch_add(1, Ordering::SeqCst);
         SpyProvider(self.clone())
-    }
-    fn factory(self: &Arc<Self>) -> impl Fn() -> Box<dyn Provider> + Send + Sync + 'static + use<> {
-        let spy = self.clone();
-        move || Box::new(spy.provider()) as Box<dyn Provider>
     }
     fn built(&self) -> usize {
         self.built.load(Ordering::SeqCst)
@@ -117,7 +96,6 @@ impl Provider for SpyProvider {
                 "spy: unexpected request (script exhausted)".into(),
             ));
         };
-        let spy = self.0.clone();
         let (tx, rx) = mpsc::channel(32);
         tokio::spawn(async move {
             let _ = tx
@@ -127,11 +105,6 @@ impl Provider for SpyProvider {
                     usage: None,
                 })
                 .await;
-            if step.hang {
-                tx.closed().await;
-                spy.dropped.fetch_add(1, Ordering::SeqCst);
-                return;
-            }
             let mut index = 0;
             if let Some(t) = step.text {
                 let _ = tx
@@ -217,28 +190,6 @@ impl Tool for Probe {
     }
 }
 
-/// A tool named like a delegation tool: must never reach a child.
-struct Named(&'static str);
-
-#[async_trait]
-impl Tool for Named {
-    fn name(&self) -> &str {
-        self.0
-    }
-    fn description(&self) -> &str {
-        "named"
-    }
-    fn permission_level(&self) -> PermissionLevel {
-        PermissionLevel::None
-    }
-    fn input_schema(&self) -> Value {
-        json!({"type": "object", "properties": {}})
-    }
-    async fn execute(&self, _: Value, _: &ToolContext) -> ToolResult {
-        ToolResult::success("ran")
-    }
-}
-
 fn agent(spy: &Arc<Spy>) -> Agent {
     Agent::builder()
         .provider(spy.provider())
@@ -246,21 +197,6 @@ fn agent(spy: &Arc<Spy>) -> Agent {
         .working_dir(std::env::temp_dir())
         .build()
         .unwrap()
-}
-
-fn ctx(permissions: Arc<dyn PermissionPolicy>, dir: &std::path::Path) -> ToolContext {
-    ToolContext {
-        working_dir: dir.to_path_buf(),
-        session_id: "parent".into(),
-        permissions,
-        cost_tracker: Arc::new(CostTracker::new()),
-        mcp_manager: None,
-        extensions: Extensions::default(),
-    }
-}
-
-fn no_tools() -> ToolsetFactory {
-    Arc::new(Vec::new)
 }
 
 /// No assistant tool call left without its result.
@@ -286,28 +222,6 @@ const BLANKS: &[&str] = &["", "   ", "\n\t", "\u{3000}\u{00A0}", "\u{200B}\u{FEF
 #[tokio::test]
 async fn empty_tasks_build_no_provider_and_send_nothing() {
     let spy = Spy::new(vec![]);
-    let dir = tempfile::tempdir().unwrap();
-    let c = ctx(Arc::new(AllowAll), dir.path());
-    let agent_tool = AgentTool::new(spy.factory(), vec![Box::new(Probe) as Box<dyn Tool>]);
-    for blank in BLANKS {
-        let r = agent_tool
-            .execute(json!({"description": "x", "prompt": blank}), &c)
-            .await;
-        assert!(
-            r.is_error && r.content.contains("empty"),
-            "{blank:?}: {}",
-            r.content
-        );
-    }
-    // A model change would be silently ignored: refused instead.
-    let r = agent_tool
-        .execute(
-            json!({"description": "x", "prompt": "ok", "model": "other/m"}),
-            &c,
-        )
-        .await;
-    assert!(r.is_error && r.content.contains("model"), "{}", r.content);
-
     // An empty run of an agent.
     let a = Agent::builder()
         .provider(SpyProvider(spy.clone()))
@@ -510,221 +424,6 @@ async fn an_alternating_cycle_with_the_same_results_is_a_loop() {
 
 // ─── 8. Sub-agents: permissions, tools, recursion ────────────────────────────
 
-#[tokio::test]
-async fn a_child_has_its_parents_permissions_not_more() {
-    let dir = tempfile::tempdir().unwrap();
-    let target = dir.path().join("child.txt");
-    let spy = Spy::new(vec![
-        call(
-            "w1",
-            "Write",
-            json!({"file_path": target.display().to_string(), "content": "x"}),
-        ),
-        say("Écriture refusée."),
-    ]);
-    let tool = AgentTool::new(spy.factory(), bricks_tools::filesystem());
-    let c = ctx(Arc::new(DenyAll), dir.path());
-    let r = tool
-        .execute(json!({"description": "w", "prompt": "écris child.txt"}), &c)
-        .await;
-    assert!(!r.is_error, "{}", r.content);
-    assert!(
-        !target.exists(),
-        "the parent's DenyAll applies to the child"
-    );
-    let result = spy.requests.lock()[1]
-        .messages
-        .iter()
-        .flat_map(|m| m.content_blocks())
-        .find_map(|b| match b {
-            ContentBlock::ToolResult { content, .. } => Some(format!("{content:?}")),
-            _ => None,
-        })
-        .unwrap();
-    assert!(result.contains("Permission denied"), "{result}");
-}
-
-#[tokio::test]
-async fn a_child_never_gets_more_tools_nor_a_delegation_tool() {
-    let dir = tempfile::tempdir().unwrap();
-    let c = ctx(Arc::new(AllowAll), dir.path());
-
-    // No tools given: none, not the standard set.
-    let spy = Spy::new(vec![say("ok")]);
-    let tool = AgentTool::new(spy.factory(), vec![]);
-    let r = tool
-        .execute(json!({"description": "x", "prompt": "fais"}), &c)
-        .await;
-    assert!(!r.is_error, "{}", r.content);
-    assert!(spy.requests.lock()[0].tools.is_empty());
-
-    // A factory that returns delegation tools: they are removed.
-    let spy = Spy::new(vec![say("ok")]);
-    let tf: ToolsetFactory = Arc::new(|| {
-        vec![
-            Box::new(Named("Agent")) as Box<dyn Tool>,
-            Box::new(Named("Agents")),
-            Box::new(Probe),
-        ]
-    });
-    let tool = AgentTool::with_toolset(spy.factory(), tf);
-    tool.execute(json!({"description": "x", "prompt": "fais"}), &c)
-        .await;
-    for req in spy.requests.lock().iter() {
-        let names: Vec<&str> = req.tools.iter().map(|t| t.name.as_str()).collect();
-        assert_eq!(names, vec!["Probe"]);
-    }
-
-    // A tool the registry cannot rebuild is refused, not silently dropped.
-    let spy = Spy::new(vec![]);
-    let tool = AgentTool::new(spy.factory(), vec![Box::new(Probe) as Box<dyn Tool>]);
-    let r = tool
-        .execute(json!({"description": "x", "prompt": "fais"}), &c)
-        .await;
-    assert!(r.is_error && r.content.contains("Probe"), "{}", r.content);
-    assert_eq!(spy.built(), 0);
-}
-
-#[tokio::test]
-async fn a_child_cannot_start_a_sub_agent() {
-    let dir = tempfile::tempdir().unwrap();
-    let spy = Spy::new(vec![]);
-    let c = ctx(Arc::new(AllowAll), dir.path());
-    c.extensions.insert(DelegationDepth(1));
-    let r = AgentTool::new(spy.factory(), vec![])
-        .execute(json!({"description": "x", "prompt": "fais"}), &c)
-        .await;
-    assert!(
-        r.is_error && r.content.contains("cannot start another"),
-        "{}",
-        r.content
-    );
-    assert_eq!((spy.built(), spy.sent()), (0, 0));
-}
-
-#[tokio::test]
-async fn a_child_that_stops_without_an_answer_is_not_a_success() {
-    let dir = tempfile::tempdir().unwrap();
-    let c = ctx(Arc::new(AllowAll), dir.path());
-    // The child keeps failing the same way: stopped for no progress.
-    let spy = Spy::new(vec![Step {
-        text: Some("Je commence…".into()),
-        calls: vec![("c1".into(), "Probe".into(), json!({"fail": true}))],
-        ..Default::default()
-    }]);
-    *spy.fallback.lock() = Some(call("c", "Probe", json!({"fail": true})));
-    let tf: ToolsetFactory = Arc::new(|| vec![Box::new(Probe) as Box<dyn Tool>]);
-    let r = AgentTool::with_toolset(spy.factory(), tf.clone())
-        .execute(json!({"description": "x", "prompt": "fais"}), &c)
-        .await;
-    assert!(r.is_error);
-    assert!(r.content.contains("incomplete"), "{}", r.content);
-    assert_eq!(r.metadata.as_ref().unwrap()["status"], "incomplete");
-
-    // An empty final answer is not a completed task either.
-    let spy = Spy::new(vec![Step::default()]);
-    let r = AgentTool::with_toolset(spy.factory(), tf)
-        .execute(json!({"description": "x", "prompt": "fais"}), &c)
-        .await;
-    assert!(r.is_error, "{}", r.content);
-}
-
-// ─── 9. Cancellation ─────────────────────────────────────────────────────────
-
-#[tokio::test]
-async fn cancelling_the_parent_stops_its_child_and_starts_nothing_more() {
-    // Parent: one Agent call; child: a request that never ends.
-    let spy = Spy::new(vec![
-        call(
-            "a1",
-            "Agent",
-            json!({"description": "x", "prompt": "attends"}),
-        ),
-        hang(),
-    ]);
-    let tool = AgentTool::with_toolset(spy.factory(), no_tools());
-    let parent = Arc::new(
-        Agent::builder()
-            .provider(spy.provider())
-            .tool(tool)
-            .build()
-            .unwrap(),
-    );
-    let run = {
-        let parent = parent.clone();
-        tokio::spawn(async move { parent.run("délègue").await })
-    };
-    for _ in 0..200 {
-        if spy.sent() == 2 {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    assert_eq!(spy.sent(), 2, "the child's request is in flight");
-    parent.cancel();
-    let result = tokio::time::timeout(Duration::from_secs(5), run)
-        .await
-        .expect("the parent stops promptly")
-        .unwrap();
-    assert!(matches!(result, Err(CerseiError::Cancelled)));
-    tokio::time::sleep(Duration::from_millis(100)).await;
-    assert_eq!(
-        spy.dropped.load(Ordering::SeqCst),
-        1,
-        "the child's request was dropped"
-    );
-    assert_eq!(spy.sent(), 2, "no request after the cancellation");
-}
-
-#[tokio::test]
-async fn a_cancelled_run_starts_no_sub_agent() {
-    // Already cancelled: nothing is built.
-    let spy = Spy::new(vec![]);
-    let dir = tempfile::tempdir().unwrap();
-    let c = ctx(Arc::new(AllowAll), dir.path());
-    let t = tokio_util::sync::CancellationToken::new();
-    t.cancel();
-    c.extensions.insert(RunCancellation(t));
-    let r = AgentTool::new(spy.factory(), vec![])
-        .execute(json!({"description": "x", "prompt": "fais"}), &c)
-        .await;
-    assert!(r.is_error);
-    assert_eq!(spy.built(), 0);
-}
-
-/// The sub-agent of `AgentTool` passes no turn budget either: it works past
-/// its former default (10) and gives its answer.
-#[tokio::test]
-async fn agent_tool_goes_on_until_its_answer() {
-    let dir = tempfile::tempdir().unwrap();
-    let c = ctx(Arc::new(AllowAll), dir.path());
-    let work = |n: usize| {
-        let mut v: Vec<Step> = (1..=n)
-            .map(|i| call(&format!("c{i}"), "Probe", json!({"n": i})))
-            .collect();
-        v.push(say("Fini."));
-        v
-    };
-    let tf: ToolsetFactory = Arc::new(|| vec![Box::new(Probe) as Box<dyn Tool>]);
-    let limit = Duration::from_secs(60);
-
-    let spy = Spy::new(work(40));
-    let tool = AgentTool::with_toolset(spy.factory(), tf);
-    let r = tokio::time::timeout(
-        limit,
-        tool.execute(json!({"description": "x", "prompt": "fais"}), &c),
-    )
-    .await
-    .unwrap();
-    assert!(!r.is_error, "{}", r.content);
-    assert_eq!(spy.sent(), 41, "AgentTool: past its former default of 10");
-}
-
-// ─── 10. The removed `delegate` tool ─────────────────────────────────────────
-
-/// `delegate` was removed: the native `Agent` and `Agents` tools replace it.
-/// A transcript written before the removal still holds its calls: they stay
-/// readable, and a new call to it is an unknown tool, never a sub-agent.
 #[tokio::test]
 async fn a_stored_delegate_call_stays_readable_and_is_unknown_now() {
     let old = vec![

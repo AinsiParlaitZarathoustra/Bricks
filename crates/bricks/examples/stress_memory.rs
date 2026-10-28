@@ -4,14 +4,12 @@
 //! 1. Memdir — scanning, frontmatter, staleness, MEMORY.md index
 //! 2. CLAUDE.md — hierarchical loading, @include, scope ordering
 //! 3. Session storage — JSONL transcripts, tombstones, round-trip
-//! 4. Session memory extraction — parsing, persistence
-//! 5. Auto-dream — gate checks, lock management, state persistence
 //! 6. Graph memory — availability check (feature-gated)
 //! 7. Unified manager — context building, recall, session lifecycle
 //! 8. Performance — scan/recall speed benchmarks
 //!
 //! ```bash
-//! cargo run --example phase5_stress_test --release
+//! cargo run -p bricks --example stress_memory --release
 //! ```
 
 use bricks::prelude::*;
@@ -314,159 +312,6 @@ fn main() {
         write_transcript_entry(&path, &summary).unwrap();
         let entries = load_transcript(&path).unwrap();
         check!("Summary entry persists", entries.len() == 4); // 3 messages + 1 summary
-        println!();
-    }
-
-    // ── 4. Session Memory Extraction ─────────────────────────────────────
-    println!("  4. Session Memory Extraction");
-    println!("  ────────────────────────────");
-    {
-        use bricks_agent::session_memory::*;
-
-        // Threshold checks
-        let small: Vec<Message> = (0..10)
-            .map(|i| Message::user(format!("Msg {}", i)))
-            .collect();
-        let state = SessionMemoryState::default();
-        check!("10 msgs = no extract", !should_extract(&small, &state));
-
-        let large: Vec<Message> = (0..30)
-            .map(|i| {
-                if i % 2 == 0 {
-                    Message::user(format!("Q{}", i))
-                } else {
-                    Message::assistant(format!("A{}", i))
-                }
-            })
-            .collect();
-        check!("30 msgs = extract", should_extract(&large, &state));
-
-        let cooldown_state = SessionMemoryState {
-            extraction_count: 1,
-            tool_calls_since_last: 1,
-            ..Default::default()
-        };
-        check!(
-            "Cooldown blocks extract",
-            !should_extract(&large, &cooldown_state)
-        );
-
-        // Parse extraction output
-        let output = "\
-MEMORY: preference | 8 | User prefers dark mode UI
-MEMORY: project | 9 | API uses REST with JSON
-MEMORY: decision | 7 | Chose PostgreSQL for storage
-MEMORY: pattern | 6 | Uses builder pattern for config
-not a memory line
-MEMORY: bad format
-";
-        let memories = parse_extraction_output(output);
-        check!(
-            &format!("Parsed {} memories", memories.len()),
-            memories.len() == 4
-        );
-        check!(
-            "First memory content",
-            memories[0].content == "User prefers dark mode UI"
-        );
-        check!(
-            "Confidence normalized",
-            (memories[0].confidence - 0.8).abs() < 0.01
-        );
-
-        // Persistence
-        let tmp = tempfile::tempdir().unwrap();
-        let target = tmp.path().join("extracted.md");
-        persist_memories(&memories, &target).unwrap();
-        let content = std::fs::read_to_string(&target).unwrap();
-        check!(
-            "Persisted has section header",
-            content.contains("Auto-extracted memories")
-        );
-        check!("Persisted has memories", content.contains("dark mode"));
-        check!("Persisted has confidence", content.contains("80%"));
-
-        // Append more
-        let more = vec![ExtractedMemory {
-            content: "Uses tokio for async".into(),
-            category: MemoryCategory::CodePattern,
-            confidence: 0.9,
-        }];
-        persist_memories(&more, &target).unwrap();
-        let content = std::fs::read_to_string(&target).unwrap();
-        check!("Append preserves original", content.contains("dark mode"));
-        check!("Append adds new", content.contains("tokio"));
-        println!();
-    }
-
-    // ── 5. Auto-Dream Consolidation ──────────────────────────────────────
-    println!("  5. Auto-Dream Consolidation");
-    println!("  ───────────────────────────");
-    {
-        use bricks_agent::auto_dream::*;
-
-        let tmp = tempfile::tempdir().unwrap();
-        let mem_dir = tmp.path().join("memory");
-        let conv_dir = tmp.path().join("conversations");
-        std::fs::create_dir_all(&mem_dir).unwrap();
-        std::fs::create_dir_all(&conv_dir).unwrap();
-
-        let dream = AutoDream::new(mem_dir.clone(), conv_dir.clone());
-
-        // Time gate
-        let empty_state = ConsolidationState::default();
-        check!(
-            "Never consolidated → time gate passes",
-            dream.time_gate_passes(&empty_state)
-        );
-
-        let recent_state = ConsolidationState {
-            last_consolidated_at: Some(
-                std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs()
-                    - 3600,
-            ),
-            ..Default::default()
-        };
-        check!(
-            "1 hour ago → time gate fails",
-            !dream.time_gate_passes(&recent_state)
-        );
-
-        // Session gate
-        check!(
-            "No sessions → session gate fails",
-            !dream.session_gate_passes(&empty_state)
-        );
-
-        for i in 0..6 {
-            std::fs::write(conv_dir.join(format!("s{}.jsonl", i)), "{}").unwrap();
-        }
-        check!(
-            "6 sessions → session gate passes",
-            dream.session_gate_passes(&empty_state)
-        );
-
-        // Lock gate
-        check!("No lock → lock gate passes", dream.lock_gate_passes());
-        dream.acquire_lock().unwrap();
-        check!("Fresh lock → lock gate fails", !dream.lock_gate_passes());
-        dream.release_lock().unwrap();
-        check!("Released lock → lock gate passes", dream.lock_gate_passes());
-
-        // State persistence
-        dream.update_state().unwrap();
-        let state = dream.load_state();
-        check!("State persisted", state.last_consolidated_at.is_some());
-
-        // Consolidation prompt
-        let prompt = dream.consolidation_prompt();
-        check!(
-            "Prompt has phases",
-            prompt.contains("Orient") && prompt.contains("Prune")
-        );
         println!();
     }
 

@@ -1,4 +1,4 @@
-//! What a sub-agent started by `AgentTool` (`Agent`) relies on: input
+//! Shared invariants of native sub-agents: input
 //! validation, the tools a child may have, its depth and its link to the
 //! parent's run.
 //!
@@ -54,32 +54,6 @@ pub fn depth_of(ext: &Extensions) -> u32 {
 /// put one there.
 pub fn run_token(ext: &Extensions) -> Option<CancellationToken> {
     ext.get::<RunCancellation>().map(|r| r.0.clone())
-}
-
-/// Admission of an `AgentTool` sub-agent by the session's scheduler, when
-/// there is one: the same depth and cumulative total as the native tools,
-/// and one activity slot held while it runs. Without a runtime
-/// (embedders), nothing changes.
-pub async fn legacy_admission(
-    ext: &Extensions,
-) -> Result<Option<tokio::sync::OwnedSemaphorePermit>, String> {
-    let Some(rt) = ext.get::<crate::agents::RuntimeHandle>() else {
-        return Ok(None);
-    };
-    let root = ext
-        .get::<crate::agents::AgentIdentity>()
-        .map(|i| i.root_run_id.clone())
-        .unwrap_or_else(|| "detached".into());
-    rt.0.scheduler
-        .reserve(&root, depth_of(ext), 1)
-        .map_err(|e| format!("{e}. Nothing was started."))?;
-    let cancel = run_token(ext).unwrap_or_default();
-    let permit =
-        rt.0.scheduler
-            .acquire(&cancel, || {})
-            .await
-            .map_err(|e| format!("{e}. Nothing was started."))?;
-    Ok(Some(permit))
 }
 
 /// The extensions a child starts with: its own map (a child never writes

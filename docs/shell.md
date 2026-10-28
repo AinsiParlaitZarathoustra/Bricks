@@ -1,6 +1,6 @@
 # Shell, file tools and tool results
 
-Contracts of the `Bash`, `PowerShell`, background-task and `Job` tools, of
+Contracts of the `Bash`, `PowerShell` and `Job` tools (background jobs), of
 `Edit`, `ApplyPatch` and `Read`, and of the result format every tool shares.
 
 ## 1. Bash: one process per command, shared state
@@ -68,28 +68,33 @@ that double-forks) escapes the group cleanup (§2).
 | --- | --- |
 | `Bash` | the command's own current directory, which starts from the session's directory and is reported in each result's data as `cwd` |
 | `PowerShell` | the PowerShell session's location (`Set-Location`) |
-| `Read`, `Edit`, `Write`, `ApplyPatch`, `NotebookEdit`, `Glob`, `Grep` | the agent's working directory: a `cd` in a shell never moves them |
+| `Read`, `Edit`, `Write`, `ApplyPatch`, `Glob`, `Grep`, `CodeStats` | the agent's working directory: a `cd` in a shell never moves them |
 
 A `cd` in the shell does not change the agent's working directory nor the
 permission root of the workspace.
 
 ### Permissions
 
-Permission checks run before execution on the command text. In addition, when
+The session's permission policy decides before execution, on the command text. In addition, when
 the command invokes an alias or function defined in the session, its
-definition is appended to the permission request's `description`, so session
-state cannot hide what will actually run (a policy that matches `rm -rf` sees
-`alias tidy='rm -rf …'`).
+definition is appended to the request's `description`, so session state cannot
+hide what will actually run (the approval shows `alias tidy='rm -rf …'` for a
+call that would run it).
 
 ## 2. Execution, timeouts, supervision
 
 | Option (Bash input) | Default | Meaning |
 | --- | --- | --- |
 | `timeout` | 120 000 ms (max 600 000) | Deadline from the start of the command, enforced also after it was handed over (see `yield_time_ms`). |
-| `yield_time_ms` | `[bash] yield_time_ms`, 10 000 ms | Foreground only. Time the call waits before a command still running is handed over as a task (§3). Not a deadline: `timeout` is. |
+| `yield_time_ms` | `[bash] yield_time_ms`, 10 000 ms | Foreground only. Time the call waits before a command still running is handed over as a job (§3). Not a deadline: `timeout` is. |
 | `input` | none (empty stdin) | Text given on stdin. Prompts are never answered automatically. |
 | `background` | `false` | Start a supervised task at once (§3). |
 | `ready_pattern` / `ready_timeout` | — / 10 s | Background only: readiness regex on output lines, and how long to wait for it. |
+
+A command that may become a job (`background: true`, or a `yield_time_ms` below
+its `timeout`) needs the session's job registry (§3). Without one, as with
+`bricks_tools::shell()`, it is refused before anything starts. Give
+`yield_time_ms` at least the `timeout` to have the call wait for the end.
 
 `[bash] yield_time_ms` in `bricks.toml` sets the default (see
 `docs/bricks.example.toml`). `ShellConfig` (put in `ToolContext::extensions`,
@@ -133,9 +138,9 @@ it survives this cleanup.
 
 **Cancellation.** Cancelling the agent's turn drops the running tool call;
 each ordinary command still active is interrupted at once (its group, then
-its tree). Background tasks (`background: true`) keep their own rule: they
+its tree). Background jobs (`background: true`) keep their own rule: they
 survive the turn, not the session (§3). An individual task stopped with
-`BashTaskStop` or `Job stop` is terminated as a group and reaped.
+`Job` `stop` is terminated as a group and reaped.
 
 **Output.** Bytes are cleaned incrementally (ANSI CSI/OSC/DCS/APC sequences
 and their 8-bit forms, carriage-return progress, backspace, control
@@ -163,23 +168,23 @@ group); Bricks follows parent links instead, with the limits above. No
 administrator privilege is required. Job Objects are not used yet on Windows
 (see §9).
 
-## 3. Yielded commands and background tasks
+## 3. Yielded commands and background jobs
 
 A `Bash` call returns one of two ways when a command is still running:
 
-* **At once**, with `background: true`: the call returns as soon as the task is
-  started, with a stable `task_id` (`bg-1`, `bg-2`, …), a `job_id`, its pid and
-  state.
+* **At once**, with `background: true`: the call returns as soon as the job is
+  started, with its `job_id` (`job_` followed by 12 hexadecimal characters), its
+  pid, its state, its readiness and its working directory.
 * **After `yield_time_ms`**, for a foreground command that is still running: the
-  call returns status `Running` with the same ids and the cursors to read the
-  output. The command is not restarted and not killed; its `timeout` still
-  applies.
+  call returns status `Running` with its `job_id`, pid, state, working directory
+  and the stdout and stderr cursors (the line counts to read from). The command
+  is not restarted and not killed; its `timeout` still applies.
 
-Both are supervised tasks: a separate `bash` started from a **snapshot** of the
-session state taken at launch (§1). A task never publishes into the session,
-so what it changes never reaches the next commands. It runs in its own session
-and process group, with its own pipes: it never blocks the next commands and
-its output never mixes with theirs.
+Both are jobs: a separate `bash` started from a **snapshot** of the session state
+taken at launch (§1). A job never publishes into the session, so what it changes
+never reaches the next commands. It runs in its own session and process group,
+with its own pipes: it never blocks the next commands and its output never mixes
+with theirs.
 
 * **States**: `running`, `completed` (exit 0), `failed` (non-zero exit, or a
   signal Bricks did not send), `stopped`. The exit code exists only after a
@@ -187,21 +192,65 @@ its output never mixes with theirs.
 * **Ready is not running**: with `ready_pattern`, readiness is reported when a
   line matches (e.g. `port \d+`); without it, the result says readiness was not
   checked. Ready is still not proof that the service works.
-* **Tools**: `BashTaskStatus` (one or all tasks), `BashTaskOutput` (`stream`,
-  `offset` in lines, `limit` ≤ 2000; returns the next offset and says when
-  earlier lines are no longer in memory), `BashTaskStop` (graceful then forced;
-  idempotent). `Job` (`list`, `status`, `output`, `wait`, `stop`) shows the same
-  jobs to the agent that started them, see `docs/agents.md`.
+* **Tool `Job`**: one action per call, on the jobs of the calling agent (see
+  below). Its `job_id` comes from `Bash`; `docs/agents.md` describes the
+  sub-agent case.
 * **Quota**: `[background] max_jobs` (default 16) counts the running jobs of the
   session and the places being started. A place is reserved atomically before
   anything starts. Beyond the limit the start is refused with a clear message
   and nothing is launched: there is no queue.
-* **Ownership and lifetime**: tasks are visible and stoppable only from their
-  own session and agent. A background task (`background: true`) survives the
-  turn that started it and ends with the session. A yielded command is not
-  durable: it ends with the run that started it.
-* **Bounded capture**: 5 000 lines per stream in memory; raw logs up to 50 MiB
-  per stream in the session directory.
+* **Ownership**: a job is visible and stoppable only to the agent that started
+  it. Another agent's id gets the same answer as an unknown id. A frontend sees
+  every job of its session.
+* **Lifetime**: a background job (`background: true`) survives the turn that
+  started it and ends with the session. A yielded command is not durable: it
+  ends with the run that started it. A sub-agent's jobs stop when it ends.
+* **Bounded capture**: per stream, 5 000 lines and 1 MiB
+  (`[background] output_buffer_bytes`) are kept in memory; a line longer than
+  64 KiB (`max_line_bytes`) is cut and marked. Raw logs are capped at 50 MiB per
+  stream (`raw_log_bytes`) in the session directory, and copied to the session's
+  files when the job ends.
+
+### The `Job` tool
+
+| Input | Default | Rule |
+| --- | --- | --- |
+| `action` | `list` | `list`, `status`, `output`, `wait` or `stop`. `{}` lists the jobs. |
+| `job_id` | — | Required for every action but `list`. |
+| `stream` | `stdout` | `stdout` or `stderr`, for `output`. |
+| `offset` | `0` | Line to start at, 0-based, for `output`. |
+| `limit` | `200` | 1 to 2000 lines, for `output`. |
+| `tail` | `false` | The last `limit` lines, for `output`. Not with `offset`. |
+| `timeout_ms` | `60000` | 1 to 600000, for `wait`. |
+
+Unknown fields are refused, and out-of-range values are refused, never
+clamped. Permission: `stop` is Execute; `list`, `status`, `output` and `wait` are
+ReadOnly.
+
+* **`list`**: one line per job: id, state (with the exit code or signal once
+  ended), pid, duration, readiness (not checked, not yet, or yes after a
+  delay), lines and bytes per stream, working directory and command.
+* **`status`**: the same line, then the raw log paths: the live logs while the
+  job runs, the durable copies once they are kept.
+* **`output`**: a header, then the lines, without numbers. The header gives the
+  stream, the range returned, the complete lines so far, the bytes received,
+  how many earlier lines are no longer in memory, the raw log path (with its cap
+  or write error when relevant) and the next offset to read from. A first line
+  longer than the page (`[background] max_page_bytes`, 64 KiB by default) is
+  shown cut and marked, and the offset moves past it. A line still in progress
+  is shown apart and marked; it does not move the offset.
+* **`wait`**: returns when the job ends or after `timeout_ms`. A timeout says
+  the job is still running and stops nothing.
+* **`stop`**: TERM to the process group and its tree, a grace period
+  (`stop_grace_ms`, 2 s by default), then KILL. Idempotent: a job that already
+  ended is a success, and the answer gives its state.
+* **Unknown id, or another agent's**: `No accessible job with this id. A job is
+  visible only to the agent that started it. Use Job with action list to see your
+  jobs.`
+* **No jobs**: `You have no jobs.` with a pointer to `background: true` and
+  `yield_time_ms`.
+
+The `Bash` result of a job names the `Job` call that follows it.
 
 Prefer `background: true`, or a yield, to `cmd &` in a foreground command
 (whose leftovers are stopped when the command ends).
@@ -308,8 +357,8 @@ characters are cut with a marker. Relative paths are resolved against the
 agent's working directory.
 
 Reading a file before changing it is recommended when the change needs its
-exact text, but no tool requires it: `Edit`, `Write`, `ApplyPatch` and
-`NotebookEdit` do not check that a `Read` came first.
+exact text, but no tool requires it: `Edit`, `Write` and `ApplyPatch` do not
+check that a `Read` came first.
 
 ## 8. Tool results
 
@@ -344,7 +393,7 @@ Vérifiez que l'outil est installé ou disponible dans le PATH.
 
 A successful command without output reads `(Commande exécutée avec succès sans
 sortie)`; a yielded or background command reads `… [Bash] En cours`, with its
-`task_id`, `job_id`, pid and cursors. The header describes the call: it is not
+`job_id`, pid and cursors. The header describes the call: it is not
 output, and compression never sees it. Notes (`--- remarques ---`: environment
 changes not available, raw output paths, processes stopped) and the suggestion
 come after the output. Tools that do not provide a report get the same header

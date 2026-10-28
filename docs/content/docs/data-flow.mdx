@@ -9,12 +9,13 @@ description: How a prompt becomes model requests, tool calls, events and a store
 
 ```text
 1. A prompt is submitted to the agent (run, run_with, run_stream, or a frontend's submit command).
-2. The system prompt is assembled: the instructions, and what the enabled services add,
-   such as recalled memory, the skills catalogue and the sub-agent profiles.
+2. The system prompt is assembled for each request: the instructions, the guidance for the
+   tools that request announces, its environment, model and plan, and what the enabled services
+   add, such as recalled memory, the skills catalogue and the sub-agent profiles.
 3. Before a request, the context is checked: a request that would not fit is compacted first
    or not sent.
 4. The provider streams the model's answer: text and reasoning deltas, and tool calls.
-5. Each tool call goes through the approval policy, then the hooks, then the tool.
+5. Each tool call goes through the session's permission policy, then the hooks, then the tool.
    Its result goes back into the history, after the tool-output compression.
 6. If the model made tool calls, the loop returns to step 3 with the results.
    If it gave a final answer with no tool call, the run ends with an output.
@@ -55,8 +56,8 @@ tool call from the model
   │
   ├─ the tool name is looked up in the session's tool set
   │    (an unknown name returns an error result to the model)
-  ├─ the approval policy decides: allow, ask the person, or deny (a denial
-  │    returns an error result to the model and nothing runs)
+  ├─ the session's permission policy decides: allow, ask the person, or deny
+  │    (a denial returns an error result to the model and nothing runs)
   ├─ PreToolUse hooks run: a hook can block the call, or change its input
   │    (a changed input is decided again)
   ├─ the tool executes
@@ -111,7 +112,7 @@ adds a message to the run, and `cancel` stops it.
 The event stream is part of the library. The frontends use the versioned
 events of the command/event contract, `bricks_agent::control`, which the JSONL
 output of `bricks run --json` writes. Its schema is in `docs/cli.md` in the
-repository. The schema version is 6.
+repository. The schema version is 7.
 
 The end of a tool call says whether it ran (`executed`: `false` for a call
 refused, denied, or blocked by a hook, which never ran) and how it ended
@@ -159,7 +160,9 @@ default), one version of a run per line:
   background job or a sub-agent ending later), and the last version of a run
   wins. Runs keep the order of their first line;
 * a damaged line is skipped on read, and never stops the others;
-* deleting the session deletes the file.
+* deleting the session deletes the file. The runs replaced by a revised
+  message are moved to `desktop/run-records/<session>.revised.jsonl`, which
+  deleting the session does not remove.
 
 Each command and file change carries its provenance: the root run, the
 sub-agent (`agent_id`, absent for the session agent) and the tool call

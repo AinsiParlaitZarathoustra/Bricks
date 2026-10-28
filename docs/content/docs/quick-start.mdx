@@ -25,7 +25,6 @@ id = "fast"
 name = "Fast model"
 api_model = "vendor-fast-model"
 streaming = true
-tool_calls = true
 
 [providers.models.limits]
 max_input_tokens = 96000
@@ -60,7 +59,7 @@ A file change or a shell command waits for your approval in the terminal, with t
 
 ## 3. Run an agent from Rust
 
-Add the crate as described in [Installation](/docs/installation). This program asks a question about the project. It gives the agent the coding tool set, and it allows only the read-only tools, so the agent can read and search but cannot write or run commands:
+Add the crate as described in [Installation](/docs/installation). This program asks a question about the project. It gives the agent the coding tool set, and its approver refuses every call the policy asks about, so the agent can read and search but cannot write, run commands or use the web:
 
 ```rust
 use bricks::prelude::*;
@@ -70,7 +69,7 @@ async fn main() -> anyhow::Result<()> {
     let output = Agent::builder()
         .provider(provider_from_config(None, "acme/fast")?) // ~/.bricks/providers.toml
         .tools(bricks::tools::coding())
-        .permission_policy(AllowReadOnly)
+        .permission_policy(DenyAll)
         .run_with("What files are in the current directory?")
         .await?;
 
@@ -79,7 +78,7 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-`provider_from_config(None, …)` reads `~/.bricks/providers.toml`; pass a path instead of `None` to read another file. `run_with` runs the loop until the model gives a final answer, and returns the answer with its usage and tool calls.
+`provider_from_config(None, …)` reads `~/.bricks/providers.toml`; pass a path instead of `None` to read another file. With an approver and no profile, the session's policy is ASK: reads run, and a write or a command is asked, then refused by `DenyAll`. `run_with` runs the loop until the model gives a final answer, and returns the answer with its usage and tool calls.
 
 ## 4. Stream the events
 
@@ -96,7 +95,7 @@ async fn main() -> anyhow::Result<()> {
         Agent::builder()
             .provider(provider_from_config(None, "acme/fast")?)
             .tools(bricks::tools::coding())
-            .permission_policy(AllowReadOnly)
+            .permission_policy(DenyAll)
             .build()?,
     );
 

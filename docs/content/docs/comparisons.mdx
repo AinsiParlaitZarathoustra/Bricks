@@ -22,8 +22,10 @@ with other products.
 - **Tools you select.** The library lets an agent use any subset of the
   built-in tools, or your own tools. The frontends give a session a fixed set,
   described in the `docs/cli.md` of the repository.
-- **One approval policy.** The `[permissions]` section of `bricks.toml` applies
-  to every frontend. File changes are shown as a diff before they are written.
+- **One permission engine.** Each session has one policy (ASK, EXECUTE or
+  CUSTOM), chosen in the desktop application or with `--permissions`, and the
+  same engine decides every frontend's calls. File changes are shown as a diff
+  before they are written.
 - **A command for scripts and CI.** `bricks run --json` writes versioned JSONL
   events, and each outcome has an exit code.
 - **A desktop application** on the same engine contract, for interactive work.
@@ -46,8 +48,9 @@ with other products.
   MCP servers yet, and `/mcp` says so. The library can add them with
   `mcp_server`.
 - **A full tool set in the frontends.** A `bricks` session gets the coding
-  tools, the skill tool and the sub-agent tools. Planning, scheduling and the
-  task tools are available to a library user only.
+  tools, the skill tool and the sub-agent tools (with `SendMessage`). A library
+  user gets the sets of `bricks::tools` (`all()` is `coding()` plus
+  `TodoWrite`), and the sub-agent tools through the agent runtime only.
 - **A model catalogue.** You declare each model and its limits yourself, and
   the file is the only source of them.
 

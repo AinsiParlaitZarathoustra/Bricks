@@ -35,7 +35,7 @@ async fn main() -> anyhow::Result<()> {
     let output = Agent::builder()
         .provider(provider_from_config(None, "acme/fast")?) // ~/.bricks/providers.toml
         .tools(bricks::tools::coding())
-        .permission_policy(AllowReadOnly)
+        .permission_policy(DenyAll)
         .run_with("What files are in the current directory?")
         .await?;
 

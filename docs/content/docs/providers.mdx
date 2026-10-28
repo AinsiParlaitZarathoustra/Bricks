@@ -41,7 +41,6 @@ id = "my-model"
 name = "My model"
 api_model = "vendor-model-id"          # sent to the server exactly as written
 streaming = true
-tool_calls = true
 
 [providers.models.limits]
 max_input_tokens = 96000
@@ -127,8 +126,8 @@ identifier the server receives), and optionally its own `protocol`, `endpoint`,
 |---|---|
 | `input_modalities`, `output_modalities` | Subsets of `text`, `image`, `audio`, `video`, `document`. Default `["text"]`. |
 | `document_mime_types` | Accepted MIME types when `document` is an input. |
-| `streaming`, `tool_calls` | Capability flags. **Default `false`**: an undeclared capability is unsupported. |
-| `limits` | `max_input_tokens`, `max_output_tokens` and optionally `context_window_tokens`, a window shared by input and output. |
+| `streaming` | **Default `false`**: an undeclared streaming is a blocking request. |
+| `limits` | `max_input_tokens`, the input usable with the maximum output reserved, and `max_output_tokens`. |
 | `pricing` | USD per million tokens (see *Prices and usage*). |
 | `reasoning` | Reasoning profiles (see *Reasoning profiles*). |
 | `parameters` | Request parameters sent with every request. |
@@ -193,6 +192,17 @@ remove = ["/temperature"]
 * Protected fields (model, messages, system prompt, tools, tool choice,
   streaming control) cannot be set or removed by `parameters`.
 
+## Request identity
+
+A configured provider reports what each request is sent as, through
+`Provider::request_identity`: the model name in the request body (`api_model`)
+and the reasoning profile applied with the request's options, resolved the same
+way as the body. The agent's system prompt states both in its model block, for
+each request. An unknown profile id is refused, so nothing is sent, and the
+reported profile is then empty. A custom provider that does not override the
+method reports nothing, and its prompt states only the Bricks selection. The
+server may still run another model behind an alias.
+
 ## Capabilities
 
 The capabilities of a request are the ones the model declares **and** the
@@ -207,8 +217,9 @@ attachment is dropped or converted silently.
 | audio | data (`wav`, `mp3`) | no | no |
 | video | no | no | no |
 | document | data, file id | data, URL, file id | data (`application/pdf`, `text/plain`), URL, file id |
+| media inside a tool result | no | no | image, document |
 
-Model-native output is text only. Tool calls are carried by every adapter.
+Model-native output is text only. Tool calls are carried by every adapter. An image a tool returns is carried by the adapter as the table allows, otherwise next to the results or not at all: see [Images returned by tools](/docs/multimodal#images-returned-by-tools).
 
 In the desktop form, *Document* offers the accepted types, with the presets PDF
 (`application/pdf`) and any file (`*/*`); at least one type, written `type/subtype`,
@@ -216,9 +227,8 @@ is required. Unchecking *Document* removes `document_mime_types`.
 
 ## Limits and counting
 
-A request is checked against the prompt budget before it is sent. When a model
-has no `context_window_tokens`, the input and output limits apply separately,
-and the status says so. A server counting endpoint is used only when the model
+A request is checked against the prompt budget, `max_input_tokens`, before it
+is sent; the output is a separate limit. A server counting endpoint is used only when the model
 configures it:
 
 ```toml

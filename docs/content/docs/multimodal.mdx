@@ -128,7 +128,7 @@ The copies live under the Bricks home (`~/.bricks` by default, or `BRICKS_HOME`)
 * **Before sending**, a copy belongs to its draft: `desktop/drafts/<draft_id>/attachments/<attachment_id>-<name>`.
 * **At sending**, once the conversation exists, the copies of the draft are moved, one rename each, into `sessions/<session_id>.files/attachments/`. Deleting the conversation deletes that folder with its copies.
 
-The conversation folder also holds `attachments.jsonl`, one line per run that was sent with copies. It is how the conversation shows the copies again on their message, with image previews, after a switch or a restart. A copy that is no longer on disk is not shown. Messages of conversations from before this record show no attachment.
+The conversation folder also holds `attachments.jsonl`, one line per run that was sent with copies. It is how the conversation shows the copies again on their message, with image previews, after a switch or a restart. A copy that is no longer on disk is not shown. Messages of conversations from before this record show no attachment. When a sent message is revised, the lines of the runs it replaces move to `attachments.revised.jsonl` in the same folder; their copies stay.
 
 A copy can be removed from a draft at any time. A copy in a conversation can be removed only while no sent message refers to it.
 
@@ -142,6 +142,24 @@ Bounds and cleanup:
 
 An image is sent as an image block only when the model of the conversation declares `image` in its `input_modalities` (see `providers.toml` in [Providers](/docs/providers)). Otherwise the send is refused before anything is sent, no user turn is added, and the attachment shows the refusal: remove the image or switch model. A model that the catalog does not know is left to the engine, which refuses it on its own.
 
+
+## Images returned by tools
+
+A tool shows an image to the model with `ToolResult::with_images(...)`, which takes `ToolImage` values (`bricks::tools::ToolImage`: media type, base64 data, path and byte size). The built-in `ViewImage` tool does this for an image file. It is read-only, reads the type from the bytes (PNG, JPEG, GIF or WebP), and refuses a file over 3,750,000 bytes or over 8,000 pixels on a side. The size is checked only when the header gives it, which is not the case for WebP. These limits are separate from the 5 MiB of an image attached in the desktop.
+
+The agent sends each image as the model's `ImageTransport` allows, which `Provider::image_transport()` reports. It depends on the model's `input_modalities` (`image`) and on the protocol:
+
+| Transport | When | What the model receives |
+| --- | --- | --- |
+| `ToolResult` | the model declares `image`, `anthropic_messages` | the image is a block of the tool result, after its text |
+| `UserTurn` | the model declares `image`, `chat_completions` or `responses` | the result stays text. The images of the round follow all its results, in the same user turn, each after a text label: `[image from tool call <id>] <path>, <type>, <n> bytes` |
+| `None` | the model does not declare `image` | nothing is attached; the result text ends with `[the image was not shown: the current model does not accept images]` |
+
+A provider that does not override `image_transport()` gets `None`.
+
+In Bricks Desktop, a successful `ViewImage` call shows a thumbnail under its line. The thumbnail is read back from the open session's history (`session_tool_image`), so it is the image the model received, not the file as it is now.
+
+MCP results are unchanged: an image in an MCP result is still a text placeholder, `[image <type>, <n> bytes — not shown]`. See `docs/mcp.md`.
 
 ## Runnable examples
 

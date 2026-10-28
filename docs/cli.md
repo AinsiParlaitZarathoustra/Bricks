@@ -42,23 +42,21 @@ Two files are read, both through the existing loaders. Nothing is built in.
   reasoning profiles, capabilities and prices come from this file.
 * **Project**: `bricks.toml` in the project folder (the current folder, or
   `--workspace <dir>`; see *Projects* below). Sections: `[agent]`,
-  `[permissions]`, `[agents]`, `[bash]`, `[background]`, `[semantic]`,
-  `[memory]`, `[context]`, `[compression]` and `[web]` (see
+  `[agents]`, `[bash]`, `[background]`, `[semantic]`, `[memory]`,
+  `[context]`, `[compression]` and `[web]` (see
   `docs/bricks.example.toml`, which lists every key with its default).
   An invalid section falls back to its defaults with a diagnostic, shown
   as a warning when the session opens.
+* **Permissions** are not read from this file. Each session has its own
+  policy, chosen in Bricks or with `--permissions` (see
+  [Permissions](#permissions)). A `[permissions]` section left in an old
+  `bricks.toml` is reported as a diagnostic and its rules, denials
+  included, are not applied: delete the section.
 
 ```toml
 [agent]
 model = "my-provider/my-model"   # default model (otherwise --model is required)
 reasoning = "deep"               # one of that model's reasoning profiles
-
-[permissions]                    # the approval policy (below)
-write = "ask"
-execute = "ask"
-
-[permissions.tools]
-WebFetch = "allow"
 ```
 
 Sessions are stored in `~/.bricks/sessions` (`$BRICKS_HOME/sessions`).
@@ -110,26 +108,23 @@ The ADK has a larger built-in tool set than a `bricks` session gets. The
 difference matters when you read the catalogue or build an agent with the
 library. A session of the `bricks` command or of Bricks Desktop has:
 
-* **In every session** (`bricks_tools::coding()`): `Read`, `Write`, `Edit`,
-  `ApplyPatch`, `Glob`, `Grep`, `CodeSearch`, `CodeScout`, `NotebookEdit`,
-  `Bash`, `BashTaskStatus`, `BashTaskOutput`, `BashTaskStop`, `Job`,
-  `PowerShell`, `WebFetch` and `WebSearch`.
+* **In every session** (`bricks_tools::coding()`): `Read`, `ViewImage`, `Write`, `Edit`,
+  `ApplyPatch`, `Glob`, `Grep`, `CodeSearch`, `CodeScout`, `CodeStats`,
+  `Bash`, `Job`, `PowerShell`, `WebFetch` and `WebSearch`.
 * **With skills** (both frontends enable them): `Skill`.
 * **When `[agents] enabled` is true, the default**: `Agent`, `Agents`,
-  `AgentControl` and `AgentProfiles`.
+  `AgentControl`, `AgentProfiles` and `SendMessage`.
+* **The plan, always**: `TodoWrite`, added by the controller even when the
+  tool set has none. It keeps the conversation's plan (see `plan_updated`).
 
-The rest of `bricks_tools::all()` is not given to a session: planning
-(`TodoWrite`, `EnterPlanMode`, `ExitPlanMode`), scheduling (`CronCreate`,
-`CronList`, `CronDelete`, `Sleep`, `RemoteTrigger`), orchestration
-(`SendMessage`, the `Task*` tools, `EnterWorktree`, `ExitWorktree`),
-`AskUserQuestion`, `SyntheticOutput`, `Config` and `ToolSearch`. An agent you
-build with the library chooses its own tools.
+`bricks_tools::all()` is `coding()` plus `TodoWrite`, sixteen tools, and a
+session gets all of them. An agent you build with the library chooses its
+own tools.
 
-Every tool, whatever its set, goes through the approval policy of
-`[permissions]`: each tool has a permission level (`read_only`, `write`,
-`execute`, `dangerous` or `none`), and the policy maps the level, or the tool
-name, to `allow`, `ask` or `deny`. The defaults are in the `[permissions]`
-section of `docs/bricks.example.toml`. The built-in tools page of the site
+Every tool, whatever its set, goes through the session's permission policy
+(see [Permissions](#permissions)): each call is one of four classes (read,
+write, execute, network), and the policy decides it as allowed, asked or
+refused. The built-in tools page of the site
 (`docs/content/docs/built-in-tools.mdx`) describes each tool.
 
 ## Commands
@@ -140,6 +135,7 @@ section of `docs/bricks.example.toml`. The built-in tools page of the site
 | `bricks run "…"` | run one prompt and print the answer |
 | `bricks run --model <p/m> --reasoning <profile> "…"` | with another model / profile |
 | `bricks run --json --non-interactive "…"` | JSONL on stdout, no human interaction |
+| `bricks run --permissions ask\|execute "…"` | the permission profile of this run's session (see [Permissions](#permissions)) |
 | `bricks run --session <id> "…"` | continue a stored session, in its own folder and project |
 | `bricks run --skill <name> [--skill …] "…"` | activate skills before the prompt (see `docs/skills.md`) |
 | `bricks run --trust-project-skills …` | allow this project's skills for this session only |
@@ -169,22 +165,25 @@ content is captured when the run starts.
 **Skills.** `--skill <name>` (repeatable) activates skills, in order,
 before the prompt, which stays a separate message. Every one is checked
 before anything is sent; one that is missing, not approved, invalid or
-incompatible stops the command with exit code 2 and nothing is sent. The
-project's skills (`.agents/skills`, `.claude/skills`) are used only with
-`--trust-project-skills`, for this project and this session; without it a
-`notice` says they were found and not used, and nothing waits for an
-answer. The flag grants no other permission. See `docs/skills.md`.
+incompatible stops the command with exit code 2 and nothing is sent. Bricks
+reads the skills installed in its store (`<bricks_home>/skills`) and its one
+built-in skill, `create-skills`. It does not read `~/.claude/skills`,
+`~/.agents/skills`, `.claude/skills` or `.agents/skills`. The flag
+`--trust-project-skills` concerns only project folders that are configured as
+explicit sources, for this session; none is configured by default, so there is
+nothing to trust. The flag grants no other permission. See `docs/skills.md`.
 
 **Output.** Without `--json`, the answer is streamed to stdout. Tool
 calls, notices and errors go to stderr. With `--json`, stdout carries
 only JSONL envelopes (schema below). Diagnostics and logs go to stderr.
 
-**Approvals.** They are asked on the controlling terminal (`/dev/tty`)
-when there is one, with the diff of a file change. With
-`--non-interactive`, or without a terminal, nobody is waited for. A step
-the policy says to ask about then stops the run, with `run_finished`
+**Approvals.** A call the session's policy says to ask about is asked on
+the controlling terminal (`/dev/tty`) when there is one, with the diff of a
+file change: `Allow this call? [y]es / [N]o:`. The answer covers that call
+only. With `--non-interactive`, or without a terminal, nobody is waited for:
+such a call is refused, and the run stops with `run_finished`
 `failure = "approval_required"` and exit code 3. `--non-interactive`
-grants nothing: steps the policy allows still run, the others do not.
+grants nothing: calls the policy allows still run, the others do not.
 
 **Ctrl+C** cancels the run (or the memory maintenance after it). A second
 Ctrl+C exits at once. The session is stored. Tool calls already finished
@@ -243,10 +242,12 @@ built, get their parent's permissions and at most its tools (never the
 sub-agent tools themselves), are cancelled with the parent's run (which
 waits for their cleanup), and report `completed`, `incomplete`, `cancelled`
 or `failed` with their partial answer. In headless mode, starting sub-agents
-needs `Agent` / `Agents` allowed in `[permissions]` (`execute` tools);
-allowing them allows none of the children's own tools. Sub-agents run in
+starting a sub-agent is an execute-class call: under the ASK profile it is
+asked, under EXECUTE it runs, under CUSTOM the execute rule or the rule of
+`Agent` / `Agents` decides. Children inherit their session's policy, and
+each of their own calls is decided by it too. Sub-agents run in
 parallel: `Agent` and `Agents` return their ids at once, and `AgentControl`
-(`wait`, `result`, `message`, `resume`, `cancel`) follows them. In headless
+(`wait`, `result`, `resume`, `cancel`) follows them; `SendMessage` sends live instructions. In headless
 mode, sub-agents still running after the answer are waited for, for at most
 `[agents] background_drain_ms` (`600000` by default), then cancelled: exit
 code 6 if any did not complete.
@@ -256,17 +257,17 @@ When a provider's `Retry-After` is longer than `[agent] retry_after_max_wait_ms`
 run fails at once with an error that names the setting. Shorter waits are
 taken, and each one is shown by a `Retrying in …` notice.
 
-## The JSONL schema (version 6)
+## The JSONL schema (version 8)
 
 Every line is one envelope:
 
 ```json
-{"schema":6,"session_id":"20261006-141502-a1b2c3","run_id":"run_5f…","seq":7,"at":1791300902123,"type":"tool_started","tool_call_id":"call_1","name":"Glob","input":{"pattern":"*.md"}}
+{"schema":8,"session_id":"20261006-141502-a1b2c3","run_id":"run_5f…","seq":7,"at":1791300902123,"type":"tool_started","tool_call_id":"call_1","name":"Glob","input":{"pattern":"*.md"}}
 ```
 
 | field | |
 |---|---|
-| `schema` | `6`; incremented on any change a consumer could notice (2: `run_finished` gained `incomplete` and `termination`; 3: the `search` command and its `search_results` event; 4: sub-agents — `agent_*` events, `agent_id` in `approval_requested`, `list_agent_profiles` and `reload_agent_profiles`; 5: turn limits removed — `agent_spawned` no longer has `max_turns`, `edit_applied` gains `agent_id` and `changeset_id`, `binary` in its files; 6: `edit_applied` files gain `absolute`, `patch` and `patch_truncated`, `tool_finished` gains `executed` and `status`, `agent_tool_finished` gains `executed`, `status`, `output` and `output_truncated`). Additions a consumer can ignore — new event types, new optional fields, new commands, new states such as `set_reasoning`, `reasoning_changed`, `effective_reasoning` or the skills events — keep the version; a removed or renamed field or event, or a changed meaning, increments it. Consumers ignore unknown types and fields |
+| `schema` | `8`; incremented on any change a consumer could notice (2: `run_finished` gained `incomplete` and `termination`; 3: the `search` command and its `search_results` event; 4: sub-agents — `agent_*` events, `agent_id` in `approval_requested`, `list_agent_profiles` and `reload_agent_profiles`; 5: turn limits removed — `agent_spawned` no longer has `max_turns`, `edit_applied` gains `agent_id` and `changeset_id`, `binary` in its files; 6: `edit_applied` files gain `absolute`, `patch` and `patch_truncated`, `tool_finished` gains `executed` and `status`, `agent_tool_finished` gains `executed`, `status`, `output` and `output_truncated`; 7: the `plan_updated` event, the conversation's plan; 8: the permission policy — `permission_policy_changed`, `approval.policy_revision`, the `approve` decisions `allow` and `deny` only, `approval_resolved.by` without `session`, and the snapshot's `permission_policy` and `permission_revision` in place of `allowed_for_session`, `approval_rules` and `approval_mode`). Additions a consumer can ignore — new event types, new optional fields, new commands, new states such as `set_reasoning`, `reasoning_changed`, `effective_reasoning` or the skills events — keep the version; a removed or renamed field or event, or a changed meaning, increments it. Consumers ignore unknown types and fields |
 | `session_id` | the session |
 | `run_id` | the run (absent for session-level events) |
 | `seq` | 1, 2, 3, … contiguous: a gap never happens silently |
@@ -284,8 +285,9 @@ Events (`type`):
 | `tool_started` | `tool_call_id, name, input` | concurrent calls have distinct ids |
 | `tool_progress` | `tool_call_id?, name, message` | long calls (shell) |
 | `tool_finished` | `tool_call_id, name, is_error, duration_ms, output, executed?, status?` | sent as soon as the call is done, without waiting for the other calls of its round: several calls finish in the order they end. The history sent to the model keeps the order of the calls. `executed: false` for a call refused, denied or blocked before it ran; `status` is `success`, `failure`, `timed_out`, `cancelled` or `running` (a background command still going) |
-| `approval_requested` | `approval{approval_id, tool_call_id, tool, level, description, input, preview?, agent_id?}` | `preview.files[{path, kind, before_sha256, diff, added, removed}]` |
-| `approval_resolved` | `approval_id, tool_call_id, decision, by` | `decision`: `allow`, `allow_for_session`, `deny`; `by`: `user`, `session`, `non_interactive`, `cancelled` |
+| `approval_requested` | `approval{approval_id, tool_call_id, tool, level, description, input, preview?, agent_id?, policy_revision?}` | the engine said to ask. `preview.files[{path, kind, before_sha256, diff, added, removed}]`; `policy_revision`: the policy revision that asked |
+| `approval_resolved` | `approval_id, tool_call_id, decision, by` | `decision`: `allow` (this call only), `deny`; `by`: `user`, `non_interactive`, `cancelled` |
+| `permission_policy_changed` | `policy{profile, custom, chosen}, revision` | the session's policy was changed by a person; calls decided from now on follow `revision`. See [Permissions](#permissions) |
 | `edit_applied` | `tool_call_id, tool, files[{path, kind, added, removed, binary?, absolute?, patch?, patch_truncated?}], agent_id?, changeset_id?` | a change was applied to the session's workspace: a successful `Write`, `Edit` or `ApplyPatch` of the session agent, or of a sub-agent working in that workspace (`agent_id`), or a ChangeSet applied (`changeset_id`); never for a denial, a refusal or a failure. Counts are those of the complete diff; one event per change |
 | `memory_recalled` | `items, tokens, omitted, budget` | what went into the system prompt |
 | `context` | `status{context_used{tokens, provenance, …}, context_window, input_limit, totals, …}` | `provenance`: `measured`, `counted`, `mixed`, `estimated` |
@@ -294,7 +296,10 @@ Events (`type`):
 | `model_changed` | `model, reasoning?, effective_reasoning?, applies` | `next_turn` during a run, `next_run` otherwise |
 | `reasoning_changed` | `model, requested?, previous?, previous_label?, effective?, effective_label?, applies` | answer to `set_reasoning`: the effective profile before and after (ids and configured labels); `requested` absent = the model's default |
 | `context_cleared` | `messages_removed` | |
+| `history_revised` | `user_index, messages_removed` | answer to `revise`: the active context was cut before the user message at `user_index` (its index among the user-role messages); the new run's `run_started` follows. The removed context is kept as a snapshot and in the raw history |
 | `session_saved` | | |
+| `title_changed` | `title` | the model named the session from its first prompt (the first title is that prompt, shortened); only when the frontend enables generated titles, and never over a rename |
+| `plan_updated` | `plan{version, revision, todos[{content, status, activeForm}], explanation?, updated_at}` | the conversation's plan (TodoWrite) was saved: the complete state, whose `revision` orders it against the session state and other updates; `status`: `pending`, `in_progress`, `completed`; the envelope's `run_id` is the run whose tool call made the update, and the event comes before that call's `tool_finished`; never sent for a refused update |
 | `notice` | `message` | retries, configuration diagnostics, continuations after a cut answer, no-progress warnings |
 | `run_finished` | `outcome, failure?, error?, termination?, text, turns, approvals_unsatisfied?` | **exactly one per run**; `outcome`: `succeeded`, `incomplete`, `failed`, `cancelled`; `failure`: `approval_required`, `error`; `termination.kind`: `completed`, `output_truncated` (`continuations`), `no_progress` (`repeats`), `content_filtered`, `empty_response`; a kind stored by an earlier version (`max_turns`, before 0.4.8) is kept as stored and is a historical end, never `completed`; `turns`: generation turns that got a response |
 | `memory_maintenance_started` | | after `run_finished` |
@@ -311,7 +316,7 @@ Events (`type`):
 | `agent_control_result` | `action, ok, text` | answer to `agent_control` |
 | `job_started` / `job_output` / `job_finished` | `job_id, agent_id, root_run_id, command, cwd, pid` / `job_id, stdout_bytes, stderr_bytes` / `job_id, state, code?, signal?, duration_ms, logs` | background commands; `job_output` carries counts, never the output |
 | `skill_activated` | `agent_id?, name, source, revision, origin` | a skill's instructions are in an agent's context; `origin`: `user`, `model`, `profile`, `restored`; `agent_id` absent for the session agent |
-| `skill_activation_failed` | `agent_id?, name, reason` | not activated (refused, too large, invalid…), or suspended on restoration |
+| `skill_activation_failed` | `agent_id?, name, reason` | not activated (refused, too large, invalid…), or withdrawn because its skill was removed, reinstalled or changed |
 | `skills` | `listing{generation, project_decision, entries[{name, source, state, description?, path?, revision?, details}], total, page, diagnostics?, catalog_omitted}` | answer to `list_skills` / `reload_skills`; `state`: `available`, `active`, `shadowed`, `invalid`, `incompatible`, `pending_approval`, `refused`, `disabled` |
 | `skills_trust_requested` | `project, sources[{source, path, skills}]` | project skills wait for a person's decision (interactive; once per session) |
 | `skills_trust_resolved` | `project, allowed, by` | `by`: `user` or `caller` (`--trust-project-skills`) |
@@ -320,21 +325,28 @@ Events (`type`):
 A short run:
 
 ```text
-{"schema":6,"session_id":"…","seq":1,"at":…,"type":"session_opened","working_dir":"/p","model":"demo/scripted","resumed":false,"message_count":0,"warnings":[]}
-{"schema":6,"session_id":"…","run_id":"run_…","seq":2,"at":…,"type":"run_started","prompt":"Find the README","attachments":[],"model":"demo/scripted"}
-{"schema":6,…,"seq":3,"type":"tool_started","tool_call_id":"call_0","name":"Glob","input":{"pattern":"*.md"}}
-{"schema":6,…,"seq":4,"type":"tool_finished","tool_call_id":"call_0","name":"Glob","is_error":false,"duration_ms":3,"output":"README.md","executed":true,"status":"success"}
-{"schema":6,…,"seq":9,"type":"text_delta","text":"I listed the Markdown files. …"}
-{"schema":6,…,"seq":14,"type":"run_finished","outcome":"succeeded","termination":{"kind":"completed"},"text":"…","turns":3}
+{"schema":8,"session_id":"…","seq":1,"at":…,"type":"session_opened","working_dir":"/p","model":"demo/scripted","resumed":false,"message_count":0,"warnings":[]}
+{"schema":8,"session_id":"…","run_id":"run_…","seq":2,"at":…,"type":"run_started","prompt":"Find the README","attachments":[],"model":"demo/scripted"}
+{"schema":8,…,"seq":3,"type":"tool_started","tool_call_id":"call_0","name":"Glob","input":{"pattern":"*.md"}}
+{"schema":8,…,"seq":4,"type":"tool_finished","tool_call_id":"call_0","name":"Glob","is_error":false,"duration_ms":3,"output":"README.md","executed":true,"status":"success"}
+{"schema":8,…,"seq":9,"type":"text_delta","text":"I listed the Markdown files. …"}
+{"schema":8,…,"seq":14,"type":"run_finished","outcome":"succeeded","termination":{"kind":"completed"},"text":"…","turns":3}
 ```
 
 No API key, authentication header or secret appears in any event. The
 views the frontends read do not carry them.
 
+The state a frontend reads on demand (`Controller::snapshot`, which the
+desktop application serialises) has a `plan` field: the complete plan, with
+`revision` 0 before any update. It is the same state as the last
+`plan_updated`. Older engines do not send `plan`; a frontend treats its
+absence as no plan.
+
 ### Commands (for frontends)
 
 ```json
 {"type":"submit","prompt":{"blocks":[{"kind":"text","text":"…"},{"kind":"file","path":"src/a b.rs"}]}}
+{"type":"revise","user_index":1,"original":"Fix the parser","prompt":{"blocks":[{"kind":"text","text":"Fix the lexer"}]}}
 {"type":"cancel"}
 {"type":"set_model","model":"p/m","reasoning":"deep"}
 {"type":"set_reasoning","profile":"medium"}
@@ -342,7 +354,8 @@ views the frontends read do not carry them.
 {"type":"compact"}
 {"type":"clear_context"}
 {"type":"resume","session_id":"…"}
-{"type":"approve","approval_id":"ap_…","decision":"allow_for_session"}
+{"type":"approve","approval_id":"ap_…","decision":"allow"}
+{"type":"set_permission_policy","policy":{"profile":"custom","custom":{"read":"allow","write":"ask","execute":"deny","network":"ask","tools":{"WebFetch":"allow"}},"chosen":true}}
 {"type":"search","text":"needle","regex":false}
 {"type":"list_agent_profiles","query":"review","page":0}
 {"type":"reload_agent_profiles"}
@@ -374,12 +387,28 @@ Rules during a run:
 * `submit`, `resume`, `compact` and `clear_context` are refused
   (`command_rejected`). A second prompt never starts silently in
   parallel.
+* `revise {user_index, original, prompt}` replaces a past user message and
+  runs again from it. `user_index` is the message's index among the
+  user-role messages of the active history; `original` is its text, as the
+  person saw it (compared trimmed). The active context is cut before that
+  message: the context as it was is kept as a snapshot, and stays in the
+  raw history. Then `history_revised` is sent and the run follows as for a
+  `submit`. A skill activated only in the removed part is dropped from the
+  session's ledger (a sub-agent profile's skills stay).
+  Refused (`command_rejected`, nothing changed) while anything runs; when
+  that message is not in the active history with that text (the history
+  changed, or the message was compacted or cleared away, or it is a tool
+  result); and for the reasons of `submit`.
 * `list_agent_profiles`, `reload_agent_profiles` and `agent_control` are
   accepted at any time; a reload does not change a running sub-agent.
   `cancel` while idle cancels the sub-agents still running.
 * `list_skills`, `reload_skills` and `trust_project_skills` are accepted at
   any time; a reload does not change instructions already active. A
   `submit` whose `prompt.skills` cannot all be used is refused.
+* `set_permission_policy` is accepted at any time and answered by
+  `permission_policy_changed`. It is stored with the session first. A
+  request already waiting for a person is not answered by it; calls decided
+  afterwards follow the new revision.
 * `search` is read-only and accepted at any time; it uses the workspace's
   shared code engine (the one the agents' `CodeScout` uses) and never
   starts a language server (see `docs/semantic.md`).
@@ -404,18 +433,77 @@ The durable session store is the authority on the conversation. The
 frontends keep no conversation store of their own. On resume they read the
 stored history.
 
-## Approvals
+## Permissions
 
-The policy belongs to the engine and is the same for the desktop
-application and the headless mode. It is configured in `[permissions]`:
+One engine decides every tool call, the same way in the desktop application
+and in the headless mode. Each session has one **policy**: a profile and,
+for the CUSTOM profile, its rules. Nothing is read from `bricks.toml`.
 
-* by tool name first (`[permissions.tools]`), then by permission level
-  (`read_only`, `write`, `execute`, `dangerous`, `none`), then `default`;
-* actions: `allow`, `ask`, `deny`;
-* defaults: reading is allowed, writing and executing are asked;
-  `forbidden` tools are always refused.
+### Profiles
 
-When a call must be asked about:
+Every call falls in one of four classes: **read** (reads and searches of
+the workspace), **write** (file changes), **execute** (commands and
+sub-agents) and **network** (the web tools). A tool's permission level
+gives its class; a `forbidden` tool is refused in every profile.
+
+| profile | read | write | execute | network |
+|---|---|---|---|---|
+| `ask` | allowed | asked | asked | asked |
+| `execute` | allowed | allowed | allowed | allowed |
+| `custom` | the effect of its class, or of its tool | the same | the same | the same |
+
+* **ASK** lets reads and searches run and asks about everything else.
+* **EXECUTE** runs everything without asking.
+* **CUSTOM** gives an effect (`allow`, `ask` or `deny`) per class and per
+  tool. A tool's own rule wins over its class. It is the only profile
+  that refuses calls outright.
+* A session whose policy was never chosen behaves as ASK, and says so in
+  the reason shown for each decision.
+
+### Choosing a policy
+
+* **Desktop application.** Settings › General › « Permissions des nouvelles
+  conversations » sets the policy new conversations start from. While a
+  conversation's policy is not chosen, a first-choice bar above the
+  composer offers the profiles; the choice applies to that conversation and
+  becomes the default. The `/config` view edits the conversation's policy,
+  and `/tools` shows each tool's decision with its reason.
+* **Command line.** `--permissions ask` or `--permissions execute` sets the
+  profile of the run's session. Without it, the session keeps its own policy,
+  or starts from the default chosen in Bricks (none chosen: as `ask`).
+  CUSTOM rules are set in Bricks.
+
+### Storage
+
+* The default for new sessions is stored in `<bricks_home>/permissions.json`
+  (`~/.bricks/permissions.json`), chosen once. An unreadable file is an error
+  and never a silent allow: the session starts with no policy chosen (as
+  ASK) and a warning says why.
+* Each new session copies that default into its own `permissions.json`, in
+  its files folder, and keeps it: a later change of the default does not
+  reach it. A person can change a session's policy at any time. A stored
+  session policy that cannot be read stops the session from opening.
+* Sub-agents use their session's policy. They never get more.
+
+### Revisions
+
+Each change of a session's policy gets a new revision. A verdict records the
+revision it was made under (`approval.policy_revision` in the events). A
+request already waiting for a person is not answered by a change: calls
+decided after the change follow the new revision.
+
+### Migrating from `[permissions]`
+
+The `[permissions]` section of `bricks.toml` is no longer read. Its rules,
+denials included, are not applied; the file reports it as a diagnostic.
+Delete the section, then choose the profile in Bricks (or pass
+`--permissions` on the command line). The rules you need are set again as
+CUSTOM rules, per class and per tool, in the conversation's `/config` view or
+in Settings.
+
+### Approvals
+
+When a call the policy says to ask about is waiting:
 
 * **File changes** (`Write`, `Edit`, `ApplyPatch`). The tool
   computes the change without writing: files, kind, diff, and the SHA-256
@@ -429,8 +517,9 @@ When a call must be asked about:
 * **Shell commands and MCP calls** have no file preview: their effects
   cannot be shown as a diff, and none is pretended. The approval shows the
   command and its context.
-* **Allow for the session** applies to later calls of the same tool in the
-  session.
+* **An answer covers that call only.** There is no "allow for the session":
+  a later call of the same tool is decided by the policy again. To allow a
+  tool for good, change the policy (a CUSTOM rule for the tool).
 
 ## The desktop application
 
@@ -447,7 +536,8 @@ registry (`bricks_agent::control::slash`).
   the session's own folder and project, its model and reasoning profile and
   its compaction snapshots. See [Sessions and resume](#sessions-and-resume).
 * **Approvals.** A pending approval shows the change before anything is
-  written. The policy is the one of [Approvals](#approvals).
+  written, with two answers: « Autoriser » (this call) and « Refuser ». The
+  policy is the one of [Permissions](#permissions).
 * **Runs and files.** Each run ends with a card: its duration, the files it
   changed (the sum of the applied edit operations, not a Git diff) and its
   commands, both closed by default. « Copier » copies the whole answer of a
@@ -455,6 +545,75 @@ registry (`bricks_agent::control::slash`).
   with one tab per file: Source, Aperçu for Markdown files, and Modifications
   (each recorded patch, never merged). A file name in the conversation opens
   it there; paths stay in the project folder or the agent workspace.
+* **Images.** A successful `ViewImage` call shows a thumbnail under its line:
+  the image the model received, read from the conversation's history. A
+  reopened conversation shows the thumbnail again, and no longer shows the
+  text or images of a tool result as a message of the person.
+* **Plan.** A collapsible block under the conversation shows the plan
+  (TodoWrite): done out of total, the steps, and the last explanation. It
+  follows `plan_updated` and only adopts a newer revision. A reopened
+  conversation shows the plan of its snapshot.
+* **Icons.** The mention palette, attachments, edit and change rows, the run
+  card, the agent inspector, the reader tabs, the file view and the headers
+  of diffs and code blocks show a file or folder icon from a local catalogue
+  (`apps/bricks-desktop/public/file-icons`, rules in
+  `src/lib/features/file-icons/rules.json`): nothing is fetched at run time.
+  A name that matches no rule gets a generic icon.
+* **Search.** The magnifier beside « Nouvelle conversation » opens a dialog
+  that searches the titles and the messages of every project, with a
+  debounced query; a result opens its conversation. Escape closes the dialog.
+  It is not the `/search` command, which searches the text of the workspace
+  (see Commands).
+* **Editing a sent message.** A message of a conversation has « Modifier »
+  (not for a typed command such as `/skill …`, and disabled while a run
+  works) and « Copier » (the message's own text). « Enregistrer et relancer »
+  is enabled when the text is not empty and no run works; it sends a
+  `revise` for that message, whose index comes from its run's record or from
+  the stored history. « Annuler » leaves the message as it was. An index
+  that cannot be found is refused, with « Ce message ne peut pas être modifié :
+  rouvrez la conversation. ».
+  After a revision, the run records, the run labels and the attachment
+  records of the replaced messages are moved, not deleted, to
+  `desktop/run-records/<session>.revised.jsonl`,
+  `desktop/run-labels/<session>.revised.jsonl` and
+  `sessions/<session>.files/attachments.revised.jsonl`. Deleting a
+  conversation removes its `<session>.jsonl` in the two `desktop/` folders,
+  but not the two `<session>.revised.jsonl` files there (the attachments file
+  goes with its `.files` folder).
+* **Working line.** While a run works, the timeline ends with « Travaille
+  depuis 1m 29s »: the time since the run's start in the engine (approval
+  waits included), in whole seconds. Without a known start, « Travaille… ».
+* **Copying a response.** « Copier » of a response sits after the run's
+  summary (the « bilan »). It is offered only for a complete response with
+  some text.
+* **Projects with a missing folder.** The project stays in the list with a
+  red folder-with-cross icon and its conversations: those recorded at exactly
+  its path (a vanished folder cannot be resolved, so the path is compared as
+  it was written). Opening one of them, « + », a search result or
+  the first message asks for the folder first: the dialog « Dossier de travail
+  introuvable » offers « Choisir un dossier… » (the native picker) and
+  « Annuler ». Choosing a folder moves the project there (`project_relocate`):
+  it keeps its id, and each stored conversation recorded in the old folder
+  gets the new one as its working folder. The move is refused while one of its conversations
+  runs, and when the folder is another project's (a conflict). Its open
+  conversations are closed; they open again on demand, in the new folder.
+  A journal in `<home>/desktop/relocations/<project id>.json` is finished or
+  undone at the next start. File paths written in the transcripts are not
+  rewritten. `bricks run --session` does not move a project: see
+  [Sessions and resume](#sessions-and-resume).
+* **Sidebar.** A long conversation title in the list fades out over its last
+  pixels instead of ending with an ellipsis; the title in the top bar still
+  ends with one. Projects are spaced further apart.
+* **Window (macOS).** The window has an overlay title bar
+  (`src-tauri/tauri.macos.conf.json`: `titleBarStyle` Overlay, `hiddenTitle`,
+  traffic lights at x 18, y 26). The top bar is 52 px high
+  (`TOP_BAR` in `src/lib/layout/constants.ts`) and leaves 78 px on its left for
+  the system buttons, except in full screen. Its empty areas drag the window;
+  its controls do not.
+* **Scrolling.** `html` and `body` do not scroll and do not bounce
+  (`overscroll-behavior: none`). The scrollable panes (timeline, changes,
+  reader, search results, inspector, sidebar lists) contain their own
+  overscroll (`overscroll-contain`).
 
 ### Commands
 
@@ -506,9 +665,9 @@ registry (`bricks_agent::control::slash`).
   a `git diff`. They come from `edit_applied` only: `Write`, `Edit`,
   `ApplyPatch` that succeeded, a sub-agent's in the same
   workspace, a ChangeSet applied (once). Not counted: denied, refused or
-  failed calls, previews, files changed by `Bash`, MCP tools,
-  `NotebookEdit` (no preview) or by hand, a worktree's writes before their
-  ChangeSet is applied, binary files' lines. A new or resumed session starts
+  failed calls, previews, files changed by `Bash`, MCP tools or by hand, a
+  worktree's writes before their ChangeSet is applied, binary files' lines.
+  A new or resumed session starts
   from `+0 −0`.
 
 ### Attachments
@@ -555,8 +714,8 @@ override B's folder. The session is read first: the settings of the
 folder you started from are not loaded for it (a broken `bricks.toml`
 there does not prevent resuming B). Everything B needs is prepared before
 anything is switched: when that fails, the open session stays as it was
-and the reason is shown. Approvals "for the session" stay with the
-session they were given in; the previous session's background jobs stop.
+and the reason is shown. Each session keeps its own permission policy: the
+one of B is B's, and the previous session's background jobs stop.
 
 `/resume` (with or without an id) and `bricks run --session <id>`
 restore:
@@ -570,7 +729,10 @@ restore:
 
 A working directory that disappeared, or a model no longer in
 `providers.toml`, is reported and nothing is resumed: there is no fallback
-to the current folder. No replacement is chosen silently; `--model` picks
+to the current folder. In the desktop application, a project whose folder
+disappeared can be moved to its new folder, and its conversations follow it
+(see [The desktop application](#the-desktop-application)); this command does
+not move anything. No replacement is chosen silently; `--model` picks
 one explicitly. An older session without recorded settings resumes in the
 current project folder with the selected model, and a warning says which.
 
@@ -579,7 +741,8 @@ commands: processes, background tasks and shell variables of the old one are
 not restored.
 
 Deleting a session (`Memory::delete`) removes its history, raw history,
-snapshots, saved tool outputs and `session.json` (its settings).
+snapshots, saved tool outputs, `session.json` (its settings) and its files
+folder, which holds the plan (`plan.json`).
 
 ## Long-term memory
 

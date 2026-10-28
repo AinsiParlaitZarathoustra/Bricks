@@ -40,12 +40,10 @@ api_model = "vendor-flash"                    # sent to the server exactly as wr
 input_modalities = ["text", "image"]
 output_modalities = ["text"]
 streaming = true
-tool_calls = true
 
 [providers.models.limits]
-max_input_tokens = 96000
+max_input_tokens = 96000                      # usable with the maximum output reserved
 max_output_tokens = 32000
-context_window_tokens = 128000                # optional: window shared by input and output
 
 [providers.models.pricing]                    # USD per million tokens, as exact decimals
 currency = "USD"
@@ -76,7 +74,6 @@ protocol = "responses"                        # overrides the provider's protoco
 input_modalities = ["text"]
 output_modalities = ["text"]
 streaming = true
-tool_calls = true
 
 [providers.models.limits]
 max_input_tokens = 64000
@@ -111,7 +108,6 @@ input_modalities = ["text", "image", "audio", "document"]
 document_mime_types = ["application/pdf"]     # required when `document` is an input modality
 output_modalities = ["text"]
 streaming = true
-tool_calls = true
 remove_parameters = ["/temperature"]          # the engine sets one; this server rejects it
 
 [providers.models.limits]
@@ -156,7 +152,6 @@ input_modalities = ["text", "image", "document"]
 document_mime_types = ["application/pdf", "text/*"]
 output_modalities = ["text"]
 streaming = true
-tool_calls = true
 
 [providers.models.limits]
 max_input_tokens = 400000
@@ -201,7 +196,6 @@ input_modalities = ["text", "image", "document"]
 document_mime_types = ["application/pdf", "text/plain"]
 output_modalities = ["text"]
 streaming = true
-tool_calls = true
 
 [providers.models.limits]
 max_input_tokens = 200000
@@ -255,7 +249,6 @@ id = "coder"
 name = "Local coder"
 api_model = "your-local-model:7b"
 streaming = true
-tool_calls = true
 
 [providers.models.limits]
 max_input_tokens = 32000
@@ -284,7 +277,6 @@ id = "flash-chat"
 name = "Flash (chat completions)"
 api_model = "multi-flash"
 streaming = true
-tool_calls = true
 
 [providers.models.limits]
 max_input_tokens = 128000
@@ -307,7 +299,6 @@ name = "Flash (responses)"
 api_model = "multi-flash"
 protocol = "responses"
 streaming = true
-tool_calls = true
 
 [providers.models.limits]
 max_input_tokens = 128000
@@ -319,7 +310,6 @@ name = "Flash (messages)"
 api_model = "multi-flash"
 protocol = "anthropic_messages"
 streaming = true
-tool_calls = true
 
 [providers.models.limits]
 max_input_tokens = 128000
@@ -347,7 +337,6 @@ id = "deployed"
 name = "Deployed model"
 api_model = "my-deployment"
 streaming = true
-tool_calls = true
 
 [providers.models.limits]
 max_input_tokens = 128000
