@@ -48,6 +48,16 @@ impl StreamAccumulator {
         }
     }
 
+    /// The tool call whose block closed at `index`: `(id, name, input)`.
+    pub fn tool_use(&self, index: usize) -> Option<(String, String, serde_json::Value)> {
+        match self.content_blocks.get(&index)? {
+            ContentBlock::ToolUse { id, name, input } => {
+                Some((id.clone(), name.clone(), input.clone()))
+            }
+            _ => None,
+        }
+    }
+
     pub fn process_event(&mut self, event: StreamEvent) {
         match event {
             StreamEvent::MessageStart { id, model, usage } => {

@@ -10,7 +10,11 @@ selection: string, name: string, api_model: string,
 /**
  * Model-level override, if any.
  */
-protocol: string | null, endpoint: string | null, input_modalities: Array<string>, output_modalities: Array<string>, streaming: boolean, tool_calls: boolean, max_input_tokens: number, max_output_tokens: number, reasoning_default: string | null, profiles: Array<ModelProfileView>, priced: boolean, 
+protocol: string | null, endpoint: string | null, input_modalities: Array<string>, output_modalities: Array<string>, streaming: boolean, tool_calls: boolean, 
+/**
+ * Tools start while the answer still streams.
+ */
+async_tool_calls: boolean, max_input_tokens: number, max_output_tokens: number, reasoning_default: string | null, profiles: Array<ModelProfileView>, priced: boolean, 
 /**
  * MIME types of the documents the model accepts (`document` input).
  */

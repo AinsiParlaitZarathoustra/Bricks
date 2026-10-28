@@ -188,6 +188,8 @@ pub struct ResolvedModel {
     pub remove_parameters: Vec<String>,
     pub reasoning: ReasoningConfig,
     pub pricing: Option<Pricing>,
+    /// Tools start while the answer still streams (`async_tool_calls`).
+    pub async_tool_calls: bool,
 }
 
 impl std::fmt::Debug for ResolvedModel {
@@ -294,6 +296,7 @@ impl ResolvedModel {
             parameters: model.parameters.clone(),
             remove_parameters: model.remove_parameters.clone(),
             reasoning: model.reasoning.clone(),
+            async_tool_calls: model.async_tool_calls,
             pricing: model
                 .pricing
                 .as_ref()

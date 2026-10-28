@@ -19,4 +19,8 @@ reasoning_default: string | null, clear_reasoning_default: boolean,
  *.3: replaces the whole profile list (ids unique; the
  * default must stay one of them or be cleared in the same patch).
  */
-profiles: Array<ReasoningProfileEdit> | null, };
+profiles: Array<ReasoningProfileEdit> | null, 
+/**
+ * Tools start while the answer still streams; `false` removes the key.
+ */
+async_tool_calls: boolean | null, };

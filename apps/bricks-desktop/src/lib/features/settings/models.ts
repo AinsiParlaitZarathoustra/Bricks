@@ -203,6 +203,8 @@ export interface ModelForm {
 	 * valid choice; leaving the choice open is not.
 	 */
 	defaultPending: boolean;
+	/** Tools start while the answer still streams. */
+	asyncToolCalls: boolean;
 }
 
 export function modelForm(model: ModelView): ModelForm {
@@ -218,7 +220,8 @@ export function modelForm(model: ModelView): ModelForm {
 		priceCache: model.pricing?.cache_read ?? '',
 		profiles: model.profiles.map(profileDraft),
 		reasoningDefault: model.reasoning_default,
-		defaultPending: false
+		defaultPending: false,
+		asyncToolCalls: model.async_tool_calls
 	};
 }
 
@@ -235,7 +238,8 @@ export function newModelForm(): ModelForm {
 		priceCache: '',
 		profiles: [],
 		reasoningDefault: null,
-		defaultPending: false
+		defaultPending: false,
+		asyncToolCalls: false
 	};
 }
 
@@ -455,7 +459,8 @@ export function buildModelPatch(
 		pricing: changedPricing(model, form),
 		reasoning_default: reasoningChanged && form.reasoningDefault !== null ? form.reasoningDefault : null,
 		clear_reasoning_default: reasoningChanged && form.reasoningDefault === null,
-		profiles
+		profiles,
+		async_tool_calls: form.asyncToolCalls === model.async_tool_calls ? null : form.asyncToolCalls
 	};
 }
 
@@ -519,7 +524,8 @@ export function buildModelCreatePatch(form: ModelForm, profiles: ReasoningProfil
 		pricing: pricingOf(form),
 		reasoning_default: form.reasoningDefault,
 		clear_reasoning_default: false,
-		profiles: profiles && profiles.length > 0 ? profiles : null
+		profiles: profiles && profiles.length > 0 ? profiles : null,
+		async_tool_calls: form.asyncToolCalls ? true : null
 	};
 }
 
@@ -536,7 +542,9 @@ export function isEmptyProviderPatch(patch: ProviderPatch): boolean {
 }
 
 export function isEmptyModelPatch(patch: ModelPatch): boolean {
-	return Object.values(patch).every((value) => value === null || value === false);
+	// `false` turns asynchronous tool calls off: a change, unlike the other flags.
+	const { async_tool_calls, ...rest } = patch;
+	return async_tool_calls === null && Object.values(rest).every((value) => value === null || value === false);
 }
 
 // ─── Deletion and write outcomes ─────────────────────────────────────────────

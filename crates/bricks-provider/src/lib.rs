@@ -241,6 +241,13 @@ pub trait Provider: Send + Sync {
         None
     }
 
+    /// Each tool of an answer may start as soon as its call is complete in
+    /// the stream, while the model still writes the rest
+    /// (`async_tool_calls` in the model's configuration).
+    fn async_tool_calls(&self) -> bool {
+        false
+    }
+
     /// Send a streaming completion request.
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionStream>;
 
@@ -272,6 +279,9 @@ impl Provider for Box<dyn Provider> {
     }
     fn request_identity(&self, options: &ProviderOptions) -> Option<RequestIdentity> {
         (**self).request_identity(options)
+    }
+    fn async_tool_calls(&self) -> bool {
+        (**self).async_tool_calls()
     }
     async fn complete(&self, request: CompletionRequest) -> Result<CompletionStream> {
         (**self).complete(request).await

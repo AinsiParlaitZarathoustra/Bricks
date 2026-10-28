@@ -106,6 +106,7 @@ fn provider_view(p: &ProviderConfig, has_credentials: bool) -> ProviderView {
                 output_modalities: m.output_modalities.iter().map(|x| x.to_string()).collect(),
                 streaming: m.streaming,
                 tool_calls: m.tool_calls,
+                async_tool_calls: m.async_tool_calls,
                 max_input_tokens: m.limits.max_input_tokens,
                 max_output_tokens: m.limits.max_output_tokens,
                 reasoning_default: m.reasoning.default.clone(),

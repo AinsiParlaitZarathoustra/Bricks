@@ -277,6 +277,8 @@ pub(crate) struct StreamState {
     message_id: String,
     model: String,
     started: bool,
+    /// The tool calls already went out: `(emitted, executable, rejected)`.
+    tools_emitted: Option<(usize, usize, Vec<String>)>,
 }
 
 impl StreamState {
@@ -367,7 +369,9 @@ impl StreamState {
             });
         }
 
-        if let Some(calls) = delta["tool_calls"].as_array() {
+        if let Some(calls) = delta["tool_calls"].as_array()
+            && self.tools_emitted.is_none()
+        {
             for tc in calls {
                 self.on_tool_delta(tc);
             }
@@ -376,7 +380,53 @@ impl StreamState {
         if let Some(usage) = json["usage"].as_object() {
             self.usage = Some(parse_usage(&Value::Object(usage.clone())));
         }
+
+        // The calls are complete once the server says how the answer ended:
+        // they go out now, before the usage chunk and `[DONE]`, so the runner
+        // can start them. A cut or filtered answer keeps them for the end.
+        if matches!(
+            self.final_stop,
+            Some(StopReason::ToolUse | StopReason::EndTurn)
+        ) && !self.tool_calls.is_empty()
+            && self.tools_emitted.is_none()
+        {
+            self.emit_tools(&mut out);
+        }
         out
+    }
+
+    /// Emit the tool calls, once. A call the dispatcher cannot route would
+    /// wedge the conversation (an empty id is echoed back as
+    /// `"tool_call_id": ""` and rejected): it is counted as rejected instead.
+    fn emit_tools(&mut self, out: &mut Vec<StreamEvent>) {
+        let mut emitted = 0usize;
+        let mut executable = 0usize;
+        let mut rejected: Vec<String> = Vec::new();
+        for (slot, (id, name, args)) in &self.tool_calls {
+            if id.is_empty() || name.is_empty() {
+                rejected.push(format!(
+                    "slot {slot}: id={id:?} name={name:?} arguments={args:?}"
+                ));
+                continue;
+            }
+            let index = TOOL_BASE_INDEX + slot;
+            out.push(StreamEvent::ContentBlockStart {
+                index,
+                block_type: "tool_use".into(),
+                id: Some(id.clone()),
+                name: Some(name.clone()),
+            });
+            out.push(StreamEvent::InputJsonDelta {
+                index,
+                partial_json: args.clone(),
+            });
+            out.push(StreamEvent::ContentBlockStop { index });
+            emitted += 1;
+            if args_are_executable(args) {
+                executable += 1;
+            }
+        }
+        self.tools_emitted = Some((emitted, executable, rejected));
     }
 
     fn on_tool_delta(&mut self, tc: &Value) {
@@ -424,36 +474,10 @@ impl StreamState {
                 usage: None,
             });
         }
-        let mut emitted = 0usize;
-        let mut executable = 0usize;
-        let mut rejected: Vec<String> = Vec::new();
-
-        for (slot, (id, name, args)) in &self.tool_calls {
-            // A call the dispatcher cannot route would wedge the conversation:
-            // an empty id is echoed back as `"tool_call_id": ""` and rejected.
-            if id.is_empty() || name.is_empty() {
-                rejected.push(format!(
-                    "slot {slot}: id={id:?} name={name:?} arguments={args:?}"
-                ));
-                continue;
-            }
-            let index = TOOL_BASE_INDEX + slot;
-            out.push(StreamEvent::ContentBlockStart {
-                index,
-                block_type: "tool_use".into(),
-                id: Some(id.clone()),
-                name: Some(name.clone()),
-            });
-            out.push(StreamEvent::InputJsonDelta {
-                index,
-                partial_json: args.clone(),
-            });
-            out.push(StreamEvent::ContentBlockStop { index });
-            emitted += 1;
-            if args_are_executable(args) {
-                executable += 1;
-            }
+        if self.tools_emitted.is_none() {
+            self.emit_tools(&mut out);
         }
+        let (emitted, executable, rejected) = self.tools_emitted.clone().unwrap_or_default();
 
         // Report dropped calls in-band so valid siblings survive: an Error
         // event would discard the whole turn.
@@ -596,6 +620,63 @@ mod tests {
             acc.process_event(e);
         }
         acc.into_response()
+    }
+
+    /// Indexes of the tool blocks closed by these chunks, in order.
+    fn tool_stops(state: &mut StreamState, chunks: &[&str]) -> Vec<usize> {
+        chunks
+            .iter()
+            .flat_map(|c| state.on_data(c))
+            .filter_map(|e| match e {
+                StreamEvent::ContentBlockStop { index } if index >= TOOL_BASE_INDEX => Some(index),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn tool_calls_go_out_at_finish_reason_once() {
+        let mut state = StreamState::new();
+        let calls = r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"a","function":{"name":"Read","arguments":"{}"}},{"index":1,"id":"b","function":{"name":"Grep","arguments":"{\"p\":1}"}}]}}]}"#;
+        assert!(
+            tool_stops(&mut state, &[calls]).is_empty(),
+            "not before finish_reason"
+        );
+        let end = r#"{"choices":[{"delta":{},"finish_reason":"tool_calls"}]}"#;
+        assert_eq!(
+            tool_stops(&mut state, &[end]).len(),
+            2,
+            "both, with finish_reason"
+        );
+        let usage = r#"{"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":1}}"#;
+        assert!(tool_stops(&mut state, &[usage, "[DONE]"]).is_empty());
+        let rest = state.finish();
+        assert!(
+            !rest
+                .iter()
+                .any(|e| matches!(e, StreamEvent::ContentBlockStart { .. })),
+            "never emitted twice"
+        );
+        assert!(rest.iter().any(|e| matches!(
+            e,
+            StreamEvent::MessageDelta {
+                stop_reason: Some(StopReason::ToolUse),
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn a_cut_answer_keeps_its_calls_for_the_end() {
+        let mut state = StreamState::new();
+        let cut = r#"{"choices":[{"delta":{"tool_calls":[{"index":0,"id":"a","function":{"name":"Read","arguments":"{\"pa"}}]},"finish_reason":"length"}]}"#;
+        assert!(tool_stops(&mut state, &[cut]).is_empty());
+        assert!(
+            state
+                .finish()
+                .iter()
+                .any(|e| matches!(e, StreamEvent::ContentBlockStop { .. }))
+        );
     }
 
     #[test]

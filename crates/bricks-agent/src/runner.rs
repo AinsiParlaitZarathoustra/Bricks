@@ -523,6 +523,70 @@ struct FinishedCall {
     executed: bool,
 }
 
+/// Position of a call started while its answer still streams, until the
+/// answer is complete.
+const UNPLACED: usize = usize::MAX;
+
+/// One call of an answer, decided then run. `index` is its position in the
+/// answer's calls, or [`UNPLACED`] for a call started while the answer still
+/// streams.
+#[allow(clippy::too_many_arguments)]
+fn call_future<'a>(
+    agent: &'a Agent,
+    tool_ctx: &ToolContext,
+    permissions: &Arc<dyn PermissionPolicy>,
+    registered_tool_names: &[String],
+    index: usize,
+    (tool_id, tool_name, tool_input): (String, String, serde_json::Value),
+    turn: u32,
+    cumulative_cost: f64,
+    message_count: usize,
+) -> futures::future::BoxFuture<'a, FinishedCall> {
+    // Its own view: the call id never leaks to a sibling.
+    let tool_ctx = tool_ctx.for_call(&tool_id);
+    let permission_policy = Arc::clone(permissions);
+    let hooks = agent.hooks.clone();
+    let registered_tool_names = registered_tool_names.to_vec();
+    let tool_ref = agent.tool_by_name(&tool_name);
+    Box::pin(async move {
+        let start = Instant::now();
+        let run = match tool_ref {
+            Some(tool) => {
+                let site = CallSite {
+                    tool_id: &tool_id,
+                    tool_ctx: &tool_ctx,
+                    permissions: permission_policy.as_ref(),
+                    hooks: &hooks,
+                    turn,
+                    cumulative_cost,
+                    message_count,
+                };
+                decide_and_run(&site, tool, &tool_name, tool_input.clone()).await
+            }
+            // F-A15: weak models hallucinate tool names constantly, and
+            // "Unknown tool: X" gave them nothing to correct toward.
+            None => CallRun::not_run(bricks_tools::tool_feedback::not_found(
+                "tool",
+                &tool_name,
+                &registered_tool_names,
+                "Use one of the available tools above, with its exact name.",
+            )),
+        };
+        // Measured when the call ends, not when it is published.
+        let duration = start.elapsed();
+        FinishedCall {
+            index,
+            id: tool_id,
+            name: tool_name,
+            input: tool_input,
+            result: run.result,
+            duration,
+            change: run.change,
+            executed: run.executed,
+        }
+    })
+}
+
 /// A finished call already published, waiting for the round's assembly.
 struct PublishedCall {
     id: String,
@@ -1365,13 +1429,32 @@ async fn run_loop(
             })
             .await;
 
+        // With `async_tool_calls`, each call starts as soon as it is complete
+        // in the stream, while the model still writes the rest. Those calls
+        // are awaited with the others below and stop with the turn. A
+        // `Skill` call waits for the answer: its activation is committed in
+        // the order of the calls.
+        let early_start = provider.async_tool_calls();
+        let mut early: futures::stream::FuturesUnordered<
+            futures::future::BoxFuture<'_, FinishedCall>,
+        > = futures::stream::FuturesUnordered::new();
+        let mut early_done: Vec<FinishedCall> = Vec::new();
+        let mut early_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+
         // Process stream events (with cancellation support)
         let mut stream_error: Option<CerseiError> = None;
         loop {
             tokio::select! {
+                Some(call) = futures::StreamExt::next(&mut early), if !early.is_empty() => {
+                    early_done.push(call);
+                }
                 event = rx.recv() => {
                     match event {
                         Some(event) => {
+                            let closed = match &event {
+                                StreamEvent::ContentBlockStop { index } if early_start => Some(*index),
+                                _ => None,
+                            };
                             match &event {
                                 StreamEvent::TextDelta { text, .. } => {
                                     let _ = event_tx.send(AgentEvent::TextDelta(text.clone())).await;
@@ -1390,6 +1473,35 @@ async fn run_loop(
                                 _ => {}
                             }
                             accumulator.process_event(event);
+                            if let Some((id, name, input)) =
+                                closed.and_then(|index| accumulator.tool_use(index))
+                                && name != "Skill"
+                                && early_ids.insert(id.clone())
+                            {
+                                let start = AgentEvent::ToolStart {
+                                    name: name.clone(),
+                                    id: id.clone(),
+                                    input: input.clone(),
+                                };
+                                let _ = event_tx.send(start.clone()).await;
+                                agent.emit(start);
+                                let names: Vec<String> =
+                                    agent.tool_list().iter().map(|t| t.name().to_string()).collect();
+                                let cost = agent.cumulative_usage.lock().cost_usd.unwrap_or(0.0);
+                                // The answer is not in the history yet: it will be.
+                                let message_count = agent.messages.lock().len() + 1;
+                                early.push(call_future(
+                                    agent,
+                                    &tool_ctx,
+                                    &permissions,
+                                    &names,
+                                    UNPLACED,
+                                    (id, name, input),
+                                    turn,
+                                    cost,
+                                    message_count,
+                                ));
+                            }
                         }
                         None => break, // Stream ended
                     }
@@ -1402,7 +1514,9 @@ async fn run_loop(
 
         if let Some(e) = stream_error {
             let allowed = agent.context.lock().policy().max_overflow_recoveries;
-            if e.is_context_overflow() && overflow_recoveries < allowed {
+            // A call already started may have had effects: the turn is not
+            // redone behind it.
+            if e.is_context_overflow() && overflow_recoveries < allowed && early_ids.is_empty() {
                 // Refused mid-stream before any tool ran: compact and redo the turn.
                 overflow_recoveries += 1;
                 let outcome = run_compaction(
@@ -1549,18 +1663,47 @@ async fn run_loop(
         if response.stop_reason == StopReason::MaxTokens {
             max_tokens_retries += 1;
             // Calls in a cut answer are answered, never run, so the history
-            // stays valid whatever happens next.
-            let mut blocks: Vec<ContentBlock> = tool_use_blocks
-                .iter()
-                .map(|(id, name, _)| ContentBlock::ToolResult {
-                    tool_use_id: id.clone(),
-                    content: ToolResultContent::Text(format!(
-                        "{name} was not run: your answer was cut by the output-token limit, \
-                         possibly inside this call. Send it again if you still need it."
-                    )),
-                    is_error: Some(true),
-                })
-                .collect();
+            // stays valid whatever happens next. Those already started while
+            // it streamed were complete: they end and keep their results.
+            let mut started: Vec<FinishedCall> = std::mem::take(&mut early_done);
+            loop {
+                let next = tokio::select! {
+                    n = futures::StreamExt::next(&mut early) => n,
+                    _ = cancel.cancelled() => {
+                        drop(early);
+                        let blocks: Vec<ContentBlock> = tool_use_blocks
+                            .iter()
+                            .map(|(id, _, _)| {
+                                tool_result_block(id, interrupted_text("cancelled by the user"), true)
+                            })
+                            .collect();
+                        push_message(agent, Message::user_blocks(blocks));
+                        return Err(CerseiError::Cancelled);
+                    }
+                };
+                let Some(call) = next else { break };
+                started.push(call);
+            }
+            let mut blocks: Vec<ContentBlock> = Vec::new();
+            for (id, name, _) in &tool_use_blocks {
+                let block = match started.iter().position(|c| &c.id == id) {
+                    Some(at) => {
+                        let call = started.swap_remove(at);
+                        let p = publish_call(agent, &event_tx, &tool_ctx, call, false).await;
+                        let (capped, _) = p.render();
+                        tool_result_block(&p.id, capped, p.result.is_error)
+                    }
+                    None => ContentBlock::ToolResult {
+                        tool_use_id: id.clone(),
+                        content: ToolResultContent::Text(format!(
+                            "{name} was not run: your answer was cut by the output-token limit, \
+                             possibly inside this call. Send it again if you still need it."
+                        )),
+                        is_error: Some(true),
+                    },
+                };
+                blocks.push(block);
+            }
             if max_tokens_retries > MAX_TOKENS_RETRY_LIMIT {
                 if !blocks.is_empty() {
                     push_message(agent, Message::user_blocks(blocks));
@@ -1618,8 +1761,11 @@ async fn run_loop(
             break;
         } else {
             max_tokens_retries = 0;
-            // Phase 1: Emit ToolStart events for all tools
+            // Phase 1: Emit ToolStart events for the tools not started yet
             for (tool_id, tool_name, tool_input) in &tool_use_blocks {
+                if early_ids.contains(tool_id) {
+                    continue;
+                }
                 let _ = event_tx
                     .send(AgentEvent::ToolStart {
                         name: tool_name.clone(),
@@ -1649,63 +1795,29 @@ async fn run_loop(
                 .map(|t| t.name().to_string())
                 .collect();
 
-            let mut pending: futures::stream::FuturesUnordered<_> = tool_use_blocks
-                .iter()
-                .enumerate()
-                .map(|(index, (tool_id, tool_name, tool_input))| {
-                    let tool_name = tool_name.clone();
-                    let registered_tool_names = registered_tool_names.clone();
-                    let tool_id = tool_id.clone();
-                    let tool_input = tool_input.clone();
-                    // Its own view: the call id never leaks to a sibling.
-                    let tool_ctx = tool_ctx.for_call(&tool_id);
-                    let permission_policy = Arc::clone(&permissions);
-                    let hooks = agent.hooks.clone();
-                    let cumulative_cost = cumulative.cost_usd.unwrap_or(0.0);
-
-                    // Find tool reference by name
-                    let tool_ref = agent.tool_by_name(&tool_name);
-
-                    async move {
-                        let start = Instant::now();
-                        let run = match tool_ref {
-                            Some(tool) => {
-                                let site = CallSite {
-                                    tool_id: &tool_id,
-                                    tool_ctx: &tool_ctx,
-                                    permissions: permission_policy.as_ref(),
-                                    hooks: &hooks,
-                                    turn,
-                                    cumulative_cost,
-                                    message_count: msg_count,
-                                };
-                                decide_and_run(&site, tool, &tool_name, tool_input.clone()).await
-                            }
-                            // F-A15: weak models hallucinate tool names
-                            // constantly, and "Unknown tool: X" gave them
-                            // nothing to correct toward.
-                            None => CallRun::not_run(bricks_tools::tool_feedback::not_found(
-                                "tool",
-                                &tool_name,
-                                &registered_tool_names,
-                                "Use one of the available tools above, with its exact name.",
-                            )),
-                        };
-                        // Measured when the call ends, not when it is published.
-                        let duration = start.elapsed();
-                        FinishedCall {
-                            index,
-                            id: tool_id,
-                            name: tool_name,
-                            input: tool_input,
-                            result: run.result,
-                            duration,
-                            change: run.change,
-                            executed: run.executed,
-                        }
-                    }
-                })
-                .collect();
+            // The calls started while the answer streamed go on; the others
+            // start now.
+            let mut pending = std::mem::take(&mut early);
+            for call in early_done.drain(..) {
+                pending.push(Box::pin(futures::future::ready(call)));
+            }
+            let cumulative_cost = cumulative.cost_usd.unwrap_or(0.0);
+            for (index, (tool_id, tool_name, tool_input)) in tool_use_blocks.iter().enumerate() {
+                if early_ids.contains(tool_id) {
+                    continue;
+                }
+                pending.push(call_future(
+                    agent,
+                    &tool_ctx,
+                    &permissions,
+                    &registered_tool_names,
+                    index,
+                    (tool_id.clone(), tool_name.clone(), tool_input.clone()),
+                    turn,
+                    cumulative_cost,
+                    msg_count,
+                ));
+            }
 
             // One slot per call, in the order of the calls.
             let mut slots: Vec<Option<CallSlot>> =
@@ -1722,7 +1834,15 @@ async fn run_loop(
                         break;
                     }
                 };
-                let Some(call) = next else { break };
+                let Some(mut call) = next else { break };
+                if call.index == UNPLACED {
+                    // Every call started early is in the complete answer.
+                    let Some(at) = tool_use_blocks.iter().position(|(id, _, _)| *id == call.id)
+                    else {
+                        continue;
+                    };
+                    call.index = at;
+                }
                 let index = call.index;
                 // A skill activation proposed by this agent's own `Skill`
                 // tool is announced only once committed (it may need a

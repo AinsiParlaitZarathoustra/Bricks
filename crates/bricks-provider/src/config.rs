@@ -320,6 +320,10 @@ pub struct ModelConfig {
     /// is ever guessed for other servers.
     #[serde(default)]
     pub token_counting: Option<TokenCounting>,
+    /// Tools start as soon as their call is complete in the stream, without
+    /// waiting for the rest of the answer. Off unless `true`.
+    #[serde(default)]
+    pub async_tool_calls: bool,
 }
 
 /// `[providers.models.token_counting]`.

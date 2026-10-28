@@ -386,6 +386,13 @@ fn apply_model_patch(table: &mut Table, patch: &ModelPatch) -> IpcResult<()> {
     if let Some(prices) = &patch.pricing {
         write_prices(table, prices)?;
     }
+    match patch.async_tool_calls {
+        Some(true) => set_value(table, "async_tool_calls", Value::from(true)),
+        Some(false) => {
+            table.remove("async_tool_calls");
+        }
+        None => {}
+    }
     if patch.max_input_tokens.is_some() || patch.max_output_tokens.is_some() {
         let limits = table
             .get_mut("limits")
@@ -930,6 +937,24 @@ mod tests {
             provider_id: provider.into(),
             patch,
         }
+    }
+
+    #[test]
+    fn async_tool_calls_is_written_when_on_and_removed_when_off() {
+        let on = |value| {
+            model_update(
+                "local",
+                "small",
+                ModelPatch {
+                    async_tool_calls: Some(value),
+                    ..Default::default()
+                },
+            )
+        };
+        let with = apply(PROVIDERS, &on(true), "test").unwrap();
+        assert!(with.contains("async_tool_calls = true"), "{with}");
+        let without = apply(&with, &on(false), "test").unwrap();
+        assert_eq!(without, PROVIDERS);
     }
 
     #[test]

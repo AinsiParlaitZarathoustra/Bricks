@@ -419,6 +419,10 @@ impl Provider for ConfiguredProvider {
         })
     }
 
+    fn async_tool_calls(&self) -> bool {
+        self.model.async_tool_calls
+    }
+
     fn request_identity(&self, options: &crate::ProviderOptions) -> Option<crate::RequestIdentity> {
         Some(crate::RequestIdentity {
             api_model: self.model.api_model.clone(),

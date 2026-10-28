@@ -402,6 +402,11 @@
 				{/if}
 			</div>
 
+			<label class="flex items-center gap-2 text-sm">
+				<input type="checkbox" bind:checked={form.asyncToolCalls} class="size-4 accent-primary" />
+				Appels d’outils asynchrones
+			</label>
+
 			{#if error}
 				<p role="alert" class="text-sm text-pretty text-destructive">{error}</p>
 			{/if}

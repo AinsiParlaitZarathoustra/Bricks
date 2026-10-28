@@ -873,6 +873,8 @@ pub struct ModelView {
     pub output_modalities: Vec<String>,
     pub streaming: bool,
     pub tool_calls: bool,
+    /// Tools start while the answer still streams.
+    pub async_tool_calls: bool,
     #[ts(type = "number")]
     pub max_input_tokens: u64,
     #[ts(type = "number")]
@@ -950,6 +952,8 @@ pub struct ModelPatch {
     ///.3: replaces the whole profile list (ids unique; the
     /// default must stay one of them or be cleared in the same patch).
     pub profiles: Option<Vec<ReasoningProfileEdit>>,
+    /// Tools start while the answer still streams; `false` removes the key.
+    pub async_tool_calls: Option<bool>,
 }
 
 // ─── colours, reasoning profiles, skills catalogue ─────────────
