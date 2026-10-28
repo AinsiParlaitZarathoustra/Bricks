@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed — Grafeo 0.6.0
+
+- Pin the memory store to Grafeo 0.6.0 (Rust 1.99+) and the repository toolchain to Rust 1.99.1. Read adjacency and properties through pinned committed snapshots; propagate errors from the new fallible reads and property-index creation. Remove the direct dependency on Grafeo's internal core crate. USearch and the existing lexical rebuild policy remain in place.
+- The first read-write open migrates 0.5.x storage to the new format, keeping `.pre-0.6` originals. Close old processes and back up the database and WAL before opening it with the upgraded application; old engines cannot read the migrated file. See `docs/memory.md`. Historical 0.5.43 timings are not 0.6.0 measurements.
+
 ### Removed — Sprint 15: disconnected APIs and historical harnesses (breaking change)
 
 - Remove the unused agent modules `agent_tool`, `coordinator`, `auto_dream`, `session_memory` and `context_analyzer`, their example-only paths, and the inert `SystemPromptSection` cache API. Native sub-agents, compaction and structured memory remain supported.

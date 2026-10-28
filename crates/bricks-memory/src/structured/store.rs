@@ -282,8 +282,8 @@ pub struct Store {
     /// before the next lexical search.
     dirty_text: AtomicBool,
     /// Held for writing across a whole transaction, for reading by the
-    /// reads that bypass Grafeo's snapshots (adjacency lists, single
-    /// properties, text indexes): they never observe a transaction that has
+    /// direct reads (adjacency lists, single properties, text indexes),
+    /// in addition to Grafeo 0.6 snapshots: they never observe a transaction that has
     /// not committed. Only local work happens under it — never a model or
     /// embedding call.
     commit_lock: parking_lot::RwLock<()>,
@@ -306,7 +306,7 @@ impl Store {
 
     fn init(db: GrafeoDB) -> StoreResult<Self> {
         for p in Self::INDEXED_PROPERTIES {
-            db.create_property_index(p);
+            db.create_property_index(p).map_err(|e| e.to_string())?;
         }
         match crate::graph_migrate::check_version(&db) {
             crate::graph_migrate::VersionCheck::UpToDate => {}
@@ -393,6 +393,7 @@ impl Store {
         }
         self.db
             .find_nodes_by_property("id", &Value::from(id))
+            .map_err(|e| e.to_string())?
             .into_iter()
             .next()
             .ok_or_else(|| format!("no memory record `{id}`"))
@@ -659,7 +660,7 @@ impl Store {
         property: &'static str,
         query: &str,
         k: usize,
-    ) -> Vec<(String, f64)> {
+    ) -> StoreResult<Vec<(String, f64)>> {
         let key = if label == "Fact" { "Fact" } else { "Episode" };
         let _committed = self.commit_lock.read();
         {
@@ -673,22 +674,25 @@ impl Store {
                 let ok = self.db.create_text_index(label, property).is_ok();
                 idx.insert(key, ok);
                 if !ok {
-                    return Vec::new();
+                    return Ok(Vec::new());
                 }
             }
         }
-        let Ok(hits) = self.db.text_search(label, property, query, k) else {
-            return Vec::new();
-        };
-        let lpg = self.db.store();
-        hits.into_iter()
-            .filter_map(|(node, score)| {
-                lpg.get_node_property(node, &"id".into())
-                    .as_ref()
-                    .and_then(as_str)
-                    .map(|id| (id, score))
-            })
-            .collect()
+        let hits = self
+            .db
+            .text_search(label, property, query, k, None)
+            .map_err(|e| e.to_string())?;
+        let snapshot = self.db.snapshot().map_err(|e| e.to_string())?;
+        let mut out = Vec::with_capacity(hits.len());
+        for (node, score) in hits {
+            let value = snapshot
+                .node_property(node, "id", snapshot.view())
+                .map_err(|e| e.to_string())?;
+            if let Some(id) = value.as_ref().and_then(as_str) {
+                out.push((id, score));
+            }
+        }
+        Ok(out)
     }
 
     /// Open facts with this space, subject and predicate, oldest first.
@@ -714,10 +718,11 @@ impl Store {
     }
 
     /// Whether `episode` is already evidence of `fact`.
-    pub fn has_evidence(&self, fact: &str, episode: &str) -> bool {
-        self.adjacent(fact, true, &["SUPPORTED_BY"])
+    pub fn has_evidence(&self, fact: &str, episode: &str) -> StoreResult<bool> {
+        Ok(self
+            .adjacent(fact, true, &["SUPPORTED_BY"])?
             .iter()
-            .any(|(id, _, _)| id == episode)
+            .any(|(id, _, _)| id == episode))
     }
 
     /// Records linked to `id` by an edge of one of `types`, read from the
@@ -729,44 +734,46 @@ impl Store {
         id: &str,
         outgoing: bool,
         types: &[&str],
-    ) -> Vec<(String, String, bool)> {
+    ) -> StoreResult<Vec<(String, String, bool)>> {
         let _committed = self.commit_lock.read();
         let Some(node) = self
             .db
             .find_nodes_by_property("id", &Value::from(id))
+            .map_err(|e| e.to_string())?
             .into_iter()
             .next()
         else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
-        let lpg = self.db.store();
-        let edges = if outgoing {
-            lpg.edges_from(node, grafeo_core::graph::Direction::Outgoing)
-                .collect::<Vec<_>>()
+        let snapshot = self.db.snapshot().map_err(|e| e.to_string())?;
+        let view = snapshot.view();
+        let direction = if outgoing {
+            grafeo::Direction::Outgoing
         } else {
-            lpg.edges_to(node)
+            grafeo::Direction::Incoming
         };
-        let mut out: Vec<(String, String, bool)> = edges
-            .into_iter()
-            .filter_map(|(other, edge)| {
-                // Edge type and single properties read from the store's
-                // columns: a session read builds the whole node, embedding
-                // included.
-                let ty = lpg.edge_type(edge)?;
-                if !types.contains(&ty.as_ref()) {
-                    return None;
-                }
-                let other_id = lpg
-                    .get_node_property(other, &"id".into())
-                    .as_ref()
-                    .and_then(as_str)?;
-                // Facts are the records with a subject.
-                let is_fact = lpg.get_node_property(other, &"subject_id".into()).is_some();
-                Some((other_id, ty.to_string(), is_fact))
-            })
-            .collect();
+        let types: Vec<_> = types.iter().map(|ty| (*ty).into()).collect();
+        let edges = snapshot
+            .edges(node, direction, &types, view)
+            .map_err(|e| e.to_string())?;
+        let mut out = Vec::with_capacity(edges.len());
+        for (other, edge) in edges {
+            let Some(ty) = snapshot.edge_type(edge, view).map_err(|e| e.to_string())? else {
+                continue;
+            };
+            let value = snapshot
+                .node_property(other, "id", view)
+                .map_err(|e| e.to_string())?;
+            if let Some(other_id) = value.as_ref().and_then(as_str) {
+                let is_fact = snapshot
+                    .node_property(other, "subject_id", view)
+                    .map_err(|e| e.to_string())?
+                    .is_some();
+                out.push((other_id, ty.to_string(), is_fact));
+            }
+        }
         out.sort();
-        out
+        Ok(out)
     }
 
     // ── Typed reads ──
@@ -910,7 +917,7 @@ mod tests {
         ]
     }
 
-    /// The reads that bypass Grafeo's snapshots wait for the commit: they
+    /// The direct reads also wait for the local commit lock: they
     /// see committed links, never links of a transaction still open or
     /// rolled back.
     #[test]
@@ -940,7 +947,7 @@ mod tests {
             });
             let r = s.transaction(mention_ops(entity));
             assert_eq!(r.is_ok(), commit, "{r:?}");
-            let seen = rx.recv().unwrap().join().unwrap();
+            let seen = rx.recv().unwrap().join().unwrap().unwrap();
             let ids: Vec<&str> = seen.iter().map(|(id, _, _)| id.as_str()).collect();
             assert_eq!(
                 ids,
@@ -1154,25 +1161,29 @@ mod tests {
             s.ids(q::CONTRADICTIONS, P::new().s("id", "f1")).unwrap(),
             vec!["f2"]
         );
-        let ents = s.adjacent("f1", true, &["ABOUT", "MENTIONS"]);
+        let ents = s.adjacent("f1", true, &["ABOUT", "MENTIONS"]).unwrap();
         let rels: Vec<&str> = ents.iter().map(|r| r.1.as_str()).collect();
         assert_eq!(rels.len(), 2, "{ents:?}");
         assert!(
             rels.contains(&"ABOUT") && rels.contains(&"MENTIONS"),
             "{rels:?}"
         );
-        let touching = s.adjacent("n1", false, &["ABOUT", "MENTIONS"]);
+        let touching = s.adjacent("n1", false, &["ABOUT", "MENTIONS"]).unwrap();
         assert_eq!(touching.len(), 3, "two facts and the episode: {touching:?}");
         assert_eq!(touching.iter().filter(|r| r.2).count(), 2, "{touching:?}");
-        assert!(s.adjacent("no-such-record", true, &["ABOUT"]).is_empty());
+        assert!(
+            s.adjacent("no-such-record", true, &["ABOUT"])
+                .unwrap()
+                .is_empty()
+        );
         assert_eq!(
             s.ids(q::FACTS_OF_SESSION, P::new().s("session_id", "s1"))
                 .unwrap(),
             vec!["f1"]
         );
         assert_eq!(s.count(q::COUNT_FACTS), 2);
-        assert!(s.has_evidence("f1", "e1"));
-        assert!(!s.has_evidence("f1", "no-such-episode"));
+        assert!(s.has_evidence("f1", "e1").unwrap());
+        assert!(!s.has_evidence("f1", "no-such-episode").unwrap());
         assert!(
             s.facts_by_key("project:y", "n1", "uses_framework", &["contested"])
                 .unwrap()
@@ -1211,9 +1222,17 @@ mod tests {
             Some("m2")
         );
         // Text indexes follow the typed writes (rebuilt after them).
-        assert_eq!(s.text_search("Fact", "statement", "Axum", 5).len(), 2);
+        assert_eq!(
+            s.text_search("Fact", "statement", "Axum", 5).unwrap().len(),
+            2
+        );
         episode(&s, "e2", "s2", "a second episode about Axum");
-        assert_eq!(s.text_search("Episode", "content", "Axum", 5).len(), 2);
+        assert_eq!(
+            s.text_search("Episode", "content", "Axum", 5)
+                .unwrap()
+                .len(),
+            2
+        );
         s.exec(W::ClearEmbeddings, P::new()).unwrap();
         assert_eq!(
             s.ids(q::UNEMBEDDED, P::new().s("model", "m"))

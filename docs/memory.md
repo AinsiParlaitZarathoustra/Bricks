@@ -41,7 +41,7 @@ What it is not:
 
 ## Records (schema v3)
 
-All records live in one Grafeo database (the authority, Grafeo 0.5.43 as
+All records live in one Grafeo database (the authority, Grafeo 0.6.0 as
 locked). Nothing written by a user or a model is ever spliced into a query.
 
 * **Reads** are fixed GQL texts (`structured::store::q`) whose values —
@@ -64,24 +64,30 @@ locked). Nothing written by a user or a model is ever spliced into a query.
     about 2.5 ms at 4 000 nodes, and 4 000 indexed `SET`s took 1.3 s.
   * The typed API stayed at a few microseconds per operation up to 10 000
     nodes.
-  * Text indexes are not updated by typed writes: they are rebuilt before the
-    next lexical search after a write.
-  * **Transaction cost.** In 0.5.43 one transaction, even an empty one, costs
+  * Bricks conservatively invalidates its text-index handles after typed
+    writes and rebuilds before the next lexical search. This compatibility
+    policy predates Grafeo 0.6.0; it is not evidence that 0.6.0 lacks
+    incremental indexing.
+  * **Historical transaction cost.** In 0.5.43 one transaction, even an empty one, costs
     time proportional to the whole graph: `begin_transaction` counts every
     node and edge, and `commit` walks every version chain. Measured (release,
     in memory): about 30 µs at 500 nodes and 465 µs at 16 000. Bulk
     ingestion therefore records its episodes together
     (`record_all`, one transaction per 512 episodes), and applying an
-    extraction stays one transaction per episode.
+    extraction stays one transaction per episode. Grafeo 0.5.44 replaced
+    whole-store commit/rollback scans with work over the transaction changes;
+    the old scaling measurements below must not be attributed to 0.6.0.
 * **Neighbours** used by the relational expansion are read from Grafeo's
   adjacency lists (`Store::adjacent`: the node found by its `id` index, then
   its edges of the wanted types), not through a query: this costs time in
   the node's degree, not in the size of the graph.
   * Edge types and single properties are read from the store's columns. A
     session read builds the whole node, embedding included.
-  * These reads do not go through a transaction snapshot. A recall running
-    while an ingestion transaction is open may therefore see that
-    transaction's links before its commit. A rollback removes them.
+  * Grafeo 0.6.0 adjacency and property reads use a pinned committed
+    snapshot. Bricks also keeps its local commit lock around these reads.
+    They cannot observe links from an open ingestion transaction. Each
+    adjacency read has its own snapshot; an entire hybrid recall is not
+    claimed to use one common snapshot.
 
 | record | key properties |
 |---|---|
@@ -279,7 +285,30 @@ Schema v3 follows v2 (`graph_migrate`):
 * Sessions, originals, compaction snapshots and web documents are separate
   stores and are not changed.
 
+## Upgrading the storage engine to 0.6.0
+
+Grafeo and the memory crate require **Rust 1.99 or newer**; the repository
+toolchain is pinned to 1.99.1. Bricks pins
+Grafeo to 0.6.0 and reads adjacency through its public snapshot API rather
+than the old internal LPG store. USearch remains the vector projection.
+
+The first read-write open of a 0.5.x database migrates its storage format.
+Stop every old Bricks process first, and copy the database **and its WAL**
+(or the entire database directory) while closed. Test the upgrade on a copy.
+Grafeo keeps the old storage alongside the result as `.pre-0.6`; 0.5.x
+cannot open the upgraded file. To go back, restore the closed backup with
+the old application, rather than opening the upgraded file with 0.5.x.
+Schema v3 is Bricks' record schema, separate from Grafeo's file format.
+
+The official 0.6.0 notes say native vector and text indexes are rebuilt
+from data at open. This upgrade therefore does not promise constant-time
+startup or remove Bricks' USearch rebuild. See the
+[upstream release notes](https://grafeo.dev/changelog/).
+
 ## Measurements
+
+The timings below were recorded on **Grafeo 0.5.43**. They have not been
+rerun on 0.6.0; they describe the old engine and integration only.
 
 ### Starting point: where the 6.6 % came from
 

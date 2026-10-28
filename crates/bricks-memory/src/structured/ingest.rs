@@ -553,7 +553,7 @@ impl StructuredMemory {
                     && x.negated == f.negated
                     && overlaps(&x.validity, &new_validity)
             }) {
-                let has = self.store.has_evidence(&same.id, &episode.id);
+                let has = self.store.has_evidence(&same.id, &episode.id)?;
                 let in_ops = pending.iter().any(|p| p.id == same.id);
                 if !has && !in_ops {
                     ops.push((

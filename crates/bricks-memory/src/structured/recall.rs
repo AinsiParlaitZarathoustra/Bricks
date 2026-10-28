@@ -237,7 +237,7 @@ impl StructuredMemory {
         for &(label, prop, kind) in lexical_lanes {
             for (id, score) in self
                 .store
-                .text_search(label, prop, &query.text, cfg.candidates)
+                .text_search(label, prop, &query.text, cfg.candidates)?
             {
                 let ok = match kind {
                     Kind::Fact => self.store.fact(&id)?.is_some_and(|f| {
@@ -485,7 +485,7 @@ impl StructuredMemory {
                 };
                 let mut neighbors: Vec<(String, f64)> = self
                     .store
-                    .adjacent(id, true, types)
+                    .adjacent(id, true, types)?
                     .into_iter()
                     .map(|(eid, rel, _)| (eid, edge_weight(&rel)))
                     .collect();
@@ -510,7 +510,9 @@ impl StructuredMemory {
             let mut next: BTreeMap<String, f64> = BTreeMap::new();
             for (eid, ew) in &entities {
                 let mut facts: Vec<(String, f64)> = Vec::new();
-                for (fid, rel, is_fact) in self.store.adjacent(eid, false, &["ABOUT", "MENTIONS"]) {
+                for (fid, rel, is_fact) in
+                    self.store.adjacent(eid, false, &["ABOUT", "MENTIONS"])?
+                {
                     // Episodes mentioning the entity are not facts.
                     if !is_fact {
                         continue;
