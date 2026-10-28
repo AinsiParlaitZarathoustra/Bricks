@@ -1352,7 +1352,7 @@ impl AgentBuilder {
     pub fn build(self) -> bricks_types::Result<Agent> {
         let provider = self
             .provider
-            .ok_or_else(|| CerseiError::Config("Provider is required".into()))?;
+            .ok_or_else(|| BricksError::Config("Provider is required".into()))?;
 
         let working_dir = self
             .working_dir
@@ -1402,7 +1402,7 @@ impl AgentBuilder {
         if let Some(t) = self.compact_threshold {
             policy.compact_threshold = t;
         }
-        policy.validate().map_err(CerseiError::Config)?;
+        policy.validate().map_err(BricksError::Config)?;
         let raw_dir = self.raw_output_dir.or(bricks.raw_output_dir);
         let session_for_store = self
             .session_id
@@ -1440,7 +1440,7 @@ impl AgentBuilder {
                 ))
             });
             let web =
-                bricks_web::WebContext::new(web_config, store).map_err(CerseiError::Config)?;
+                bricks_web::WebContext::new(web_config, store).map_err(BricksError::Config)?;
             self.extensions
                 .insert(bricks_tools::web_runtime::WebRuntime(Arc::new(web)));
         }
@@ -1606,7 +1606,7 @@ fn assemble_jobs(
         };
         match &registry {
             Some(known) if !Arc::ptr_eq(known, &r) => {
-                return Err(CerseiError::Config(format!(
+                return Err(BricksError::Config(format!(
                     "`{}` is on another job registry than the agent's other job tools: build \
                      them together with bricks_tools::shell_with_jobs(registry), or give the \
                      agent a JobsHandle",

@@ -358,7 +358,7 @@ pub(crate) fn parse_sse_event(event: Option<&str>, data: &str) -> Option<StreamE
 /// Convert a complete (non-streamed) message into stream events.
 pub(crate) fn response_to_events(json: &Value) -> Result<Vec<StreamEvent>> {
     if json["type"].as_str() == Some("error") {
-        return Err(CerseiError::Provider(
+        return Err(BricksError::Provider(
             json["error"]["message"]
                 .as_str()
                 .unwrap_or("Unknown error")
@@ -624,7 +624,7 @@ mod tests {
         ] {
             let mut r = CompletionRequest::new("m");
             r.messages.push(Message::user_blocks(vec![bad]));
-            assert!(matches!(body(&r), Err(CerseiError::Unsupported(_))));
+            assert!(matches!(body(&r), Err(BricksError::Unsupported(_))));
         }
     }
 

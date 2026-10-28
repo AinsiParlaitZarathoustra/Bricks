@@ -87,7 +87,7 @@ impl GraphMemory {
     #[cfg(feature = "graph")]
     pub fn open(path: &Path) -> Result<Self> {
         let db = GrafeoDB::open(path)
-            .map_err(|e| CerseiError::Config(format!("Failed to open graph DB: {}", e)))?;
+            .map_err(|e| BricksError::Config(format!("Failed to open graph DB: {}", e)))?;
 
         // Version check and auto-migrate
         match graph_migrate::check_version(&db) {
@@ -131,7 +131,7 @@ impl GraphMemory {
     /// Fallback: graph feature not enabled.
     #[cfg(not(feature = "graph"))]
     pub fn open(_path: &Path) -> Result<Self> {
-        Err(CerseiError::Config(
+        Err(BricksError::Config(
             "Graph memory requires the 'graph' feature. Enable it in Cargo.toml.".into(),
         ))
     }
@@ -139,7 +139,7 @@ impl GraphMemory {
     /// Fallback: graph feature not enabled.
     #[cfg(not(feature = "graph"))]
     pub fn open_in_memory() -> Result<Self> {
-        Err(CerseiError::Config(
+        Err(BricksError::Config(
             "Graph memory requires the 'graph' feature. Enable it in Cargo.toml.".into(),
         ))
     }
@@ -169,7 +169,7 @@ impl GraphMemory {
                     ("now", now.as_str().into()),
                 ]),
             )
-            .map_err(|e| CerseiError::Config(format!("Graph insert failed: {}", e)))?;
+            .map_err(|e| BricksError::Config(format!("Graph insert failed: {}", e)))?;
 
         Ok(id)
     }
@@ -187,7 +187,7 @@ impl GraphMemory {
                     ("relationship", relationship.into()),
                 ]),
             )
-            .map_err(|e| CerseiError::Config(format!("Graph link failed: {}", e)))?;
+            .map_err(|e| BricksError::Config(format!("Graph link failed: {}", e)))?;
         Ok(())
     }
 
@@ -200,7 +200,7 @@ impl GraphMemory {
                 gql::TAG_MEMORY,
                 gql::params(vec![("id", memory_id.into()), ("topic", topic.into())]),
             )
-            .map_err(|e| CerseiError::Config(format!("Graph tag failed: {}", e)))?;
+            .map_err(|e| BricksError::Config(format!("Graph tag failed: {}", e)))?;
         Ok(())
     }
 
@@ -220,7 +220,7 @@ impl GraphMemory {
                     ("turns", grafeo::Value::Int64(turns as i64)),
                 ]),
             )
-            .map_err(|e| CerseiError::Config(format!("Graph session record failed: {}", e)))?;
+            .map_err(|e| BricksError::Config(format!("Graph session record failed: {}", e)))?;
         Ok(())
     }
 
@@ -233,7 +233,7 @@ impl GraphMemory {
             .execute_with_params(gql::REVALIDATE, gql::params(vec![("id", memory_id.into())]))
         {
             Ok(result) => Ok(result.iter().next().is_some()),
-            Err(e) => Err(CerseiError::Config(format!(
+            Err(e) => Err(BricksError::Config(format!(
                 "Graph revalidate failed: {}",
                 e
             ))),
@@ -368,7 +368,7 @@ impl GraphMemory {
 
     #[cfg(not(feature = "graph"))]
     pub fn store_memory(&self, _: &str, _: MemoryType, _: f32) -> Result<String> {
-        Err(CerseiError::Config("Graph feature not enabled".into()))
+        Err(BricksError::Config("Graph feature not enabled".into()))
     }
 
     #[cfg(not(feature = "graph"))]
@@ -378,22 +378,22 @@ impl GraphMemory {
 
     #[cfg(not(feature = "graph"))]
     pub fn link_memories(&self, _: &str, _: &str, _: &str) -> Result<()> {
-        Err(CerseiError::Config("Graph feature not enabled".into()))
+        Err(BricksError::Config("Graph feature not enabled".into()))
     }
 
     #[cfg(not(feature = "graph"))]
     pub fn tag_memory(&self, _: &str, _: &str) -> Result<()> {
-        Err(CerseiError::Config("Graph feature not enabled".into()))
+        Err(BricksError::Config("Graph feature not enabled".into()))
     }
 
     #[cfg(not(feature = "graph"))]
     pub fn record_session(&self, _: &str, _: Option<&str>, _: u32) -> Result<()> {
-        Err(CerseiError::Config("Graph feature not enabled".into()))
+        Err(BricksError::Config("Graph feature not enabled".into()))
     }
 
     #[cfg(not(feature = "graph"))]
     pub fn revalidate_memory(&self, _: &str) -> Result<bool> {
-        Err(CerseiError::Config("Graph feature not enabled".into()))
+        Err(BricksError::Config("Graph feature not enabled".into()))
     }
 
     #[cfg(not(feature = "graph"))]

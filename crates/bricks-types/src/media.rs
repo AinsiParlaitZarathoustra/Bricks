@@ -17,7 +17,7 @@
 //! // Or build directly from bytes / base64 / a remote URL.
 //! let block = ContentBlock::image_bytes("image/png", &std::fs::read("x.png")?);
 //! let remote = ContentBlock::image_url("https://example.com/cat.jpg");
-//! # Ok::<(), bricks_types::CerseiError>(())
+//! # Ok::<(), bricks_types::BricksError>(())
 //! ```
 //!
 //! What each protocol can carry differs (see the capability matrix in
@@ -26,7 +26,7 @@
 //! is sent — it never drops an attachment silently.
 
 use crate::{
-    CerseiError, ContentBlock, DocumentSource, ImageSource, MediaSource, Message, MessageContent,
+    BricksError, ContentBlock, DocumentSource, ImageSource, MediaSource, Message, MessageContent,
     Result, Role,
 };
 use base64::Engine;
@@ -329,13 +329,13 @@ impl ContentBlock {
     /// file's contents (and extension as a fallback). Each file becomes an
     /// image, audio, video or document block according to its MIME type.
     ///
-    /// Returns [`CerseiError::Config`] if the media type can't be determined,
-    /// or [`CerseiError::Io`] if the file can't be read.
+    /// Returns [`BricksError::Config`] if the media type can't be determined,
+    /// or [`BricksError::Io`] if the file can't be read.
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         let bytes = std::fs::read(path)?;
         let mime = detect_mime(&bytes, Some(path)).ok_or_else(|| {
-            CerseiError::Config(format!(
+            BricksError::Config(format!(
                 "could not determine a media type for `{}`; pass one explicitly via ContentBlock::media_bytes",
                 path.display()
             ))

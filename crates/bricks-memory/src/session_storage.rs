@@ -263,7 +263,7 @@ pub fn load_transcript(path: &Path) -> Result<Vec<TranscriptEntry>> {
         .filter_map(|p| std::fs::metadata(p).ok().map(|m| m.len()))
         .sum();
     if total > MAX_TOTAL_SESSION_SIZE {
-        return Err(CerseiError::Config(format!(
+        return Err(BricksError::Config(format!(
             "Session too large: {} bytes across {} parts (max {})",
             total,
             parts.len(),
@@ -284,7 +284,7 @@ pub fn load_transcript(path: &Path) -> Result<Vec<TranscriptEntry>> {
 fn load_single_transcript(path: &Path) -> Result<Vec<TranscriptEntry>> {
     let meta = std::fs::metadata(path)?;
     if meta.len() > MAX_SESSION_SIZE {
-        return Err(CerseiError::Config(format!(
+        return Err(BricksError::Config(format!(
             "Session file too large: {} bytes (max {})",
             meta.len(),
             MAX_SESSION_SIZE

@@ -464,7 +464,7 @@ mod tests {
             &self,
             _: CompletionRequest,
         ) -> bricks_types::Result<bricks_provider::CompletionStream> {
-            Err(bricks_types::CerseiError::Provider(
+            Err(bricks_types::BricksError::Provider(
                 "streaming not used".into(),
             ))
         }

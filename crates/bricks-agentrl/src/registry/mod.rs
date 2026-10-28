@@ -10,7 +10,7 @@ pub mod dynamic_tool;
 
 use crate::graph::FailureTrace;
 use crate::scrub::redact;
-use bricks_types::{CerseiError, Result};
+use bricks_types::{BricksError, Result};
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
@@ -67,12 +67,12 @@ impl ToolRegistry {
     pub fn open(dir: impl AsRef<Path>) -> Result<Arc<Self>> {
         let dir = dir.as_ref().to_path_buf();
         std::fs::create_dir_all(&dir)
-            .map_err(|e| CerseiError::Other(anyhow::anyhow!("registry mkdir: {e}")))?;
+            .map_err(|e| BricksError::Other(anyhow::anyhow!("registry mkdir: {e}")))?;
         let path = dir.join("entries.jsonl");
         let entries = DashMap::new();
         if path.exists() {
             let text = std::fs::read_to_string(&path)
-                .map_err(|e| CerseiError::Other(anyhow::anyhow!("registry read: {e}")))?;
+                .map_err(|e| BricksError::Other(anyhow::anyhow!("registry read: {e}")))?;
             for line in text.lines() {
                 if line.trim().is_empty() {
                     continue;
@@ -114,14 +114,14 @@ impl ToolRegistry {
         let entry = entry.scrubbed();
         if !self.path.as_os_str().is_empty() {
             let line = serde_json::to_string(&entry)
-                .map_err(|e| CerseiError::Other(anyhow::anyhow!("registry serialize: {e}")))?;
+                .map_err(|e| BricksError::Other(anyhow::anyhow!("registry serialize: {e}")))?;
             let mut f = std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
                 .open(&self.path)
-                .map_err(|e| CerseiError::Other(anyhow::anyhow!("registry open: {e}")))?;
+                .map_err(|e| BricksError::Other(anyhow::anyhow!("registry open: {e}")))?;
             writeln!(f, "{line}")
-                .map_err(|e| CerseiError::Other(anyhow::anyhow!("registry write: {e}")))?;
+                .map_err(|e| BricksError::Other(anyhow::anyhow!("registry write: {e}")))?;
         }
         self.entries.insert(entry.tool_id.clone(), entry);
         Ok(())

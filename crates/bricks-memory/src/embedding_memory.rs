@@ -30,7 +30,7 @@ pub struct EmbeddingMemory<P: EmbeddingProvider> {
 impl<P: EmbeddingProvider> EmbeddingMemory<P> {
     pub fn new(provider: P, metric: Metric) -> Result<Self> {
         let store = EmbeddingStore::new(provider, metric)
-            .map_err(|e| CerseiError::Config(format!("EmbeddingStore init failed: {e}")))?;
+            .map_err(|e| BricksError::Config(format!("EmbeddingStore init failed: {e}")))?;
         Ok(Self {
             store,
             payloads: RwLock::new(HashMap::new()),
@@ -59,7 +59,7 @@ impl<P: EmbeddingProvider> EmbeddingMemory<P> {
         self.store
             .add_batch(&[(key, text.clone())])
             .await
-            .map_err(|e| CerseiError::Config(format!("embed add: {e}")))?;
+            .map_err(|e| BricksError::Config(format!("embed add: {e}")))?;
         self.payloads.write().insert(key, (text, source));
         Ok(key)
     }
@@ -81,7 +81,7 @@ impl<P: EmbeddingProvider> EmbeddingMemory<P> {
         self.store
             .add_batch(&to_store)
             .await
-            .map_err(|e| CerseiError::Config(format!("embed add_batch: {e}")))?;
+            .map_err(|e| BricksError::Config(format!("embed add_batch: {e}")))?;
         let mut p = self.payloads.write();
         let mut keys = Vec::with_capacity(items.len());
         for (k, t, s) in items {
@@ -121,7 +121,7 @@ impl<P: EmbeddingProvider> Memory for EmbeddingMemory<P> {
             .store
             .search(query, limit)
             .await
-            .map_err(|e| CerseiError::Config(format!("embed search: {e}")))?;
+            .map_err(|e| BricksError::Config(format!("embed search: {e}")))?;
         let payloads = self.payloads.read();
         Ok(hits
             .into_iter()

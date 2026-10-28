@@ -21,7 +21,7 @@ use crate::reasoning;
 use crate::registry::{KeySource, ResolvedModel};
 use crate::{CompletionRequest, CompletionStream, Provider};
 use async_trait::async_trait;
-use bricks_types::{CerseiError, Modality, Result, StreamEvent, Usage};
+use bricks_types::{BricksError, Modality, Result, StreamEvent, Usage};
 use futures::StreamExt;
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 use std::sync::Arc;
@@ -84,19 +84,19 @@ impl ProviderBuilder {
         // Fail early on a profile or tariff that does not exist.
         if let Some(id) = &self.profile {
             reasoning::select_profile(&m.reasoning, Some(id))
-                .map_err(|e| CerseiError::Config(format!("{who}: {e}")))?;
+                .map_err(|e| BricksError::Config(format!("{who}: {e}")))?;
         }
         if let Some(name) = &self.tariff {
             match &m.pricing {
                 Some(p) if p.tariff(name).is_some() => {}
                 Some(p) => {
-                    return Err(CerseiError::Config(format!(
+                    return Err(BricksError::Config(format!(
                         "{who}: unknown tariff `{name}`; available: {}",
                         p.tariff_names().collect::<Vec<_>>().join(", ")
                     )));
                 }
                 None => {
-                    return Err(CerseiError::Config(format!(
+                    return Err(BricksError::Config(format!(
                         "{who}: tariff `{name}` requested but the model declares no pricing"
                     )));
                 }
@@ -116,7 +116,7 @@ impl ProviderBuilder {
                     match value.filter(|v| !v.trim().is_empty()) {
                         Some(v) => Some(Secret::new(v.trim())),
                         None => {
-                            return Err(CerseiError::Auth(format!(
+                            return Err(BricksError::Auth(format!(
                                 "provider \"{}\": environment variable `{var}` (api_key_env) is \
                                  not set or empty",
                                 m.provider_id
@@ -125,7 +125,7 @@ impl ProviderBuilder {
                     }
                 }
                 KeySource::None => {
-                    return Err(CerseiError::Auth(format!(
+                    return Err(BricksError::Auth(format!(
                         "provider \"{}\": auth = \"{}\" but no key source is configured",
                         m.provider_id,
                         m.auth.as_str()
@@ -187,9 +187,9 @@ impl ConfiguredProvider {
         }
         for (name, value) in &self.model.headers {
             let n = HeaderName::from_bytes(name.as_bytes())
-                .map_err(|_| CerseiError::Config(format!("invalid header name `{name}`")))?;
+                .map_err(|_| BricksError::Config(format!("invalid header name `{name}`")))?;
             let mut v = HeaderValue::from_str(value.expose())
-                .map_err(|_| CerseiError::Config(format!("invalid value for header `{name}`")))?;
+                .map_err(|_| BricksError::Config(format!("invalid value for header `{name}`")))?;
             v.set_sensitive(true);
             map.insert(n, v);
         }
@@ -198,16 +198,16 @@ impl ConfiguredProvider {
                 AuthMode::Bearer => {
                     let mut v = HeaderValue::from_str(&format!("Bearer {}", key.expose()))
                         .map_err(|_| {
-                            CerseiError::Auth("the API key is not a valid header value".into())
+                            BricksError::Auth("the API key is not a valid header value".into())
                         })?;
                     v.set_sensitive(true);
                     map.insert(AUTHORIZATION, v);
                 }
                 AuthMode::ApiKeyHeader => {
                     let n = HeaderName::from_bytes(self.model.auth_header.as_bytes())
-                        .map_err(|_| CerseiError::Config("invalid auth_header".into()))?;
+                        .map_err(|_| BricksError::Config("invalid auth_header".into()))?;
                     let mut v = HeaderValue::from_str(key.expose()).map_err(|_| {
-                        CerseiError::Auth("the API key is not a valid header value".into())
+                        BricksError::Auth("the API key is not a valid header value".into())
                     })?;
                     v.set_sensitive(true);
                     map.insert(n, v);
@@ -228,7 +228,7 @@ impl ConfiguredProvider {
             &m.declared,
             m.protocol,
         )
-        .map_err(|e| CerseiError::Unsupported(format!("{}: {e}", m.selection())))?;
+        .map_err(|e| BricksError::Unsupported(format!("{}: {e}", m.selection())))?;
 
         let ctx = BuildCtx {
             api_model: &m.api_model,
@@ -248,7 +248,7 @@ impl ConfiguredProvider {
 
         let profile = self
             .profile_for(&request.options)
-            .map_err(|e| CerseiError::Config(format!("{}: {e}", m.selection())))?;
+            .map_err(|e| BricksError::Config(format!("{}: {e}", m.selection())))?;
         reasoning::apply(
             &mut body,
             m.protocol,
@@ -256,7 +256,7 @@ impl ConfiguredProvider {
             &m.remove_parameters,
             profile,
         )
-        .map_err(|e| CerseiError::Config(format!("{}: {e}", m.selection())))?;
+        .map_err(|e| BricksError::Config(format!("{}: {e}", m.selection())))?;
         Ok(body)
     }
 
@@ -482,24 +482,24 @@ impl Provider for ConfiguredProvider {
             .headers(self.request_headers(false)?)
             .json(&body)
             .build()
-            .map_err(|e| CerseiError::Http(e.without_url()))?;
+            .map_err(|e| BricksError::Http(e.without_url()))?;
         let response = self
             .client
             .execute(http)
             .await
-            .map_err(|e| CerseiError::Http(e.without_url()))?;
+            .map_err(|e| BricksError::Http(e.without_url()))?;
         if !response.status().is_success() {
             let status = response.status().as_u16();
             let retry_after = crate::parse_retry_after(response.headers());
             let text = response.text().await.unwrap_or_default();
-            return Err(CerseiError::from_http_status(
+            return Err(BricksError::from_http_status(
                 status,
                 retry_after,
                 self.redact(&text),
             ));
         }
         let json: serde_json::Value = response.json().await.map_err(|e| {
-            CerseiError::Provider(format!(
+            BricksError::Provider(format!(
                 "token count response is not valid JSON: {}",
                 self.redact(&e.without_url().to_string())
             ))
@@ -508,7 +508,7 @@ impl Provider for ConfiguredProvider {
             .and_then(serde_json::Value::as_u64)
             .map(Some)
             .ok_or_else(|| {
-                CerseiError::Provider("token count response has no integer `input_tokens`".into())
+                BricksError::Provider("token count response has no integer `input_tokens`".into())
             })
     }
 
@@ -525,7 +525,7 @@ impl Provider for ConfiguredProvider {
             .headers(self.request_headers(stream)?)
             .json(&body)
             .build()
-            .map_err(|e| CerseiError::Http(e.without_url()))?;
+            .map_err(|e| BricksError::Http(e.without_url()))?;
 
         // F-02: the status is checked before anything is spawned, so a non-2xx
         // is a typed `Err` from `complete()` — the only place the runner's
@@ -534,12 +534,12 @@ impl Provider for ConfiguredProvider {
             .client
             .execute(http)
             .await
-            .map_err(|e| CerseiError::Http(e.without_url()))?;
+            .map_err(|e| BricksError::Http(e.without_url()))?;
         if !response.status().is_success() {
             let status = response.status().as_u16();
             let retry_after = crate::parse_retry_after(response.headers());
             let text = response.text().await.unwrap_or_default();
-            return Err(CerseiError::from_http_status(
+            return Err(BricksError::from_http_status(
                 status,
                 retry_after,
                 self.redact(&text),
@@ -569,7 +569,7 @@ impl Provider for ConfiguredProvider {
 
         if !stream {
             let json: serde_json::Value = response.json().await.map_err(|e| {
-                CerseiError::Provider(format!(
+                BricksError::Provider(format!(
                     "response is not valid JSON: {}",
                     this.redact(&e.without_url().to_string())
                 ))

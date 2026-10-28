@@ -55,9 +55,9 @@ pub enum McpError {
     UnknownTool { server: String, tool: String },
 }
 
-impl From<McpError> for bricks_types::CerseiError {
+impl From<McpError> for bricks_types::BricksError {
     fn from(e: McpError) -> Self {
-        bricks_types::CerseiError::Mcp(e.to_string())
+        bricks_types::BricksError::Mcp(e.to_string())
     }
 }
 

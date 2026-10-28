@@ -127,7 +127,7 @@ pub fn run_migrations(db: &GrafeoDB, from: u32, to: u32) -> bricks_types::Result
             1 => migrate_v1_to_v2(db)?,
             2 => migrate_v2_to_v3(db)?,
             _ => {
-                return Err(bricks_types::CerseiError::Config(format!(
+                return Err(bricks_types::BricksError::Config(format!(
                     "Unknown migration: v{} → v{}",
                     current,
                     current + 1
@@ -171,7 +171,7 @@ fn stamp_version(db: &GrafeoDB, version: u32) -> bricks_types::Result<()> {
             ]),
         )
         .map_err(|e| {
-            bricks_types::CerseiError::Config(format!("Failed to stamp schema version: {}", e))
+            bricks_types::BricksError::Config(format!("Failed to stamp schema version: {}", e))
         })?;
 
     Ok(())
@@ -227,7 +227,7 @@ fn migrate_v1_to_v2(_db: &GrafeoDB) -> bricks_types::Result<()> {
 fn migrate_v2_to_v3(db: &GrafeoDB) -> bricks_types::Result<()> {
     use grafeo::Value;
     tracing::debug!("Running migration v2 → v3 (legacy memories become episodes)");
-    let err = |e: grafeo::Error| bricks_types::CerseiError::Config(format!("migration v2→v3: {e}"));
+    let err = |e: grafeo::Error| bricks_types::BricksError::Config(format!("migration v2→v3: {e}"));
     let session = db.session();
     let rows: Vec<Vec<Value>> = session
         .execute(queries::LEGACY_MEMORIES)

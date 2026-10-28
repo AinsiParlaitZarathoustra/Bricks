@@ -34,7 +34,7 @@ impl Provider for Nothing {
         100_000
     }
     async fn complete(&self, _: CompletionRequest) -> Result<bricks::provider::CompletionStream> {
-        Err(CerseiError::Provider("not used".into()))
+        Err(BricksError::Provider("not used".into()))
     }
 }
 

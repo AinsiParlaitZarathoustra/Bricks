@@ -23,7 +23,7 @@ fn resolve_provider() -> bricks_types::Result<bricks::ConfiguredProvider> {
     // The model comes from ~/.bricks/providers.toml, selected on the command
     // line as `provider_id/model_id`; its key from the `api_key_env` it names.
     let selection = std::env::args().nth(1).ok_or_else(|| {
-        CerseiError::Config(
+        BricksError::Config(
             "usage: coding_agent provider_id/model_id (see docs/providers.md)".into(),
         )
     })?;

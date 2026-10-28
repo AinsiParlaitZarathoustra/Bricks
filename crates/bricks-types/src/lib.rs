@@ -572,8 +572,10 @@ pub enum StreamEvent {
 
 // ─── Errors ──────────────────────────────────────────────────────────────────
 
+/// Every error of the SDK. It was named `CerseiError`; the type is the same
+/// (variants, messages, conversions), and no alias keeps the old name.
 #[derive(thiserror::Error, Debug)]
-pub enum CerseiError {
+pub enum BricksError {
     #[error("Provider error: {0}")]
     Provider(String),
 
@@ -637,23 +639,23 @@ pub enum CerseiError {
     Other(#[from] anyhow::Error),
 }
 
-impl CerseiError {
+impl BricksError {
     /// The error for a non-2xx provider response.
     ///
     /// Every provider funnels its HTTP failures through here so that "which
     /// statuses are worth retrying" is decided once, next to
-    /// [`CerseiError::is_retryable`], rather than four times in four clients.
+    /// [`BricksError::is_retryable`], rather than four times in four clients.
     pub fn from_http_status(
         status: u16,
         retry_after: Option<Duration>,
         message: impl Into<String>,
     ) -> Self {
         match status {
-            429 => CerseiError::RateLimit {
+            429 => BricksError::RateLimit {
                 retry_after,
                 message: message.into(),
             },
-            _ => CerseiError::ProviderStatus {
+            _ => BricksError::ProviderStatus {
                 status,
                 message: message.into(),
                 retry_after,
@@ -665,8 +667,8 @@ impl CerseiError {
     /// response. Whether to retry at all is [`Self::is_retryable`]'s call.
     pub fn retry_after(&self) -> Option<Duration> {
         match self {
-            CerseiError::RateLimit { retry_after, .. }
-            | CerseiError::ProviderStatus { retry_after, .. } => *retry_after,
+            BricksError::RateLimit { retry_after, .. }
+            | BricksError::ProviderStatus { retry_after, .. } => *retry_after,
             _ => None,
         }
     }
@@ -675,16 +677,16 @@ impl CerseiError {
     /// transport error that never got a response has none).
     pub fn http_status(&self) -> Option<u16> {
         match self {
-            CerseiError::RateLimit { .. } => Some(429),
-            CerseiError::ProviderStatus { status, .. } => Some(*status),
-            CerseiError::Http(e) => e.status().map(|s| s.as_u16()),
+            BricksError::RateLimit { .. } => Some(429),
+            BricksError::ProviderStatus { status, .. } => Some(*status),
+            BricksError::Http(e) => e.status().map(|s| s.as_u16()),
             _ => None,
         }
     }
 
     /// A transport failure that timed out (no HTTP status).
     pub fn is_timeout(&self) -> bool {
-        matches!(self, CerseiError::Http(e) if e.is_timeout())
+        matches!(self, BricksError::Http(e) if e.is_timeout())
     }
 
     /// The server refused the request because the prompt does not fit the
@@ -694,8 +696,8 @@ impl CerseiError {
     /// context has to shrink first.
     pub fn is_context_overflow(&self) -> bool {
         let message = match self {
-            CerseiError::ContextOverflow { .. } => return true,
-            CerseiError::ProviderStatus {
+            BricksError::ContextOverflow { .. } => return true,
+            BricksError::ProviderStatus {
                 status, message, ..
             } => {
                 if !matches!(status, 400 | 413 | 422) {
@@ -703,7 +705,7 @@ impl CerseiError {
                 }
                 message
             }
-            CerseiError::Provider(message) => message,
+            BricksError::Provider(message) => message,
             _ => return false,
         };
         let m = message.to_ascii_lowercase();
@@ -729,18 +731,18 @@ impl CerseiError {
             // A 429 is transient — unless the body says the account is out of
             // money, in which case every retry buys the same answer and the
             // backoff ladder just delays the inevitable by five sleeps.
-            CerseiError::RateLimit { message, .. } => !Self::quota_exhausted(message),
+            BricksError::RateLimit { message, .. } => !Self::quota_exhausted(message),
             // 529 is Anthropic's "overloaded". 500/502/503/504 are standard
             // upstream/gateway blips — Gemini in particular returns 503
             // UNAVAILABLE under load, which used to be session-fatal.
-            CerseiError::ProviderStatus { status, .. } => {
+            BricksError::ProviderStatus { status, .. } => {
                 matches!(status, 429 | 500 | 502 | 503 | 504 | 529)
             }
             // Transport-level failures that never produced a status: the
             // connection was refused, reset, or timed out. Scoped to the two
             // reqwest classes that are unambiguously transient; malformed-URL
             // and builder errors stay fatal.
-            CerseiError::Http(e) => e.is_connect() || e.is_timeout(),
+            BricksError::Http(e) => e.is_connect() || e.is_timeout(),
             _ => false,
         }
     }
@@ -759,11 +761,11 @@ impl CerseiError {
     }
 
     pub fn is_context_limit(&self) -> bool {
-        matches!(self, CerseiError::ContextOverflow { .. })
+        matches!(self, BricksError::ContextOverflow { .. })
     }
 }
 
-pub type Result<T> = std::result::Result<T, CerseiError>;
+pub type Result<T> = std::result::Result<T, BricksError>;
 
 // ─── Session info ────────────────────────────────────────────────────────────
 
@@ -844,42 +846,42 @@ mod usage_tests {
 mod retry_tests {
     #[test]
     fn context_overflow_refusals_are_recognised() {
-        use super::CerseiError;
+        use super::BricksError;
         let overflow = [
-            CerseiError::ProviderStatus {
+            BricksError::ProviderStatus {
                 status: 400,
                 message: r#"{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 210000 tokens > 200000 maximum"}}"#.into(),
                 retry_after: None,
             },
-            CerseiError::ProviderStatus {
+            BricksError::ProviderStatus {
                 status: 400,
                 message: r#"{"error":{"code":"context_length_exceeded","message":"This model's maximum context length is 128000 tokens."}}"#.into(),
                 retry_after: None,
             },
-            CerseiError::ProviderStatus {
+            BricksError::ProviderStatus {
                 status: 413,
                 message: "request_too_large".into(),
                 retry_after: None,
             },
-            CerseiError::Provider("stream error: context_length_exceeded".into()),
-            CerseiError::ContextOverflow { used: 10, limit: 5 },
+            BricksError::Provider("stream error: context_length_exceeded".into()),
+            BricksError::ContextOverflow { used: 10, limit: 5 },
         ];
         for e in overflow {
             assert!(e.is_context_overflow(), "{e}");
-            assert!(!e.is_retryable() || matches!(e, CerseiError::Provider(_)));
+            assert!(!e.is_retryable() || matches!(e, BricksError::Provider(_)));
         }
         let other = [
-            CerseiError::ProviderStatus {
+            BricksError::ProviderStatus {
                 status: 400,
                 message: "invalid tool schema".into(),
                 retry_after: None,
             },
-            CerseiError::ProviderStatus {
+            BricksError::ProviderStatus {
                 status: 500,
                 message: "context length".into(),
                 retry_after: None,
             },
-            CerseiError::Auth("bad key".into()),
+            BricksError::Auth("bad key".into()),
         ];
         for e in other {
             assert!(!e.is_context_overflow(), "{e}");
@@ -888,8 +890,8 @@ mod retry_tests {
 
     use super::*;
 
-    fn status(code: u16) -> CerseiError {
-        CerseiError::from_http_status(code, None, "upstream said no")
+    fn status(code: u16) -> BricksError {
+        BricksError::from_http_status(code, None, "upstream said no")
     }
 
     #[test]
@@ -911,8 +913,8 @@ mod retry_tests {
     #[test]
     fn the_servers_delay_is_kept_and_decides_nothing() {
         let d = Some(Duration::from_secs(12));
-        let e429 = CerseiError::from_http_status(429, d, "slow down");
-        let e503 = CerseiError::from_http_status(503, d, "unavailable");
+        let e429 = BricksError::from_http_status(429, d, "slow down");
+        let e503 = BricksError::from_http_status(503, d, "unavailable");
         for e in [&e429, &e503] {
             assert_eq!(e.retry_after(), d, "{e}");
             assert!(e.is_retryable(), "{e}");
@@ -925,19 +927,19 @@ mod retry_tests {
         assert_eq!(e503.to_string(), "Provider error 503: unavailable");
         // A definitive error stays definitive whatever the header says.
         for code in [400, 401, 403, 404, 422] {
-            let e = CerseiError::from_http_status(code, d, "no");
+            let e = BricksError::from_http_status(code, d, "no");
             assert_eq!(e.retry_after(), d);
             assert!(!e.is_retryable(), "{code}");
         }
-        let quota = CerseiError::from_http_status(429, d, "insufficient_quota");
+        let quota = BricksError::from_http_status(429, d, "insufficient_quota");
         assert!(!quota.is_retryable());
-        assert_eq!(CerseiError::Auth("x".into()).retry_after(), None);
-        assert_eq!(CerseiError::Auth("x".into()).http_status(), None);
+        assert_eq!(BricksError::Auth("x".into()).retry_after(), None);
+        assert_eq!(BricksError::Auth("x".into()).http_status(), None);
     }
 
     #[test]
     fn a_genuine_rate_limit_is_retryable() {
-        let err = CerseiError::from_http_status(
+        let err = BricksError::from_http_status(
             429,
             Some(Duration::from_secs(2)),
             r#"{"error":{"type":"rate_limit_error","message":"Too many requests"}}"#,
@@ -956,7 +958,7 @@ mod retry_tests {
             // Anthropic's shape.
             r#"{"error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API."}}"#,
         ] {
-            let err = CerseiError::from_http_status(429, None, body);
+            let err = BricksError::from_http_status(429, None, body);
             assert!(
                 !err.is_retryable(),
                 "quota exhaustion must fail fast, retried anyway: {body}"
@@ -966,15 +968,15 @@ mod retry_tests {
 
     #[test]
     fn quota_matching_is_case_insensitive() {
-        let err = CerseiError::from_http_status(429, None, "INSUFFICIENT_QUOTA");
+        let err = BricksError::from_http_status(429, None, "INSUFFICIENT_QUOTA");
         assert!(!err.is_retryable());
     }
 
     #[test]
     fn non_http_errors_stay_fatal() {
-        assert!(!CerseiError::Provider("anything".into()).is_retryable());
-        assert!(!CerseiError::Auth("bad key".into()).is_retryable());
-        assert!(!CerseiError::Cancelled.is_retryable());
+        assert!(!BricksError::Provider("anything".into()).is_retryable());
+        assert!(!BricksError::Auth("bad key".into()).is_retryable());
+        assert!(!BricksError::Cancelled.is_retryable());
     }
 }
 

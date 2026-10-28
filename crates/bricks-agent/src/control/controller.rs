@@ -23,7 +23,7 @@ use crate::{Agent, BricksConfig, CompactReason};
 use bricks_memory::{JsonlMemory, LongTermMemory, Memory};
 use bricks_provider::Provider;
 use bricks_tools::Tool;
-use bricks_types::{CerseiError, Message, Usage};
+use bricks_types::{BricksError, Message, Usage};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -2244,7 +2244,7 @@ impl Controller {
                 turns: out.turns,
                 approvals_unsatisfied: Vec::new(),
             },
-            Err(CerseiError::Cancelled) if !unsatisfied.is_empty() => Event::RunFinished {
+            Err(BricksError::Cancelled) if !unsatisfied.is_empty() => Event::RunFinished {
                 outcome: RunOutcome::Failed,
                 failure: Some(FailureKind::ApprovalRequired),
                 error: Some(format!(
@@ -2256,7 +2256,7 @@ impl Controller {
                 turns: turns_done,
                 approvals_unsatisfied: unsatisfied,
             },
-            Err(CerseiError::Cancelled) => Event::RunFinished {
+            Err(BricksError::Cancelled) => Event::RunFinished {
                 outcome: RunOutcome::Cancelled,
                 failure: None,
                 error: None,
@@ -2280,7 +2280,7 @@ impl Controller {
         // background sub-agents still run, final again when the last ends.
         let sp = self.inner.spawner.read().clone();
         if let (Some(sp), Some(id)) = (sp, agent.extensions.get::<crate::agents::AgentIdentity>()) {
-            if matches!(&result, Err(CerseiError::Cancelled)) {
+            if matches!(&result, Err(BricksError::Cancelled)) {
                 sp.runtime().cancel_root(&id.root_run_id);
             }
             if let AgentEvent::SubAgent(ev) = sp.runtime().root_finished(&id.root_run_id) {

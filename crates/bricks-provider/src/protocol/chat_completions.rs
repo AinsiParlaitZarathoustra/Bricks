@@ -557,11 +557,11 @@ impl StreamState {
 /// Convert a complete (non-streamed) response body into the same events.
 pub(crate) fn response_to_events(json: &Value) -> Result<Vec<StreamEvent>> {
     if let Some(msg) = json["error"]["message"].as_str() {
-        return Err(CerseiError::Provider(msg.to_string()));
+        return Err(BricksError::Provider(msg.to_string()));
     }
     let message = &json["choices"][0]["message"];
     if !message.is_object() {
-        return Err(CerseiError::Provider(
+        return Err(BricksError::Provider(
             "response has no choices[0].message".into(),
         ));
     }
@@ -987,7 +987,7 @@ mod tests {
             r.messages.push(Message::user_blocks(vec![block]));
             assert!(matches!(
                 build_body(&ctx(&compat(), true), &r),
-                Err(CerseiError::Unsupported(_))
+                Err(BricksError::Unsupported(_))
             ));
         }
         let mut r = req();

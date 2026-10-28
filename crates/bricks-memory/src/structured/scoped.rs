@@ -18,7 +18,7 @@ use super::recall::{RecallItem, RecallQuery};
 use super::service::{Lease, SharedStore};
 use super::{EpisodeInput, NoteInput, Processing};
 use crate::{LongTermMemory, MaintenanceReport, MemoryScope, MemoryTurn, RecalledContext};
-use bricks_types::{CerseiError, Result};
+use bricks_types::{BricksError, Result};
 use std::collections::HashMap;
 
 /// Entries one recall gives at most.
@@ -88,8 +88,8 @@ impl ScopedMemory {
     fn store(&self, scope: MemoryScope) -> Result<&SharedStore> {
         match self.slot(scope) {
             Some(Ok(s)) => Ok(s),
-            Some(Err(why)) => Err(CerseiError::Config(unavailable(scope, why))),
-            None => Err(CerseiError::Config(match scope {
+            Some(Err(why)) => Err(BricksError::Config(unavailable(scope, why))),
+            None => Err(BricksError::Config(match scope {
                 MemoryScope::Project => {
                     "the project memory is unavailable: this session has no project".to_string()
                 }
@@ -275,7 +275,7 @@ impl LongTermMemory for ScopedMemory {
         let store = match &self.project {
             None => return Ok(()),
             Some(Err(why)) => {
-                return Err(CerseiError::Config(unavailable(MemoryScope::Project, why)));
+                return Err(BricksError::Config(unavailable(MemoryScope::Project, why)));
             }
             Some(Ok(s)) => s,
         };
@@ -365,7 +365,7 @@ impl LongTermMemory for ScopedMemory {
             .write_note(note, self.processing.extractor.is_some())
             .await
             .map(|w| w.id)
-            .map_err(|e| CerseiError::Config(e.to_string()))
+            .map_err(|e| BricksError::Config(e.to_string()))
     }
 }
 

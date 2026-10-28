@@ -18,7 +18,7 @@ pub trait Reporter: Send + Sync {
 
     async fn on_complete(&self, _output: &AgentOutput) {}
 
-    async fn on_error(&self, _error: &CerseiError) {}
+    async fn on_error(&self, _error: &BricksError) {}
 }
 
 // ─── Console reporter ────────────────────────────────────────────────────────

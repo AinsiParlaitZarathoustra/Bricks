@@ -7,7 +7,7 @@ use crate::step::{Step, StepContext, StepOutcome};
 use async_trait::async_trait;
 use bricks_tools::permissions::AllowAll;
 use bricks_tools::{CostTracker, Tool, ToolContext};
-use bricks_types::{CerseiError, Result};
+use bricks_types::{BricksError, Result};
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -75,7 +75,7 @@ impl Step for ToolStep {
         let tool_ctx = self.tool_context(ctx);
         let res = self.tool.execute(input, &tool_ctx).await;
         if res.is_error {
-            return Err(CerseiError::Tool(res.content));
+            return Err(BricksError::Tool(res.content));
         }
         Ok(StepOutcome::Done(json!({
             "content": res.content,

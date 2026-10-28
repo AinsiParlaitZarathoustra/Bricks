@@ -541,10 +541,10 @@ impl StreamState {
 /// Convert a complete (non-streamed) response into events.
 pub(crate) fn response_to_events(json: &Value) -> Result<Vec<StreamEvent>> {
     if let Some(msg) = json["error"]["message"].as_str() {
-        return Err(CerseiError::Provider(msg.to_string()));
+        return Err(BricksError::Provider(msg.to_string()));
     }
     if json["status"].as_str() == Some("failed") {
-        return Err(CerseiError::Provider("response failed".into()));
+        return Err(BricksError::Provider("response failed".into()));
     }
     let mut state = StreamState::new();
     let mut out = Vec::new();
@@ -658,7 +658,7 @@ mod tests {
     fn stop_sequences_are_refused() {
         let mut r = CompletionRequest::new("expert");
         r.stop_sequences = vec!["x".into()];
-        assert!(matches!(body(&r, true), Err(CerseiError::Unsupported(_))));
+        assert!(matches!(body(&r, true), Err(BricksError::Unsupported(_))));
     }
 
     #[test]
@@ -741,7 +741,7 @@ mod tests {
         ] {
             let mut r = CompletionRequest::new("expert");
             r.messages.push(Message::user_blocks(vec![bad]));
-            assert!(matches!(body(&r, true), Err(CerseiError::Unsupported(_))));
+            assert!(matches!(body(&r, true), Err(BricksError::Unsupported(_))));
         }
     }
 

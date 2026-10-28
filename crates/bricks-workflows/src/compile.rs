@@ -8,7 +8,7 @@ use crate::ir::{EdgeKind, NodeKind, WorkflowDef, WorkflowEdge};
 use crate::registry::StepRegistry;
 use crate::step::Step;
 use crate::store::RunStore;
-use bricks_types::{CerseiError, Result};
+use bricks_types::{BricksError, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -28,10 +28,10 @@ impl Workflow {
     /// Validate and resolve a workflow definition against a step registry.
     pub fn compile(def: WorkflowDef, registry: &StepRegistry) -> Result<Arc<Workflow>> {
         if def.nodes.is_empty() {
-            return Err(CerseiError::Config("workflow has no nodes".into()));
+            return Err(BricksError::Config("workflow has no nodes".into()));
         }
         if def.node(&def.entry).is_none() {
-            return Err(CerseiError::Config(format!(
+            return Err(BricksError::Config(format!(
                 "workflow entry node '{}' does not exist",
                 def.entry
             )));
@@ -45,7 +45,7 @@ impl Workflow {
             {
                 let step = registry
                     .get(step_id)
-                    .ok_or_else(|| CerseiError::Tool(format!("unknown step: '{}'", step_id)))?;
+                    .ok_or_else(|| BricksError::Tool(format!("unknown step: '{}'", step_id)))?;
                 steps.insert(step_id.clone(), step);
             }
         }
@@ -54,13 +54,13 @@ impl Workflow {
         let mut outgoing: HashMap<String, Vec<WorkflowEdge>> = HashMap::new();
         for edge in &def.edges {
             if def.node(&edge.from).is_none() {
-                return Err(CerseiError::Config(format!(
+                return Err(BricksError::Config(format!(
                     "edge from unknown node '{}'",
                     edge.from
                 )));
             }
             if def.node(&edge.to).is_none() {
-                return Err(CerseiError::Config(format!(
+                return Err(BricksError::Config(format!(
                     "edge to unknown node '{}'",
                     edge.to
                 )));
@@ -77,14 +77,14 @@ impl Workflow {
                 NodeKind::Branch => {
                     let outs = outgoing.get(&node.id).map(|v| v.as_slice()).unwrap_or(&[]);
                     if !outs.iter().any(|e| matches!(e.kind, EdgeKind::When { .. })) {
-                        return Err(CerseiError::Config(format!(
+                        return Err(BricksError::Config(format!(
                             "branch node '{}' has no `When` arms",
                             node.id
                         )));
                     }
                 }
                 NodeKind::Loop { body, .. } if def.node(body).is_none() => {
-                    return Err(CerseiError::Config(format!(
+                    return Err(BricksError::Config(format!(
                         "loop node '{}' references missing body '{}'",
                         node.id, body
                     )));

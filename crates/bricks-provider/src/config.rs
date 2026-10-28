@@ -516,9 +516,9 @@ impl fmt::Display for ConfigError {
 
 impl std::error::Error for ConfigError {}
 
-impl From<ConfigError> for bricks_types::CerseiError {
+impl From<ConfigError> for bricks_types::BricksError {
     fn from(e: ConfigError) -> Self {
-        bricks_types::CerseiError::Config(e.to_string())
+        bricks_types::BricksError::Config(e.to_string())
     }
 }
 

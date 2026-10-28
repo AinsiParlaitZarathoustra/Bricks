@@ -75,9 +75,9 @@ impl From<String> for MemoryError {
     }
 }
 
-impl From<MemoryError> for bricks_types::CerseiError {
+impl From<MemoryError> for bricks_types::BricksError {
     fn from(e: MemoryError) -> Self {
-        bricks_types::CerseiError::Config(e.to_string())
+        bricks_types::BricksError::Config(e.to_string())
     }
 }
 
@@ -473,7 +473,7 @@ impl crate::LongTermMemory for StructuredMemory {
         self.write_note(note, self.extractor.is_some())
             .await
             .map(|w| w.id)
-            .map_err(|e| bricks_types::CerseiError::Config(e.to_string()))
+            .map_err(|e| bricks_types::BricksError::Config(e.to_string()))
     }
 
     async fn maintain(

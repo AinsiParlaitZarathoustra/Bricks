@@ -4,7 +4,7 @@ use crate::Workflow;
 use crate::result::RunStatus;
 use crate::step::{Step, StepContext, StepOutcome};
 use async_trait::async_trait;
-use bricks_types::{CerseiError, Result};
+use bricks_types::{BricksError, Result};
 use serde_json::Value;
 use std::sync::Arc;
 
@@ -48,7 +48,7 @@ impl Step for WorkflowStep {
                     payload,
                 })
             }
-            _ => Err(CerseiError::Tool(
+            _ => Err(BricksError::Tool(
                 res.error.unwrap_or_else(|| "nested workflow failed".into()),
             )),
         }

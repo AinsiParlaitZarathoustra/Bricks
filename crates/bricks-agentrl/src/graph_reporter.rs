@@ -8,7 +8,7 @@ use crate::graph::{
 use async_trait::async_trait;
 use bricks_agent::events::AgentEvent;
 use bricks_agent::{AgentOutput, Reporter};
-use bricks_types::{CerseiError, StopReason};
+use bricks_types::{BricksError, StopReason};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -129,7 +129,7 @@ impl Reporter for GraphReporter {
         }
     }
 
-    async fn on_error(&self, _error: &CerseiError) {
+    async fn on_error(&self, _error: &BricksError) {
         let mut g = self.graph.lock();
         let root = g.root;
         g.set_status(root, NodeStatus::Failed);

@@ -58,6 +58,13 @@ impl StreamAccumulator {
         }
     }
 
+    /// The blocks finished so far, in the provider's order, whether or not
+    /// the answer ever completes: blocks closed by `ContentBlockStop` and
+    /// protocol items, which arrive whole. A block still open is left out.
+    pub fn finished_blocks(&self) -> Vec<ContentBlock> {
+        self.content_blocks.values().cloned().collect()
+    }
+
     pub fn process_event(&mut self, event: StreamEvent) {
         match event {
             StreamEvent::MessageStart { id, model, usage } => {
@@ -200,7 +207,7 @@ impl StreamAccumulator {
     pub fn into_response(self) -> Result<super::CompletionResponse> {
         // A provider error mid-stream is a failed turn, not a partial success (F-03b).
         if let Some(message) = self.stream_error.clone() {
-            return Err(CerseiError::Provider(message));
+            return Err(BricksError::Provider(message));
         }
 
         // An unterminated stream is not a clean turn (F-03c). `EndTurn` is only
@@ -209,7 +216,7 @@ impl StreamAccumulator {
             Some(sr) => sr.clone(),
             None if self.saw_terminal => StopReason::EndTurn,
             None => {
-                return Err(CerseiError::Provider(format!(
+                return Err(BricksError::Provider(format!(
                     "stream ended without a terminal event (no stop_reason, no message_stop); \
                      the response is incomplete ({} content block(s) accumulated)",
                     self.content_blocks.len()
@@ -621,5 +628,52 @@ mod tests {
         );
         assert!(matches!(&b[1], ContentBlock::RedactedThinking { data } if data == "OPAQUE"));
         assert!(matches!(&b[2], ContentBlock::Text { text } if text == "hi"));
+    }
+
+    /// An answer stopped mid-stream: the finished blocks are recovered in
+    /// order, protocol items included (they have no `ContentBlockStop`),
+    /// and the open ones are not, without any terminal event.
+    #[test]
+    fn finished_blocks_of_an_unterminated_answer() {
+        let mut events = tool_use_events(&[r#"{"path":"a"}"#]);
+        events.extend([
+            StreamEvent::ProtocolItem {
+                index: 1,
+                protocol: "responses".into(),
+                item: serde_json::json!({"type": "reasoning"}),
+            },
+            StreamEvent::ContentBlockStart {
+                index: 2,
+                block_type: "text".into(),
+                id: None,
+                name: None,
+            },
+            StreamEvent::TextDelta {
+                index: 2,
+                text: "half".into(),
+            },
+            StreamEvent::ContentBlockStart {
+                index: 3,
+                block_type: "tool_use".into(),
+                id: Some("tu_2".into()),
+                name: Some("Read".into()),
+            },
+            StreamEvent::InputJsonDelta {
+                index: 3,
+                partial_json: r#"{"pa"#.into(),
+            },
+        ]);
+        let acc = accumulate(events);
+        let blocks = acc.finished_blocks();
+        assert_eq!(blocks.len(), 2, "{blocks:?}");
+        assert!(matches!(
+            &blocks[0],
+            ContentBlock::ToolUse { id, input, .. } if id == "tu_1" && input["path"] == "a"
+        ));
+        assert!(
+            matches!(&blocks[1], ContentBlock::ProtocolItem { protocol, .. } if protocol == "responses")
+        );
+        // The answer itself is still incomplete.
+        assert!(acc.into_response().is_err());
     }
 }

@@ -223,7 +223,7 @@ pub trait LongTermMemory: Send + Sync {
         limit: usize,
     ) -> Result<Option<RecalledContext>> {
         let _ = (query, limit);
-        Err(CerseiError::Config(format!(
+        Err(BricksError::Config(format!(
             "the {} memory is not available here",
             scope.as_str()
         )))
@@ -238,7 +238,7 @@ pub trait LongTermMemory: Send + Sync {
         text: &str,
     ) -> Result<String> {
         let _ = (session_id, text);
-        Err(CerseiError::Config(format!(
+        Err(BricksError::Config(format!(
             "the {} memory is not available here",
             scope.as_str()
         )))
@@ -383,8 +383,8 @@ enum Stored {
     },
 }
 
-fn corrupt(path: &std::path::Path, why: &str) -> CerseiError {
-    CerseiError::Config(format!("{}: {why}", path.display()))
+fn corrupt(path: &std::path::Path, why: &str) -> BricksError {
+    BricksError::Config(format!("{}: {why}", path.display()))
 }
 
 fn parse_stored(path: &std::path::Path, content: &str) -> Result<Stored> {
@@ -536,7 +536,7 @@ impl JsonlMemory {
             )
         })
         .await
-        .map_err(|e| CerseiError::Config(format!("session write: {e}")))??;
+        .map_err(|e| BricksError::Config(format!("session write: {e}")))??;
         Ok(())
     }
 
@@ -600,7 +600,7 @@ impl JsonlMemory {
             Ok(Some(digest))
         })
         .await
-        .map_err(|e| CerseiError::Config(format!("session write: {e}")))??;
+        .map_err(|e| BricksError::Config(format!("session write: {e}")))??;
         if let Some(r) = revision {
             let p = state.revisions.entry(r.owner).or_insert(r.seq);
             *p = (*p).max(r.seq);

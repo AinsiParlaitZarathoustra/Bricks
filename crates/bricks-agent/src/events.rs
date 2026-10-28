@@ -274,11 +274,11 @@ impl AgentStream {
         while let Some(event) = self.rx.recv().await {
             match event {
                 AgentEvent::Complete(output) => return Ok(output),
-                AgentEvent::Error(e) => return Err(CerseiError::Other(anyhow::anyhow!(e))),
+                AgentEvent::Error(e) => return Err(BricksError::Other(anyhow::anyhow!(e))),
                 _ => continue,
             }
         }
-        Err(CerseiError::Cancelled)
+        Err(BricksError::Cancelled)
     }
 
     /// Collect only text deltas into a single string.
@@ -288,7 +288,7 @@ impl AgentStream {
             match event {
                 AgentEvent::TextDelta(t) => text.push_str(&t),
                 AgentEvent::Complete(_) => return Ok(text),
-                AgentEvent::Error(e) => return Err(CerseiError::Other(anyhow::anyhow!(e))),
+                AgentEvent::Error(e) => return Err(BricksError::Other(anyhow::anyhow!(e))),
                 _ => continue,
             }
         }

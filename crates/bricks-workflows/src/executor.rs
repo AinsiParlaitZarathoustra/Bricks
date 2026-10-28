@@ -16,7 +16,7 @@ use crate::result::{RunStatus, StepResult, SuspendPoint, WorkflowResult};
 use crate::step::{StepContext, StepOutcome};
 use crate::store::RunSnapshot;
 use bricks_tools::Extensions;
-use bricks_types::{CerseiError, Result};
+use bricks_types::{BricksError, Result};
 use dashmap::DashMap;
 use parking_lot::Mutex;
 use serde_json::{Map, Value, json};
@@ -88,7 +88,7 @@ impl Workflow {
         let snapshot = self
             .store
             .load(run_id)
-            .ok_or_else(|| CerseiError::Config(format!("no suspended run '{}'", run_id)))?;
+            .ok_or_else(|| BricksError::Config(format!("no suspended run '{}'", run_id)))?;
         let (tx, mut rx) = mpsc::channel::<WorkflowEvent>(1024);
         let drain = tokio::spawn(async move { while rx.recv().await.is_some() {} });
         // Restore shared state from the snapshot before re-walking.
@@ -220,7 +220,7 @@ impl Workflow {
             }
             let node = match self.def.node(node_id) {
                 Some(n) => n,
-                None => return Err(CerseiError::Config(format!("missing node '{}'", node_id))),
+                None => return Err(BricksError::Config(format!("missing node '{}'", node_id))),
             };
 
             match &node.kind {
@@ -293,7 +293,7 @@ impl Workflow {
         let step = self
             .steps
             .get(step_id)
-            .ok_or_else(|| CerseiError::Tool(format!("unknown step: '{}'", step_id)))?;
+            .ok_or_else(|| BricksError::Tool(format!("unknown step: '{}'", step_id)))?;
 
         let effective_input = merge_config(config, input);
         let _ = rctx
@@ -503,7 +503,7 @@ impl Workflow {
             LoopMode::ForEach { .. } => {
                 let items = match &input {
                     Value::Array(a) => a.clone(),
-                    _ => return Err(CerseiError::Config("foreach input is not an array".into())),
+                    _ => return Err(BricksError::Config("foreach input is not an array".into())),
                 };
                 let mut collected = Vec::with_capacity(items.len());
                 for item in items {

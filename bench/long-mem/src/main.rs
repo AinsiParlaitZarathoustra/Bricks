@@ -330,7 +330,7 @@ struct ModelRouter {
 impl ModelRouter {
     fn lookup(&self, model: &str) -> bricks_types::Result<&ConfiguredProvider> {
         self.by_selection.get(model).ok_or_else(|| {
-            bricks_types::CerseiError::Config(format!(
+            bricks_types::BricksError::Config(format!(
                 "model `{model}` was not configured for this run"
             ))
         })

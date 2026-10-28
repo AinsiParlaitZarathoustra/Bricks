@@ -66,7 +66,7 @@ pub mod prelude {
 
     // Types
     pub use bricks_types::{
-        CerseiError, ContentBlock, DocumentSource, ImageSource, MediaKind, Message, MessageContent,
+        BricksError, ContentBlock, DocumentSource, ImageSource, MediaKind, Message, MessageContent,
         MessageMetadata, Result, Role, StopReason, StreamEvent, ToolDefinition, Usage,
     };
 

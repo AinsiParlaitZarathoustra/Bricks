@@ -13,7 +13,7 @@ pub mod sse;
 
 use crate::config::ResolvedCompat;
 use bricks_types::{
-    CerseiError, ContentBlock, Message, MessageContent, Role, SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+    BricksError, ContentBlock, Message, MessageContent, Role, SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
     ToolResultContent,
 };
 
@@ -34,8 +34,8 @@ impl BuildCtx<'_> {
     }
 }
 
-pub(crate) fn unsupported(msg: impl Into<String>) -> CerseiError {
-    CerseiError::Unsupported(msg.into())
+pub(crate) fn unsupported(msg: impl Into<String>) -> BricksError {
+    BricksError::Unsupported(msg.into())
 }
 
 /// A `data:` URL for inline base64 media.
@@ -54,7 +54,7 @@ pub(crate) fn plain_system(system: &str) -> String {
 pub(crate) fn tool_result_text(
     content: &ToolResultContent,
     protocol: &str,
-) -> Result<String, CerseiError> {
+) -> Result<String, BricksError> {
     match content {
         ToolResultContent::Text(t) => Ok(t.clone()),
         ToolResultContent::Blocks(blocks) => {

@@ -104,7 +104,7 @@ pub fn status_of(result: &bricks_types::Result<AgentOutput>) -> ChildStatus {
             ChildStatus::Failed("the sub-agent finished without an answer".into())
         }
         Ok(_) => ChildStatus::Completed,
-        Err(bricks_types::CerseiError::Cancelled) => ChildStatus::Cancelled,
+        Err(bricks_types::BricksError::Cancelled) => ChildStatus::Cancelled,
         Err(e) => ChildStatus::Failed(e.to_string()),
     }
 }

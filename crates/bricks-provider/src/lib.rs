@@ -377,7 +377,7 @@ impl CompletionStream {
         let mut acc = StreamAccumulator::new();
         while let Some(event) = self.rx.recv().await {
             if let StreamEvent::Error { message } = &event {
-                return Err(CerseiError::Provider(message.clone()));
+                return Err(BricksError::Provider(message.clone()));
             }
             acc.process_event(event);
         }

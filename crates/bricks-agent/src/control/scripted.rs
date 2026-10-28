@@ -5,7 +5,7 @@
 use super::controller::{ModelCatalog, ModelChoice, ProfileChoice};
 use async_trait::async_trait;
 use bricks_provider::{CompletionRequest, CompletionStream, ModelInfo, ModelLimits, Provider};
-use bricks_types::{CerseiError, Result, StopReason, StreamEvent, Usage};
+use bricks_types::{BricksError, Result, StopReason, StreamEvent, Usage};
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
@@ -142,7 +142,7 @@ impl Provider for ScriptedProvider {
             .pop_front()
             .unwrap_or_else(|| Reply::text("(no more scripted replies)"));
         if let Some(e) = reply.error {
-            return Err(CerseiError::Provider(e));
+            return Err(BricksError::Provider(e));
         }
         let (tx, rx) = mpsc::channel(64);
         tokio::spawn(async move {

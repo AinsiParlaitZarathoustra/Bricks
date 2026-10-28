@@ -192,7 +192,7 @@ pub fn group_messages_for_compact(messages: &[Message]) -> Vec<MessageGroup> {
 ///
 /// This is the same check every provider runs server-side. A `tool_result`
 /// without its `tool_use` in the *same request* is a 400, and the runner maps a
-/// 400 to `CerseiError::Provider`, which `is_retryable()` does not match — so
+/// 400 to `BricksError::Provider`, which `is_retryable()` does not match — so
 /// the conversation is wedged for good rather than retried.
 pub fn find_orphaned_tool_results(msgs: &[Message]) -> Vec<String> {
     let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
@@ -1151,7 +1151,7 @@ mod tests {
         }
         async fn complete(&self, request: CompletionRequest) -> Result<CompletionStream> {
             self.seen.lock().unwrap().push(request);
-            let text = self.reply.clone().map_err(CerseiError::Provider)?;
+            let text = self.reply.clone().map_err(BricksError::Provider)?;
             let (tx, rx) = tokio::sync::mpsc::channel(8);
             let stop = self.stop.clone();
             tokio::spawn(async move {
