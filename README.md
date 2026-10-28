@@ -2,78 +2,60 @@
 
 # Bricks
 
-**An engine for agentic development. Built in Rust. At home in your terminal.**
+**A desktop coding agent built in Rust.**
 
 ![Version](https://img.shields.io/badge/version-0.6.1-blue)
 ![Rust](https://img.shields.io/badge/built_with-Rust-orange)
 
-[Quick start](#quick-start) · [What it does](#what-it-does) · [Configuration](#configuration) · [The engine as a library](#the-engine-as-a-library) · [Documentation](#documentation) · [License](#license)
+[Features](#features) · [Getting started](#getting-started) · [Settings](#settings) · [CLI](#cli) · [Rust SDK](#rust-sdk) · [Development](#development) · [Documentation](#documentation) · [License](#license)
 
 </div>
 
-Bricks is a tool for coding with AI agents. It has three parts:
+Bricks is a desktop coding agent built in Rust. Explore your codebase, edit
+files, run commands and delegate work to sub-agents from one workspace.
+Configure your models and tools directly in the application’s settings.
 
-- **Bricks ADK** (Agentic Development Kit): the Rust crates (`bricks` and the
-  `bricks-*` crates) that you use to build agent applications. It provides the
-  agent loop, providers configured by file, tools, approvals, context
-  management, sessions, memory, skills and MCP.
-- **`bricks`**, the command-line frontend for one prompt, scripts and CI, with
-  text output or versioned JSONL events.
-- **Bricks Desktop** (`apps/bricks-desktop`), the interactive application. It
-  runs on the same engine contract as the command line.
+The desktop application, command-line interface and Rust SDK share the same
+agent engine: model connections, tool execution, permissions, context
+management and sessions.
 
-### Two ideas behind Bricks
+**Status:** in active development. The current workspace version is **0.6.1**.
+Development and the recorded validation runs use macOS on Apple Silicon;
+Linux and Windows have not yet been validated in those runs.
 
-Bricks brings together two concepts developed by AinsiParlaitZarathoustra:
+## Features
 
-- **ADK, the Agentic Development Kit (Bricks ADK).** A broad set of
-  purpose-built, optimised tools that help AI agents inspect code, make
-  changes, run commands and work effectively across a project.
-- **ADE, the Agentic Development Engine.** An engine designed to enhance the
-  capabilities of any agent by providing the tools, context and execution
-  infrastructure it needs to perform well.
+- **Desktop workspace.** Projects, conversations, file attachments, `@` file
+  mentions, `/` commands, tool activity and session resume.
+- **Your choice of models.** Add providers and models in Settings, with
+  support for Chat Completions, Responses and Anthropic Messages. Set model
+  limits, reasoning profiles and pricing from the interface.
+- **Concurrent tools.** Independent tool calls can run in parallel. Each
+  model has an option to start completed tool calls while the rest of the
+  response is still streaming.
+- **Code and shell tools.** Search code with `CodeScout`, read and edit files,
+  run supervised commands and manage background jobs. File edits are
+  revalidated before atomic writes.
+- **Sub-agents.** Delegate tasks with profiles and separate contexts. Parallel
+  writers can work in isolated Git worktrees, with changes returned for
+  inspection and application.
+- **Permissions.** Each session uses ASK, EXECUTE or CUSTOM. Review file diffs
+  before approving changes; approvals cover individual calls.
+- **Context management.** Track usage, compact conversations and reduce tool
+  outputs while keeping their originals accessible.
+- **Memory.** Structured long-term memory with sourced records, project
+  scopes and hybrid recall.
+- **Skills and MCP.** Install Agent Skills in Bricks’ own store and connect
+  MCP servers over stdio or Streamable HTTP.
+- **Web tools.** Search, read pages as Markdown and retrieve citable passages.
 
-**Engine** is the defining word. Where a *harness* suggests restraint,
-reduced agility and dependence on whoever holds it, an engine supplies the
-means to act. Bricks is built around that ambition: empower the agent and
-make its work more effective.
+## Getting started
 
-### Project status
+To run Bricks Desktop from source, install a recent stable Rust toolchain,
+Node.js, npm and the native build dependencies for Tauri. The vector index
+also requires a C++17 toolchain.
 
-**Bricks 0.6.1** (the workspace version) has a substantial foundation.
-Development continues, with further features and code optimisations still
-ahead.
-
-Bricks is a fork of Cersei, created by **Adib Mohsin (Pacifio)**. Its crates
-are named `bricks-*`. A few identifiers keep their Cersei names because other
-code depends on them, for example the error type `CerseiError`. See the
-[migration guide](docs/content/docs/migration.mdx) for the changes since the
-Cersei names and behaviour.
-
-## Quick start
-
-Build the `bricks` command from a checkout of this repository. You need a
-recent stable Rust (1.88 or later) and a C++17 toolchain, because the vector
-index (USearch) is compiled with the engine:
-
-```bash
-cargo install --path crates/bricks-cli
-```
-
-Declare a provider and a model. Copy [`docs/providers.example.toml`](docs/providers.example.toml)
-to `~/.bricks/providers.toml` and adapt it (the example's endpoints, limits and
-prices are illustrative). Then select the model in the project's `bricks.toml`,
-as shown in [Configuration](#configuration):
-
-```bash
-bricks run "Explain the failing test in src/parser.rs"          # one prompt, answer on stdout
-bricks run --json --non-interactive "Analyse the build errors"  # scripts and CI: JSONL events
-bricks sessions                                                 # the project's stored sessions
-bricks run --session <id> "Continue where we stopped"           # continue one, headless
-```
-
-The interactive interface is Bricks Desktop. From a checkout, with Node.js and
-npm installed:
+From the repository root:
 
 ```bash
 cd apps/bricks-desktop
@@ -81,239 +63,108 @@ npm ci
 npm run tauri dev
 ```
 
-Open a project, then pick a conversation in the sidebar or use `/resume`.
+Once Bricks is open:
 
-## What it does
+1. Open **Settings** and add your provider.
+2. Add a model and choose its reasoning and execution options.
+3. Open a project and start a conversation.
 
-* **Models are configuration.** `~/.bricks/providers.toml` lists providers,
-  models, limits, capabilities, reasoning profiles and prices. Nothing is built
-  in and nothing is guessed from a model name.
-  * A model is selected explicitly as `provider_id/model_id`.
-  * Three wire protocols are supported: `chat_completions`, `responses` and
-    `anthropic_messages`. Any compatible server (a hosted API, a gateway,
-    Ollama, vLLM, llama.cpp) is added by editing the file. See
-    [docs/providers.md](docs/providers.md).
-* **Context management.** Occupation comes from the server's reported usage,
-  with explicit estimates in between.
-  * A request that cannot fit is compacted first, or not sent.
-  * Compaction keeps the user's messages verbatim and verifies its gain.
-  * The raw history is never shortened. See [docs/context.md](docs/context.md).
-* **Tool-output compression.** Diagnostics are kept first, and rules exist
-  for cargo, go, pytest, npm/pnpm/yarn, eslint, docker, kubectl, terraform,
-  and more.
-  * Tree-sitter skeletons summarise long files.
-  * Every reduced output names its saved original. See
-    [docs/compression.md](docs/compression.md).
-* **Shell and files.**
-  * Each `Bash` call is its own process. The session's state (working
-    directory, exported variables, aliases and functions) carries over to the
-    next call when a call ends normally. Calls can run side by side, and a
-    long command can be handed over as a background task.
-  * Execution is supervised: timeouts, process-tree termination,
-    cancellation and background tasks.
-  * `Edit` is one tool: a single replacement, or several in `edits`. Edits are
-    re-validated before an atomic write. See [docs/shell.md](docs/shell.md).
-* **Sub-agents and jobs.** The native `Agent`, `Agents`, `AgentControl` and
-  `AgentProfiles` tools run sub-agents with a fresh context. They get the
-  parent's permissions and at most its tools. Parallel writers each get their
-  own git worktree, and their changes come back as ChangeSets to inspect and
-  apply. Background commands are supervised jobs. See
-  [docs/agents.md](docs/agents.md).
-* **Web.** Web search with ordered provider fallback, page reading in
-  Markdown, citable passages, and a private-network policy. See
-  [docs/web.md](docs/web.md).
-* **Code understanding.** `CodeScout` (and `/search`) answer "where is it
-  defined, who uses it, what is here" in one call with exact, sourced and
-  bounded results: text search, Tree-sitter, and optional language servers
-  (never installed by Bricks). See [docs/semantic.md](docs/semantic.md).
-* **MCP.** A client on the official SDK (`rmcp`), over stdio and Streamable
-  HTTP. See [docs/mcp.md](docs/mcp.md).
-* **Skills.** Standard [Agent Skills](https://agentskills.io/specification)
-  (`SKILL.md`). Bricks reads the skills you install in its store
-  (`~/.bricks/skills`) and one built-in skill, `create-skills`. It does not
-  read `.claude/skills` or `.agents/skills`, in a project or at home.
-  * Install a skill from a folder in Settings › Skills (Import), or let the
-    model check and install one with the `Skill` tool.
-  * The model sees a catalog and activates a skill with the `Skill` tool;
-    you can choose one with `/skill` or `--skill`.
-  * A skill removed or changed is withdrawn from the conversations that used
-    it, at their next request.
-  * Activating a skill gives instructions only: it runs nothing and grants
-    no permission. See [docs/skills.md](docs/skills.md).
-* **Long-term memory.** Sourced episodes, entities scoped by
-  user/project/space, and temporal facts with evidence.
-  * Hybrid recall combines vector, BM25 and a bounded graph expansion,
-    fused with weighted RRF.
-  * Maintenance (extraction, embeddings) runs after the answer: it is
-    resumable and cancellable. Memory is off until `[memory] enabled = true`.
-    See [docs/memory.md](docs/memory.md).
-* **Permissions.** One engine decides every tool call, for every frontend. Each
-  session has a policy: ASK (reads run, writes, commands, web and sub-agents
-  are asked), EXECUTE (everything runs) or CUSTOM (rules per class and per
-  tool). A person chooses it, and it is stored with the session, not in
-  `bricks.toml`. An answer covers one call.
-  * File changes are shown as a diff before anything is written.
-  * A change approved for a file that changed meanwhile is recomputed and
-    asked again.
-  * See [the permissions of docs/cli.md](docs/cli.md#permissions).
-* **The `bricks` command.** A thin layer over the engine's command/event
-  contract, for scripts and CI. JSONL events are versioned, with documented
-  exit codes. Sessions can be listed and continued (`bricks sessions`,
-  `bricks run --session <id>`). See [docs/cli.md](docs/cli.md).
-* **Bricks Desktop** (`apps/bricks-desktop`). The interactive interface:
-  projects and conversations in a sidebar, `@` file mentions, `/` commands,
-  approvals with the diff, inspectors and session resume. See
-  [the desktop section of docs/cli.md](docs/cli.md#the-desktop-application).
+## Settings
 
-## Configuration
+Set up Bricks directly in the desktop application:
 
-Two files configure a run. Neither is optional for a model: `bricks` never
-chooses a model silently.
+- **Providers and models:** connections, credentials, model selection,
+  limits, reasoning profiles and tool execution options.
+- **Permissions:** choose how new conversations ask for approval.
+- **Skills:** import, inspect and remove installed skills.
+- **Memory:** manage the memories available to your projects.
+- **Appearance:** adjust the theme and fonts.
 
-```toml
-# ~/.bricks/providers.toml — see docs/providers.example.toml
-schema_version = 1
+Each conversation keeps its own permission policy. File changes can be
+reviewed as diffs before approval, and running work can be interrupted from
+the conversation.
 
-[[providers]]
-id = "local"
-name = "Local server"
-endpoint = "http://127.0.0.1:11434/v1"
-protocol = "chat_completions"
-auth = "none"
+## CLI
 
-[[providers.models]]
-id = "coder"
-name = "My coding model"
-api_model = "qwen2.5-coder:32b"
-streaming = true
-
-[providers.models.limits]
-max_input_tokens = 32000
-max_output_tokens = 4096
-```
-
-```toml
-# ./bricks.toml — see docs/bricks.example.toml for every section
-[agent]
-model = "local/coder"            # provider_id/model_id
-```
-
-Permissions are not set in `bricks.toml`: choose the profile in Bricks, or run
-`bricks run --permissions ask "…"` (or `execute`). A `[permissions]` section in
-an older file is reported and not applied: delete it.
-
-Bricks keeps its files in `~/.bricks`: the providers file, the sessions
-(`~/.bricks/sessions`) and the memory. Set `BRICKS_HOME` to move that folder,
-and pass `--providers <file>` to read another providers file.
-
-## The engine as a library
-
-Add the facade crate from a checkout, by path:
-
-```toml
-[dependencies]
-bricks = { path = "/path/to/bricks/crates/bricks" }
-tokio = { version = "1", features = ["full"] }
-anyhow = "1"
-```
-
-or from the Git repository, replacing the revision with the one you want to
-build against:
-
-```toml
-[dependencies]
-bricks = { git = "https://github.com/AinsiParlaitZarathoustra/Bricks", rev = "<revision>" }
-```
-
-```rust
-use bricks::prelude::*;
-
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    let output = Agent::builder()
-        .provider(provider_from_config(None, "local/coder")?) // ~/.bricks/providers.toml
-        .tools(bricks::tools::coding())                        // files, shell, web
-        .permission_policy(DenyAll)                            // reads run; writes, commands and web are refused
-        .run_with("Explain what src/main.rs does")
-        .await?;
-    println!("{}", output.text());
-    Ok(())
-}
-```
-
-`bricks::tools::coding()` is a set of tools, not a default for every session:
-see [the tools of a session](docs/cli.md#tools-of-a-session) for what the
-`bricks` command and Bricks Desktop give the model.
-
-Frontends use the command/event contract (`bricks_agent::control`). It offers
-typed commands (submit, cancel, set_model, compact, resume, approve…) and
-versioned events with one `run_finished` per run. Delivery is bounded and never
-silently drops an event. See [docs/cli.md](docs/cli.md).
-
-## Architecture
-
-```text
-bricks-cli            the `bricks` binary: arguments, configuration, headless / JSONL
-apps/bricks-desktop   Bricks Desktop (Tauri): the interactive interface
-bricks                facade crate — use bricks::prelude::*
-  bricks-agent        agent builder, agentic loop, context manager, compaction,
-                      command/event contract (control), approvals, sub-agents
-  bricks-provider     provider registry from configuration, 3 protocol adapters
-  bricks-tools        file, shell, web, planning, orchestration tools; permissions; previews
-  bricks-compression  tool-output reduction, rules, tree-sitter skeletons
-  bricks-memory       sessions, memdir, graph memory, structured long-term memory
-  bricks-embeddings   embedding providers, USearch vector index
-  bricks-semantic     shared code understanding engine: lexical, syntax, LSP
-  bricks-web          search, fetching, extraction, passages
-  bricks-mcp          MCP client (rmcp)
-  bricks-skills       Agent Skills (SKILL.md): sources, trust, activation
-  bricks-config       engine assembly shared by the frontends: home, providers, projects
-  bricks-types, bricks-hooks, bricks-lsp, bricks-workflows, …
-```
-
-## Measurements
-
-The measurements recorded so far (Bricks 0.4.6, 2026-10-08) are in
-[docs/benchmarks-bricks-2026-10-08.md](docs/benchmarks-bricks-2026-10-08.md).
-They predate the current architecture. They cover local tools and engine
-overhead, and no live model was called. They are not a performance promise.
-Evaluations that need a live model have not been re-run, and no result is
-claimed for them.
-
-## Tests
+Install the command-line frontend from the repository root:
 
 ```bash
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-cargo fmt --all -- --check
+cargo install --locked --path crates/bricks-cli
 ```
 
-The model-facing paths are tested against scripted models and local test
-servers. Live API tests are opt-in (`#[ignore]`). The reported test runs used
-macOS (arm64); Linux and Windows have not yet been validated in those runs.
+```bash
+# Run one task.
+bricks run "Explain the failing test in src/parser.rs"
+
+# Stream JSONL events for scripts and CI.
+bricks run --json --non-interactive "Analyse the build errors"
+
+# List and continue stored sessions.
+bricks sessions
+bricks run --session <id> "Continue where we stopped"
+```
+
+Use `--permissions ask` or `--permissions execute` to choose a profile for
+a CLI session. See the [CLI reference](docs/cli.md) for configuration,
+events and exit codes.
+
+## Rust SDK
+
+Bricks also exposes its engine through the `bricks` facade and `bricks-*`
+crates. Build custom agent applications with the same model connections,
+tools, context management, sessions and permission engine used by the
+desktop application.
+
+See the [agent API](docs/content/docs/api-agent.mdx),
+[architecture](docs/content/docs/architecture.mdx) and
+[crate map](docs/content/docs/crate-map.mdx) for integration details.
+
+## Development
+
+Rust tests use [Nextest](https://nexte.st/):
+
+```bash
+cargo nextest run --workspace --locked
+```
+
+For the workspace validation, including compilation of all targets:
+
+```bash
+./scripts/run_tests.sh
+```
+
+Desktop checks, from `apps/bricks-desktop`:
+
+```bash
+npm run check
+npm run test:unit
+npm run build
+```
+
+Model-facing tests use scripted providers and local servers. Live API tests
+are opt-in. Builds and test runs regenerate `target`; keep an eye on its
+size during development.
 
 ## Documentation
 
 | Guide | Contents |
 |---|---|
-| [docs/cli.md](docs/cli.md) | the `bricks` command, JSONL schema, approvals, sessions, tools of a session, the desktop application |
-| [docs/maintenance.md](docs/maintenance.md) | build, publishing, dependency advisories |
-| [docs/providers.md](docs/providers.md) | providers configuration |
-| [docs/providers.example.toml](docs/providers.example.toml) | every `providers.toml` section, annotated |
-| [docs/context.md](docs/context.md) | context management and compaction |
-| [docs/compression.md](docs/compression.md) | tool-output compression and rules |
-| [docs/shell.md](docs/shell.md) | shell, file tools, result format |
-| [docs/web.md](docs/web.md) | web search and reading |
-| [docs/semantic.md](docs/semantic.md) | code understanding engine, CodeScout |
-| [docs/agents.md](docs/agents.md) | sub-agents, profiles, parallel and background runs, worktrees, jobs |
-| [docs/mcp.md](docs/mcp.md) | MCP client |
-| [docs/memory.md](docs/memory.md) | long-term memory and hybrid recall |
-| [docs/skills.md](docs/skills.md) | Agent Skills |
-| [docs/bricks.example.toml](docs/bricks.example.toml) | every `bricks.toml` section, annotated |
-| [docs/content/docs/migration.mdx](docs/content/docs/migration.mdx) | migration from the Cersei names and behaviour |
-| [CHANGELOG.md](CHANGELOG.md) | changes since the fork |
+| [CLI and desktop](docs/cli.md) | Sessions, permissions, commands and events |
+| [Providers](docs/providers.md) | Models, protocols and reasoning profiles |
+| [Context](docs/context.md) | Usage accounting and compaction |
+| [Compression](docs/compression.md) | Tool-output reduction and originals |
+| [Shell and files](docs/shell.md) | Commands, edits and background jobs |
+| [Sub-agents](docs/agents.md) | Profiles, delegation and worktrees |
+| [Code understanding](docs/semantic.md) | CodeScout, syntax and optional LSP |
+| [Memory](docs/memory.md) | Long-term storage and hybrid recall |
+| [Skills](docs/skills.md) | Skill installation and activation |
+| [MCP](docs/mcp.md) | External tool connections |
+| [Web](docs/web.md) | Search and page reading |
+| [Maintenance](docs/maintenance.md) | Builds, publishing and dependencies |
+| [Migration](docs/content/docs/migration.mdx) | Removed APIs and configuration changes |
+| [Changelog](CHANGELOG.md) | Release history |
 
-The documentation site is in [`docs/`](docs/README.md).
+The documentation website lives in [docs/](docs/README.md).
 
 ## License
 
