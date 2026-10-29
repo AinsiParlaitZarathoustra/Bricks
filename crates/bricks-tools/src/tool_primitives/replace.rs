@@ -686,10 +686,19 @@ fn apply_blocks(
     crlf: bool,
     stage: Stage,
 ) -> EditPlan {
+    // Overlapping matches (`replace_all` of a block that repeats over its
+    // own lines): leftmost first, then the next one that starts after it,
+    // as `str::replace` does.
+    let mut kept: Vec<&(usize, usize, Shift)> = Vec::with_capacity(blocks.len());
+    for block in blocks {
+        if kept.last().is_none_or(|last| block.0 > last.1) {
+            kept.push(block);
+        }
+    }
     let eol = if crlf { "\r\n" } else { "\n" };
     let mut out = String::with_capacity(content.len() + new_raw.len());
     let mut cursor = 0;
-    for (a, b, shift) in blocks {
+    for (a, b, shift) in kept.iter().copied() {
         let first = &lines[*a];
         let last = &lines[*b];
         let block_indent = indent_of(first.text);
@@ -707,8 +716,8 @@ fn apply_blocks(
     EditPlan {
         content: out,
         stage,
-        replacements: blocks.len(),
-        ranges: blocks.iter().map(|(a, b, _)| (a + 1, b + 1)).collect(),
+        replacements: kept.len(),
+        ranges: kept.iter().map(|(a, b, _)| (a + 1, b + 1)).collect(),
     }
 }
 
@@ -808,6 +817,26 @@ mod tests {
         assert_eq!(
             replace("x", "", "hi", false),
             Err(ReplaceError::EmptyOldString)
+        );
+    }
+
+    #[test]
+    fn overlapping_blocks_are_ambiguous_or_replaced_left_to_right() {
+        // A two-line block that repeats over its own lines (normalized stage).
+        let content = "x  = 1\nx  = 1\nx  = 1\n";
+        assert!(matches!(
+            replace(content, "x = 1\nx = 1", "y = 2\ny = 2", false),
+            Err(ReplaceError::Ambiguous { count: 2, .. })
+        ));
+        let p = plan_edit(content, "x = 1\nx = 1", "y = 2\ny = 2", true, None).unwrap();
+        assert_eq!(p.content, "y = 2\ny = 2\nx  = 1\n");
+        assert_eq!(p.replacements, 1);
+        assert_eq!(p.ranges, [(1, 2)]);
+        // Four lines: two blocks that do not overlap.
+        let content = "x  = 1\n".repeat(4);
+        assert_eq!(
+            replace(&content, "x = 1\nx = 1", "y", true).unwrap(),
+            "y\ny\n"
         );
     }
 

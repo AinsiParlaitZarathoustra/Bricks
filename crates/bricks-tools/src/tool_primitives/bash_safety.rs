@@ -309,7 +309,30 @@ fn classify_program(name: &Arg, args: &[Arg], analysis: &mut BashAnalysis, depth
             let mut i = 0;
             while i < args.len() {
                 let a = &args[i].text;
-                if a == "-u" || a == "-C" || a == "-S" {
+                // `-S <string>` splits its string into the program and its
+                // first arguments: the rest of the line follows them.
+                let split = if a == "-S" || a == "--split-string" {
+                    i += 1;
+                    args.get(i)
+                        .map(|s| (s.text.clone(), s.dynamic || args[i - 1].dynamic))
+                } else {
+                    a.strip_prefix("--split-string=")
+                        .or_else(|| a.strip_prefix("-S"))
+                        .map(|v| (v.to_string(), args[i].dynamic))
+                };
+                if let Some((script, dynamic)) = split {
+                    let rest = &args[(i + 1).min(args.len())..];
+                    if dynamic || rest.iter().any(|a| a.dynamic) {
+                        raise(analysis, BashRiskLevel::High, "dynamic env -S command");
+                    }
+                    let line = std::iter::once(script)
+                        .chain(rest.iter().map(|a| shell_quote(&a.text)))
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    analyze_into(&line, analysis, depth + 1);
+                    return;
+                }
+                if a == "-u" || a == "-C" {
                     i += 2;
                 } else if a.starts_with('-') || a.contains('=') {
                     i += 1;
@@ -328,6 +351,7 @@ fn classify_program(name: &Arg, args: &[Arg], analysis: &mut BashAnalysis, depth
         "nice" | "nohup" | "stdbuf" | "time" | "chrt" | "ionice" | "caffeinate" => {
             run_inner(skip_options(args, &["-n", "-c", "-p"]), analysis, depth);
         }
+        "setsid" => run_inner(skip_options(args, &[]), analysis, depth),
         "timeout" => {
             let rest = skip_options(args, &["-s", "-k", "--signal", "--kill-after"]);
             run_inner(rest.get(1..).unwrap_or(&[]), analysis, depth);
@@ -584,6 +608,11 @@ fn skip_options<'a>(args: &'a [Arg], with_value: &[&str]) -> &'a [Arg] {
     &args[i.min(args.len())..]
 }
 
+/// `text` as one shell word.
+fn shell_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
+}
+
 fn is_version_query(args: &[Arg]) -> bool {
     args.len() == 1 && matches!(args[0].text.as_str(), "--version" | "-V" | "--help")
 }
@@ -720,9 +749,39 @@ fn classify_git(args: &[Arg], analysis: &mut BashAnalysis) {
         args,
         &["-C", "-c", "--git-dir", "--work-tree", "--namespace"],
     );
+    // `-c`/`--config-env` set any key for this run, `core.pager`,
+    // `core.sshCommand`, `alias.*` or `diff.external` among them: each runs
+    // a program.
+    let globals = &args[..args.len() - rest.len()];
+    if globals
+        .iter()
+        .any(|a| a.text == "-c" || a.text.starts_with("--config-env"))
+    {
+        raise(
+            analysis,
+            BashRiskLevel::High,
+            "git -c sets a configuration that can run a program",
+        );
+    }
     let Some((sub, rest)) = rest.split_first() else {
         return;
     };
+    // `--output <file>` (log, diff, show, format-patch…) writes a file.
+    for (i, a) in rest.iter().enumerate() {
+        let target = if a.text == "--output" {
+            rest.get(i + 1).map(|t| t.text.clone())
+        } else {
+            a.text.strip_prefix("--output=").map(str::to_string)
+        };
+        if let Some(target) = target {
+            raise(
+                analysis,
+                BashRiskLevel::Moderate,
+                "git --output writes a file",
+            );
+            analysis.write_paths.push(target);
+        }
+    }
     let sub = sub.text.as_str();
     let flags: Vec<&str> = rest.iter().map(|a| a.text.as_str()).collect();
     let has = |f: &[&str]| flags.iter().any(|a| f.contains(a));
@@ -957,6 +1016,14 @@ mod tests {
         assert!(risk("command rm file") >= High);
         assert_eq!(risk("command -v rm"), Safe);
         assert_eq!(risk("env"), Safe);
+        // `env -S` runs the command in its string, with the rest of the line.
+        assert_eq!(risk("env -S 'rm -rf ~'"), Forbidden);
+        assert_eq!(risk("env --split-string='rm -rf /'"), Forbidden);
+        assert_eq!(risk("env -S'rm -rf' ~"), Forbidden);
+        assert!(risk("env -S \"$CMD\"") >= High);
+        assert_eq!(risk("env -S 'ls -la'"), Safe);
+        assert_eq!(risk("setsid rm -rf ~"), Forbidden);
+        assert_eq!(risk("setsid -f rm -rf /"), Forbidden);
         assert!(risk("nohup python3 server.py") >= High);
         assert!(risk("timeout 5 curl https://example.com") >= High);
         assert_eq!(risk("sudo -u nobody ls"), Forbidden);
@@ -1030,5 +1097,21 @@ mod tests {
         assert!(tree.is_some());
         let tree = tree.unwrap();
         assert!(!tree.root_node().has_error());
+    }
+
+    #[test]
+    fn git_configuration_and_output_files_are_not_safe() {
+        assert!(risk("git -c core.pager='sh -c id' log") >= High);
+        assert!(risk("git -c alias.x='!rm -rf ~' x") >= High);
+        assert!(risk("git --config-env=core.sshCommand=CMD fetch") >= High);
+        let a = analyze_command("git log --output=/tmp/x");
+        assert_eq!(a.risk, Moderate);
+        assert_eq!(a.write_paths, ["/tmp/x"]);
+        let a = analyze_command("git diff --output out.patch");
+        assert_eq!(a.risk, Moderate);
+        assert_eq!(a.write_paths, ["out.patch"]);
+        // Read-only git stays safe.
+        assert_eq!(risk("git log --oneline -5"), Safe);
+        assert_eq!(risk("git -C sub status"), Safe);
     }
 }

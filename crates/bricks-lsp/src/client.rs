@@ -1145,11 +1145,15 @@ fn percent_decode(s: &str) -> String {
     let mut out = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
+        // Two hex digits, read as bytes: slicing the `str` could cut a
+        // multi-byte character (`%aé`).
         if bytes[i] == b'%'
-            && i + 2 < bytes.len()
-            && let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16)
+            && let (Some(hi), Some(lo)) = (
+                bytes.get(i + 1).and_then(|b| (*b as char).to_digit(16)),
+                bytes.get(i + 2).and_then(|b| (*b as char).to_digit(16)),
+            )
         {
-            out.push(v);
+            out.push((hi * 16 + lo) as u8);
             i += 3;
             continue;
         }
@@ -1249,6 +1253,18 @@ mod tests {
             uri
         );
         assert_eq!(normalize_uri("file:///tmp/a%2Db.rs"), "file:///tmp/a-b.rs");
+    }
+
+    #[test]
+    fn malformed_escapes_are_kept_as_text() {
+        // `%` before a multi-byte character, truncated or non-hex escapes.
+        assert_eq!(percent_decode("/tmp/%aé.rs"), "/tmp/%aé.rs");
+        assert_eq!(percent_decode("/tmp/%é"), "/tmp/%é");
+        assert_eq!(percent_decode("a%"), "a%");
+        assert_eq!(percent_decode("a%4"), "a%4");
+        assert_eq!(percent_decode("a%zz"), "a%zz");
+        assert_eq!(percent_decode("a%41"), "aA");
+        assert_eq!(uri_to_path("file:///tmp/%aé.rs"), "/tmp/%aé.rs");
     }
 
     #[test]
