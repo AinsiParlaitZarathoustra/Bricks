@@ -54,7 +54,7 @@ fn reference(code_scout: bool, delegation: bool) -> String {
         .join("\n")
 }
 
-const INTRO: &str = "Tu es Bricks, un agent de développement logiciel autonome.";
+const INTRO: &str = "Tu es Bricks, un agent de développement autonome.";
 
 /// Recalls a fixed marker.
 struct Recall;
