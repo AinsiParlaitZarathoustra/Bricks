@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  # No debug info: the workspace's test build must fit on the runner's disk.
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  RUST_BACKTRACE: "1"
+
+jobs:
+  rust:
+    name: Rust tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+          df -h /
+
+      - name: Tauri system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev \
+            libxdo-dev libssl-dev libdbus-1-dev pkg-config build-essential file
+
+      - name: Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install && rustc --version
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: apps/bricks-desktop/package-lock.json
+
+      # The desktop crate embeds the built frontend (`frontendDist`).
+      - name: Build the desktop frontend
+        working-directory: apps/bricks-desktop
+        run: |
+          npm ci
+          npm run build
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
+
+      - name: Tests (nextest)
+        run: cargo nextest run --workspace --locked --profile ci
+
+      - name: Doc tests
+        run: cargo test --workspace --doc --locked
+
+  desktop:
+    name: Desktop interface
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/bricks-desktop
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: apps/bricks-desktop/package-lock.json
+
+      - run: npm ci
+      - name: Design tokens are up to date
+        run: npm run tokens:check
+      - name: svelte-check
+        run: npm run check
+      - name: Type-check the tests
+        run: npm run test:types
+      - name: Unit tests (Vitest)
+        run: npm run test:unit
+      - name: Build
+        run: npm run build

@@ -1,0 +1,8 @@
+# Tests marked `#[ignore]` need API keys, live services or extra tools
+# (rust-analyzer, PowerShell); they run only on request:
+# `cargo nextest run --run-ignored only`.
+
+[profile.ci]
+fail-fast = false
+failure-output = "immediate-final"
+slow-timeout = { period = "60s", terminate-after = 5 }
