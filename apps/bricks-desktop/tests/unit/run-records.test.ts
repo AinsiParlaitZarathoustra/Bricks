@@ -159,8 +159,8 @@ describe('commands of a run', () => {
 		const conv = openConversation();
 		const feed = new EnvelopeFeed({ runId: RUN_1 });
 		startRun(conv, feed);
-		conv.apply(feed.next({ type: 'tool_started', tool_call_id: 'tc-j', name: 'BashTaskOutput', input: { job_id: 'job_1' } }));
-		conv.apply(feed.next({ type: 'tool_finished', tool_call_id: 'tc-j', name: 'BashTaskOutput', is_error: false, duration_ms: 1, output: '', executed: true, status: 'success' }));
+		conv.apply(feed.next({ type: 'tool_started', tool_call_id: 'tc-j', name: 'Job', input: { action: 'output', job_id: 'job_1' } }));
+		conv.apply(feed.next({ type: 'tool_finished', tool_call_id: 'tc-j', name: 'Job', is_error: false, duration_ms: 1, output: '', executed: true, status: 'success' }));
 		endRun(conv, feed);
 		expect(commands(conv)).toEqual([]);
 	});

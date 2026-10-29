@@ -417,7 +417,7 @@ describe('proposed diffs', () => {
   it('a diff fence inside a list is a code block', () => {
     const blocks = renderReference('- élément\n\n  ```diff\n  +a\n  ```', { idPrefix: 'd' })
     expect(diffsOf(blocks)).toEqual([])
-    expect(htmlOf(blocks)).toContain('<span class="font-mono">diff</span>')
+    expect(htmlOf(blocks)).toContain('<span class="inline-flex min-w-0 items-center gap-1.5 font-mono">diff</span>')
   })
 
   it('a multi-file proposal: each file has its own path, binary flag and counts', () => {

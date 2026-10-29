@@ -31,10 +31,9 @@ const model: ModelView = {
 	input_modalities: ['text'],
 	output_modalities: ['text'],
 	streaming: true,
-	tool_calls: true,
+	async_tool_calls: false,
 	max_input_tokens: 128000,
 	max_output_tokens: 8192,
-	context_window_tokens: 200000,
 	reasoning_default: 'low',
 	profiles: [
 		{ id: 'low', label: 'Léger', parameters: { budget: 1024 }, remove: ['/thinking'] },

@@ -571,9 +571,9 @@ async fn a_background_server_is_supervised_and_independent() {
     );
 
     // Paged logs with a cursor.
-    let page = task.read(bricks_tools::shell::background::Stream::Stdout, 0, 10);
+    let page = task.read(bricks_tools::shell::background::Stream::Stdout, bricks_tools::shell::background::OutputPosition::Offset(0), 10);
     assert_eq!(page.lines[0].1, "function-inherited");
-    let err = task.read(bricks_tools::shell::background::Stream::Stderr, 0, 1);
+    let err = task.read(bricks_tools::shell::background::Stream::Stderr, bricks_tools::shell::background::OutputPosition::Offset(0), 1);
     assert_eq!(err.lines[0].1, "inherited");
     assert_eq!(err.next_offset, 1);
 
@@ -625,7 +625,7 @@ async fn the_test_server_starts_answers_and_stops_without_reverse_dns() {
         .run(&format!("python3 -c \"import urllib.request as u; print(u.urlopen('http://127.0.0.1:{port}/').status)\""))
         .await;
     assert_eq!(o.stdout.text, "200\n", "{}", o.stderr.text);
-    let err = task.read(bricks_tools::shell::background::Stream::Stderr, 0, 50);
+    let err = task.read(bricks_tools::shell::background::Stream::Stderr, bricks_tools::shell::background::OutputPosition::Offset(0), 50);
     assert!(
         !err.lines.iter().any(|(_, l)| l.contains("getfqdn")),
         "{:?}",

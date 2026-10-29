@@ -2,17 +2,20 @@
 //! successful structured change, with the counts of the complete diff;
 //! never for a refusal, a denial or a failed write.
 
+#[allow(dead_code)]
+mod common;
+
 use bricks_agent::BricksConfig;
+use bricks_agent::permission::{PermissionEffect, PermissionProfile, SessionPolicy};
 use bricks_agent::control::scripted::{Reply, Script, ScriptedCatalog};
 use bricks_agent::control::*;
 use serde_json::json;
 use std::time::Duration;
 
-async fn run(dir: &std::path::Path, replies: Vec<Reply>, rules: ApprovalRules) -> Vec<Envelope> {
+async fn run(dir: &std::path::Path, replies: Vec<Reply>, policy: SessionPolicy) -> Vec<Envelope> {
     let script = Script::new(replies);
     let mut bricks = BricksConfig::default();
     bricks.agent.model = Some("test/a".into());
-    bricks.permissions = rules;
     let mut cfg = EngineConfig::new(
         dir,
         ScriptedCatalog::new(&["a"], script),
@@ -20,6 +23,7 @@ async fn run(dir: &std::path::Path, replies: Vec<Reply>, rules: ApprovalRules) -
         dir.join(".sessions"),
     );
     cfg.interactive = false;
+    cfg.permissions = Some(common::default_store(dir, &policy));
     let (ctl, mut events) = Controller::open(
         cfg,
         OpenOptions {
@@ -48,11 +52,15 @@ async fn run(dir: &std::path::Path, replies: Vec<Reply>, rules: ApprovalRules) -
     }
 }
 
-fn allow_writes() -> ApprovalRules {
-    ApprovalRules {
-        write: Action::Allow,
-        ..Default::default()
-    }
+/// A CUSTOM policy where writes run without asking.
+fn writes_with(effect: PermissionEffect) -> SessionPolicy {
+    let mut policy = SessionPolicy::chosen(PermissionProfile::Custom);
+    policy.custom.write = effect;
+    policy
+}
+
+fn allow_writes() -> SessionPolicy {
+    writes_with(PermissionEffect::Allow)
 }
 
 /// `(tool_call_id, [(path, added, removed)])`.
@@ -136,10 +144,7 @@ async fn refusals_denials_and_failures_report_nothing() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("a_file"), "x").unwrap();
     // Denied by the policy (nobody to ask): previewed, never written.
-    let deny = ApprovalRules {
-        write: Action::Deny,
-        ..Default::default()
-    };
+    let deny = writes_with(PermissionEffect::Deny);
     let evs = run(
         dir.path(),
         vec![

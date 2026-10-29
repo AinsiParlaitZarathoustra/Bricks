@@ -41,7 +41,7 @@ api_model = "small-1"
 [providers.models.limits]
 max_input_tokens = 8000
 max_output_tokens = 1000
-context_window_tokens = 16000
+context_window_tokens = 8500
 [providers.models.reasoning]
 default = "fast"
 [[providers.models.reasoning.profiles]]
@@ -79,16 +79,13 @@ fn patch_from_form(json: Json) -> ModelPatch {
 }
 
 /// A model patch with every field unchanged except the given ones, shaped as
-/// `buildModelPatch` sends it (`context_window_tokens` and `clear_context_window`
-/// are never set by the form).
+/// `buildModelPatch` sends it.
 fn form_patch(changes: Json) -> ModelPatch {
     let mut base = json!({
         "name": null,
         "api_model": null,
         "max_input_tokens": null,
         "max_output_tokens": null,
-        "context_window_tokens": null,
-        "clear_context_window": false,
         "input_modalities": null,
         "reasoning_default": null,
         "clear_reasoning_default": false,
@@ -122,7 +119,7 @@ fn fresh_catalog(path: &Path) -> Arc<DesktopCatalog> {
 }
 
 #[test]
-fn a_model_edit_from_the_form_keeps_the_context_window_and_the_profiles() {
+fn a_model_edit_from_the_form_drops_the_former_window_and_keeps_the_profiles() {
     let s = setup();
     let rev = revision(&s.path);
     save(
@@ -134,10 +131,11 @@ fn a_model_edit_from_the_form_keeps_the_context_window_and_the_profiles() {
 
     let model = model_view(&s.path);
     assert_eq!(model.max_input_tokens, 9000, "the edited field changed");
-    assert_eq!(
-        model.context_window_tokens,
-        Some(16_000),
-        "the window the form does not show is kept"
+    assert!(
+        !std::fs::read_to_string(&s.path)
+            .unwrap()
+            .contains("context_window_tokens"),
+        "the former window leaves the file"
     );
     assert_eq!(model.reasoning_default.as_deref(), Some("fast"));
     assert_eq!(model.profiles.len(), 1, "a null list leaves the profiles alone");
@@ -179,7 +177,9 @@ fn a_free_named_profile_with_nested_values_is_read_back_after_a_restart() {
         json!({ "reasoning": { "effort": "high", "budget": 2048 }, "stop": ["fin"] })
     );
     assert_eq!(saved.remove, vec!["/temperature".to_string()]);
-    assert_eq!(model.context_window_tokens, Some(16_000), "the window is kept too");
+    // The former window, still in the file, gives the budget it gave with
+    // the maximum output: min(8000, 8500 - 1000).
+    assert_eq!(model.max_input_tokens, 7500);
 
     // The next start: the composer's catalogue lists the saved profile.
     let catalog = fresh_catalog(&s.path);
@@ -195,7 +195,7 @@ fn a_free_named_profile_with_nested_values_is_read_back_after_a_restart() {
         .expect("the composer offers the saved profile");
     assert_eq!(listed.label, "Approfondi");
     assert_eq!(choice.default_profile.as_deref(), Some("fast"));
-    assert_eq!(choice.context_window_tokens, Some(16_000));
+    assert_eq!(choice.max_input_tokens, 7500);
 }
 
 #[test]
@@ -307,7 +307,7 @@ fn a_removed_default_is_replaced_in_the_same_patch_or_cleared() {
     let model = model_view(&s.path);
     assert_eq!(model.reasoning_default, None);
     assert!(model.profiles.is_empty());
-    assert_eq!(model.context_window_tokens, Some(16_000));
+    assert_eq!(model.max_input_tokens, 7500);
 }
 
 #[test]

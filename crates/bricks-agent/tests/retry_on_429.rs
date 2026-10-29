@@ -231,7 +231,7 @@ async fn cancel_is_honoured_while_waiting_on_response_headers() {
     });
     let err = result.expect_err("a cancelled run must not report success");
     assert!(
-        matches!(err, bricks_types::CerseiError::Cancelled),
+        matches!(err, bricks_types::BricksError::Cancelled),
         "expected Cancelled, got {err:?}"
     );
 }
@@ -270,7 +270,7 @@ async fn cancel_is_honoured_during_retry_backoff() {
     });
     let err = result.expect_err("a cancelled run must not report success");
     assert!(
-        matches!(err, bricks_types::CerseiError::Cancelled),
+        matches!(err, bricks_types::BricksError::Cancelled),
         "expected Cancelled, got {err:?}"
     );
 }

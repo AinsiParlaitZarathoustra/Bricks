@@ -41,7 +41,7 @@ class FakeEl {
 const CELL_W = 8;
 const CELL_H = 16;
 const THEME: ITheme = { background: '#101010' };
-const FONT = 'Geist Mono, monospace';
+const FONT = 'Google Sans Code, monospace';
 
 type LookOptions = Pick<ITerminalOptions, 'fontFamily' | 'theme'>;
 
@@ -576,17 +576,17 @@ describe('terminal isolation', () => {
 			store.activate('p1', a.session.id);
 			pane.showActive('p1');
 			const hiddenWrites = b.term.fontWrites.length;
-			world.font.value = 'Geist Mono, ui-monospace';
+			world.font.value = 'Google Sans Code, ui-monospace';
 
 			store.refreshTheme();
 
-			expect(a.term.options.fontFamily).toBe('Geist Mono, ui-monospace');
+			expect(a.term.options.fontFamily).toBe('Google Sans Code, ui-monospace');
 			expect(b.term.options.theme).toEqual(THEME);
 			expect(b.term.fontWrites.length).toBe(hiddenWrites);
 
 			store.activate('p1', b.session.id);
 			pane.showActive('p1');
-			expect(b.term.options.fontFamily).toBe('Geist Mono, ui-monospace');
+			expect(b.term.options.fontFamily).toBe('Google Sans Code, ui-monospace');
 		});
 	});
 

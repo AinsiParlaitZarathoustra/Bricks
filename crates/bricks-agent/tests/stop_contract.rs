@@ -92,7 +92,7 @@ impl Provider for SpyProvider {
             .pop_front()
             .or_else(|| self.0.fallback.lock().clone());
         let Some(step) = step else {
-            return Err(CerseiError::Provider(
+            return Err(BricksError::Provider(
                 "spy: unexpected request (script exhausted)".into(),
             ));
         };
@@ -230,7 +230,7 @@ async fn empty_tasks_build_no_provider_and_send_nothing() {
     for blank in BLANKS {
         assert!(matches!(
             a.run(blank).await,
-            Err(CerseiError::InvalidInput(_))
+            Err(BricksError::InvalidInput(_))
         ));
     }
 

@@ -43,3 +43,44 @@ max_output_tokens = 16384
         .build()
         .expect("provider builds")
 }
+
+/// A CUSTOM policy: `edit` sets its class effects and per-tool rules (the
+/// classes start at the ASK effects).
+#[allow(dead_code)]
+pub fn custom(
+    edit: impl FnOnce(&mut bricks_agent::permission::CustomRules),
+) -> bricks_agent::permission::SessionPolicy {
+    use bricks_agent::permission::{PermissionProfile, SessionPolicy};
+    let mut policy = SessionPolicy::chosen(PermissionProfile::Custom);
+    edit(&mut policy.custom);
+    policy
+}
+
+/// A CUSTOM policy that allows exactly `tools`; the classes keep the ASK
+/// effects (reads run, writes, commands and network are asked).
+#[allow(dead_code)]
+pub fn allow_tools(tools: &[&str]) -> bricks_agent::permission::SessionPolicy {
+    use bricks_agent::permission::PermissionEffect;
+    custom(|rules| {
+        for tool in tools {
+            rules
+                .tools
+                .insert(tool.to_string(), PermissionEffect::Allow);
+        }
+    })
+}
+
+/// The default policy for new sessions, stored in `dir` (what a person chose
+/// in the desktop or with the CLI). Pass it as `EngineConfig::permissions`.
+#[allow(dead_code)]
+pub fn default_store(
+    dir: &std::path::Path,
+    policy: &bricks_agent::permission::SessionPolicy,
+) -> bricks_agent::permission::PermissionStore {
+    let store =
+        bricks_agent::permission::PermissionStore::new(dir.join("default-permissions.json"));
+    store
+        .set_default(policy)
+        .expect("the default policy is written");
+    store
+}

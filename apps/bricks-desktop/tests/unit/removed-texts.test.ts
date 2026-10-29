@@ -50,6 +50,11 @@ describe('the run-end card and the composer keep only what the spec keeps', () =
 		expect(text).not.toMatch(/\brun\.model\b|\bmodel\}/);
 	});
 
+	it('the composer no longer says a draft is kept while a run goes on', () => {
+		const composer = src('lib/features/composer/Composer.svelte');
+		expect(forbidden(composer, ['Une génération est en cours', 'le brouillon sera conservé'])).toEqual([]);
+	});
+
 	it('the send button tooltip is « Envoyer » and the placeholder « Quelque chose à dire ? » stays', () => {
 		const composer = src('lib/features/composer/Composer.svelte');
 		expect(composer).toContain('<Tooltip.Content side="top">Envoyer</Tooltip.Content>');
@@ -74,14 +79,17 @@ describe('model form: two limits, no context window field', () => {
 	});
 });
 
-describe('appearance: Geist only, no Inter', () => {
-	it('app.css and main.ts do not reference Inter or the fontsource package', () => {
-		const css = src('app.css');
+describe('appearance: bundled Google Sans fonts', () => {
+	it('uses the Google families without old font declarations or network imports', () => {
+		const css = ['app.css', 'styles/fonts.css', 'styles/tokens.generated.css']
+			.map((path) => src(path)).join('\n');
 		const main = src('main.ts');
 		expect(css).not.toMatch(/font-family:\s*['"]?Inter\b/);
 		expect(css).not.toMatch(/--font-sans:[^;]*Inter/);
 		expect(main).not.toContain('fontsource');
-		expect(css).toContain("--font-sans: 'Geist'");
+		expect(css).not.toMatch(/Geist/i);
+		expect(css).toContain("--ui-font-family: 'Google Sans Flex'");
+		expect(css).toContain("--code-font-family: 'Google Sans Code'");
 	});
 });
 

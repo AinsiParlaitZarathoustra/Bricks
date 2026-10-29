@@ -9,6 +9,7 @@ use bricks_agent::Agent;
 use bricks_agent::events::AgentEvent;
 use bricks_compression::CompressionLevel;
 use bricks_tools::permissions::{PermissionDecision, PermissionPolicy, PermissionRequest};
+use bricks_tools::jobs::JobRegistry;
 use bricks_tools::shell::{ShellConfig, procs};
 use bricks_types::*;
 use serde_json::{Value, json};
@@ -36,10 +37,16 @@ fn text(t: &str) -> String {
 
 /// Serves `replies` in order (then plain "done" texts forever).
 fn serve(replies: Vec<String>) -> String {
+    let mut it = replies.into_iter();
+    serve_with(move |_body| it.next().unwrap_or_else(|| text("done")))
+}
+
+/// Serves what `next` returns for each request, given the request body so
+/// far: a reply can name a job id that an earlier tool result gave.
+fn serve_with(mut next: impl FnMut(&str) -> String + Send + 'static) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let port = listener.local_addr().unwrap().port();
     std::thread::spawn(move || {
-        let mut it = replies.into_iter();
         while let Ok((mut sock, _)) = listener.accept() {
             let mut buf = Vec::new();
             let mut tmp = [0u8; 8192];
@@ -69,7 +76,8 @@ fn serve(replies: Vec<String>) -> String {
                 }
                 buf.extend_from_slice(&tmp[..n]);
             }
-            let body = it.next().unwrap_or_else(|| text("done"));
+            let request = String::from_utf8_lossy(&buf[start..]).to_string();
+            let body = next(&request);
             let out = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                 body.len()
@@ -79,6 +87,14 @@ fn serve(replies: Vec<String>) -> String {
         }
     });
     format!("http://127.0.0.1:{port}/v1")
+}
+
+/// The job id (`job_` and 12 hex digits) named in `text`, if any.
+fn job_id_in(text: &str) -> Option<String> {
+    regex::Regex::new(r"job_[0-9a-f]{12}")
+        .unwrap()
+        .find(text)
+        .map(|m| m.as_str().to_string())
 }
 
 fn tool_results(agent: &Agent) -> Vec<String> {
@@ -109,7 +125,7 @@ fn shell_extensions(progress_every: Duration) -> bricks_tools::Extensions {
 fn agent(url: &str, work: &std::path::Path) -> bricks_agent::AgentBuilder {
     Agent::builder()
         .provider(common::provider(url, "chat_completions", 100_000))
-        .tools(bricks_tools::shell())
+        .tools(bricks_tools::shell_with_jobs(JobRegistry::new(Default::default(), None)))
         .working_dir(work)
         .raw_output_dir(work.join(".raw"))
 }
@@ -142,9 +158,9 @@ async fn state_persists_across_turns_and_results_are_rendered_uniformly() {
     a.run("go").await.unwrap();
     let r = tool_results(&a);
 
-    assert!(r[0].starts_with("✓ [Bash] Succès ("), "{}", r[0]);
+    assert!(r[0].starts_with("✓ [Bash] Success ("), "{}", r[0]);
     assert!(
-        r[0].ends_with(") — code 0\n(Commande exécutée avec succès sans sortie)"),
+        r[0].ends_with(") — code 0\n(Command ran successfully with no output)"),
         "{}",
         r[0]
     );
@@ -154,11 +170,11 @@ async fn state_persists_across_turns_and_results_are_rendered_uniformly() {
         r[1]
     );
     let fail = &r[2];
-    assert!(fail.starts_with("✗ [Bash] Échec ("), "{fail}");
+    assert!(fail.starts_with("✗ [Bash] Failed ("), "{fail}");
     assert!(fail.contains(") — code 127\n--- stderr ---\n"), "{fail}");
     assert!(fail.contains("command not found"), "{fail}");
     assert!(
-        fail.contains("--- suggestion ---\nVérifiez que l'outil est installé"),
+        fail.contains("--- suggestion ---\nCheck that the tool is installed"),
         "{fail}"
     );
     // The shell's `cd` did not move the agent's own working directory.
@@ -182,13 +198,13 @@ async fn a_timeout_renders_partial_output_without_a_code() {
     let r = tool_results(&a);
     let t = &r[0];
     assert!(
-        t.starts_with("⏱ [Bash] Interrompu après timeout de 0.6s ("),
+        t.starts_with("⏱ [Bash] Interrupted after timeout of 0.6s ("),
         "{t}"
     );
-    assert!(t.contains("aucun code de sortie"), "{t}");
+    assert!(t.contains("no exit code"), "{t}");
     assert!(!t.contains("code 0") && !t.contains("code -1"), "{t}");
     assert!(
-        t.contains("[Interrompu après timeout de 0.6s — sortie partielle ci-dessous]"),
+        t.contains("[Interrupted after timeout of 0.6s — partial output below]"),
         "{t}"
     );
     assert!(
@@ -199,37 +215,51 @@ async fn a_timeout_renders_partial_output_without_a_code() {
 }
 
 #[tokio::test]
-async fn background_tasks_through_the_agent() {
+async fn background_jobs_through_the_agent() {
     let work = tempfile::tempdir().unwrap();
-    let url = serve(vec![
-        tool_call(
-            "b1",
-            "Bash",
-            json!({
-                "command": format!(
-                    "python3 -u '{}'",
-                    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                        .join("../bricks-tools/tests/fixtures/http_server.py")
-                        .display()
-                ),
-                "background": true,
-                "ready_pattern": "port \\d+",
-                "ready_timeout": 15000
-            }),
-        ),
-        tool_call("b2", "BashTaskOutput", json!({ "task_id": "bg-1" })),
-        tool_call("b3", "BashTaskStatus", json!({})),
-        tool_call("b4", "BashTaskStop", json!({ "task_id": "bg-1" })),
-        tool_call("b5", "BashTaskStop", json!({ "task_id": "bg-1" })),
-        tool_call("b6", "BashTaskOutput", json!({ "task_id": "bg-99" })),
-        text("ok"),
-    ]);
+    let server = format!(
+        "python3 -u '{}'",
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../bricks-tools/tests/fixtures/http_server.py")
+            .display()
+    );
+    // Each reply is built from the request so far: the job's id comes from
+    // the result of the Bash call that started it.
+    let mut step = 0;
+    let url = serve_with(move |request| {
+        let id = job_id_in(request).unwrap_or_default();
+        let reply = match step {
+            0 => tool_call(
+                "b1",
+                "Bash",
+                json!({
+                    "command": server,
+                    "background": true,
+                    "ready_pattern": "port \\d+",
+                    "ready_timeout": 15000
+                }),
+            ),
+            1 => tool_call("b2", "Job", json!({ "action": "output", "job_id": id })),
+            2 => tool_call("b3", "Job", json!({})),
+            3 => tool_call("b4", "Job", json!({ "action": "stop", "job_id": id })),
+            4 => tool_call("b5", "Job", json!({ "action": "stop", "job_id": id })),
+            5 => tool_call(
+                "b6",
+                "Job",
+                json!({ "action": "output", "job_id": "job_000000000000" }),
+            ),
+            _ => text("ok"),
+        };
+        step += 1;
+        reply
+    });
     let a = agent(&url, work.path()).build().unwrap();
     a.run("serve").await.unwrap();
     let r = tool_results(&a);
-    assert!(r[0].starts_with("… [Bash] En cours ("), "{}", r[0]);
+    let id = job_id_in(&r[0]).expect(&r[0]);
+    assert!(r[0].starts_with("… [Bash] Running ("), "{}", r[0]);
     assert!(
-        r[0].contains("Tâche bg-1 démarrée") && r[0].contains("prête après"),
+        r[0].contains(&format!("Started job {id}")) && r[0].contains("ready after"),
         "{}",
         r[0]
     );
@@ -239,15 +269,15 @@ async fn background_tasks_through_the_agent() {
         .expect(&r[1])[1]
         .parse()
         .unwrap();
-    assert!(
-        r[1].contains("     1 | Serving HTTP") || r[1].contains("1 | Serving HTTP"),
-        "{}",
-        r[1]
-    );
-    assert!(r[2].contains("bg-1 [running]"), "{}", r[2]);
-    assert!(r[3].contains("Arrêtée : bg-1 [stopped]"), "{}", r[3]);
-    assert!(r[4].contains("Déjà terminée"), "{}", r[4]);
-    assert!(r[5].starts_with("✗ [BashTaskOutput]"), "{}", r[5]);
+    assert!(r[1].contains("Serving HTTP"), "{}", r[1]);
+    assert!(r[2].contains(&format!("{id} [running]")), "{}", r[2]);
+    assert!(r[3].starts_with("✓ [Job] Success"), "{}", r[3]);
+    assert!(r[3].contains(&format!("{id} [stopped]")), "{}", r[3]);
+    // Stopping a stopped job is not an error.
+    assert!(r[4].starts_with("✓ [Job] Success"), "{}", r[4]);
+    assert!(r[4].contains(&format!("{id} [stopped]")), "{}", r[4]);
+    assert!(r[5].starts_with("✗ [Job] Failed"), "{}", r[5]);
+    assert!(r[5].contains("No accessible job"), "{}", r[5]);
     assert!(
         std::net::TcpStream::connect(("127.0.0.1", port)).is_err(),
         "port released"
@@ -394,7 +424,7 @@ async fn a_reduced_bash_output_is_readable_after_restore() {
     {
         let a = Agent::builder()
             .provider(common::provider(&url, "chat_completions", 100_000))
-            .tools(bricks_tools::shell())
+            .tools(bricks_tools::shell_with_jobs(JobRegistry::new(Default::default(), None)))
             .working_dir(work.path())
             .memory(JsonlMemory::new(mem.path()))
             .session_id("rs")
@@ -413,7 +443,7 @@ async fn a_reduced_bash_output_is_readable_after_restore() {
     b.run("again").await.unwrap();
     let reduced = tool_results(&b).into_iter().next().unwrap();
     assert!(
-        reduced.starts_with("✗ [Bash] Échec (") && reduced.contains("— code 101"),
+        reduced.starts_with("✗ [Bash] Failed (") && reduced.contains("— code 101"),
         "{reduced}"
     );
     assert!(reduced.contains("error[E0425]"), "{reduced}");
@@ -474,7 +504,7 @@ async fn cancelling_a_turn_stops_the_running_command() {
     }
     let pid = pid.expect("the command started");
     token.cancel();
-    assert!(matches!(runner.await.unwrap(), Err(CerseiError::Cancelled)));
+    assert!(matches!(runner.await.unwrap(), Err(BricksError::Cancelled)));
     assert!(
         procs::wait_gone(&[pid], Duration::from_secs(5)).await,
         "pid {pid} survived the cancel"
@@ -486,40 +516,39 @@ async fn cancelling_a_turn_stops_the_running_command() {
 /// real Bash tool (level `execute`), for `ask` as for `deny`.
 #[tokio::test]
 async fn a_command_rated_safe_still_needs_the_approval_rules() {
-    use bricks_agent::control::{Action, ApprovalBroker, ApprovalGate, ApprovalRules};
+    use bricks_agent::control::{ApprovalBroker, BrokerApprover};
+    use bricks_agent::permission::{PermissionEffect, PermissionProfile, SessionPolicy};
     use bricks_tools::tool_primitives::bash_safety::is_safe;
 
     let command = "ls > /dev/null";
     assert!(is_safe(command));
-    for action in [Action::Ask, Action::Deny] {
+    // The session's policy says ask (nobody can answer here) or deny.
+    let ask = SessionPolicy::chosen(PermissionProfile::Ask);
+    let mut deny = SessionPolicy::chosen(PermissionProfile::Custom);
+    deny.custom.execute = PermissionEffect::Deny;
+    for (name, policy) in [("ask", ask), ("deny", deny)] {
         let work = tempfile::tempdir().unwrap();
         let url = serve(vec![
             tool_call("s1", "Bash", json!({ "command": command })),
             tool_call("s2", "Bash", json!({ "command": "touch ran" })),
             text("ok"),
         ]);
-        let rules = ApprovalRules {
-            execute: action,
-            ..ApprovalRules::default()
-        };
         // Non-interactive: an `ask` cannot be answered and is refused.
         let broker = ApprovalBroker::new(false);
         let a = agent(&url, work.path())
-            .permission_policy(ApprovalGate::new(rules, broker.clone()))
+            .permission_profile(policy)
+            .permission_policy(BrokerApprover::new(broker.clone()))
             .build()
             .unwrap();
         let _ = a.run("go").await;
         let results = tool_results(&a);
-        assert!(!results.is_empty(), "{action:?}");
+        assert!(!results.is_empty(), "{name}");
         assert!(
             results.iter().all(|r| r.contains("Permission denied")),
-            "{action:?}: {results:?}"
+            "{name}: {results:?}"
         );
-        assert!(
-            !work.path().join("ran").exists(),
-            "{action:?}: a command ran"
-        );
-        if action == Action::Ask {
+        assert!(!work.path().join("ran").exists(), "{name}: a command ran");
+        if name == "ask" {
             let asked = broker.unsatisfied();
             assert_eq!(asked[0].tool, "Bash");
             assert_eq!(asked[0].level, "execute");

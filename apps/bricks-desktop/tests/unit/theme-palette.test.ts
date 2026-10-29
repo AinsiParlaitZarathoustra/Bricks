@@ -83,6 +83,12 @@ describe('theme tokens in hex', () => {
 		expect(oklchToHex(0, 0, 0)).toBe('#000000');
 	});
 
+	it('the default accent is the same blue in both modes: #002aff', () => {
+		expect(oklchToHex(0.4755, 0.2973, 264.2)).toBe('#002aff');
+		expect(TOKENS.light.accent).toBe('#002aff');
+		expect(TOKENS.dark.accent).toBe('#002aff');
+	});
+
 	it('keeps the light and dark defaults readable as they are', () => {
 		expect(contrastRatio(TOKENS.light.foreground, TOKENS.light.background)).toBeGreaterThan(12);
 		expect(contrastRatio(TOKENS.dark.foreground, TOKENS.dark.background)).toBeGreaterThan(10);

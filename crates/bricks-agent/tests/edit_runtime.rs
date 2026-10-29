@@ -188,21 +188,11 @@ async fn a_read_and_an_edit_of_one_file_in_one_batch_are_both_run() {
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "alpha\nBETA\n");
 }
 
-/// Writing, notebook editing and patching an existing file need no read
-/// either.
+/// Writing and patching an existing file need no read either.
 #[tokio::test]
-async fn write_notebook_and_patch_of_unread_files_run() {
+async fn write_and_patch_of_unread_files_run() {
     let dir = tempfile::tempdir().unwrap();
     let text = write_file(dir.path(), "w.txt", "old\n");
-    let nb = write_file(
-        dir.path(),
-        "n.ipynb",
-        &json!({
-            "nbformat": 4, "nbformat_minor": 5, "metadata": {},
-            "cells": [{"cell_type": "code", "source": ["x = 1\n"], "outputs": [], "metadata": {}, "execution_count": null}]
-        })
-        .to_string(),
-    );
     let patched = write_file(dir.path(), "p.txt", "one\ntwo\n");
     let patch = "--- a/p.txt\n+++ b/p.txt\n@@ -1,2 +1,2 @@\n one\n-two\n+TWO\n";
     let out = agent(
@@ -213,11 +203,6 @@ async fn write_notebook_and_patch_of_unread_files_run() {
                 "Write",
                 json!({"file_path": text, "content": "new\n"}),
             ),
-            Reply::tool(
-                "n1",
-                "NotebookEdit",
-                json!({"file_path": nb, "cell_index": 0, "new_source": "x = 2"}),
-            ),
             Reply::tool("p1", "ApplyPatch", json!({"patch": patch})),
             Reply::text("done"),
         ],
@@ -227,12 +212,11 @@ async fn write_notebook_and_patch_of_unread_files_run() {
     .await
     .unwrap();
 
-    for id in ["w1", "n1", "p1"] {
+    for id in ["w1", "p1"] {
         let c = call(&out.tool_calls, id);
         assert!(!c.is_error, "{id}: {}", c.result);
     }
     assert_eq!(std::fs::read_to_string(&text).unwrap(), "new\n");
-    assert!(std::fs::read_to_string(&nb).unwrap().contains("x = 2"));
     assert_eq!(std::fs::read_to_string(&patched).unwrap(), "one\nTWO\n");
 }
 

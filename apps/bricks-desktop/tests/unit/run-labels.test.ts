@@ -68,7 +68,8 @@ const project: Project = {
 	path: '/work/alpha',
 	added_at: T0,
 	last_opened_at: T0,
-	missing: false
+	missing: false,
+	chats: false
 };
 
 type AppStore = AppModule['app'];

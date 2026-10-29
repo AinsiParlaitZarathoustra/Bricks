@@ -9,7 +9,7 @@
 //!
 //! Every provider rejects that request server-side: a `tool_result` with no
 //! matching `tool_use` in the same request is a 400. The runner turns a 400 into
-//! `CerseiError::Provider`, which `is_retryable()` does not match — so the
+//! `BricksError::Provider`, which `is_retryable()` does not match — so the
 //! conversation is wedged permanently, at exactly the moment the context was
 //! full enough to need compacting.
 //!

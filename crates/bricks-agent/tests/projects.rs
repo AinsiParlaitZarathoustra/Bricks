@@ -3,6 +3,7 @@
 //! before anything is switched; a failure leaves the open session intact.
 
 use bricks_agent::BricksConfig;
+use bricks_agent::permission::{PermissionProfile, SessionPolicy};
 use bricks_agent::control::scripted::{Reply, Script, ScriptedCatalog};
 use bricks_agent::control::*;
 use serde_json::json;
@@ -10,8 +11,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-/// A project, read from its folder: `write_allowed` allows writes,
-/// `broken` makes it fail; the prompt and the semantic limits name it.
+/// A project, read from its folder: `broken` makes it fail; the prompt and
+/// the semantic limits name it. (Permissions are per session, not per
+/// project.)
 struct Folders;
 
 impl ProjectLoader for Folders {
@@ -24,16 +26,9 @@ impl ProjectLoader for Folders {
         bricks.agent.model = Some("test/a".into());
         bricks.semantic.lsp.enabled = false;
         bricks.semantic.max_results = if name == "B" { 7 } else { 9 };
-        if wd.join("exec_allowed").exists() {
-            bricks.permissions.execute = Action::Allow;
-        }
-        bricks.permissions.write = if wd.join("write_allowed").exists() {
-            Action::Allow
-        } else {
-            Action::Ask
-        };
         Ok(ProjectContext {
             working_dir: wd.to_path_buf(),
+            prompt_options: None,
             bricks,
             system_prompt: Some(format!("PROJECT-{name}")),
             long_term_memory: None,
@@ -136,10 +131,10 @@ async fn session_of(w: &World, name: &str) -> String {
 async fn resuming_another_projects_session_loads_that_project() {
     let w = World::new(vec![
         Reply::text("B created"),
-        // In A: a write allowed for the session.
+        // In A: a write, asked and allowed once.
         Reply::tool("w0", "Write", json!({"file_path": "a.txt", "content": "a"})),
         Reply::text("A wrote"),
-        // After the resume, in B.
+        // After the resume, in B (EXECUTE).
         Reply::tool(
             "w1",
             "Write",
@@ -147,13 +142,19 @@ async fn resuming_another_projects_session_loads_that_project() {
         ),
         Reply::text("B wrote"),
     ]);
-    std::fs::write(w.dir("B").join("write_allowed"), "").unwrap();
     let id_b = session_of(&w, "B").await;
+    // B's own policy: EXECUTE, chosen in B (A's stays unchosen).
+    let (ctl_b, mut ev_b) = w.open("B", SessionChoice::Resume(id_b.clone())).await.unwrap();
+    next(&mut ev_b).await;
+    ctl_b
+        .set_permission_policy(SessionPolicy::chosen(PermissionProfile::Execute))
+        .unwrap();
+    ctl_b.close().await;
 
     let (ctl, mut ev) = w.open("A", SessionChoice::New).await.unwrap();
     next(&mut ev).await;
     assert_eq!(ctl.project().system_prompt.as_deref(), Some("PROJECT-A"));
-    // A asks before writing; allowed for the session.
+    // A asks before writing; the answer covers that one call.
     ctl.send(Command::Submit {
         prompt: Prompt::text("write"),
     })
@@ -164,14 +165,14 @@ async fn resuming_another_projects_session_loads_that_project() {
     };
     ctl.send(Command::Approve {
         approval_id: approval.approval_id.clone(),
-        decision: Decision::AllowForSession,
+        decision: Decision::Allow,
         reason: None,
     })
     .unwrap();
     until(&mut ev, "run_finished").await;
-    assert_eq!(
-        ctl.snapshot().allowed_for_session,
-        vec!["Write".to_string()]
+    assert!(
+        !ctl.snapshot().permission_policy.chosen,
+        "A's policy is still the unchosen one"
     );
     let id_a = ctl.session_id();
 
@@ -194,10 +195,10 @@ async fn resuming_another_projects_session_loads_that_project() {
     let snap = ctl.snapshot();
     assert_eq!(snap.session_id, id_b);
     assert_eq!(snap.working_dir, b);
-    assert_eq!(snap.approval_rules.write, Action::Allow, "B's rules");
-    assert!(
-        snap.allowed_for_session.is_empty(),
-        "A's session approvals stay with A"
+    assert_eq!(
+        snap.permission_policy,
+        SessionPolicy::chosen(PermissionProfile::Execute),
+        "B's policy"
     );
     assert_eq!(ctl.project().system_prompt.as_deref(), Some("PROJECT-B"));
     assert_eq!(
@@ -207,7 +208,7 @@ async fn resuming_another_projects_session_loads_that_project() {
     );
     assert_eq!(ctl.agent().working_dir(), b.as_path());
 
-    // A write in B: no question (B allows it), relative to B.
+    // A write in B: no question (B's policy runs it), relative to B.
     let evs = submit(&ctl, &mut ev, "write").await;
     assert!(!evs.iter().any(|e| e.event.kind() == "approval_requested"));
     assert_eq!(std::fs::read_to_string(b.join("rel.txt")).unwrap(), "b");
@@ -333,10 +334,11 @@ async fn the_previous_sessions_jobs_end_with_the_resume() {
         ),
         Reply::text("started"),
     ]);
-    std::fs::write(w.dir("A").join("exec_allowed"), "").unwrap();
     let id_b = session_of(&w, "B").await;
     let (ctl, mut ev) = w.open("A", SessionChoice::New).await.unwrap();
     next(&mut ev).await;
+    ctl.set_permission_policy(SessionPolicy::chosen(PermissionProfile::Execute))
+        .unwrap();
     let evs = submit(&ctl, &mut ev, "start a job").await;
     let pid = evs
         .iter()
@@ -361,4 +363,57 @@ async fn the_previous_sessions_jobs_end_with_the_resume() {
     while let Some(e) = ev.try_next() {
         assert!(!e.event.kind().starts_with("job_"), "{:?}", e.event);
     }
+}
+
+#[tokio::test]
+async fn native_messaging_is_announced_and_agentcontrol_no_longer_sends() {
+    let w = World::new(vec![
+        Reply::tool(
+            "send",
+            "SendMessage",
+            json!({"to": "agent_missing", "content": "hello"}),
+        ),
+        Reply::tool(
+            "old",
+            "AgentControl",
+            json!({"action": "message", "agent_id": "agent_missing"}),
+        ),
+        Reply::text("done"),
+    ]);
+    let (ctl, mut ev) = w.open("A", SessionChoice::New).await.unwrap();
+    next(&mut ev).await;
+    // A's session runs what it is asked to (EXECUTE), chosen for this session.
+    ctl.set_permission_policy(SessionPolicy::chosen(PermissionProfile::Execute))
+        .unwrap();
+    assert_eq!(
+        ctl.tools()
+            .iter()
+            .filter(|t| t.name == "SendMessage")
+            .count(),
+        1
+    );
+    let events = submit(&ctl, &mut ev, "check messaging").await;
+    for id in ["send", "old"] {
+        assert!(
+            events.iter().any(|e| matches!(&e.event,
+                Event::ToolFinished { tool_call_id, is_error: true, .. } if tool_call_id == id
+            )),
+            "{id} must be refused"
+        );
+    }
+    let requests = w.script.requests();
+    let control = requests[0]
+        .1
+        .tools
+        .iter()
+        .find(|t| t.name == "AgentControl")
+        .unwrap();
+    assert!(
+        !control.input_schema["properties"]["action"]["enum"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("message"))
+    );
+    assert!(control.input_schema["properties"].get("message").is_none());
+    ctl.close().await;
 }

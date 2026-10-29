@@ -58,7 +58,7 @@ const CONTEXT: ContextStatus = {
 		provenance: 'estimated',
 		method: 'fixture'
 	},
-	context_window: { model: MODEL, total: 200_000, max_input_tokens: 180_000, max_output_tokens: 8_000 },
+	context_window: { model: MODEL, max_input_tokens: 180_000, max_output_tokens: 8_000 },
 	input_limit: 180_000,
 	reserved_output: 8_000,
 	margin: 0,
@@ -79,7 +79,6 @@ const CONTEXT: ContextStatus = {
 export function snapshot(overrides: Partial<Snapshot> = {}): Snapshot {
 	return {
 		session_id: SESSION_ID,
-		approval_mode: 'standard',
 		title: 'Essai',
 		working_dir: '/work/demo',
 		model: MODEL,
@@ -91,9 +90,9 @@ export function snapshot(overrides: Partial<Snapshot> = {}): Snapshot {
 		context: CONTEXT,
 		usage: ZERO_USAGE,
 		pending_approvals: [],
-		allowed_for_session: [],
 		memory_space: null,
-		approval_rules: null,
+		permission_policy: { profile: 'ask', custom: { read: 'allow', write: 'ask', execute: 'ask', network: 'ask', tools: {} }, chosen: false },
+		permission_revision: 0,
 		...overrides
 	};
 }

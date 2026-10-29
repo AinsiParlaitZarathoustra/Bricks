@@ -19,8 +19,8 @@ function measure(overrides: Partial<ContextStatus> = {}, provenance: Provenance 
 			provenance,
 			method: 'fixture'
 		},
-		context_window: { model: MODEL, total: 1_000_000, max_input_tokens: 900_000, max_output_tokens: 8_000 },
-		input_limit: 900_000,
+		context_window: { model: MODEL, max_input_tokens: 1_000_000, max_output_tokens: 8_000 },
+		input_limit: 1_000_000,
 		reserved_output: 8_000,
 		margin: 0,
 		total_tokens: 5_000_000,
@@ -40,7 +40,7 @@ function measure(overrides: Partial<ContextStatus> = {}, provenance: Provenance 
 }
 
 describe('context line: numerator and denominator', () => {
-	it('shows the occupation over the model window, in French format and without ≈', () => {
+	it('shows the occupation over the input budget, in French format and without ≈', () => {
 		expect(plain(contextLine(measure(), false))).toBe('12 374 / 1 000 000 tokens');
 	});
 
@@ -59,14 +59,13 @@ describe('context line: numerator and denominator', () => {
 		expect(plain(contextLine(status, false))).not.toContain('9 999 999');
 	});
 
-	it('does not replace an unknown window by the input limit', () => {
-		const status = measure({ context_window: { model: MODEL, total: null, max_input_tokens: 900_000, max_output_tokens: null } });
-		expect(plain(contextLine(status, false))).toBe('12 374 / — tokens');
-		expect(plain(contextLine(status, false))).not.toContain('900 000');
+	it('never adds the output limit to the input budget', () => {
+		const status = measure({ context_window: { model: MODEL, max_input_tokens: 96_000, max_output_tokens: 32_000 }, input_limit: 96_000 });
+		expect(plain(contextLine(status, false))).toBe('12 374 / 96 000 tokens');
 	});
 
-	it('treats a zero window as unknown', () => {
-		const status = measure({ context_window: { model: MODEL, total: 0, max_input_tokens: 0, max_output_tokens: null } });
+	it('treats a zero budget as unknown', () => {
+		const status = measure({ context_window: { model: MODEL, max_input_tokens: 0, max_output_tokens: null }, input_limit: 0 });
 		expect(contextFigures(status, false).total).toBeNull();
 		expect(plain(contextLine(status, false))).toBe('12 374 / — tokens');
 	});
@@ -107,7 +106,8 @@ describe('context line: stale measure', () => {
 
 		const fresh = measure({
 			context_used: { tokens: 500, upper_bound: 500, measured_tokens: 500, estimated_tokens: 0, provenance: 'counted', method: 'fixture' },
-			context_window: { model: 'anthropic/other-model', total: 200_000, max_input_tokens: 180_000, max_output_tokens: 8_000 }
+			context_window: { model: 'anthropic/other-model', max_input_tokens: 200_000, max_output_tokens: 8_000 },
+			input_limit: 200_000
 		});
 		conv.apply(feed.next({ type: 'context', status: fresh }));
 		expect(conv.contextStale).toBe(false);

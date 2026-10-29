@@ -5,7 +5,11 @@
 //! `default`, refusals, a switch during a stream and during a retry, and
 //! the accounting of a response sent before a switch.
 
+#[allow(dead_code)]
+mod common;
+
 use bricks_agent::BricksConfig;
+use bricks_agent::permission::{PermissionProfile, SessionPolicy};
 use bricks_agent::control::*;
 use bricks_provider::ProviderRegistry;
 use serde_json::Value;
@@ -234,14 +238,17 @@ async fn open(answers: Vec<Answer>) -> Env {
     let dir = tempfile::tempdir().unwrap();
     let mut bricks = BricksConfig::default();
     bricks.agent.model = Some("local/a".into());
-    bricks.permissions = ApprovalRules::allow_all();
     bricks.semantic.lsp.enabled = false;
-    let cfg = EngineConfig::new(
+    let mut cfg = EngineConfig::new(
         dir.path(),
         registry(&server.url),
         bricks,
         dir.path().join(".sessions"),
     );
+    cfg.permissions = Some(common::default_store(
+        dir.path(),
+        &SessionPolicy::chosen(PermissionProfile::Execute),
+    ));
     let (ctl, mut events) = Controller::open(
         cfg,
         OpenOptions {
@@ -582,7 +589,7 @@ async fn a_switch_keeps_the_conversation_and_cancellation_stays_immediate() {
     let mut env = open(vec![Answer::Text, Answer::HeldTool]).await;
     run(&mut env, "hello").await;
     let before = serde_json::to_string(&env.ctl.history().await).unwrap();
-    let rules = env.ctl.snapshot().approval_rules.clone();
+    let policy = env.ctl.snapshot().permission_policy.clone();
     env.ctl
         .send(Command::SetReasoning {
             profile: Some("low".into()),
@@ -593,7 +600,7 @@ async fn a_switch_keeps_the_conversation_and_cancellation_stays_immediate() {
         serde_json::to_string(&env.ctl.history().await).unwrap(),
         before
     );
-    assert_eq!(env.ctl.snapshot().approval_rules, rules);
+    assert_eq!(env.ctl.snapshot().permission_policy, policy);
     env.ctl
         .send(Command::Submit {
             prompt: Prompt::text("go"),

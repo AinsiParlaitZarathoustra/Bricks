@@ -76,7 +76,6 @@ impl Provider for SpyProvider {
             limits: ModelLimits {
                 max_input_tokens: 100_000,
                 max_output_tokens: 4_000,
-                context_window_tokens: None,
             },
             reasoning_resent: false,
             token_counting: true,
@@ -351,7 +350,7 @@ async fn a_cancelled_run_stops_its_overflow_compaction_and_sends_nothing_else() 
         }
         async fn complete(&self, r: CompletionRequest) -> Result<CompletionStream> {
             if self.1.fetch_add(1, Ordering::SeqCst) == 0 {
-                return Err(CerseiError::ContextOverflow {
+                return Err(BricksError::ContextOverflow {
                     used: 200_000,
                     limit: 100_000,
                 });

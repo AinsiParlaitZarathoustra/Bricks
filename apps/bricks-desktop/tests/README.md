@@ -6,9 +6,9 @@
 cd apps/bricks-desktop
 npm run check        # svelte-check + TypeScript
 npm run test:unit    # Vitest (tests/unit)
-npm run test:types   # type-check of the tests
+npm run test:types   # type-check of the tests (svelte-check)
 cargo test -p bricks-desktop                       # Rust services, IPC, engine bridge
-cargo test -p bricks-agent --test approval_override  # engine approval policy
+cargo test -p bricks-agent --test permission_policy  # session permission policy
 ```
 
 Rust tests use temporary folders (`tempfile`, a temporary Bricks home); none reads or writes `~/.bricks`.

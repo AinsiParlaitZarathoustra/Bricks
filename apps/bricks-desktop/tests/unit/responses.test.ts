@@ -56,10 +56,26 @@ describe('responses: one copy per answer, from the live events', () => {
 		expect(group.copyText).toBe('Je regarde.\n\nVoici la suite.\n\nFin.');
 		expect(group.complete).toBe(true);
 		expect(group.runId).toBe(RUN_1);
-		// The copy button goes right after the last item of the answer, before the « bilan ».
-		const last = conv.items.findLast((i) => i.kind !== 'run_end')!;
-		expect(group.anchorItemId).toBe(last.id);
-		expect(conv.responseByAnchor(last.id)?.key).toBe(RUN_1);
+		// The copy button goes right after the run's « bilan » (its run_end item).
+		const bilan = conv.items.find((i) => i.kind === 'run_end' && i.runId === RUN_1)!;
+		expect(bilan).toBeDefined();
+		expect(group.anchorItemId).toBe(bilan.id);
+		expect(conv.responseByAnchor(bilan.id)?.key).toBe(RUN_1);
+		expect(conv.items.at(-1)?.id).toBe(bilan.id);
+	});
+
+	it('a live run with a tool as its last item still anchors on the bilan, not on the tool', () => {
+		const conv = openConversation();
+		const feed = new EnvelopeFeed({ runId: RUN_1 });
+		start(conv, feed, 'Lis', RUN_1);
+		conv.apply(feed.next({ type: 'text_delta', text: 'Lecture.' }));
+		conv.apply(feed.next({ type: 'tool_started', tool_call_id: 'tc-1', name: 'Read', input: {} }));
+		conv.apply(feed.next({ type: 'tool_finished', tool_call_id: 'tc-1', name: 'Read', is_error: false, duration_ms: 1, output: '', executed: true, status: 'success' }));
+		finish(conv, feed, RUN_1);
+
+		const bilan = conv.items.find((i) => i.kind === 'run_end' && i.runId === RUN_1)!;
+		expect(conv.responses[0].anchorItemId).toBe(bilan.id);
+		expect(conv.responseByAnchor(conv.items.findLast((i) => i.kind === 'tool')!.id)).toBeUndefined();
 	});
 
 	it('segments ending with line breaks are joined by exactly one blank line, as in the stored record', () => {
@@ -259,6 +275,26 @@ describe('responses: stored history', () => {
 		expect(conv.run('stored-1')).toMatchObject({ prompt: 'Seconde', workedMs: 2_000, outcome: 'succeeded' });
 		expect(conv.items.filter((i) => i.kind === 'run_end').map((i) => i.runId)).toEqual(['stored-1']);
 		expect(conv.responseByAnchor(groups[1].anchorItemId!)?.runId).toBe('stored-1');
+	});
+
+	it('a stored history without bilan anchors on its last item, with one copy for the response', () => {
+		const conv = openConversation(
+			openedSession({
+				history: [
+					user('Question'),
+					assistant({ type: 'text', text: 'Début.' }, { type: 'tool_use', id: 'x', name: 'Read', input: {} }),
+					{ role: 'user', attachments: [], blocks: [{ type: 'tool_result', tool_use_id: 'x', content: 'ok', is_error: false }] },
+					assistant({ type: 'text', text: 'Fin.' }),
+				],
+			}),
+		);
+		expect(conv.items.some((i) => i.kind === 'run_end')).toBe(false);
+		const last = conv.items.at(-1)!;
+		expect(conv.responses).toHaveLength(1);
+		expect(conv.responses[0].anchorItemId).toBe(last.id);
+		expect(conv.responses[0].copyText).toBe('Début.\n\nFin.');
+		const copyable = conv.items.filter((i) => conv.responseByAnchor(i.id) !== undefined);
+		expect(copyable.map((i) => i.id)).toEqual([last.id]);
 	});
 
 	it('a record without a proven index places nothing and matches no text', () => {

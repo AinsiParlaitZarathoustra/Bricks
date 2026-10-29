@@ -162,8 +162,18 @@ fn a_needed_approval_without_a_person_stops_with_code_3() {
         ),
         text("fait"),
     ]);
-    let p = Project::new(&m.url, "[permissions]\nwrite = \"allow\"\n");
-    let out = p.run(&["run", "--non-interactive", "Écris le fichier"], None);
+    let p = Project::new(&m.url, "");
+    // The session's policy is EXECUTE (`--permissions execute`).
+    let out = p.run(
+        &[
+            "run",
+            "--non-interactive",
+            "--permissions",
+            "execute",
+            "Écris le fichier",
+        ],
+        None,
+    );
     assert_eq!(
         out.status.code(),
         Some(0),
@@ -171,6 +181,33 @@ fn a_needed_approval_without_a_person_stops_with_code_3() {
         String::from_utf8_lossy(&out.stderr)
     );
     assert_eq!(std::fs::read_to_string(&target).unwrap(), "x");
+}
+
+#[test]
+fn an_obsolete_permissions_section_is_not_applied() {
+    let p_dir = tempfile::tempdir().unwrap();
+    let target = p_dir.path().join("x.txt");
+    let m = model(vec![tool(
+        "c1",
+        "Write",
+        json!({"file_path": target.to_string_lossy(), "content": "x"}),
+    )]);
+    // The old `[permissions]` denial of writes is not applied: the write is
+    // asked, which a headless run cannot answer (refused as approval_required,
+    // not as a denial).
+    let p = Project::new(&m.url, "[permissions]\nwrite = \"deny\"\nexecute = \"allow\"\n");
+    let out = p.run(
+        &["run", "--json", "--non-interactive", "Écris le fichier"],
+        None,
+    );
+    assert_eq!(out.status.code(), Some(3), "{}", String::from_utf8_lossy(&out.stderr));
+    let evs = envelopes(&out.stdout);
+    let fin = evs.iter().find(|e| e["type"] == "run_finished").unwrap();
+    assert_eq!(fin["failure"], "approval_required");
+    assert!(!target.exists());
+    // The section is reported on stderr, stdout stays JSON lines.
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("[permissions] is no longer read"), "{err}");
 }
 
 #[test]
@@ -256,28 +293,26 @@ fn write_skill(root: &std::path::Path, name: &str, body: &str) {
     .unwrap();
 }
 
-/// `--skill` activates before the prompt (separate from it), with the
-/// same checks as `/skill`; a project skill needs `--trust-project-skills`
-/// (this session only); a skill that cannot be used sends nothing (2).
+/// `--skill` activates before the prompt (separate from it), with the same
+/// checks as `/skill`. Skills are read from the store (`<home>/skills`)
+/// only: a project folder is never read, trusted or not. A skill that cannot
+/// be used sends nothing (2).
 #[test]
-fn skills_are_chosen_explicitly_and_project_skills_need_explicit_trust() {
+fn skills_are_chosen_explicitly_from_the_store_and_project_folders_are_not_read() {
     let m = model(vec![text("fait"), text("fait")]);
     let p = Project::new(&m.url, "");
-    write_skill(
-        &p.path().join(".agents/skills"),
-        "house-style",
-        "HOUSE-STYLE-BODY",
-    );
-    write_skill(&p.home.path().join(".agents/skills"), "mine", "MINE-BODY");
+    write_skill(&p.path().join(".agents/skills"), "project-only", "PROJECT-ONLY-BODY");
+    write_skill(&p.home.path().join("skills"), "house-style", "HOUSE-STYLE-BODY");
+    write_skill(&p.home.path().join("skills"), "mine", "MINE-BODY");
 
-    // Without trust: the project skill is refused, nothing is sent.
+    // The project folder is not read: its skill is refused, nothing is sent.
     let out = p.run(
         &[
             "run",
             "--json",
             "--non-interactive",
             "--skill",
-            "house-style",
+            "project-only",
             "Écris",
         ],
         None,
@@ -294,21 +329,33 @@ fn skills_are_chosen_explicitly_and_project_skills_need_explicit_trust() {
         .find(|e| e["type"] == "command_rejected")
         .unwrap();
     assert!(
-        rejected["reason"]
-            .as_str()
-            .unwrap()
-            .contains("not approved")
+        rejected["reason"].as_str().unwrap().contains("project-only"),
+        "{rejected}"
     );
-    assert!(evs.iter().any(|e| {
-        e["type"] == "notice"
-            && e["message"]
-                .as_str()
-                .unwrap()
-                .contains("--trust-project-skills")
-    }));
     assert!(m.seen.lock().unwrap().is_empty(), "no request sent");
 
-    // With trust and a personal skill: both activated, in order, before
+    // Trust does not make a project folder readable: still refused.
+    let out = p.run(
+        &[
+            "run",
+            "--json",
+            "--non-interactive",
+            "--trust-project-skills",
+            "--skill",
+            "project-only",
+            "Écris",
+        ],
+        None,
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(m.seen.lock().unwrap().is_empty(), "no request sent");
+
+    // With trust and two installed skills: both activated, in order, before
     // the prompt, which stays its own message.
     let out = p.run(
         &[
@@ -380,8 +427,8 @@ fn skills_are_chosen_explicitly_and_project_skills_need_explicit_trust() {
     assert_eq!(m.seen.lock().unwrap().len(), before);
 }
 
-/// Without any skill on the machine (temporary home), a session works as
-/// before; the built-in skills are listed, nothing else.
+/// Without any installed skill (temporary home), a session works as before;
+/// the built-in skill is listed, nothing else.
 #[test]
 fn a_session_without_skills_works_and_lists_only_built_ins() {
     let m = model(vec![text("ok")]);
@@ -394,7 +441,7 @@ fn a_session_without_skills_works_and_lists_only_built_ins() {
         String::from_utf8_lossy(&out.stderr)
     );
     let body = m.seen.lock().unwrap()[0].to_string();
-    assert!(body.contains("<name>verify</name>") && body.contains("<name>debug</name>"));
+    assert!(body.contains("<name>create-skills</name>") && !body.contains("<name>verify</name>"));
     assert!(!body.contains("$ARGUMENTS"));
 }
 
@@ -416,8 +463,9 @@ fn a_background_child_still_running_at_the_end_is_cancelled_at_once() {
     );
     let p = Project::new(
         &m.url,
-        "[permissions.tools]\nAgent = \"allow\"\n\n[agents]\nbackground_drain_ms = 0\n",
+        "[agents]\nbackground_drain_ms = 0\n",
     );
+    p.allow_tools_by_default(&["Agent"]);
     let started = Instant::now();
     let out = p.run(
         &["run", "--non-interactive", "Lance un travail de fond"],
@@ -451,8 +499,9 @@ fn a_background_child_that_finishes_in_the_drain_completes_the_run() {
     );
     let p = Project::new(
         &m.url,
-        "[permissions.tools]\nAgent = \"allow\"\n\n[agents]\nbackground_drain_ms = 10000\n",
+        "[agents]\nbackground_drain_ms = 10000\n",
     );
+    p.allow_tools_by_default(&["Agent"]);
     let out = p.run(
         &["run", "--non-interactive", "Lance un travail rapide"],
         None,
@@ -479,8 +528,9 @@ fn drain_zero_cancels_at_once_and_still_reports_the_final_usage() {
     );
     let p = Project::new(
         &m.url,
-        "[permissions.tools]\nAgent = \"allow\"\n\n[agents]\nbackground_drain_ms = 0\n",
+        "[agents]\nbackground_drain_ms = 0\n",
     );
+    p.allow_tools_by_default(&["Agent"]);
     let started = Instant::now();
     let out = p.run(
         &[
@@ -539,7 +589,8 @@ fn the_default_drain_waits_for_a_child_still_running_at_the_end() {
         ],
         slow(3_000, text("Fini.")),
     );
-    let p = Project::new(&m.url, "[permissions.tools]\nAgent = \"allow\"\n");
+    let p = Project::new(&m.url, "");
+    p.allow_tools_by_default(&["Agent"]);
     let started = Instant::now();
     let out = p.run(
         &[
@@ -590,8 +641,9 @@ fn an_explicit_drain_is_the_wait_the_run_announces() {
     );
     let p = Project::new(
         &m.url,
-        "[permissions.tools]\nAgent = \"allow\"\n\n[agents]\nbackground_drain_ms = 600000\n",
+        "[agents]\nbackground_drain_ms = 600000\n",
     );
+    p.allow_tools_by_default(&["Agent"]);
     let mut c = p.command(&["run", "--non-interactive", "Lance un travail de fond"]);
     c.stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())

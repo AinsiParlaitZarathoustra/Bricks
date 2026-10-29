@@ -8,8 +8,8 @@
 
 #![cfg(unix)]
 
-use bricks_tools::bash::{BashTaskOutputTool, BashTool};
-use bricks_tools::jobs::{JobOwner, JobRegistry, JobSettings, JobsHandle};
+use bricks_tools::bash::BashTool;
+use bricks_tools::jobs::{JobOwner, JobRegistry, JobSettings, JobTool, JobsHandle};
 use bricks_tools::permissions::AllowAll;
 use bricks_tools::shell::bash::RunStatus;
 use bricks_tools::shell::{self, ShellConfig, procs};
@@ -103,25 +103,50 @@ fn tool_ctx(dir: &Path, sid: &str, jobs: Option<&Arc<JobRegistry>>) -> ToolConte
     }
 }
 
-/// `(line number, text)` of the numbered lines of a BashTaskOutput page.
-fn numbered_lines(content: &str) -> Vec<(u64, String)> {
-    content
-        .lines()
-        .filter_map(|l| {
-            let (num, text) = l.split_once(" | ")?;
-            Some((num.trim().parse::<u64>().ok()?, text.to_string()))
-        })
+/// `(line number, text)` of the complete lines of a `Job` output page: the
+/// header says the range (`lines a–b of n`), the body holds the lines.
+fn page_lines(content: &str) -> Vec<(u64, String)> {
+    let header = content.lines().next().unwrap_or_default();
+    let Some(range) = regex::Regex::new(r"lines (\d+)–(\d+) of")
+        .unwrap()
+        .captures(header)
+    else {
+        return Vec::new();
+    };
+    let first: u64 = range[1].parse().unwrap();
+    let last: u64 = range[2].parse().unwrap();
+    let body: Vec<&str> = content.lines().skip(1).collect();
+    let shown: Vec<&str> = body
+        .into_iter()
+        .take_while(|l| !l.starts_with("[line in progress"))
+        .collect();
+    assert_eq!(shown.len() as u64, last - first + 1, "{content}");
+    shown
+        .into_iter()
+        .enumerate()
+        .map(|(i, t)| (first + i as u64, t.to_string()))
         .collect()
 }
 
-/// A task's output read two lines at a time, following `next_offset`, while
-/// the task runs and after it ended: every line once, in order, none lost.
+/// The `next offset` of a `Job` output page.
+fn next_offset(content: &str) -> u64 {
+    regex::Regex::new(r"next offset (\d+)")
+        .unwrap()
+        .captures(content)
+        .expect(content)[1]
+        .parse()
+        .unwrap()
+}
+
+/// A job's output read two lines at a time, following `next offset`, while
+/// the job runs and after it ended: every line once, in order, none lost.
 #[tokio::test]
-async fn task_output_pages_follow_the_cursor_without_omission() {
+async fn job_output_pages_follow_the_cursor_without_omission() {
     let dir = tempfile::tempdir().unwrap();
     let sid = format!("cursor-{}", uuid::Uuid::new_v4());
-    let c = tool_ctx(dir.path(), &sid, None);
-    let r = BashTool
+    let reg = JobRegistry::new(JobSettings::default(), None);
+    let c = tool_ctx(dir.path(), &sid, Some(&reg));
+    let r = BashTool::with_jobs(Arc::clone(&reg))
         .execute(
             json!({
                 "command": "for i in 1 2 3 4 5 6 7; do echo line$i; sleep 0.15; done",
@@ -131,11 +156,12 @@ async fn task_output_pages_follow_the_cursor_without_omission() {
         )
         .await;
     assert!(!r.is_error, "{}", r.content);
-    let id = r.metadata.as_ref().unwrap()["task_id"]
+    let id = r.metadata.as_ref().unwrap()["job_id"]
         .as_str()
         .unwrap()
         .to_string();
-    let task = shell::session(&sid, &config()).task(&id).unwrap();
+    let task = reg.view(&id, None).unwrap().task;
+    let job = JobTool::new(Arc::clone(&reg));
 
     let mut offset = 0u64;
     let mut seen: Vec<(u64, String)> = Vec::new();
@@ -145,16 +171,16 @@ async fn task_output_pages_follow_the_cursor_without_omission() {
         assert!(pages <= 500, "the cursor never reached the end");
         // Read the state first: a page read after the end is the last one.
         let finished = task.state().is_finished();
-        let out = BashTaskOutputTool
-            .execute(json!({ "task_id": id, "offset": offset, "limit": 2 }), &c)
+        let out = job
+            .execute(
+                json!({ "action": "output", "job_id": id, "offset": offset, "limit": 2 }),
+                &c,
+            )
             .await;
         assert!(!out.is_error, "{}", out.content);
-        let lines = numbered_lines(&out.content);
-        let next = out.metadata.as_ref().unwrap()["next_offset"]
-            .as_u64()
-            .unwrap();
+        let lines = page_lines(&out.content);
         seen.extend(lines.iter().cloned());
-        offset = next;
+        offset = next_offset(&out.content);
         if finished && lines.is_empty() {
             break;
         }
@@ -173,6 +199,7 @@ async fn task_output_pages_follow_the_cursor_without_omission() {
         pages >= 4,
         "two lines a page: at least four pages, got {pages}"
     );
+    reg.stop_all().await;
     shell::close_session(&sid).await;
 }
 
@@ -198,13 +225,22 @@ async fn a_shell_that_cannot_start_is_an_error_of_the_call() {
         .await;
     assert!(spawned.is_err(), "a missing shell started a command");
 
-    let c = tool_ctx(dir.path(), &sid, None);
+    let reg = JobRegistry::new(JobSettings::default(), None);
+    let c = tool_ctx(dir.path(), &sid, Some(&reg));
     c.extensions.insert(broken.clone());
-    let r = BashTool
+    let r = BashTool::with_jobs(Arc::clone(&reg))
         .execute(json!({ "command": "echo never" }), &c)
         .await;
     assert!(r.is_error, "{}", r.content);
+    let rep = r.to_report();
+    assert_eq!(rep.status, ToolStatus::Failure, "{}", r.content);
+    assert!(
+        rep.termination.as_deref().is_some_and(|t| t.starts_with("cannot launch")),
+        "{:?}",
+        rep.termination
+    );
     assert!(!r.content.contains("never\n"), "{}", r.content);
+    assert_eq!(reg.running(), 0, "nothing was registered as a job");
     shell::close_session(&sid).await;
 }
 
@@ -336,9 +372,10 @@ async fn loads_of_8_16_and_32_commands_are_all_handed_over_under_a_quota_of_32()
         let mut handles = Vec::new();
         for i in 0..n {
             let ctx = c.clone();
+            let reg_for_wave = Arc::clone(&reg);
             let cmd = format!("touch '{d}/l{n}_{i}'; sleep 1.5; echo done-{n}-{i}");
             handles.push(tokio::spawn(async move {
-                BashTool
+                BashTool::with_jobs(Arc::clone(&reg_for_wave))
                     .execute(json!({ "command": cmd, "yield_time_ms": 100 }), &ctx)
                     .await
             }));
@@ -384,8 +421,9 @@ async fn concurrent_yields_never_hand_over_more_than_the_quota() {
     let mut handles = Vec::new();
     for _ in 0..40 {
         let ctx = tool_ctx(dir.path(), &sid, Some(&reg));
+        let reg_for_call = Arc::clone(&reg);
         handles.push(tokio::spawn(async move {
-            BashTool
+            BashTool::with_jobs(reg_for_call)
                 .execute(json!({ "command": "sleep 2", "yield_time_ms": 50 }), &ctx)
                 .await
         }));

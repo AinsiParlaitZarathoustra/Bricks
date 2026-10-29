@@ -14,7 +14,7 @@
     "test:unit": "vitest run --config tests/vitest.config.ts",
     "test:styles": "node scripts/compare-css-centralization.mjs",
     "test:e2e": "wdio run tests/e2e/wdio.conf.ts",
-    "test:types": "tsc -p tests/tsconfig.json"
+    "test:types": "svelte-check --tsconfig tests/tsconfig.json"
   },
   "devDependencies": {
     "@internationalized/date": "^3.12.4",

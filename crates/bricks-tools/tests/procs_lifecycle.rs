@@ -13,10 +13,20 @@ use nix::unistd::Pid;
 use std::time::{Duration, Instant};
 use tokio::process::{Child, Command};
 
-/// Threads of this process: one row of `ps -M` per thread, after a header.
+/// Threads of this process: on Linux the exit watchers alone, by name (the
+/// runtime's other threads come and go and would move a total); elsewhere
+/// every thread, one row of `ps -M` per thread after a header.
 fn threads() -> usize {
     if cfg!(target_os = "linux") {
-        return std::fs::read_dir("/proc/self/task").unwrap().count();
+        // `comm` holds the first 15 bytes of the thread's name.
+        return std::fs::read_dir("/proc/self/task")
+            .unwrap()
+            .filter_map(|t| std::fs::read_to_string(t.ok()?.path().join("comm")).ok())
+            .filter(|name| {
+                let name = name.trim_end();
+                !name.is_empty() && "bricks-exit-watch".starts_with(name)
+            })
+            .count();
     }
     let out = std::process::Command::new("ps")
         .args(["-M", "-p", &std::process::id().to_string()])

@@ -78,7 +78,7 @@ function deferred<T>() {
 }
 
 function project(id: string, name: string): Project {
-	return { id, name, path: `/work/${name.toLowerCase()}`, added_at: 0, last_opened_at: 0, missing: false };
+	return { id, name, path: `/work/${name.toLowerCase()}`, added_at: 0, last_opened_at: 0, missing: false, chats: false };
 }
 
 const attachment = (name: string): DraftAttachment => ({
@@ -289,7 +289,7 @@ describe('dispatch with the app store', () => {
 		expect(sends[0].display).toBe('/skill debug');
 		expect(sends[0].command).toEqual({
 			type: 'submit',
-			prompt: { blocks: [{ kind: 'text', text: 'fix it' }], skills: ['debug'] }
+			prompt: { blocks: [{ kind: 'text', text: 'fix it' }], skills: ['debug'], ask_timer: { mode: 'off' } }
 		});
 		// The creation comes before the submit.
 		const order = ipc.invoke.mock.calls.map(([c]) => c).filter((c) => c === 'session_open' || c === 'session_command');

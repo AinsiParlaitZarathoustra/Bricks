@@ -527,7 +527,7 @@ async fn non_streaming_models_use_a_blocking_request_for_every_protocol() {
 
 // ─── Errors ──────────────────────────────────────────────────────────────────
 
-async fn error_of(reg: &ProviderRegistry, sel: &str) -> CerseiError {
+async fn error_of(reg: &ProviderRegistry, sel: &str) -> BricksError {
     let p = provider(reg, sel);
     match p
         .complete(first_request(vec![Message::user("hi")], false))
@@ -547,7 +547,7 @@ async fn http_statuses_are_typed_and_retryable_from_complete_itself() {
             body: r#"{"error":"slow down"}"#.into(),
         }]);
         match error_of(&reg, sel).await {
-            CerseiError::RateLimit { retry_after, .. } => {
+            BricksError::RateLimit { retry_after, .. } => {
                 assert_eq!(retry_after, Some(std::time::Duration::from_secs(7)))
             }
             other => panic!("{sel}: {other:?}"),
@@ -600,7 +600,7 @@ async fn http_statuses_are_typed_and_retryable_from_complete_itself() {
         }]);
         let e = error_of(&reg, sel).await;
         assert!(
-            matches!(e, CerseiError::ProviderStatus { status: 401, .. }) && !e.is_retryable(),
+            matches!(e, BricksError::ProviderStatus { status: 401, .. }) && !e.is_retryable(),
             "{sel}: {e:?}"
         );
     }
@@ -629,7 +629,7 @@ async fn connection_refused_is_a_retryable_transport_error_without_the_url() {
         .port();
     let reg = registry_for(&format!("http://127.0.0.1:{port}"), "");
     let e = error_of(&reg, "mock/chat").await;
-    assert!(matches!(e, CerseiError::Http(_)), "{e:?}");
+    assert!(matches!(e, BricksError::Http(_)), "{e:?}");
     assert!(e.is_retryable());
     assert!(
         !e.to_string().contains(&port.to_string()),
@@ -649,7 +649,7 @@ async fn a_connection_dropped_mid_stream_becomes_a_stream_error() {
     )
     .await
     .unwrap_err();
-    assert!(matches!(e, CerseiError::Provider(_)), "{e:?}");
+    assert!(matches!(e, BricksError::Provider(_)), "{e:?}");
 }
 
 #[tokio::test]
@@ -773,7 +773,7 @@ max_output_tokens = 10
     for value in [None, Some("   ".to_string())] {
         let v = value.clone();
         let e = m.provider().env(move |_| v.clone()).build().unwrap_err();
-        assert!(matches!(e, CerseiError::Auth(_)));
+        assert!(matches!(e, BricksError::Auth(_)));
         assert!(e.to_string().contains("BRICKS_TEST_KEY_VAR"), "{e}");
     }
     let p = m
@@ -844,7 +844,7 @@ async fn unknown_profile_and_empty_profile_lists_never_send_a_request() {
     let mut r = first_request(vec![Message::user("hi")], false);
     r.options.set("reasoning_profile", "mythic");
     let e = p.complete(r).await.err().unwrap();
-    assert!(matches!(e, CerseiError::Config(_)));
+    assert!(matches!(e, BricksError::Config(_)));
     assert!(
         e.to_string().contains("unknown reasoning profile `mythic`")
             && e.to_string().contains("fast, deep, off, ultra"),
@@ -921,7 +921,7 @@ async fn untransportable_or_undeclared_input_is_refused_before_sending() {
             false,
         );
         let e = provider(&reg, sel).complete(r).await.err().unwrap();
-        assert!(matches!(e, CerseiError::Unsupported(_)), "{sel}: {e:?}");
+        assert!(matches!(e, BricksError::Unsupported(_)), "{sel}: {e:?}");
         assert!(e.to_string().contains(expect), "{sel}: {e}");
         assert!(e.to_string().contains(sel), "the error names the model");
     }
@@ -938,13 +938,6 @@ async fn untransportable_or_undeclared_input_is_refused_before_sending() {
             .contains("declared, but the `chat_completions` adapter cannot transport audio output"),
         "{e}"
     );
-    // Tools on a model that does not declare them.
-    let e = provider(&reg, "local/m")
-        .complete(first_request(vec![Message::user("x")], true))
-        .await
-        .err()
-        .unwrap();
-    assert!(e.to_string().contains("tool_calls"), "{e}");
     assert!(mock.requests().is_empty(), "no request left the process");
 }
 

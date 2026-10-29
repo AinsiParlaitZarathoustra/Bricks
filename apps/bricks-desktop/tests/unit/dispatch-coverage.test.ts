@@ -135,7 +135,8 @@ const PRESENT: Record<SlashPresent['view'], { present: SlashPresent; calls: Call
 		present: { view: 'effort_picker' },
 		calls: [{ name: 'openPicker', args: ['effort'] }]
 	},
-	memory: { present: { view: 'memory' }, calls: [open('memory')] },
+	memory: { present: { view: 'memory' }, calls: [open('memory', { scope: 'project' })] },
+	memory_global: { present: { view: 'memory_global' }, calls: [open('memory', { scope: 'global' })] },
 	context: { present: { view: 'context' }, calls: [open('context')] },
 	context_details: {
 		present: { view: 'context_details' },
@@ -218,7 +219,21 @@ const ENGINE: { type: string; registry: boolean; command: Command }[] = [
 	{ type: 'list_skills', registry: true, command: { type: 'list_skills', query: 'pdf', page: 0 } },
 	{ type: 'reload_skills', registry: true, command: { type: 'reload_skills' } },
 	{ type: 'trust_project_skills', registry: true, command: { type: 'trust_project_skills', allow: true } },
-	{ type: 'approve', registry: false, command: { type: 'approve', approval_id: 'ap-1', decision: 'allow' } }
+	{ type: 'approve', registry: false, command: { type: 'approve', approval_id: 'ap-1', decision: 'allow' } },
+	{ type: 'answer_question', registry: false, command: { type: 'answer_question', question_id: 'q-1', answer: { kind: 'skip' } } },
+	{
+		type: 'revise',
+		registry: false,
+		command: { type: 'revise', user_index: 0, original: 'Bonjour', prompt: { blocks: [{ kind: 'text', text: 'Salut' }] } }
+	},
+	{
+		type: 'set_permission_policy',
+		registry: false,
+		command: {
+			type: 'set_permission_policy',
+			policy: { profile: 'execute', custom: { read: 'allow', write: 'ask', execute: 'ask', network: 'ask', tools: {} }, chosen: true }
+		}
+	}
 ];
 
 /** Engine types a `/` line can produce (crates/bricks-agent/src/control/slash.rs). */
@@ -522,6 +537,18 @@ describe('engine Command: desktop effect of each type', () => {
 		});
 		expect(fake.calls.map((c) => c.name)).toEqual(['parse']);
 	});
+
+	it('revise is refused in the dispatcher: a message is revised from the conversation', async () => {
+		const fake = fakeHost({
+			kind: 'engine',
+			command: { type: 'revise', user_index: 0, original: 'Bonjour', prompt: { blocks: [{ kind: 'text', text: 'Salut' }] } }
+		});
+		expect(await runSlashLine('/revise', fake.host)).toEqual({
+			kind: 'refused',
+			message: 'Un message se modifie depuis la conversation (crayon du message).'
+		});
+		expect(fake.calls.map((c) => c.name)).toEqual(['parse']);
+	});
 });
 
 // ─── No fallthrough ────────────────────────────────────────────────────────
@@ -554,6 +581,29 @@ describe('no `/` line falls through to a prompt', () => {
 			}
 		);
 	}
+});
+
+describe('set_permission_policy: the open session gets the policy, none is kept elsewhere', () => {
+	const setPolicy = (): SlashAction => ({
+		kind: 'engine',
+		command: {
+			type: 'set_permission_policy',
+			policy: { profile: 'execute', custom: { read: 'allow', write: 'ask', execute: 'ask', network: 'ask', tools: {} }, chosen: true }
+		}
+	});
+
+	it('is sent to the open session as it is', async () => {
+		const fake = fakeHost(setPolicy());
+		await runSlashLine('/permissions execute', fake.host);
+		expect(sendsOfType(fake.calls, 'set_permission_policy')).toBe(1);
+	});
+
+	it('without an open session it is refused, and nothing is sent', async () => {
+		const fake = fakeHost(setPolicy(), { session: null });
+		const outcome = await runSlashLine('/permissions execute', fake.host);
+		expect(outcome.kind).toBe('refused');
+		expect(sendsOfType(fake.calls, 'set_permission_policy')).toBe(0);
+	});
 });
 
 describe('unknown actions are refused, never sent', () => {

@@ -1,5 +1,6 @@
 // Server render of the tool approval card (ApprovalCard.svelte): a pending request shows its
-// three decisions; a resolved one is a single trace line with no decision left to take.
+// two decisions (an answer covers one call); a resolved one is a single trace line with no
+// decision left to take.
 //.2, Haiku 4 (validation). Node environment, rendered to a string.
 import { describe, expect, it } from 'vitest';
 import { render } from 'svelte/server';
@@ -29,13 +30,13 @@ const approval = {
 } as unknown as ApprovalRequest;
 
 describe('ApprovalCard: pending request', () => {
-	it('offers the three decisions in French, in one labelled region', () => {
+	it('offers the two decisions in French, in one labelled region, and no session grant', () => {
 		const { body } = render(ApprovalCard, { props: { approval, conversation } });
 		const shown = text(body);
 		expect(shown).toContain('Autorisation demandée');
 		expect(shown).toContain('Autoriser');
-		expect(shown).toContain('Autoriser pour la session');
 		expect(shown).toContain('Refuser');
+		expect(shown).not.toContain('pour la session');
 		expect(body).toContain('aria-label="Autorisation demandée"');
 	});
 
@@ -64,10 +65,10 @@ describe('ApprovalCard: resolved request', () => {
 		expect(text(body)).toBe('Refusé · Write · par vous');
 	});
 
-	it('names the session grant when the decision came from it', () => {
+	it('names the cause of a refusal nobody could be asked for', () => {
 		const { body } = render(ApprovalCard, {
-			props: { approval, resolved: { decision: 'allow_for_session', by: 'session' }, conversation }
+			props: { approval, resolved: { decision: 'deny', by: 'non_interactive' }, conversation }
 		});
-		expect(text(body)).toBe('Autorisé pour la session · Write · selon l’autorisation de la session');
+		expect(text(body)).toBe('Refusé · Write · mode non interactif');
 	});
 });

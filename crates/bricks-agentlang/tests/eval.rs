@@ -2,7 +2,9 @@ use async_trait::async_trait;
 use bricks_agentlang::ProgramError;
 use bricks_agentlang::interp::{EvalCtx, Limits, run_program};
 use bricks_agentlang::registry::ToolDispatch;
-use bricks_tools::permissions::{AllowAll, AllowReadOnly, PermissionPolicy};
+use bricks_tools::permissions::{
+    AllowAll, InteractivePolicy, PermissionDecision, PermissionPolicy,
+};
 use bricks_tools::{CostTracker, Extensions, ToolContext, ToolResult};
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};
@@ -65,7 +67,14 @@ async fn io_read_dispatches_correct_input() {
 #[tokio::test]
 async fn io_write_denied_under_read_only() {
     let dispatch = Arc::new(MockDispatch::default());
-    let ctx = ctx_with(Arc::new(AllowReadOnly));
+    // An approver that only agrees to reads.
+    let read_only = InteractivePolicy::new(|r| match r.permission_level {
+        bricks_tools::PermissionLevel::None | bricks_tools::PermissionLevel::ReadOnly => {
+            PermissionDecision::Allow
+        }
+        _ => PermissionDecision::Deny("read-only".into()),
+    });
+    let ctx = ctx_with(Arc::new(read_only));
     let mut ev = EvalCtx::new(&ctx, dispatch.clone());
     let err = run_program(r#"io.write("/tmp/a", content: "x")"#, &mut ev)
         .await

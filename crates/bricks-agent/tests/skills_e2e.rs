@@ -2,13 +2,18 @@
 //! scripted model whose requests are captured: catalog without bodies,
 //! activation by the model and by a person, trust of project skills,
 //! permissions, deduplication, compaction, restoration, reload, change of
-//! project, cancellation. Project and home folders are temporary; no skill
-//! of the machine is read.
+//! project, cancellation. Project and home folders are temporary; the skills
+//! are in the store of the home folder, and no skill of the machine is read.
+
+#[allow(dead_code)]
+mod common;
 
 use bricks_agent::BricksConfig;
+use bricks_agent::permission::{PermissionEffect, SessionPolicy};
 use bricks_agent::control::scripted::{Reply, Script, ScriptedCatalog};
 use bricks_agent::control::*;
 use bricks_provider::CompletionRequest;
+use bricks_skills::{Scope, SkillRoot};
 use bricks_types::{ContentBlock, ToolResultContent};
 use serde_json::json;
 use std::path::{Path, PathBuf};
@@ -34,8 +39,28 @@ fn skill(root: &Path, name: &str, extra: &str, body: &str) {
     .unwrap();
 }
 
-fn personal(env_home: &Path) -> PathBuf {
-    env_home.join(".agents/skills")
+/// The store of a home folder: where the installed skills are read from.
+fn store_of(env_home: &Path) -> PathBuf {
+    env_home.join("skills")
+}
+
+/// The project's folders of other clients, given as explicit sources that
+/// are not trusted: a person decides for each session.
+fn project_roots(project: &Path) -> Vec<SkillRoot> {
+    vec![
+        SkillRoot {
+            id: "project:.agents".into(),
+            scope: Scope::Project,
+            path: Some(project.join(".agents/skills")),
+            trusted: false,
+        },
+        SkillRoot {
+            id: "project:.claude".into(),
+            scope: Scope::Project,
+            path: Some(project.join(".claude/skills")),
+            trusted: false,
+        },
+    ]
 }
 
 fn config(
@@ -43,13 +68,12 @@ fn config(
     home: &Path,
     sessions: &Path,
     script: &Arc<Script>,
-    rules: ApprovalRules,
+    rules: Option<SessionPolicy>,
     interactive: bool,
     tweak: impl FnOnce(&mut BricksConfig),
 ) -> EngineConfig {
     let mut bricks = BricksConfig::default();
     bricks.agent.model = Some("test/a".into());
-    bricks.permissions = rules;
     bricks.semantic.lsp.enabled = false;
     tweak(&mut bricks);
     let mut cfg = EngineConfig::new(
@@ -59,13 +83,16 @@ fn config(
         sessions,
     );
     cfg.interactive = interactive;
-    cfg.skills = Some(SkillsSetup::with_home(Some(home.to_path_buf())));
+    cfg.permissions = rules.map(|p| common::default_store(project, &p));
+    let mut setup = SkillsSetup::with_store(Some(store_of(home)));
+    setup.extra_roots = project_roots(project);
+    cfg.skills = Some(setup);
     cfg
 }
 
 async fn open_env(
     replies: Vec<Reply>,
-    rules: ApprovalRules,
+    rules: Option<SessionPolicy>,
     interactive: bool,
     prepare: impl FnOnce(&Path, &Path),
     tweak: impl FnOnce(&mut BricksConfig),
@@ -105,12 +132,8 @@ async fn open_env(
     }
 }
 
-fn allow(tools: &[&str]) -> ApprovalRules {
-    let mut r = ApprovalRules::default();
-    for t in tools {
-        r.tools.insert(t.to_string(), Action::Allow);
-    }
-    r
+fn allow(tools: &[&str]) -> Option<SessionPolicy> {
+    Some(common::allow_tools(tools))
 }
 
 async fn next(events: &mut EventStream) -> Envelope {
@@ -225,11 +248,11 @@ async fn the_model_activates_through_the_real_tool_and_the_catalog_has_no_body()
             ),
             Reply::text("done"),
         ],
-        ApprovalRules::default(),
+        None,
         true,
         |_, h| {
             skill(
-                &personal(h),
+                &store_of(h),
                 "deploy",
                 "",
                 "DEPLOY-BODY-1: check the tag first.",
@@ -271,9 +294,9 @@ async fn a_repeated_activation_is_not_duplicated_and_keeps_the_new_request() {
             ),
             Reply::text("done"),
         ],
-        ApprovalRules::default(),
+        None,
         true,
-        |_, h| skill(&personal(h), "deploy", "", "DEPLOY-BODY-2"),
+        |_, h| skill(&store_of(h), "deploy", "", "DEPLOY-BODY-2"),
         |_| {},
     )
     .await;
@@ -296,11 +319,11 @@ async fn project_skills_stay_out_of_requests_until_a_person_allows_them() {
             Reply::text("second"),
             Reply::text("third"),
         ],
-        ApprovalRules::default(),
+        None,
         true,
         |p, h| {
             skill(&p.join(".agents/skills"), "local-proc", "", "PROJECT-BODY");
-            skill(&personal(h), "mine", "", "PERSONAL-BODY");
+            skill(&store_of(h), "mine", "", "PERSONAL-BODY");
         },
         |_| {},
     )
@@ -319,7 +342,7 @@ async fn project_skills_stay_out_of_requests_until_a_person_allows_them() {
         assert!(!t.contains("Procedure local-proc.") && !t.contains("PROJECT-BODY"));
         assert!(
             t.contains("<name>mine</name>"),
-            "personal skills are usable"
+            "the installed skills are usable"
         );
     }
     // The person can inspect them before deciding (not the model).
@@ -365,7 +388,7 @@ async fn project_skills_stay_out_of_requests_until_a_person_allows_them() {
 async fn headless_sessions_announce_project_skills_without_waiting() {
     let mut env = open_env(
         vec![Reply::text("ok")],
-        ApprovalRules::default(),
+        None,
         false,
         |p, _| skill(&p.join(".claude/skills"), "local-proc", "", "PROJECT-BODY"),
         |_| {},
@@ -398,7 +421,7 @@ async fn the_callers_explicit_trust_applies_to_this_session_only() {
         home.path(),
         &sessions,
         &script,
-        ApprovalRules::default(),
+        None,
         false,
         |_| {},
     );
@@ -435,7 +458,7 @@ async fn the_callers_explicit_trust_applies_to_this_session_only() {
         home.path(),
         &sessions,
         &script2,
-        ApprovalRules::default(),
+        None,
         false,
         |_| {},
     );
@@ -459,8 +482,9 @@ async fn the_callers_explicit_trust_applies_to_this_session_only() {
 
 #[tokio::test]
 async fn a_refused_read_activates_nothing() {
-    let mut rules = ApprovalRules::default();
-    rules.tools.insert("Skill".into(), Action::Deny);
+    let rules = Some(common::custom(|rules| {
+        rules.tools.insert("Skill".into(), PermissionEffect::Deny);
+    }));
     let mut env = open_env(
         vec![
             Reply::tool("s1", "Skill", json!({"skill": "deploy"})),
@@ -468,7 +492,7 @@ async fn a_refused_read_activates_nothing() {
         ],
         rules,
         true,
-        |_, h| skill(&personal(h), "deploy", "", "DEPLOY-BODY-3"),
+        |_, h| skill(&store_of(h), "deploy", "", "DEPLOY-BODY-3"),
         |_| {},
     )
     .await;
@@ -483,8 +507,9 @@ async fn a_refused_read_activates_nothing() {
 #[tokio::test]
 async fn an_active_skill_and_its_allowed_tools_grant_nothing() {
     // The skill says it may use Bash; the rules refuse Bash.
-    let mut rules = ApprovalRules::default();
-    rules.tools.insert("Bash".into(), Action::Deny);
+    let rules = Some(common::custom(|rules| {
+        rules.tools.insert("Bash".into(), PermissionEffect::Deny);
+    }));
     let mut env = open_env(
         vec![
             Reply::tool("s1", "Skill", json!({"skill": "cleanup"})),
@@ -495,7 +520,7 @@ async fn an_active_skill_and_its_allowed_tools_grant_nothing() {
         true,
         |_, h| {
             skill(
-                &personal(h),
+                &store_of(h),
                 "cleanup",
                 "allowed-tools: Bash(touch:*)\n",
                 "Run `touch ran.txt`.",
@@ -510,7 +535,7 @@ async fn an_active_skill_and_its_allowed_tools_grant_nothing() {
     assert!(is_error && out.contains("Permission denied"), "{out}");
     assert!(!env.project.path().join("ran.txt").exists());
     let snapshot = env.ctl.snapshot();
-    assert!(snapshot.allowed_for_session.is_empty());
+    assert_eq!(snapshot.permission_revision, 0, "nothing changed the session policy");
 }
 
 // ─── A person's activation ───────────────────────────────────────────────────
@@ -519,9 +544,9 @@ async fn an_active_skill_and_its_allowed_tools_grant_nothing() {
 async fn a_person_activates_before_the_request_and_a_failure_sends_nothing() {
     let mut env = open_env(
         vec![Reply::text("first"), Reply::text("second")],
-        ApprovalRules::default(),
+        None,
         true,
-        |_, h| skill(&personal(h), "review", "", "REVIEW-BODY"),
+        |_, h| skill(&store_of(h), "review", "", "REVIEW-BODY"),
         |_| {},
     )
     .await;
@@ -583,9 +608,9 @@ async fn an_activation_that_does_not_fit_is_refused_whole() {
             Reply::tool("s1", "Skill", json!({"skill": "huge"})),
             Reply::text("ok"),
         ],
-        ApprovalRules::default(),
+        None,
         true,
-        |_, h| skill(&personal(h), "huge", "", &big),
+        |_, h| skill(&store_of(h), "huge", "", &big),
         |b| {
             // Keep almost nothing free: the margin takes most of the window.
             b.context.safety_margin_ratio = 0.9;
@@ -618,9 +643,9 @@ async fn compaction_keeps_the_instructions_once() {
             Reply::text("SUMMARY OF THE SESSION"),
             Reply::text("after"),
         ],
-        ApprovalRules::default(),
+        None,
         true,
-        |_, h| skill(&personal(h), "style", "", "STYLE-BODY: short sentences."),
+        |_, h| skill(&store_of(h), "style", "", "STYLE-BODY: short sentences."),
         |b| {
             b.context.keep_recent_messages = 2;
             b.context.min_compaction_gain = 0.0;
@@ -652,31 +677,50 @@ async fn compaction_keeps_the_instructions_once() {
 }
 
 #[tokio::test]
-async fn reload_does_not_change_an_active_skill() {
+async fn a_reload_withdraws_an_active_skill_whose_file_changed() {
     let mut env = open_env(
         vec![
             Reply::tool("s1", "Skill", json!({"skill": "style"})),
             Reply::text("one"),
             Reply::text("two"),
         ],
-        ApprovalRules::default(),
+        None,
         true,
-        |_, h| skill(&personal(h), "style", "", "STYLE-V1"),
+        |_, h| skill(&store_of(h), "style", "", "STYLE-V1"),
         |_| {},
     )
     .await;
     submit(&mut env, "start").await;
-    let before = env.ctl.agent().active_skills()[0].2.clone();
-    skill(&personal(env.home.path()), "style", "", "STYLE-V2");
+    assert_eq!(env.ctl.agent().active_skills().len(), 1);
+    skill(&store_of(env.home.path()), "style", "", "STYLE-V2");
     env.ctl.send(Command::ReloadSkills).unwrap();
     let Event::Skills { listing } = until(&mut env.events, "skills").await.event else {
         unreachable!()
     };
     assert_eq!(listing.generation, 2);
-    assert_eq!(env.ctl.agent().active_skills()[0].2, before);
-    submit(&mut env, "more").await;
+    // The check runs before the next request is sent, not at the reload.
+    assert_eq!(env.ctl.agent().active_skills().len(), 1);
+    let evs = submit(&mut env, "more").await;
+    let withdrawn: Vec<String> = evs
+        .iter()
+        .filter_map(|e| match &e.event {
+            Event::SkillActivationFailed { name, reason, .. } if name == "style" => {
+                Some(reason.clone())
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(withdrawn.len(), 1, "{:?}", kinds(&evs));
+    assert!(
+        withdrawn[0].starts_with("withdrawn") && withdrawn[0].contains("changed"),
+        "{withdrawn:?}"
+    );
+    assert!(env.ctl.agent().active_skills().is_empty());
     let last = messages_text(&env.script.requests().last().unwrap().1);
-    assert!(last.contains("STYLE-V1") && !last.contains("STYLE-V2"));
+    assert!(
+        !last.contains("STYLE-V1") && !last.contains("STYLE-V2"),
+        "the withdrawn instructions are not sent: {last}"
+    );
 }
 
 #[tokio::test]
@@ -686,9 +730,9 @@ async fn a_restored_session_checks_its_skills_against_their_source() {
             Reply::tool("s1", "Skill", json!({"skill": "style"})),
             Reply::text("one"),
         ],
-        ApprovalRules::default(),
+        None,
         true,
-        |_, h| skill(&personal(h), "style", "", "STYLE-R1"),
+        |_, h| skill(&store_of(h), "style", "", "STYLE-R1"),
         |_| {},
     )
     .await;
@@ -701,7 +745,7 @@ async fn a_restored_session_checks_its_skills_against_their_source() {
             env.home.path(),
             &env.sessions,
             script,
-            ApprovalRules::default(),
+            None,
             true,
             |_| {},
         )
@@ -727,7 +771,7 @@ async fn a_restored_session_checks_its_skills_against_their_source() {
     assert_eq!(ctl.agent().active_skills().len(), 1);
     ctl.close().await;
     // The file changed: suspended, said so, not replaced silently.
-    skill(&personal(env.home.path()), "style", "", "STYLE-R2");
+    skill(&store_of(env.home.path()), "style", "", "STYLE-R2");
     let s3 = Script::new(vec![Reply::text("again")]);
     let (ctl, mut events) = Controller::open(reopen(&s3), resume).await.unwrap();
     ctl.send(Command::Submit {
@@ -762,7 +806,7 @@ async fn a_change_of_project_leaves_nothing_of_the_previous_one() {
         home.path(),
         sessions.path(),
         &sb,
-        ApprovalRules::default(),
+        None,
         true,
         |_| {},
     );
@@ -803,7 +847,7 @@ async fn a_change_of_project_leaves_nothing_of_the_previous_one() {
         home.path(),
         sessions.path(),
         &sa,
-        ApprovalRules::default(),
+        None,
         true,
         |_| {},
     );
@@ -857,7 +901,7 @@ async fn cancelling_during_an_activation_leaves_nothing_active() {
         ],
         allow(&["Bash"]),
         true,
-        |_, h| skill(&personal(h), "style", "", "STYLE-C"),
+        |_, h| skill(&store_of(h), "style", "", "STYLE-C"),
         |_| {},
     )
     .await;
@@ -912,7 +956,7 @@ async fn no_skills_configured_means_no_tool_and_a_clear_refusal() {
     assert!(ctl.send(Command::ReloadSkills).is_err());
     assert!(
         ctl.send(Command::Submit {
-            prompt: Prompt::text("x").with_skills(vec!["debug".into()]),
+            prompt: Prompt::text("x").with_skills(vec!["create-skills".into()]),
         })
         .is_err()
     );
@@ -939,7 +983,7 @@ async fn a_restored_project_skill_waits_for_a_new_decision() {
             Reply::tool("s1", "Skill", json!({"skill": "local-proc"})),
             Reply::text("one"),
         ],
-        ApprovalRules::default(),
+        None,
         true,
         |p, _| skill(&p.join(".agents/skills"), "local-proc", "", "LOCAL-BODY"),
         |_| {},
@@ -960,7 +1004,7 @@ async fn a_restored_project_skill_waits_for_a_new_decision() {
         env.home.path(),
         &env.sessions,
         &s2,
-        ApprovalRules::default(),
+        None,
         true,
         |_| {},
     );

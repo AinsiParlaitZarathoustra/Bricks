@@ -454,7 +454,7 @@ async fn ends_in_reverse_order_keep_a_deterministic_history() {
     let (_, text, is_error) = &results[2];
     assert!(*is_error);
     assert!(text.contains("fast failed"), "{text}");
-    assert!(text.contains("--- remarques ---"), "{text}");
+    assert!(text.contains("--- notes ---"), "{text}");
 }
 
 #[tokio::test]

@@ -111,6 +111,7 @@ fn day(s: &str) -> i64 {
 fn ep(space: &str, session: &str, role: &str, at: &str, content: &str) -> EpisodeInput {
     EpisodeInput {
         space: space.into(),
+        project_id: None,
         session_id: Some(session.into()),
         role: role.into(),
         author: None,

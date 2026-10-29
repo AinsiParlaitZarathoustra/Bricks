@@ -13,7 +13,7 @@ Méthode
 - Utilise CodeScout lorsque les symboles, références ou diagnostics apportent une précision nécessaire.
 - Utilise CodeStats pour compter le code, les commentaires et les lignes vides d'un fichier ou projet. `top_n` limite l'affichage, pas l'analyse ; vérifie `partial` avant de présenter les totaux comme complets.
 - Pour une information incertaine ou susceptible d'avoir changé (API, version, comportement d'une bibliothèque), cherche d'abord dans le code puis, si nécessaire, sur le web en privilégiant les sources officielles.
-- Parallélise les appels indépendants lorsque c'est utile. Utilise l'outil le plus adapté : recherche et lecture dédiées pour explorer, outil d'exécution pour les commandes.
+- Regroupe dans une même réponse les appels indépendants, par exemple la lecture de plusieurs fichiers déjà repérés. Utilise l'outil le plus adapté : recherche et lecture dédiées pour explorer, outil d'exécution pour les commandes.
 
 Rigueur et honnêteté
 - Vérifie ton travail à la mesure de son enjeu : lance les tests ou le build quand ils existent et sont pertinents.

@@ -219,12 +219,7 @@ async fn reported_usage_is_the_measured_base_and_totals_add_cache() {
     );
     assert_eq!(st.totals.cache_read_tokens, 200);
     assert_eq!(st.total_tokens, 1034 + 200 + 50);
-    assert_eq!(st.context_window.total, None);
-    assert!(
-        st.notes
-            .iter()
-            .any(|n| n.contains("no total context window"))
-    );
+    assert_eq!(st.input_limit, st.context_window.max_input_tokens);
     assert!(
         log.lock()
             .unwrap()
@@ -379,7 +374,7 @@ async fn a_request_that_cannot_fit_is_never_sent() {
         .unwrap();
     // One huge prompt: nothing older to compact.
     let err = agent.run(&"word ".repeat(10_000)).await.unwrap_err();
-    assert!(matches!(err, CerseiError::ContextOverflow { .. }), "{err}");
+    assert!(matches!(err, BricksError::ContextOverflow { .. }), "{err}");
     assert!(
         seen.lock().unwrap().is_empty(),
         "no request reached the server"
@@ -441,7 +436,7 @@ context_window_tokens = 8000
         .unwrap();
     let err = agent.run(&"word ".repeat(2_500)).await.unwrap_err();
     assert!(
-        matches!(err, CerseiError::ContextOverflow { limit, .. } if limit < 2_000),
+        matches!(err, BricksError::ContextOverflow { limit, .. } if limit < 2_000),
         "{err}"
     );
     assert!(seen.lock().unwrap().is_empty());
@@ -599,7 +594,7 @@ async fn a_skeleton_view_does_not_stop_an_edit() {
     // The uniform header first, then the compression header.
     let mut lines = results[0].lines();
     assert!(
-        lines.next().unwrap().starts_with("✓ [Read] Succès"),
+        lines.next().unwrap().starts_with("✓ [Read] Success"),
         "{}",
         &results[0][..200]
     );

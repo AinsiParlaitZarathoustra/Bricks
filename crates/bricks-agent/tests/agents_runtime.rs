@@ -15,6 +15,7 @@ use bricks_agent::agents::{InstanceState, ProfileSources};
 use bricks_agent::control::scripted::{Reply, Script, ScriptedProvider};
 use bricks_agent::control::*;
 use bricks_agent::events::InjectRefusal;
+use bricks_agent::permission::SessionPolicy;
 use bricks_provider::{CompletionRequest, CompletionStream, Provider};
 use bricks_types::{MessageContent, Role, Usage};
 use common::follow::{Waited, next_wait, started_ids};
@@ -175,7 +176,7 @@ impl Provider for TestProvider {
         self.shared.peak.fetch_max(n, Ordering::SeqCst);
         let _guard = scopeguard(Arc::clone(&self.shared));
         if task.contains("[fail]") {
-            return Err(bricks_types::CerseiError::Provider(
+            return Err(bricks_types::BricksError::Provider(
                 "scripted failure".into(),
             ));
         }
@@ -298,17 +299,13 @@ fn git(dir: &Path, args: &[&str]) {
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
 }
 
-fn allow(tools: &[&str]) -> ApprovalRules {
-    let mut r = ApprovalRules::default();
-    for t in tools {
-        r.tools.insert(t.to_string(), Action::Allow);
-    }
-    r
+fn allow(tools: &[&str]) -> Option<SessionPolicy> {
+    Some(common::allow_tools(tools))
 }
 
 async fn open(
     replies: Vec<Reply>,
-    rules: ApprovalRules,
+    rules: Option<SessionPolicy>,
     interactive: bool,
     tweak: impl FnOnce(&mut BricksConfig),
 ) -> Env {
@@ -317,7 +314,7 @@ async fn open(
 
 async fn open_full(
     replies: Vec<Reply>,
-    rules: ApprovalRules,
+    rules: Option<SessionPolicy>,
     interactive: bool,
     tweak: impl FnOnce(&mut BricksConfig),
     engine: impl FnOnce(&mut EngineConfig, &Path),
@@ -343,7 +340,6 @@ async fn open_full(
     });
     let mut bricks = BricksConfig::default();
     bricks.agent.model = Some("test/a".into());
-    bricks.permissions = rules;
     bricks.semantic.lsp.enabled = false;
     bricks.agents.admission_timeout_ms = 20_000;
     tweak(&mut bricks);
@@ -358,6 +354,7 @@ async fn open_full(
         project_dir: Some(dir.path().join(".bricks/agents")),
         user_dir: None,
     });
+    cfg.permissions = rules.map(|p| common::default_store(dir.path(), &p));
     engine(&mut cfg, dir.path());
     let (ctl, mut events) = Controller::open(
         cfg,
@@ -394,7 +391,6 @@ async fn restart(env: Env) -> Env {
     drop(ctl);
     let mut bricks = BricksConfig::default();
     bricks.agent.model = Some("test/a".into());
-    bricks.permissions = allow(&["Agent", "Agents", "AgentControl", "Glob", "Bash"]);
     bricks.semantic.lsp.enabled = false;
     bricks.agents.admission_timeout_ms = 20_000;
     let mut cfg = EngineConfig::new(
@@ -1155,11 +1151,19 @@ async fn parallel_writers_get_worktrees_and_changesets_without_last_writer_wins(
 
 // ─── Skills, permissions ─────────────────────────────────────────────────────
 
-/// Skills on (home in a sub-folder, nothing of the machine), project
-/// skills approved by the caller when `trust`.
+/// Skills on (the store in a sub-folder, nothing of the machine), the
+/// project's `.agents/skills` given as an explicit source, approved by the
+/// caller when `trust`.
 fn with_skills(trust: bool) -> impl FnOnce(&mut EngineConfig, &Path) {
     move |cfg, dir| {
-        let mut setup = SkillsSetup::with_home(Some(dir.join(".home")));
+        let project = dir.canonicalize().unwrap();
+        let mut setup = SkillsSetup::with_store(Some(dir.join(".home/skills")));
+        setup.extra_roots = vec![bricks_skills::SkillRoot {
+            id: "project:.agents".into(),
+            scope: bricks_skills::Scope::Project,
+            path: Some(project.join(".agents/skills")),
+            trusted: false,
+        }];
         setup.trust_project = trust;
         cfg.skills = Some(setup);
     }
@@ -1376,7 +1380,6 @@ async fn a_worktree_child_reads_its_origin_projects_skill_in_place() {
     let evs = submit(&mut env, "go").await;
     let sp = spawned(&evs);
     assert_eq!(sp[0].isolation, "worktree");
-    let wt = sp[0].workspace.clone();
     let origin = env.dir.path().canonicalize().unwrap();
     let sys = env.shared.child_requests.lock()[0].system.clone().unwrap();
     let skill_dir = origin.join(".agents/skills/house-style");
@@ -1384,11 +1387,18 @@ async fn a_worktree_child_reads_its_origin_projects_skill_in_place() {
         sys.contains(&format!("Skill directory: {}", skill_dir.display())),
         "{sys}"
     );
+    // The child works in its worktree, kept in the session's files; the
+    // `Spawned` event names the parent's directory (the worktree comes later).
+    let wd = sys
+        .split_once("Your working directory is unchanged: ")
+        .and_then(|(_, rest)| rest.split_once(".\n"))
+        .map(|(wd, _)| wd.to_string())
+        .unwrap_or_else(|| panic!("no working directory in: {sys}"));
+    assert_ne!(wd, origin.display().to_string(), "{sys}");
     assert!(
-        sys.contains(&format!("Your working directory is unchanged: {wt}")),
-        "{sys}"
+        wd.contains("workspaces"),
+        "worktree {wd} outside the session's files"
     );
-    assert!(!wt.starts_with(&origin.display().to_string()) || wt.contains("workspaces"));
 }
 
 #[tokio::test]
@@ -1411,7 +1421,7 @@ async fn nested_delegation_resolves_skills_the_same_way_and_the_parent_keeps_its
     .await;
     skilled_profile(&mut env, "house-style").await;
     write_skill(
-        &env.dir.path().join(".home/.agents/skills"),
+        &env.dir.path().join(".home/skills"),
         "parent-only",
         "PARENT-ONLY-BODY",
     );
@@ -1458,7 +1468,7 @@ async fn headless_defaults_refuse_cleanly_and_an_explicit_rule_does_not_allow_th
             Reply::tool("c1", "Agents", json!({ "agents": [{ "task": "x" }] })),
             Reply::text("ok"),
         ],
-        ApprovalRules::default(),
+        None,
         false,
         |_| {},
     )

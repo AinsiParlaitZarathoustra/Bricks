@@ -6,12 +6,12 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { COLOR_ROLES, PALETTE_VARIABLES, PRESETS, colorChecks, type ResolvedMode } from '../../src/lib/theme/palette';
 
-const css = readFileSync(new URL('../../src/app.css', import.meta.url), 'utf8');
+const css = readFileSync(new URL('../../src/styles/tokens.generated.css', import.meta.url), 'utf8');
 
 /** The declarations inside the first block that starts with `selector {`. */
 function blockOf(selector: string): string {
 	const start = css.indexOf(`${selector} {`);
-	if (start < 0) throw new Error(`no block ${selector} in app.css`);
+	if (start < 0) throw new Error(`no block ${selector} in tokens.generated.css`);
 	const open = css.indexOf('{', start);
 	let depth = 0;
 	for (let i = open; i < css.length; i++) {

@@ -71,6 +71,7 @@ impl LongTermMemory for Recall {
             tokens: 5,
             items: 1,
             omitted: 0,
+            warnings: Vec::new(),
         }))
     }
     async fn record_turns(&self, _: Option<&str>, _: &[MemoryTurn]) -> bricks_types::Result<()> {
@@ -96,10 +97,6 @@ impl ProjectLoader for Loader {
         bricks.agent.model = Some("test/a".into());
         bricks.semantic.lsp.enabled = false;
         bricks.agents.enabled = self.agents;
-        bricks
-            .permissions
-            .tools
-            .insert("Agent".into(), Action::Allow);
         let mut tools: Vec<String> = bricks_tools::coding()
             .iter()
             .map(|t| t.name().to_string())
@@ -119,6 +116,7 @@ impl ProjectLoader for Loader {
         });
         Ok(ProjectContext {
             working_dir: wd.to_path_buf(),
+            prompt_options: None,
             bricks,
             system_prompt: Some(system),
             long_term_memory: Some(Arc::new(Recall)),
@@ -136,7 +134,7 @@ async fn run(agents: bool, replies: Vec<Reply>) -> Vec<CompletionRequest> {
     let dir = tempfile::tempdir().unwrap();
     let wd = std::fs::canonicalize(dir.path()).unwrap();
     let home = tempfile::tempdir().unwrap();
-    let skill = home.path().join(".agents/skills/marker-skill");
+    let skill = home.path().join("skills/marker-skill");
     std::fs::create_dir_all(&skill).unwrap();
     std::fs::write(
         skill.join("SKILL.md"),
@@ -163,7 +161,12 @@ async fn run(agents: bool, replies: Vec<Reply>) -> Vec<CompletionRequest> {
         bricks,
         wd.join(".sessions"),
     );
-    cfg.skills = Some(SkillsSetup::with_home(Some(home.path().to_path_buf())));
+    // The parent may delegate; nothing else is allowed by the policy.
+    cfg.permissions = Some(common::default_store(
+        home.path(),
+        &common::allow_tools(&["Agent"]),
+    ));
+    cfg.skills = Some(SkillsSetup::with_store(Some(home.path().join("skills"))));
     cfg.project_loader = Some(Arc::new(Loader { agents }));
     let (ctl, mut events) = Controller::open(
         cfg,
@@ -225,6 +228,12 @@ async fn the_session_and_its_child_send_the_foundation_with_their_own_bullets() 
     // The session agent: the foundation first, whole, once.
     let p = system(parent);
     assert!(p.starts_with(&reference(true, true)), "{p}");
+    // CodeStats is announced once, and so is its line; NotebookEdit is gone.
+    let announced: Vec<&str> = parent.tools.iter().map(|t| t.name.as_str()).collect();
+    assert_eq!(announced.iter().filter(|n| **n == "CodeStats").count(), 1);
+    assert!(!announced.contains(&"NotebookEdit"));
+    assert_eq!(p.matches("- Utilise CodeStats pour").count(), 1);
+    assert!(!p.contains("NotebookEdit"));
     assert_eq!(p.matches(INTRO).count(), 1);
     assert_eq!(p.matches(SYSTEM_PROMPT_DYNAMIC_BOUNDARY).count(), 1);
     assert!(!p.contains("## Your role"));
@@ -289,7 +298,11 @@ fn a_child_prompt_without_delegation_tools_has_no_delegation_bullet() {
         &["Read".to_string(), "Bash".to_string()],
         wd,
     );
-    assert!(without.starts_with(&reference(false, false)));
+    let tools = |n: &[&str]| n.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    assert!(without.starts_with(&bricks_agent::system_prompt::bricks_foundation(&tools(&[
+        "Read", "Bash"
+    ]))));
+    assert!(!without.contains("## Délégation"));
     assert_eq!(without.matches("## Your role").count(), 1);
     assert_eq!(without.matches(general.instructions.trim()).count(), 1);
     let with = bricks_agent::agents::spawn::child_system_prompt(
@@ -297,6 +310,9 @@ fn a_child_prompt_without_delegation_tools_has_no_delegation_bullet() {
         &["Read".to_string(), "Agents".to_string()],
         wd,
     );
-    assert!(with.starts_with(&reference(false, true)));
+    assert!(with.starts_with(&bricks_agent::system_prompt::bricks_foundation(&tools(&[
+        "Read", "Agents"
+    ]))));
+    assert_eq!(with.matches("## Délégation").count(), 1);
     assert_eq!(with.matches("## Your role").count(), 1);
 }

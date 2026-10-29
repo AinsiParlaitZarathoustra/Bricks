@@ -172,7 +172,7 @@ async fn search_then_read_in_order_without_downloading_twice_and_after_a_restore
     assert_eq!(results.len(), 3, "{results:#?}");
 
     let search = &results[0];
-    assert!(search.starts_with("✓ [WebSearch] Succès"), "{search}");
+    assert!(search.starts_with("✓ [WebSearch] Success"), "{search}");
     assert!(
         search.contains("Provider: answered by duckduckgo"),
         "{search}"
@@ -259,7 +259,7 @@ async fn a_failed_search_is_a_failure_with_its_reason() {
         .unwrap();
     agent.run("search").await.unwrap();
     let r = &tool_results(&agent)[0];
-    assert!(r.starts_with("✗ [WebSearch] Échec"), "{r}");
+    assert!(r.starts_with("✗ [WebSearch] Failed"), "{r}");
     assert!(r.contains("anti-bot challenge"), "{r}");
 }
 
@@ -325,7 +325,7 @@ async fn mcp_tools_are_agent_tools_with_structured_results_and_progress() {
     assert!(first_request.contains("mcp__kv__lookup"), "{first_request}");
     let results = tool_results(&agent);
     assert!(
-        results[0].starts_with("✓ [mcp__kv__lookup] Succès"),
+        results[0].starts_with("✓ [mcp__kv__lookup] Success"),
         "{}",
         results[0]
     );
@@ -334,7 +334,7 @@ async fn mcp_tools_are_agent_tools_with_structured_results_and_progress() {
         results[0].contains("--- structured content ---") && results[0].contains("\"value\": 42")
     );
     assert!(
-        results[1].starts_with("✗ [mcp__kv__lookup] Échec"),
+        results[1].starts_with("✗ [mcp__kv__lookup] Failed"),
         "{}",
         results[1]
     );

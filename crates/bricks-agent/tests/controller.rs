@@ -1,6 +1,10 @@
 //! The command/event contract, end to end, with a scripted model.
 
+#[allow(dead_code)]
+mod common;
+
 use bricks_agent::BricksConfig;
+use bricks_agent::permission::{PermissionProfile, SessionPolicy};
 use bricks_agent::control::scripted::{Reply, Script, ScriptedCatalog};
 use bricks_agent::control::*;
 use serde_json::json;
@@ -18,7 +22,7 @@ struct Env {
 async fn open_with(
     replies: Vec<Reply>,
     interactive: bool,
-    rules: ApprovalRules,
+    policy: Option<SessionPolicy>,
     capacity: usize,
 ) -> Env {
     let dir = tempfile::tempdir().unwrap();
@@ -26,10 +30,11 @@ async fn open_with(
     let catalog = ScriptedCatalog::new(&["a", "b"], script.clone());
     let mut bricks = BricksConfig::default();
     bricks.agent.model = Some("test/a".into());
-    bricks.permissions = rules;
     let mut cfg = EngineConfig::new(dir.path(), catalog, bricks, dir.path().join(".sessions"));
     cfg.interactive = interactive;
     cfg.queue_capacity = capacity;
+    // No policy: the session starts unchosen (reads run, the rest is asked).
+    cfg.permissions = policy.map(|p| common::default_store(dir.path(), &p));
     let (ctl, events) = Controller::open(
         cfg,
         OpenOptions {
@@ -49,7 +54,7 @@ async fn open_with(
 }
 
 async fn open(replies: Vec<Reply>) -> Env {
-    open_with(replies, true, ApprovalRules::default(), 64).await
+    open_with(replies, true, None, 64).await
 }
 
 async fn next(events: &mut EventStream) -> Envelope {
@@ -277,7 +282,7 @@ async fn a_slow_consumer_neither_loses_events_nor_blocks_cancellation() {
             Reply::text("fin"),
         ],
         true,
-        ApprovalRules::default(),
+        None,
         4,
     )
     .await;
@@ -417,7 +422,7 @@ async fn without_anyone_to_ask_the_run_stops_with_an_explicit_result() {
     let mut env = open_with(
         vec![write_call(&target, "x"), Reply::text("never")],
         false,
-        ApprovalRules::default(),
+        None,
         64,
     )
     .await;
@@ -444,7 +449,7 @@ async fn without_anyone_to_ask_the_run_stops_with_an_explicit_result() {
     let mut env = open_with(
         vec![write_call(&target, "x"), Reply::text("fait")],
         false,
-        ApprovalRules::allow_all(),
+        Some(SessionPolicy::chosen(PermissionProfile::Execute)),
         64,
     )
     .await;

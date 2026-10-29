@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
 	SKILLS_PER_PAGE,
 	clampPage,
+	isInstalledSkill,
 	pageCount,
 	skillCountLabel,
 	skillSourceLabel,
@@ -86,5 +87,15 @@ describe('sources', () => {
 
 	it('keeps an unknown source as it is', () => {
 		expect(skillSourceLabel('elsewhere')).toBe('elsewhere');
+	});
+
+	it('names the skills installed in the store, whatever their installation', () => {
+		expect(skillSourceLabel('store')).toBe('Installée');
+		expect(skillSourceLabel('store:3f9a0c1b2d4e')).toBe('Installée');
+		expect(isInstalledSkill('store:3f9a0c1b2d4e')).toBe(true);
+		expect(isInstalledSkill('store')).toBe(true);
+		expect(isInstalledSkill('builtin')).toBe(false);
+		expect(isInstalledSkill('storehouse')).toBe(false);
+		expect(isInstalledSkill('user:.agents')).toBe(false);
 	});
 });

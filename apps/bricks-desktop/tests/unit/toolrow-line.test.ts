@@ -6,7 +6,6 @@ import {
 	TOOL_LINE_LABEL,
 	approvalTrace,
 	formatToolDuration,
-	sessionGrantOffered,
 	toolLineState
 } from '../../src/lib/features/conversation/timeline/toolLine';
 import { EnvelopeFeed, PROJECT_ID, T0, openedSession } from './fixtures';
@@ -88,27 +87,22 @@ describe('formatToolDuration', () => {
 	});
 });
 
-describe('sessionGrantOffered', () => {
-	it('offers « Autoriser pour la session » in standard mode', () => {
-		expect(sessionGrantOffered('standard')).toBe(true);
-	});
-
-	it('does not offer it under « Toujours demander » (always_ask)', () => {
-		expect(sessionGrantOffered('always_ask')).toBe(false);
-	});
-
-	it('still offers it when confirmation is off', () => {
-		expect(sessionGrantOffered('no_confirmation')).toBe(true);
-	});
-});
-
 describe('approvalTrace', () => {
 	it('reads as decision, tool, and who decided', () => {
 		expect(approvalTrace('Bash', { decision: 'allow', by: 'user' })).toBe('Autorisé · Bash · par vous');
 		expect(approvalTrace('Write', { decision: 'deny', by: 'user' })).toBe('Refusé · Write · par vous');
-		expect(approvalTrace('Edit', { decision: 'allow_for_session', by: 'session' })).toBe(
-			'Autorisé pour la session · Edit · selon l’autorisation de la session'
+		expect(approvalTrace('Edit', { decision: 'deny', by: 'non_interactive' })).toBe(
+			'Refusé · Edit · mode non interactif'
 		);
+	});
+
+	it('shows a stored value of the former session grant as an allow, without a cause', () => {
+		// Conversations stored before answers covered one call only.
+		const stored = { decision: 'allow_for_session', by: 'session' } as unknown as {
+			decision: 'allow';
+			by: 'user';
+		};
+		expect(approvalTrace('Edit', stored)).toBe('Autorisé · Edit');
 	});
 });
 

@@ -39,10 +39,9 @@ const model: ModelView = {
 	input_modalities: ['text', 'image'],
 	output_modalities: ['text'],
 	streaming: true,
-	tool_calls: true,
+	async_tool_calls: false,
 	max_input_tokens: 128000,
 	max_output_tokens: 8192,
-	context_window_tokens: 200000,
 	reasoning_default: 'low',
 	profiles: [
 		{ id: 'low', label: 'Léger', parameters: {}, remove: [] },
@@ -136,20 +135,26 @@ describe('buildModelPatch', () => {
 		expect(isEmptyModelPatch(patch)).toBe(true);
 	});
 
+	it('sends asynchronous tool calls when the box changes, off included', () => {
+		const on = buildModelPatch(model, { ...modelForm(model), asyncToolCalls: true });
+		expect(on.async_tool_calls).toBe(true);
+		const enabled = { ...model, async_tool_calls: true };
+		const off = buildModelPatch(enabled, { ...modelForm(enabled), asyncToolCalls: false });
+		expect(off.async_tool_calls).toBe(false);
+		expect(isEmptyModelPatch(off)).toBe(false);
+		expect(isEmptyModelPatch(buildModelPatch(enabled, modelForm(enabled)))).toBe(true);
+	});
+
 	it('sends a changed token limit as a number', () => {
 		const patch = buildModelPatch(model, { ...modelForm(model), maxOutput: '16 384' });
 		expect(patch.max_output_tokens).toBe(16384);
 		expect(patch.max_input_tokens).toBeNull();
 	});
 
-	it('never sends the context window, known or unknown, so the stored value is kept', () => {
-		const known = buildModelPatch(model, { ...modelForm(model), maxOutput: '4096' });
-		expect(known.context_window_tokens).toBeNull();
-		expect(known.clear_context_window).toBe(false);
-		const unknown = { ...model, context_window_tokens: null };
-		const patch = buildModelPatch(unknown, { ...modelForm(unknown), name: 'Renamed' });
-		expect(patch.context_window_tokens).toBeNull();
-		expect(patch.clear_context_window).toBe(false);
+	it('never sends a context window: only the input and output limits exist', () => {
+		const patch = buildModelPatch(model, { ...modelForm(model), maxOutput: '4096' });
+		expect('context_window_tokens' in patch).toBe(false);
+		expect('clear_context_window' in patch).toBe(false);
 	});
 
 	it('does not send modalities reordered or unchanged', () => {

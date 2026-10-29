@@ -38,10 +38,9 @@ const model: ModelView = {
 	input_modalities: ['text', 'document'],
 	output_modalities: ['text'],
 	streaming: true,
-	tool_calls: true,
+	async_tool_calls: false,
 	max_input_tokens: 128000,
 	max_output_tokens: 8192,
-	context_window_tokens: null,
 	reasoning_default: null,
 	profiles: [],
 	priced: true,
@@ -205,15 +204,19 @@ describe('buildModelCreatePatch', () => {
 			api_model: 'acme-fast-1',
 			max_input_tokens: 128000,
 			max_output_tokens: 8192,
-			context_window_tokens: null,
-			clear_context_window: false,
 			input_modalities: ['text', 'image', 'document'],
 			document_mime_types: ['application/pdf'],
 			pricing: { input: '0.30', output: '1.20', cache_read: '0' },
 			reasoning_default: null,
 			clear_reasoning_default: false,
-			profiles: null
+			profiles: null,
+			async_tool_calls: null
 		});
+	});
+
+	it('sends asynchronous tool calls only when checked', () => {
+		expect(buildModelCreatePatch(filledForm({ asyncToolCalls: true })).async_tool_calls).toBe(true);
+		expect(buildModelCreatePatch(filledForm()).async_tool_calls).toBeNull();
 	});
 
 	it('sends no document types when the document input is not checked', () => {

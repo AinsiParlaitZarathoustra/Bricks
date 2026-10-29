@@ -7,6 +7,7 @@ mod common;
 
 use bricks_agent::BricksConfig;
 use bricks_agent::agents::{InstanceState, ProfileSources};
+use bricks_agent::permission::{PermissionEffect, SessionPolicy};
 use bricks_agent::control::scripted::{Reply, Script, ScriptedCatalog};
 use bricks_agent::control::*;
 use bricks_provider::{CompletionRequest, Provider};
@@ -63,21 +64,17 @@ fn git(dir: &std::path::Path, args: &[&str]) {
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
 }
 
-fn allow(tools: &[&str]) -> ApprovalRules {
-    let mut r = ApprovalRules::default();
-    for t in tools {
-        r.tools.insert(t.to_string(), Action::Allow);
-    }
-    r
+fn allow(tools: &[&str]) -> Option<SessionPolicy> {
+    Some(common::allow_tools(tools))
 }
 
-async fn open(replies: Vec<Reply>, rules: ApprovalRules) -> Env {
+async fn open(replies: Vec<Reply>, rules: Option<SessionPolicy>) -> Env {
     open_with(replies, rules, |_| {}).await
 }
 
 async fn open_with(
     replies: Vec<Reply>,
-    rules: ApprovalRules,
+    rules: Option<SessionPolicy>,
     tweak: impl FnOnce(&mut BricksConfig),
 ) -> Env {
     let dir = tempfile::tempdir().unwrap();
@@ -97,7 +94,6 @@ async fn open_with(
     });
     let mut bricks = BricksConfig::default();
     bricks.agent.model = Some("test/a".into());
-    bricks.permissions = rules;
     bricks.semantic.lsp.enabled = false;
     tweak(&mut bricks);
     let mut cfg = EngineConfig::new(
@@ -110,6 +106,7 @@ async fn open_with(
         project_dir: Some(dir.path().join(".bricks/agents")),
         user_dir: None,
     });
+    cfg.permissions = rules.map(|p| common::default_store(dir.path(), &p));
     let (ctl, mut events) = Controller::open(
         cfg,
         OpenOptions {
@@ -427,8 +424,9 @@ async fn invalid_requests_build_nothing_and_send_nothing() {
 #[tokio::test]
 async fn delegation_and_the_childs_tools_go_through_the_parents_policy() {
     // `Agent` denied by the policy: nothing is built.
-    let mut rules = ApprovalRules::default();
-    rules.tools.insert("Agent".into(), Action::Deny);
+    let rules = Some(common::custom(|rules| {
+        rules.tools.insert("Agent".into(), PermissionEffect::Deny);
+    }));
     let mut env = open(
         vec![
             Reply::tool("c1", "Agent", json!({"task": "write a file"})),
@@ -445,13 +443,15 @@ async fn delegation_and_the_childs_tools_go_through_the_parents_policy() {
         .unwrap();
     let evs = until_finished(&mut env.events).await;
     let (err, out) = tool_output(&evs, "Agent");
-    assert!(err && out.contains("not allowed"), "{out}");
+    assert!(err && out.contains("Permission denied"), "{out}");
     assert_eq!(env.catalog.builds.load(Ordering::SeqCst), builds);
 
     // `Agent` allowed, `Write` denied: the child's write is refused, never
     // an implicit AllowAll.
-    let mut rules = allow(&["Agent"]);
-    rules.write = Action::Deny;
+    let rules = Some(common::custom(|rules| {
+        rules.tools.insert("Agent".into(), PermissionEffect::Allow);
+        rules.write = PermissionEffect::Deny;
+    }));
     let mut env = open(
         vec![
             Reply::tool("c1", "Agent", json!({"task": "write a file"})),
@@ -492,7 +492,7 @@ async fn allowing_agent_once_does_not_allow_the_childs_commands() {
             Reply::text("ran"),
             Reply::text("done"),
         ],
-        ApprovalRules::default(),
+        None,
     )
     .await;
     env.ctl
@@ -781,15 +781,7 @@ async fn with_one_slot_the_second_delegation_waits_for_the_first() {
 
 #[tokio::test]
 async fn compaction_keeps_the_tool_the_profile_catalogue_and_the_policy() {
-    let mut env = open(
-        vec![
-            Reply::text("first"),
-            Reply::text("summary"),
-            Reply::text("second"),
-        ],
-        ApprovalRules::default(),
-    )
-    .await;
+    let mut env = open(vec![Reply::text("first")], None).await;
     env.ctl
         .send(Command::Submit {
             prompt: Prompt::text("hello"),
@@ -802,12 +794,17 @@ async fn compaction_keeps_the_tool_the_profile_catalogue_and_the_policy() {
             break;
         }
     }
+    env.script.push(Reply::tool("profiles", "AgentProfiles", json!({})));
+    env.script.push(Reply::text("second"));
     env.ctl
         .send(Command::Submit {
             prompt: Prompt::text("again"),
         })
         .unwrap();
-    until_finished(&mut env.events).await;
+    let events = until_finished(&mut env.events).await;
+    let (is_error, profiles) = tool_output(&events, "AgentProfiles");
+    assert!(!is_error, "{profiles}");
+    assert!(profiles.contains("inspecteur") && profiles.contains("redactor"));
     let last = env.script.requests().last().unwrap().1.clone();
     let names: Vec<&str> = last.tools.iter().map(|t| t.name.as_str()).collect();
     assert!(
@@ -815,14 +812,17 @@ async fn compaction_keeps_the_tool_the_profile_catalogue_and_the_policy() {
             && names.contains(&"AgentProfiles")
             && names.contains(&"CodeScout")
     );
-    let agent = last.tools.iter().find(|t| t.name == "Agent").unwrap();
-    let schema = serde_json::to_string(&agent.input_schema).unwrap();
-    assert!(schema.contains("inspecteur") && schema.contains("redactor"));
+    for name in ["Agent", "Agents"] {
+        let tool = last.tools.iter().find(|t| t.name == name).unwrap();
+        let schema = serde_json::to_string(&tool.input_schema).unwrap();
+        assert!(schema.contains("AgentProfiles"));
+        assert!(!schema.contains("inspecteur") && !schema.contains("redactor"));
+    }
 }
 
 #[tokio::test]
 async fn profiles_listed_and_reloaded_through_the_controller() {
-    let mut env = open(vec![], ApprovalRules::default()).await;
+    let mut env = open(vec![], None).await;
     let dir = env.dir.path().join(".bricks/agents");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
@@ -856,7 +856,7 @@ async fn profiles_listed_and_reloaded_through_the_controller() {
 
 #[tokio::test]
 async fn disabled_delegation_registers_no_tool() {
-    let mut env = open_with(vec![Reply::text("hi")], ApprovalRules::default(), |b| {
+    let mut env = open_with(vec![Reply::text("hi")], None, |b| {
         b.agents.enabled = false
     })
     .await;

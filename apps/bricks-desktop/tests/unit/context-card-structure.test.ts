@@ -56,9 +56,9 @@ describe('composer ring: same figures as the card, accessible name kept', () => 
 		expect(ring).toContain('gaugeLine(gauge)');
 	});
 
-	it('names the ring « Contexte : inconnu » when there is no share, and gives the cache rate as a dash when unknown', () => {
-		expect(ring).toContain("'Contexte : inconnu'");
-		expect(ring).toContain("`Contexte : ${value}`");
+	it('names the ring « Contexte d’entrée : inconnu » when there is no share, and gives the cache rate as a dash when unknown', () => {
+		expect(ring).toContain("'Contexte d’entrée : inconnu'");
+		expect(ring).toContain("`Contexte d’entrée : ${value}`");
 		expect(ring).toContain("cache === null ? '—' : formatPercent(cache)");
 		expect(ring).toContain('Taux de cache moyen');
 	});

@@ -6,14 +6,14 @@
 use bricks_agent::Agent;
 use bricks_agent::events::AgentEvent;
 use bricks_provider::{CompletionRequest, CompletionStream, Provider};
-use bricks_types::{CerseiError, StreamEvent};
+use bricks_types::{BricksError, StreamEvent};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::time::Instant;
 
 enum Step {
-    Fail(CerseiError),
+    Fail(BricksError),
     /// A stream answering `text`.
     Text(&'static str),
     /// A stream that emits text, then a transient-looking error.
@@ -82,7 +82,7 @@ impl Provider for Spy {
                 });
                 Ok(stream(ev))
             }
-            None => Err(CerseiError::Provider("no more steps".into())),
+            None => Err(BricksError::Provider("no more steps".into())),
         }
     }
 }
@@ -138,7 +138,7 @@ fn run_with_budget(steps: Vec<Step>, budget_ms: Option<u64>) -> Run {
 }
 
 /// Run to the end, collecting the stream's retry notices.
-async fn finish(r: &Run) -> Result<String, CerseiError> {
+async fn finish(r: &Run) -> Result<String, BricksError> {
     let mut s = r.agent.run_stream("ping");
     let mut text = String::new();
     let mut error = None;
@@ -153,14 +153,14 @@ async fn finish(r: &Run) -> Result<String, CerseiError> {
         }
     }
     match error {
-        Some(m) if m.contains("Cancelled") => Err(CerseiError::Cancelled),
-        Some(m) => Err(CerseiError::Provider(m)),
+        Some(m) if m.contains("Cancelled") => Err(BricksError::Cancelled),
+        Some(m) => Err(BricksError::Provider(m)),
         None => Ok(text),
     }
 }
 
-fn status(code: u16, after: Option<u64>) -> CerseiError {
-    CerseiError::from_http_status(code, after.map(Duration::from_secs), "busy")
+fn status(code: u16, after: Option<u64>) -> BricksError {
+    BricksError::from_http_status(code, after.map(Duration::from_secs), "busy")
 }
 
 fn gaps(calls: &[Instant]) -> Vec<u128> {
@@ -243,7 +243,7 @@ async fn definitive_errors_are_not_retried() {
     for e in [
         status(401, Some(5)),
         status(400, Some(5)),
-        CerseiError::from_http_status(429, Some(Duration::from_secs(5)), "insufficient_quota"),
+        BricksError::from_http_status(429, Some(Duration::from_secs(5)), "insufficient_quota"),
     ] {
         let r = run_with(vec![Step::Fail(e), Step::Text("never")]);
         assert!(finish(&r).await.is_err());
@@ -262,7 +262,7 @@ async fn cancelling_during_a_servers_wait_sends_nothing_more() {
     tokio::time::sleep(Duration::from_secs(20)).await;
     r.cancel.cancel();
     let out = task.await.unwrap();
-    assert!(matches!(out, Err(CerseiError::Cancelled)), "{out:?}");
+    assert!(matches!(out, Err(BricksError::Cancelled)), "{out:?}");
     tokio::time::sleep(Duration::from_secs(7200)).await;
     assert_eq!(r.calls.lock().unwrap().len(), 1, "no call after the cancel");
 }
@@ -307,7 +307,7 @@ async fn a_server_delay_at_the_budget_is_waited_for() {
 
 #[tokio::test(start_paused = true)]
 async fn an_extreme_server_delay_is_refused_without_overflow() {
-    let huge = CerseiError::ProviderStatus {
+    let huge = BricksError::ProviderStatus {
         status: 503,
         message: "busy".into(),
         retry_after: Some(Duration::MAX),
@@ -429,7 +429,7 @@ async fn the_refusal_text_is_exact_and_names_the_wait_and_the_budget() {
                     retrying, more than [agent] retry_after_max_wait_ms = 5000: no retry was \
                     sent. Try again later.";
     assert!(
-        matches!(&err, CerseiError::Provider(m) if m == expected),
+        matches!(&err, BricksError::Provider(m) if m == expected),
         "{err:?}"
     );
     assert_eq!(r.calls.lock().unwrap().len(), 1);
@@ -457,7 +457,7 @@ async fn a_later_wait_beyond_the_budget_ends_the_retries_after_the_honoured_ones
 
 #[tokio::test(start_paused = true)]
 async fn one_millisecond_over_the_budget_is_refused_and_the_budget_itself_is_not() {
-    let over = CerseiError::ProviderStatus {
+    let over = BricksError::ProviderStatus {
         status: 503,
         message: "busy".into(),
         retry_after: Some(Duration::from_millis(12_001)),
@@ -465,7 +465,7 @@ async fn one_millisecond_over_the_budget_is_refused_and_the_budget_itself_is_not
     let r = run_with_budget(vec![Step::Fail(over), Step::Text("never")], Some(12_000));
     assert!(finish(&r).await.is_err());
     assert_eq!(r.calls.lock().unwrap().len(), 1);
-    let at = CerseiError::ProviderStatus {
+    let at = BricksError::ProviderStatus {
         status: 503,
         message: "busy".into(),
         retry_after: Some(Duration::from_millis(12_000)),
@@ -490,6 +490,6 @@ async fn a_huge_budget_and_a_huge_wait_stay_cancellable_without_overflow() {
     tokio::time::sleep(Duration::from_secs(20)).await;
     r.cancel.cancel();
     let out = task.await.unwrap();
-    assert!(matches!(out, Err(CerseiError::Cancelled)), "{out:?}");
+    assert!(matches!(out, Err(BricksError::Cancelled)), "{out:?}");
     assert_eq!(r.calls.lock().unwrap().len(), 1, "no call after the cancel");
 }

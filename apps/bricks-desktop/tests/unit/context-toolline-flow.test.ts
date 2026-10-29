@@ -112,7 +112,7 @@ describe('context line across compaction and clear', () => {
 		const conv = new Conversation(openedSession(), PROJECT_ID);
 		conv.apply(feed.next({ type: 'compaction', reason: 'manual', outcome: 'ok', compacted: false }));
 		expect(conv.contextStale).toBe(false);
-		expect(plain(contextLine(conv.context, conv.contextStale))).toBe('0 / 200 000 tokens');
+		expect(plain(contextLine(conv.context, conv.contextStale))).toBe('0 / 180 000 tokens');
 	});
 
 	it('a new measure after a clear shows figures again', () => {
@@ -122,6 +122,6 @@ describe('context line across compaction and clear', () => {
 		expect(contextLine(conv.context, conv.contextStale)).toBe('— / — tokens');
 		conv.apply(feed.next({ type: 'context', status: snapshot().context! }));
 		expect(conv.contextStale).toBe(false);
-		expect(plain(contextLine(conv.context, conv.contextStale))).toBe('0 / 200 000 tokens');
+		expect(plain(contextLine(conv.context, conv.contextStale))).toBe('0 / 180 000 tokens');
 	});
 });

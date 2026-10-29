@@ -6,7 +6,11 @@
 
 #![cfg(unix)]
 
+#[allow(dead_code)]
+mod common;
+
 use bricks_agent::BricksConfig;
+use bricks_agent::permission::{PermissionProfile, SessionPolicy};
 use bricks_agent::control::scripted::{Reply, Script, ScriptedCatalog};
 use bricks_agent::control::*;
 use bricks_tools::shell::procs;
@@ -19,12 +23,13 @@ async fn open(dir: &Path, replies: Vec<Reply>, yield_time_ms: u64) -> (Controlle
     let mut bricks = BricksConfig::default();
     bricks.agent.model = Some("test/a".into());
     bricks.bash.yield_time_ms = yield_time_ms;
-    bricks.permissions = ApprovalRules {
-        execute: Action::Allow,
-        ..Default::default()
-    };
     let mut cfg = EngineConfig::new(dir, catalog, bricks, dir.join(".sessions"));
     cfg.interactive = false;
+    // Commands run without asking: the session's policy is EXECUTE.
+    cfg.permissions = Some(common::default_store(
+        dir,
+        &SessionPolicy::chosen(PermissionProfile::Execute),
+    ));
     Controller::open(
         cfg,
         OpenOptions {

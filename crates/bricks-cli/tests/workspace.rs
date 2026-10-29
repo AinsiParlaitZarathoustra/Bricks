@@ -134,16 +134,18 @@ fn a_resumed_session_works_with_its_own_project() {
         ),
     ]);
     let h = Home::new(&m.url);
-    // A refuses writes without a person; B allows them. A's long-term
-    // memory section is broken: a new session of A cannot open.
+    // A's long-term memory section is broken: a new session of A cannot open.
+    // B's first session is EXECUTE (its policy is kept with the session);
+    // A's new sessions start with no policy chosen (asked).
     let a = h.project("A", "[memory]\nenabled = \"oui\"\n");
-    let b = h.project("B", "[permissions]\nwrite = \"allow\"\n");
+    let b = h.project("B", "");
 
-    let o = h.run(&b, &["run", "--json", "premier"]);
+    let o = h.run(&b, &["run", "--json", "--permissions", "execute", "premier"]);
     assert_eq!(o.status.code(), Some(0), "{}", err(&o));
     let id_b = opened(&o)["session_id"].as_str().unwrap().to_string();
 
-    // From A, explicitly: B's folder, B's rules; A's settings never read.
+    // From A, explicitly: B's folder, and B's session policy (EXECUTE);
+    // A's settings never read.
     let o = h.run(
         &a,
         &[
@@ -166,7 +168,7 @@ fn a_resumed_session_works_with_its_own_project() {
     let o = h.run(&a, &["run", "--json", "--non-interactive", "écris"]);
     assert_eq!(o.status.code(), Some(2));
     assert!(err(&o).contains("bricks.toml"), "{}", err(&o));
-    // Fixed, A refuses the write that B allowed.
+    // Fixed, A's new session asks the write, and nobody answers: refused.
     std::fs::write(a.join("bricks.toml"), "[agent]\nmodel = \"local/m\"\n").unwrap();
     let o = h.run(&a, &["run", "--json", "--non-interactive", "écris"]);
     assert_eq!(o.status.code(), Some(3), "{}", err(&o));

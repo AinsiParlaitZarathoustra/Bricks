@@ -1,8 +1,8 @@
 //! F-A5: the `file_path` / `path` naming split is a convention, not drift.
 //!
-//! `file_path` names a specific file (Read/Write/Edit/NotebookEdit);
-//! `path` names a search or worktree *scope* that may be a directory
-//! (Glob/Grep/CodeSearch/EnterWorktree/ExitWorktree). This mirrors the tool
+//! `file_path` names a specific file (Read/Write/Edit);
+//! `path` names a search *scope* that may be a directory
+//! (Glob/Grep/CodeSearch/CodeStats). This mirrors the tool
 //! surface models are most heavily trained on, so unifying the names was
 //! rejected — as was re-adding alias coercion, which F-10 removed after alias
 //! leniency on `Edit` caused the silent search-widening bug (see the
@@ -21,14 +21,8 @@ fn properties(schema: &Value) -> Vec<String> {
 
 #[test]
 fn file_tools_declare_file_path_and_scope_tools_declare_path() {
-    const FILE_TOOLS: &[&str] = &["Read", "Write", "Edit", "NotebookEdit"];
-    const SCOPE_TOOLS: &[&str] = &[
-        "Glob",
-        "Grep",
-        "CodeSearch",
-        "EnterWorktree",
-        "ExitWorktree",
-    ];
+    const FILE_TOOLS: &[&str] = &["Read", "Write", "Edit"];
+    const SCOPE_TOOLS: &[&str] = &["Glob", "Grep", "CodeSearch", "CodeStats"];
 
     let tools = bricks_tools::all();
     let mut seen_file = 0;

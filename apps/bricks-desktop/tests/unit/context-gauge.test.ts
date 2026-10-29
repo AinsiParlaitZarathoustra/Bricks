@@ -17,8 +17,8 @@ function status(used: number | undefined, total: number | null, totals: Partial<
 			provenance: 'measured',
 			method: 'fixture'
 		} as unknown as ContextStatus['context_used'],
-		context_window: { model: 'fixture/model', total, max_input_tokens: null, max_output_tokens: null } as unknown as ContextStatus['context_window'],
-		input_limit: 900_000,
+		context_window: { model: 'fixture/model', max_input_tokens: total, max_output_tokens: null } as unknown as ContextStatus['context_window'],
+		input_limit: total,
 		reserved_output: 8_000,
 		margin: 0,
 		total_tokens: 0,

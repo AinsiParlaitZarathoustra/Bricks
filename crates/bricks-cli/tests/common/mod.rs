@@ -180,8 +180,8 @@ profiles = [{{ id = "deep" }}]
         c.args(args)
             .current_dir(self.dir.path())
             .env("BRICKS_HOME", self.home.path())
-            // Personal skills (~/.agents/skills, ~/.claude/skills) come
-            // from this temporary home, never from the machine's.
+            // The skill store (<home>/skills) comes from this temporary home,
+            // never from the machine's.
             .env("HOME", self.home.path())
             .env_remove("OPENAI_API_KEY")
             .env_remove("GEMINI_API_KEY");
@@ -205,6 +205,31 @@ profiles = [{{ id = "deep" }}]
 
     pub fn sessions_dir(&self) -> PathBuf {
         self.home.path().join("sessions")
+    }
+
+    /// Chooses the default policy of new sessions, as Bricks does: the
+    /// home's `permissions.json`. `profile` is `ask` or `execute`.
+    pub fn choose_default(&self, profile: &str) {
+        self.write_default(json!({ "profile": profile, "chosen": true }));
+    }
+
+    /// The default policy of new sessions: CUSTOM, with `tools` allowed (its
+    /// classes keep the ASK effects).
+    pub fn allow_tools_by_default(&self, tools: &[&str]) {
+        let rules: serde_json::Map<String, Value> = tools
+            .iter()
+            .map(|t| (t.to_string(), json!("allow")))
+            .collect();
+        self.write_default(json!({
+            "profile": "custom",
+            "custom": { "read": "allow", "write": "ask", "execute": "ask", "network": "ask", "tools": rules },
+            "chosen": true
+        }));
+    }
+
+    fn write_default(&self, policy: Value) {
+        let file = json!({ "version": 1, "default": policy });
+        std::fs::write(self.home.path().join("permissions.json"), file.to_string()).unwrap();
     }
 }
 
