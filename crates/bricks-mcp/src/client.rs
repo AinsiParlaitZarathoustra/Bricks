@@ -98,11 +98,15 @@ pub enum McpContent {
     Text {
         text: String,
     },
-    /// Media are described, not inlined: type and decoded size.
+    /// An image: type, decoded size, and its data (base64), which the
+    /// caller may show a model; never serialized with the block.
     Image {
         mime_type: String,
         bytes: usize,
+        #[serde(skip)]
+        data: String,
     },
+    /// Audio is described, not inlined: type and decoded size.
     Audio {
         mime_type: String,
         bytes: usize,
@@ -672,13 +676,19 @@ impl Drop for CancelOnDrop {
     }
 }
 
+/// The size of the bytes a base64 text decodes to (its padding removed).
+fn decoded_len(data: &str) -> usize {
+    let data = data.trim_end_matches('=');
+    data.len() * 3 / 4
+}
+
 fn convert_content(c: &rmcp::model::ContentBlock) -> McpContent {
     let v = serde_json::to_value(c).unwrap_or(Value::Null);
     let s = |k: &str| v.get(k).and_then(Value::as_str).map(str::to_string);
     let b64 = |k: &str| {
         v.get(k)
             .and_then(Value::as_str)
-            .map(|d| d.len() / 4 * 3)
+            .map(decoded_len)
             .unwrap_or(0)
     };
     match v.get("type").and_then(Value::as_str) {
@@ -688,6 +698,7 @@ fn convert_content(c: &rmcp::model::ContentBlock) -> McpContent {
         Some("image") => McpContent::Image {
             mime_type: s("mimeType").unwrap_or_default(),
             bytes: b64("data"),
+            data: s("data").unwrap_or_default(),
         },
         Some("audio") => McpContent::Audio {
             mime_type: s("mimeType").unwrap_or_default(),
@@ -705,10 +716,7 @@ fn convert_content(c: &rmcp::model::ContentBlock) -> McpContent {
                 uri: rs("uri").unwrap_or_default(),
                 mime_type: rs("mimeType"),
                 text: rs("text"),
-                blob_bytes: r
-                    .get("blob")
-                    .and_then(Value::as_str)
-                    .map(|d| d.len() / 4 * 3),
+                blob_bytes: r.get("blob").and_then(Value::as_str).map(decoded_len),
             }
         }
         _ => McpContent::Other { value: v },

@@ -7,8 +7,8 @@
 	import * as ipc from '$lib/ipc/client';
 	import { app } from '$lib/state/app.svelte';
 	import { ui } from '$lib/state/ui.svelte';
-	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
+	import { Switch } from '$lib/components/ui/switch';
 	import SettingsGroup from './SettingsGroup.svelte';
 	import DeleteDialog from './DeleteDialog.svelte';
 	import type { WriteOutcome } from './models';
@@ -94,16 +94,10 @@
 
 <div class="flex flex-col gap-6">
 	<SettingsGroup title="Mémoire">
-		<div class="flex flex-wrap items-center gap-3 p-3">
-			{#if app.prefs.memory_enabled}
-				<Badge>Mémoire activée</Badge>
-				<Button variant="secondary" size="sm" class="ml-auto" disabled={toggling} onclick={() => toggle(false)}>
-					Désactiver
-				</Button>
-			{:else}
-				<Button size="sm" disabled={toggling} onclick={() => toggle(true)}>Activer la mémoire</Button>
-			{/if}
-		</div>
+		<label class="flex items-center justify-between gap-3 p-3 text-ui">
+			Mémoire
+			<Switch bind:checked={() => app.prefs.memory_enabled, (on) => toggle(on)} disabled={toggling} />
+		</label>
 		{#if toggleError}
 			<p role="alert" class="p-3 text-ui text-pretty text-destructive">
 				Le réglage n’a pas été enregistré : {toggleError}

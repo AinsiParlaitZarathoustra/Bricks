@@ -3,6 +3,7 @@
 	import { app } from '$lib/state/app.svelte';
 	import * as Select from '$lib/components/ui/select';
 	import { Label } from '$lib/components/ui/label';
+	import { Switch } from '$lib/components/ui/switch';
 	import {
 		MERMAID_LOOKS,
 		MERMAID_SECURITY_LEVELS,
@@ -116,16 +117,13 @@
 			</Select.Content>
 		</Select.Root>
 	</div>
-	<div class="grid gap-x-6 gap-y-3 p-3 sm:grid-cols-2">
-		{#each controls as control (control.key)}
-			<label class="flex items-center gap-2 text-ui">
-				<input
-					type="checkbox"
-					checked={settings.diagramViewer[control.key]}
-					onchange={(event) => toggle(control.key, event.currentTarget.checked)}
-				/>
-				{control.label}
-			</label>
-		{/each}
-	</div>
+	{#each controls as control (control.key)}
+		<label class="flex items-center justify-between gap-3 p-3 text-ui">
+			{control.label}
+			<Switch
+				checked={settings.diagramViewer[control.key]}
+				onCheckedChange={(on) => toggle(control.key, on)}
+			/>
+		</label>
+	{/each}
 </SettingsGroup>

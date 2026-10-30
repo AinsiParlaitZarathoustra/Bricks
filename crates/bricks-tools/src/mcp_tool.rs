@@ -3,7 +3,9 @@
 //! Named `mcp__<server>__<tool>` (characters outside `[A-Za-z0-9_-]`
 //! replaced, at most 64). The result keeps what the server returned: text
 //! blocks in order, the structured content (`structuredContent`) as JSON,
-//! media described by type and size, resource links, and the tool's own
+//! images shown to the model as [`ToolImage`]s (PNG, JPEG, GIF or WebP, up
+//! to [`MAX_IMAGE_BYTES`]; any other is described by type and size, like
+//! audio and binary resources), resource links, and the tool's own
 //! failure flag (`isError`) as the status. Progress notifications of the
 //! call are forwarded to the agent's progress events. Permission level comes
 //! from the tool's annotations (`readOnlyHint`, `destructiveHint`), which are
@@ -12,6 +14,8 @@
 
 use super::*;
 use crate::tool_report::{ToolBody, ToolReport, ToolStatus};
+use crate::view_image::{MAX_IMAGE_BYTES, image_type};
+use base64::Engine as _;
 use bricks_mcp::{McpContent, McpError, McpManager, McpToolDef};
 use std::fmt::Write as _;
 use std::time::Instant;
@@ -126,17 +130,20 @@ impl Tool for McpTool {
             .manager
             .call(&self.server, &self.def.name, args, progress)
             .await;
+        let mut images = Vec::new();
         let mut report =
             match outcome {
                 Ok(r) => {
+                    let shown = shown_images(&r.content);
                     let mut report = ToolReport::new(
                         if r.is_error {
                             ToolStatus::Failure
                         } else {
                             ToolStatus::Success
                         },
-                        ToolBody::Text(render(&r.content, r.structured.as_ref())),
+                        ToolBody::Text(render(&r.content, &shown, r.structured.as_ref())),
                     );
+                    images = shown.into_iter().filter_map(|i| i.ok()).collect();
                     if r.rounds > 0 {
                         report
                             .notes
@@ -180,12 +187,48 @@ impl Tool for McpTool {
                 }
             };
         report.duration = Some(start.elapsed());
-        ToolResult::from_report(report)
+        ToolResult::from_report(report).with_images(images)
     }
 }
 
-fn render(content: &[McpContent], structured: Option<&Value>) -> String {
+/// For each image block of `content`, in order: the image to show the
+/// model, or why it is not shown.
+fn shown_images(content: &[McpContent]) -> Vec<std::result::Result<ToolImage, String>> {
+    content
+        .iter()
+        .filter_map(|c| match c {
+            McpContent::Image { data, .. } => Some(decode_image(data)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// An image block's data as an image the model can receive. Its type is
+/// read from its bytes, never taken from the server's `mimeType`.
+fn decode_image(data: &str) -> std::result::Result<ToolImage, String> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(data.trim())
+        .map_err(|_| "not valid base64".to_string())?;
+    if bytes.len() > MAX_IMAGE_BYTES {
+        return Err(format!("larger than {MAX_IMAGE_BYTES} bytes"));
+    }
+    let media_type =
+        image_type(&bytes).ok_or_else(|| "not a PNG, JPEG, GIF or WebP image".to_string())?;
+    Ok(ToolImage {
+        media_type: media_type.to_string(),
+        data_base64: data.trim().to_string(),
+        path: None,
+        bytes: bytes.len(),
+    })
+}
+
+fn render(
+    content: &[McpContent],
+    images: &[std::result::Result<ToolImage, String>],
+    structured: Option<&Value>,
+) -> String {
     let mut out = String::new();
+    let mut images = images.iter();
     for c in content {
         match c {
             McpContent::Text { text } => {
@@ -194,9 +237,19 @@ fn render(content: &[McpContent], structured: Option<&Value>) -> String {
                     out.push('\n');
                 }
             }
-            McpContent::Image { mime_type, bytes } => {
-                let _ = writeln!(out, "[image {mime_type}, {bytes} bytes — not shown]");
-            }
+            McpContent::Image {
+                mime_type, bytes, ..
+            } => match images.next() {
+                Some(Ok(image)) => {
+                    let _ = writeln!(out, "[image {}, {} bytes]", image.media_type, image.bytes);
+                }
+                Some(Err(why)) => {
+                    let _ = writeln!(out, "[image {mime_type}, {bytes} bytes — not shown: {why}]");
+                }
+                None => {
+                    let _ = writeln!(out, "[image {mime_type}, {bytes} bytes — not shown]");
+                }
+            },
             McpContent::Audio { mime_type, bytes } => {
                 let _ = writeln!(out, "[audio {mime_type}, {bytes} bytes — not shown]");
             }
@@ -260,26 +313,71 @@ mod tests {
         assert!(tool_name(&"s".repeat(50), &"t".repeat(50)).len() <= 64);
     }
 
+    /// A 1×1 PNG.
+    const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+    fn image(data: &str) -> McpContent {
+        McpContent::Image {
+            mime_type: "image/png".into(),
+            bytes: data.len() / 4 * 3,
+            data: data.into(),
+        }
+    }
+
     #[test]
     fn content_keeps_order_structure_and_describes_media() {
+        let content = [
+            McpContent::Text {
+                text: "first".into(),
+            },
+            McpContent::Image {
+                mime_type: "image/png".into(),
+                bytes: 1234,
+                data: String::new(),
+            },
+            McpContent::Text {
+                text: "second".into(),
+            },
+        ];
         let text = render(
-            &[
-                McpContent::Text {
-                    text: "first".into(),
-                },
-                McpContent::Image {
-                    mime_type: "image/png".into(),
-                    bytes: 1234,
-                },
-                McpContent::Text {
-                    text: "second".into(),
-                },
-            ],
+            &content,
+            &shown_images(&content),
             Some(&serde_json::json!({"n": 1})),
         );
         assert_eq!(
             text,
-            "first\n[image image/png, 1234 bytes — not shown]\nsecond\n--- structured content ---\n{\n  \"n\": 1\n}\n"
+            "first\n[image image/png, 1234 bytes — not shown: not a PNG, JPEG, GIF or WebP image]\nsecond\n--- structured content ---\n{\n  \"n\": 1\n}\n"
         );
+    }
+
+    #[test]
+    fn images_are_shown_with_the_type_of_their_bytes() {
+        let content = [image(PNG)];
+        let shown = shown_images(&content);
+        let img = shown[0].as_ref().unwrap();
+        assert_eq!(img.media_type, "image/png");
+        assert_eq!(img.data_base64, PNG);
+        assert_eq!(img.bytes, 70);
+        assert_eq!(
+            render(&content, &shown, None),
+            "[image image/png, 70 bytes]\n"
+        );
+        // The data never goes into the result's JSON.
+        let json = serde_json::to_string(&content[0]).unwrap();
+        assert!(!json.contains(PNG), "{json}");
+    }
+
+    #[test]
+    fn unusable_images_are_described() {
+        assert_eq!(decode_image("%%%").unwrap_err(), "not valid base64");
+        let text = base64::engine::general_purpose::STANDARD.encode("hello");
+        assert_eq!(
+            decode_image(&text).unwrap_err(),
+            "not a PNG, JPEG, GIF or WebP image"
+        );
+        let mut big = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+        big.resize(MAX_IMAGE_BYTES + 1, 0);
+        let big = base64::engine::general_purpose::STANDARD.encode(big);
+        assert!(decode_image(&big).unwrap_err().starts_with("larger than"));
     }
 }

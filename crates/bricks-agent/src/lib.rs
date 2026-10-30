@@ -6,6 +6,7 @@ pub mod bricks_config;
 pub mod compact;
 pub mod context;
 pub mod control;
+pub mod deferred;
 pub mod events;
 pub mod permission;
 pub mod reporters;
@@ -286,6 +287,14 @@ pub struct Agent {
     mcp_servers: Vec<McpServerConfig>,
     /// Their connections and tools, once connected.
     mcp: tokio::sync::OnceCell<McpState>,
+    /// The host's lent tools ([`ToolLender`]) and those of the current run.
+    lender: Option<Arc<dyn ToolLender>>,
+    lent: parking_lot::RwLock<Arc<Vec<Arc<dyn Tool>>>>,
+    /// The host's deferred tools, `LoadTools` when there are any, and the
+    /// names loaded in this session ([`deferred`]).
+    deferred: parking_lot::RwLock<Arc<Vec<Arc<dyn Tool>>>>,
+    load_tools: parking_lot::RwLock<Option<Arc<dyn Tool>>>,
+    loaded: deferred::Loaded,
     event_handler: Option<EventHandler>,
     broadcast_tx: Option<broadcast::Sender<AgentEvent>>,
     reporters: Vec<Arc<dyn Reporter>>,
@@ -899,22 +908,87 @@ impl Agent {
             .map(|h| Arc::clone(&h.0))
     }
 
-    /// Built-in tools, then MCP tools.
-    pub fn tool_list(&self) -> Vec<&dyn Tool> {
+    /// Built-in tools, then MCP tools, then the tools the host lends this
+    /// run ([`ToolLender`]): `LoadTools` and the deferred tools loaded.
+    pub fn tool_list(&self) -> Vec<ToolRef<'_>> {
+        let lent = Arc::clone(&self.lent.read());
+        let load_tools = self.load_tools.read().clone();
+        let deferred = Arc::clone(&self.deferred.read());
+        let loaded = self.loaded.lock().clone();
         self.tools
             .iter()
-            .map(|t| t.as_ref())
+            .map(|t| ToolRef::Own(t.as_ref()))
             .chain(
                 self.mcp
                     .get()
                     .into_iter()
-                    .flat_map(|s| s.tools.iter().map(|t| t.as_ref())),
+                    .flat_map(|s| s.tools.iter().map(|t| ToolRef::Own(t.as_ref()))),
+            )
+            .chain(lent.iter().map(|t| ToolRef::Lent(Arc::clone(t))))
+            .chain(load_tools.map(ToolRef::Lent))
+            .chain(
+                deferred
+                    .iter()
+                    .filter(|t| loaded.contains(t.name()))
+                    .map(|t| ToolRef::Lent(Arc::clone(t))),
             )
             .collect()
     }
 
-    pub fn tool_by_name(&self, name: &str) -> Option<&dyn Tool> {
-        self.tool_list().into_iter().find(|t| t.name() == name)
+    /// A tool of [`Self::tool_list`], or a deferred one not loaded yet: a
+    /// call to it runs and loads it.
+    pub fn tool_by_name(&self, name: &str) -> Option<ToolRef<'_>> {
+        if let Some(t) = self.tool_list().into_iter().find(|t| t.name() == name) {
+            return Some(t);
+        }
+        let tool = self
+            .deferred
+            .read()
+            .iter()
+            .find(|t| t.name() == name)
+            .cloned()?;
+        self.loaded.lock().insert(name.to_string());
+        Some(ToolRef::Lent(tool))
+    }
+
+    /// Take the host's lent tools as they are now; they stay the same until
+    /// the next refresh (the start of the next run). A name already used by
+    /// another tool, or by an earlier lent one, is not lent.
+    pub fn refresh_lent_tools(&self) {
+        let Some(lender) = &self.lender else {
+            return;
+        };
+        let mut lent = lender.tools();
+        let mut taken: std::collections::HashSet<String> = self
+            .tools
+            .iter()
+            .map(|t| t.name().to_string())
+            .chain(
+                self.mcp
+                    .get()
+                    .into_iter()
+                    .flat_map(|s| s.tools.iter().map(|t| t.name().to_string())),
+            )
+            .collect();
+        lent.retain(|t| taken.insert(t.name().to_string()));
+        *self.lent.write() = Arc::new(lent);
+
+        let mut deferred = lender.deferred_tools();
+        deferred.retain(|t| t.name() != deferred::LOAD_TOOLS && taken.insert(t.name().to_string()));
+        let deferred = Arc::new(deferred);
+        let load_tools =
+            (!deferred.is_empty() && !taken.contains(deferred::LOAD_TOOLS)).then(|| {
+                // A deferred tool already called in the conversation stays
+                // announced, so its calls in the history keep their definition.
+                let called = deferred::called(&self.messages.lock(), &deferred);
+                self.loaded.lock().extend(called);
+                Arc::new(deferred::LoadTools::new(
+                    Arc::clone(&deferred),
+                    Arc::clone(&self.loaded),
+                )) as Arc<dyn Tool>
+            });
+        *self.deferred.write() = deferred;
+        *self.load_tools.write() = load_tools;
     }
 }
 
@@ -947,6 +1021,35 @@ impl Selection {
             .clone()
             .or_else(|| self.provider.model_info().map(|m| m.selection))
             .unwrap_or_else(|| self.provider.name().to_string())
+    }
+}
+
+/// Tools a host lends its agents and may change between runs (the
+/// desktop's built-in MCP servers, turned on and off in its settings): read
+/// at the start of each run and kept for the whole run.
+pub trait ToolLender: Send + Sync {
+    fn tools(&self) -> Vec<Arc<dyn Tool>>;
+
+    /// Tools announced only once loaded through `LoadTools` ([`deferred`]):
+    /// the run offers their names, not their definitions.
+    fn deferred_tools(&self) -> Vec<Arc<dyn Tool>> {
+        Vec::new()
+    }
+}
+
+/// A tool of an agent: one of its own, or one lent by its host.
+pub enum ToolRef<'a> {
+    Own(&'a (dyn Tool + 'static)),
+    Lent(Arc<dyn Tool>),
+}
+
+impl std::ops::Deref for ToolRef<'_> {
+    type Target = dyn Tool;
+    fn deref(&self) -> &Self::Target {
+        match self {
+            ToolRef::Own(t) => *t,
+            ToolRef::Lent(t) => t.as_ref(),
+        }
     }
 }
 
@@ -989,6 +1092,7 @@ pub struct AgentBuilder {
     session_id: Option<String>,
     hooks: Vec<Arc<dyn Hook>>,
     mcp_servers: Vec<McpServerConfig>,
+    lender: Option<Arc<dyn ToolLender>>,
     event_handler: Option<EventHandler>,
     broadcast_capacity: Option<usize>,
     reporters: Vec<Arc<dyn Reporter>>,
@@ -1036,6 +1140,7 @@ impl Default for AgentBuilder {
             session_id: None,
             hooks: Vec::new(),
             mcp_servers: Vec::new(),
+            lender: None,
             event_handler: None,
             broadcast_capacity: None,
             reporters: Vec::new(),
@@ -1211,6 +1316,12 @@ impl AgentBuilder {
 
     pub fn mcp_server(mut self, config: McpServerConfig) -> Self {
         self.mcp_servers.push(config);
+        self
+    }
+
+    /// Tools the host lends this agent, taken again at each run.
+    pub fn tool_lender(mut self, lender: Arc<dyn ToolLender>) -> Self {
+        self.lender = Some(lender);
         self
     }
 
@@ -1534,6 +1645,11 @@ impl AgentBuilder {
             hooks: self.hooks,
             mcp_servers: self.mcp_servers,
             mcp: tokio::sync::OnceCell::new(),
+            lender: self.lender,
+            lent: parking_lot::RwLock::new(Arc::new(Vec::new())),
+            deferred: parking_lot::RwLock::new(Arc::new(Vec::new())),
+            load_tools: parking_lot::RwLock::new(None),
+            loaded: deferred::Loaded::default(),
             event_handler: self.event_handler,
             shell_session_id: session_for_store.clone(),
             retry_after_max_wait: std::time::Duration::from_millis(retry_after_max_wait_ms),

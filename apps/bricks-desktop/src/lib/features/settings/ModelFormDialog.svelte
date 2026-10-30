@@ -9,6 +9,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
+	import { Switch } from '$lib/components/ui/switch';
 	import type { ModelPatch } from '$lib/ipc/bindings/ModelPatch';
 	import type { ModelView } from '$lib/ipc/bindings/ModelView';
 	import Plus from '@lucide/svelte/icons/plus';
@@ -402,9 +403,9 @@
 				{/if}
 			</div>
 
-			<label class="flex items-center gap-2 text-sm">
-				<input type="checkbox" bind:checked={form.asyncToolCalls} class="size-4 accent-primary" />
+			<label class="flex items-center justify-between gap-3 text-sm">
 				Appels d’outils asynchrones
+				<Switch bind:checked={form.asyncToolCalls} />
 			</label>
 
 			{#if error}

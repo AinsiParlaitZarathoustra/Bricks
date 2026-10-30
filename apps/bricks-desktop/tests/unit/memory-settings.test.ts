@@ -32,10 +32,11 @@ describe('the settings section', () => {
 describe('the switch', () => {
 	const settings = src(SETTINGS);
 
-	it('shows the state and the one action of each state', () => {
-		expect(settings).toContain('<Badge>Mémoire activée</Badge>');
-		expect(settings).toContain('Désactiver');
-		expect(settings).toContain('Activer la mémoire');
+	it('shows the saved state on one switch, labelled Mémoire', () => {
+		expect(settings).toContain('Mémoire\n\t\t\t<Switch bind:checked={() => app.prefs.memory_enabled, (on) => toggle(on)} disabled={toggling} />');
+		expect(settings).not.toContain('<Badge');
+		expect(settings).not.toContain('Désactiver');
+		expect(settings).not.toContain('Activer la mémoire');
 	});
 
 	it('only saves the preference: turning it off deletes nothing', () => {

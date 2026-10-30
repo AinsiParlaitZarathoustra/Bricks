@@ -31,6 +31,10 @@ pub fn run() {
             commands::app::permissions_default_set,
             commands::app::events_subscribe,
             commands::app::events_unsubscribe,
+            // Extensions: Computer Use (Cua Driver)
+            commands::computer_use::computer_use_status,
+            commands::computer_use::computer_use_set_enabled,
+            commands::computer_use::computer_use_request_permission,
             // Projects (Haiku 1)
             commands::projects::projects_list,
             commands::projects::project_add,

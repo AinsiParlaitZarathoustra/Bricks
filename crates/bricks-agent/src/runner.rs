@@ -322,6 +322,7 @@ async fn run_loop(
 
     let mut notes = std::mem::take(&mut *agent.config_notes.lock());
     notes.extend(agent.connect_mcp().await);
+    agent.refresh_lent_tools();
     // Long-term memory: recall for this prompt, within its budget (at most
     // a tenth of the prompt budget), appended to the system prompt.
     *agent.recalled.lock() = None;

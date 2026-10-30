@@ -616,6 +616,9 @@ pub struct Preferences {
     /// The long-term memory (global and per project), off by default.
     /// Applies from the next run.
     pub memory_enabled: bool,
+    /// Computer Use (the built-in Cua Driver), off by default. Its tools
+    /// are offered from the next run.
+    pub computer_use_enabled: bool,
 }
 
 impl Default for Preferences {
@@ -636,6 +639,7 @@ impl Default for Preferences {
             app_icon: AppIcon::Aligned,
             ask_timer: AskTimerPrefs::default(),
             memory_enabled: false,
+            computer_use_enabled: false,
         }
     }
 }
@@ -748,6 +752,62 @@ pub struct SessionToolInfo {
     /// (`allow`, `ask`, `deny`), and why.
     pub decision: String,
     pub reason: String,
+}
+
+/// The built-in Computer Use extension (Cua Driver).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct ComputerUseStatus {
+    /// The person's choice (`computer_use_enabled`).
+    pub enabled: bool,
+    pub state: ComputerUseState,
+    /// Why it did not start (`state: error`).
+    pub error: Option<String>,
+    /// The tools offered to the agents now.
+    pub tools: u32,
+    /// The driver found (`None`: none installed).
+    pub driver: Option<ComputerUseDriver>,
+    /// The grants of the driver's own process (`com.trycua.driver`), read
+    /// from its daemon: `unknown` when none answers.
+    pub accessibility: PermissionState,
+    pub screen_recording: PermissionState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum ComputerUseState {
+    /// Not macOS.
+    Unsupported,
+    /// No driver found.
+    Missing,
+    Off,
+    Starting,
+    Ready,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct ComputerUseDriver {
+    /// The `CuaDriver.app` bundle.
+    pub path: String,
+    pub version: Option<String>,
+    /// The copy shipped inside Bricks.
+    pub bundled: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionState {
+    Granted,
+    Missing,
+    #[default]
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum ComputerUsePermission {
+    Accessibility,
+    ScreenRecording,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]

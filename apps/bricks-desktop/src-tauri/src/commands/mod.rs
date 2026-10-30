@@ -3,6 +3,7 @@ pub mod agent_file;
 pub mod app;
 pub mod attachments;
 pub mod changes;
+pub mod computer_use;
 pub mod files;
 pub mod inspect;
 pub mod memory;

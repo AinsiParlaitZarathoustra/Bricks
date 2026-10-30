@@ -87,6 +87,9 @@ impl AppState {
             projects: Arc::clone(&self.projects),
             project_id: project.id.clone(),
         }));
+        // Computer Use lends its tools to every session, as they are when a
+        // run starts.
+        cfg.tool_lender = Some(Arc::clone(&self.computer_use) as Arc<dyn bricks_agent::ToolLender>);
         // Sessions are stored under this application state's home (tests use
         // a temporary one), never the global default.
         cfg.sessions_dir = self.sessions_dir().to_path_buf();
@@ -462,6 +465,10 @@ impl AppState {
             entry.stop_consumer();
         }
         self.sessions.lock().clear();
+        // The driver's daemon does not outlive Bricks.
+        let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let _ =
+            tokio::time::timeout(left.max(Duration::from_secs(2)), self.computer_use.stop()).await;
     }
 
     fn require_open(&self, session_id: &str) -> IpcResult<Arc<OpenSession>> {

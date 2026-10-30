@@ -43,8 +43,8 @@ afterEach(() => {
 	vi.useRealTimers();
 });
 
-function checkbox(): HTMLInputElement {
-	return target.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+function switchControl(): HTMLButtonElement {
+	return target.querySelector<HTMLButtonElement>('button[role="switch"]')!;
 }
 
 function modes(): HTMLInputElement[] {
@@ -55,9 +55,8 @@ function seconds(): HTMLInputElement | null {
 	return target.querySelector<HTMLInputElement>('input[type="number"]');
 }
 
-function toggle(input: HTMLInputElement) {
-	input.checked = !input.checked;
-	input.dispatchEvent(new Event('change', { bubbles: true }));
+function toggle(control: HTMLButtonElement) {
+	control.click();
 	flushSync();
 }
 
@@ -83,13 +82,13 @@ describe('« Délai des questions »', () => {
 	it('is titled, and off by default: no mode and no duration to set', () => {
 		expect(target.textContent).toContain('Délai des questions');
 		expect(target.textContent).toContain('Activer le délai');
-		expect(checkbox().checked).toBe(false);
+		expect(switchControl().getAttribute('aria-checked')).toBe('false');
 		expect(modes()).toHaveLength(0);
 		expect(seconds()).toBeNull();
 	});
 
 	it('offers SMART and CUSTOM once enabled, SMART first', () => {
-		toggle(checkbox());
+		toggle(switchControl());
 		expect(app.prefs.ask_timer.enabled).toBe(true);
 		expect(modes().map((r) => r.value)).toEqual(['smart', 'custom']);
 		expect(target.textContent).toContain('SMART');
@@ -99,7 +98,7 @@ describe('« Délai des questions »', () => {
 	});
 
 	it('CUSTOM asks for the duration in seconds, starting from the stored one', () => {
-		toggle(checkbox());
+		toggle(switchControl());
 		pick('custom');
 		expect(app.prefs.ask_timer.mode).toBe('custom');
 		expect(target.textContent).toContain('Durée (s)');
@@ -107,7 +106,7 @@ describe('« Délai des questions »', () => {
 	});
 
 	it('keeps 30 and 3600 seconds, and says and refuses anything else', () => {
-		toggle(checkbox());
+		toggle(switchControl());
 		pick('custom');
 
 		type('10');
@@ -134,7 +133,7 @@ describe('« Délai des questions »', () => {
 	});
 
 	it('saves the last valid duration, once the typing settles', () => {
-		toggle(checkbox());
+		toggle(switchControl());
 		pick('custom');
 		type('120');
 		type('2');
@@ -152,16 +151,16 @@ describe('« Délai des questions »', () => {
 	});
 
 	it('hides the mode and the duration while off, and keeps the chosen values for the next time', () => {
-		toggle(checkbox());
+		toggle(switchControl());
 		pick('custom');
 		type('120');
 
-		toggle(checkbox());
+		toggle(switchControl());
 		expect(modes()).toHaveLength(0);
 		expect(seconds()).toBeNull();
 		expect(app.prefs.ask_timer).toEqual({ enabled: false, mode: 'custom', seconds: 120 });
 
-		toggle(checkbox());
+		toggle(switchControl());
 		expect(modes().find((r) => r.value === 'custom')!.checked).toBe(true);
 		expect(seconds()!.value).toBe('120');
 	});

@@ -31,4 +31,9 @@ ask_timer: AskTimerPrefs,
  * The long-term memory (global and per project), off by default.
  * Applies from the next run.
  */
-memory_enabled: boolean, };
+memory_enabled: boolean, 
+/**
+ * Computer Use (the built-in Cua Driver), off by default. Its tools
+ * are offered from the next run.
+ */
+computer_use_enabled: boolean, };

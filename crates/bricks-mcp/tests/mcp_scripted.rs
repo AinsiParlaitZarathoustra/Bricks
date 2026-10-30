@@ -609,3 +609,110 @@ fn the_deprecated_http_sse_transport_is_refused_with_a_reason() {
         "{e}"
     );
 }
+
+// ─── Closed for good, and images ─────────────────────────────────────────────
+
+/// A 1×1 PNG: 70 bytes once decoded.
+const PNG_B64: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_closed_manager_fails_calls_and_opens_no_connection_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("server.sh");
+    let starts = dir.path().join("starts.log");
+    // The same server, with a line in the log each time a process starts.
+    std::fs::write(
+        &script,
+        format!("echo started >> '{}'\n{LEGACY_SH}", starts.display()),
+    )
+    .unwrap();
+    let calls = dir.path().join("calls.log");
+    let mut cfg = McpServerConfig::stdio(
+        "bash",
+        "bash",
+        &[script.to_str().unwrap(), calls.to_str().unwrap()],
+    );
+    cfg.limits.connect_timeout_ms = 5000;
+    let m = McpManager::connect(std::slice::from_ref(&cfg)).await;
+    let r = m.call("bash", "echo", None, None).await.unwrap();
+    assert_eq!(
+        r.content,
+        vec![McpContent::Text {
+            text: "bash ok".into()
+        }]
+    );
+    // The process dies: before a close, the next call would open a new one.
+    assert!(matches!(
+        m.call("bash", "die", None, None).await,
+        Err(McpError::ConnectionLost {
+            in_flight: true,
+            ..
+        })
+    ));
+
+    m.close().await;
+    assert!(m.is_closed());
+    for _ in 0..2 {
+        assert!(
+            matches!(
+                m.call("bash", "echo", None, None).await,
+                Err(McpError::Closed)
+            ),
+            "a call after close must fail with Closed"
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(&starts).unwrap().lines().count(),
+        1,
+        "no server process was started after close"
+    );
+    let log = std::fs::read_to_string(&calls).unwrap();
+    assert_eq!(
+        log.lines().collect::<Vec<_>>(),
+        ["echo", "die"],
+        "no call reached the server after close"
+    );
+}
+
+#[tokio::test]
+async fn an_image_block_keeps_its_data_for_the_caller_and_never_serializes_it() {
+    let (io, _) = scripted(modern(|m| {
+        Some(reply(
+            m,
+            json!({"resultType": "complete", "content": [
+                {"type": "image", "data": PNG_B64, "mimeType": "image/png"},
+                {"type": "text", "text": "caption"}]}),
+        ))
+    }));
+    let c = McpClient::connect_with(config(ProtocolMode::Auto), io)
+        .await
+        .unwrap();
+    let r = c.call_tool("t", None, None).await.unwrap();
+    let McpContent::Image {
+        mime_type,
+        bytes,
+        data,
+    } = &r.content[0]
+    else {
+        panic!("an image block first: {:?}", r.content);
+    };
+    assert_eq!(mime_type, "image/png");
+    assert_eq!(data, PNG_B64, "the caller gets the base64 data as sent");
+    assert_eq!(
+        r.content[1],
+        McpContent::Text {
+            text: "caption".into()
+        }
+    );
+    // The block's JSON describes the image; its data never travels with it.
+    let block = serde_json::to_value(&r.content[0]).unwrap();
+    assert_eq!(block["type"], "image");
+    assert_eq!(block["mime_type"], "image/png");
+    assert!(block.get("data").is_none(), "{block}");
+    assert!(!serde_json::to_string(&r).unwrap().contains(PNG_B64));
+    // The decoded size of the 70-byte PNG. Known to fail: `convert_content`
+    // counts 3 bytes per 4 base64 characters, which overcounts by 2 when the
+    // data is padded (`==` or `=`), here 72.
+    assert_eq!(*bytes, 70, "the decoded size of the image");
+}

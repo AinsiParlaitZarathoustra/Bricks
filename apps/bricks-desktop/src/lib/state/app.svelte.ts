@@ -43,6 +43,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   app_icon: 'aligned',
   ask_timer: { enabled: false, mode: 'smart', seconds: 300 },
   memory_enabled: false,
+  computer_use_enabled: false,
 }
 
 /** An IPC refusal because a project's folder is missing. */
@@ -224,6 +225,11 @@ class AppStore {
     } catch (e) {
       return ipc.errorMessage(e)
     }
+  }
+
+  /** The Computer Use choice, as the backend saved it (its own command saves it). */
+  noteComputerUse(enabled: boolean) {
+    this.prefs = { ...this.prefs, computer_use_enabled: enabled }
   }
 
   // ─── Projects ─────────────────────────────────────────────────────────────

@@ -16,6 +16,7 @@ pub mod sessions;
 use crate::contract::{AppInfo, IpcErrorCode, IpcResult, ProviderInfo};
 use crate::services::attachments as store;
 use crate::services::changes::ChangeJournal;
+use crate::services::computer_use::ComputerUse;
 use crate::services::conversations::path_text;
 use crate::services::error;
 use crate::services::paths::check_folder;
@@ -61,6 +62,8 @@ pub struct AppState {
     attachments_dir: PathBuf,
     pub(crate) projects: Arc<ProjectStore>,
     pub(crate) prefs: Arc<PrefsStore>,
+    /// The built-in Computer Use extension, lent to every session's agent.
+    pub(crate) computer_use: Arc<ComputerUse>,
     /// The long-term memory stores (global and per project).
     pub(crate) memory: Arc<bricks_config::MemoryService>,
     /// The skills catalogue of the settings page, outside any session.
@@ -103,7 +106,7 @@ impl AppState {
     ) -> Self {
         let desktop = home.join("desktop");
         let projects = ProjectStore::load(desktop.join("projects.json"));
-        let prefs = PrefsStore::at(desktop.join("preferences.json"));
+        let prefs = Arc::new(PrefsStore::at(desktop.join("preferences.json")));
         let journal = Arc::new(ChangeJournal::at(desktop.join("changes")));
         Self {
             catalog: DesktopCatalog::new(registry),
@@ -114,7 +117,8 @@ impl AppState {
             sessions_dir: home.join("sessions"),
             drafts_dir: desktop.join("drafts"),
             attachments_dir: desktop.join("attachments"),
-            prefs: Arc::new(prefs),
+            computer_use: ComputerUse::new(Arc::clone(&prefs)),
+            prefs,
             memory: Arc::new(bricks_config::MemoryService::in_home(&home)),
             skills: Arc::new(SkillsCatalogStore::new(home.join("skills"))),
             run_labels: Arc::new(RunLabelStore::at(desktop.join("run-labels"))),
@@ -268,6 +272,9 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         store::sweep_drafts(&drafts, std::time::SystemTime::now(), store::DRAFT_RETENTION);
         store::remove_older_than(&legacy, store::RETENTION);
     });
+    // Computer Use starts in the background when it was left on.
+    let computer_use = Arc::clone(&state.computer_use);
+    tauri::async_runtime::spawn(async move { computer_use.resume().await });
     app.manage(state);
     Ok(())
 }

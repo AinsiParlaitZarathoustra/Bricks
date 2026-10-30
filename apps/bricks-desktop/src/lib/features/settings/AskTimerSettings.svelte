@@ -5,6 +5,7 @@
 	import type { AskTimerMode } from '$lib/ipc/client';
 	import { Label } from '$lib/components/ui/label';
 	import { Input } from '$lib/components/ui/input';
+	import { Switch } from '$lib/components/ui/switch';
 	import { app } from '$lib/state/app.svelte';
 	import SettingsGroup from './SettingsGroup.svelte';
 
@@ -37,13 +38,9 @@
 </script>
 
 <SettingsGroup title="Délai des questions">
-	<label class="flex items-center gap-2 p-3 text-ui">
-		<input
-			type="checkbox"
-			checked={timer.enabled}
-			onchange={(event) => update({ enabled: event.currentTarget.checked })}
-		/>
+	<label class="flex items-center justify-between gap-3 p-3 text-ui">
 		Activer le délai
+		<Switch checked={timer.enabled} onCheckedChange={(on) => update({ enabled: on })} />
 	</label>
 	{#if timer.enabled}
 		<fieldset class="flex flex-wrap items-center gap-4 p-3 text-ui">

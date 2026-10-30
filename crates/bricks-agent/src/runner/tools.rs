@@ -218,7 +218,7 @@ pub(super) fn call_future<'a>(
                     cumulative_cost,
                     message_count,
                 };
-                decide_and_run(&site, tool, &tool_name, tool_input.clone()).await
+                decide_and_run(&site, &*tool, &tool_name, tool_input.clone()).await
             }
             // F-A15: weak models hallucinate tool names constantly, and
             // "Unknown tool: X" gave them nothing to correct toward.

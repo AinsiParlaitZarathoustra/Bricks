@@ -19,6 +19,7 @@ tauri-plugin-opener = "2"
 bricks-config = { workspace = true }
 bricks-skills = { workspace = true }
 bricks-agent = { workspace = true }
+bricks-mcp = { workspace = true }
 bricks-provider = { workspace = true }
 bricks-tools = { workspace = true }
 bricks-types = { workspace = true }

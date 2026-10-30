@@ -53,6 +53,8 @@ pub enum McpError {
     Protocol(String),
     #[error("no MCP server '{server}' has a tool '{tool}'")]
     UnknownTool { server: String, tool: String },
+    #[error("the MCP connections were closed")]
+    Closed,
 }
 
 impl From<McpError> for bricks_types::BricksError {
@@ -74,6 +76,8 @@ pub struct McpManager {
     configs: Vec<McpServerConfig>,
     clients: tokio::sync::RwLock<HashMap<String, Arc<McpClient>>>,
     errors: parking_lot::Mutex<HashMap<String, String>>,
+    /// Closed for good ([`Self::close`]): no connection is re-opened.
+    closed: std::sync::atomic::AtomicBool,
 }
 
 impl McpManager {
@@ -100,6 +104,7 @@ impl McpManager {
             configs: configs.to_vec(),
             clients: tokio::sync::RwLock::new(clients),
             errors: parking_lot::Mutex::new(errors),
+            closed: Default::default(),
         }
     }
 
@@ -114,6 +119,7 @@ impl McpManager {
                     .collect(),
             ),
             errors: parking_lot::Mutex::new(HashMap::new()),
+            closed: Default::default(),
         }
     }
 
@@ -165,6 +171,9 @@ impl McpManager {
     }
 
     async fn live_client(&self, server: &str) -> Result<Arc<McpClient>, McpError> {
+        if self.is_closed() {
+            return Err(McpError::Closed);
+        }
         let existing = self.clients.read().await.get(server).cloned();
         match existing {
             Some(c) if !c.is_closed() => Ok(c),
@@ -236,8 +245,15 @@ impl McpManager {
         &self.configs
     }
 
-    /// Close every connection.
+    /// Whether [`Self::close`] was called.
+    pub fn is_closed(&self) -> bool {
+        self.closed.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Close every connection, for good: a later call fails with
+    /// [`McpError::Closed`] instead of re-opening one.
     pub async fn close(&self) {
+        self.closed.store(true, std::sync::atomic::Ordering::SeqCst);
         let clients: Vec<Arc<McpClient>> =
             self.clients.write().await.drain().map(|(_, c)| c).collect();
         for c in clients {

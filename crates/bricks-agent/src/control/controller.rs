@@ -165,6 +165,9 @@ pub struct EngineConfig {
     /// frontend's setting and stores). When set, it replaces the project's
     /// memory: a run started with the memory off has none.
     pub memory_resolver: Option<Arc<dyn MemoryResolver>>,
+    /// Tools the host lends every session agent, taken again at each run
+    /// (the desktop's built-in MCP servers).
+    pub tool_lender: Option<Arc<dyn crate::ToolLender>>,
 }
 
 /// The long-term memory of one run, resolved at its start.
@@ -316,6 +319,7 @@ impl EngineConfig {
             permissions: None,
             generated_titles: false,
             memory_resolver: None,
+            tool_lender: None,
         }
     }
 }
@@ -655,6 +659,9 @@ fn build_agent(
     }
     for s in &project.mcp_servers {
         b = b.mcp_server(s.clone());
+    }
+    if let Some(lender) = &cfg.tool_lender {
+        b = b.tool_lender(Arc::clone(lender));
     }
     if let Some(access) = skills {
         b = b.skills(access);

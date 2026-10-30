@@ -34,6 +34,8 @@ import type { SessionItem } from './bindings/SessionItem'
 import type { SessionSearchHit } from './bindings/SessionSearchHit'
 import type { ProjectFileWindow } from './bindings/ProjectFileWindow'
 import type { PermissionsDefault } from './bindings/PermissionsDefault'
+import type { ComputerUseStatus } from './bindings/ComputerUseStatus'
+import type { ComputerUsePermission } from './bindings/ComputerUsePermission'
 import type { Command, ModelChoice, SessionPolicy, Snapshot } from './engine'
 
 export type * from './bindings/AppIcon'
@@ -122,6 +124,16 @@ export const appIconShow = (dark: boolean) => call<void>('app_icon_show', { dark
 export const permissionsDefaultGet = () => call<PermissionsDefault>('permissions_default_get')
 export const permissionsDefaultSet = (policy: SessionPolicy) =>
   call<void>('permissions_default_set', { policy })
+
+// ─── Extensions: Computer Use ────────────────────────────────────────────────
+
+export const computerUseStatus = () => call<ComputerUseStatus>('computer_use_status')
+/** Records the choice and starts or stops Cua Driver; the status says how it went. */
+export const computerUseSetEnabled = (enabled: boolean) =>
+  call<ComputerUseStatus>('computer_use_set_enabled', { enabled })
+/** Requests the permission for Cua Driver and opens System Settings at its list. */
+export const computerUseRequestPermission = (permission: ComputerUsePermission) =>
+  call<void>('computer_use_request_permission', { permission })
 
 /** Subscribes to every session's events. Returns an unsubscribe function. */
 export async function subscribeEvents(
