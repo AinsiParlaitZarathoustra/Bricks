@@ -53,15 +53,13 @@
 	{#if !conv}
 		<p class="text-sm text-muted-foreground">Aucune conversation ouverte.</p>
 	{:else}
-		<p class="text-sm text-pretty">Au prochain tour, le modèle ne reçoit plus les messages précédents. L’historique reste visible dans la conversation.</p>
-
 		{#if conv.running}
 			<p role="alert" class="rounded-md border border-border bg-muted p-3 text-sm text-pretty">
-				Impossible pendant une exécution. Attendez la fin du tour ou annulez-le, puis revenez ici.
+				Impossible pendant une exécution
 			</p>
 		{:else if conv.busy !== null}
 			<p role="alert" class="rounded-md border border-border bg-muted p-3 text-sm text-pretty">
-				Une opération est en cours dans cette session. Le vidage n’est possible qu’à sa fin.
+				Une opération est en cours
 			</p>
 		{/if}
 

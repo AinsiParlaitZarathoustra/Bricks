@@ -1,43 +1,29 @@
 <script lang="ts">
-  // End of a response: its outcome and working time, then two independent
-  // groups, closed by default: the files changed (cumulative counts of the
-  // applied operations, names only; a name opens the reader) and the
-  // commands run by the response and its sub-agents.
-  import Ban from '@lucide/svelte/icons/ban'
-  import FileIcon from '$lib/features/file-icons/FileIcon.svelte'
-  import ChevronDown from '@lucide/svelte/icons/chevron-down'
-  import CircleAlert from '@lucide/svelte/icons/circle-alert'
-  import CircleCheck from '@lucide/svelte/icons/circle-check'
-  import CircleDashed from '@lucide/svelte/icons/circle-dashed'
-  import CircleX from '@lucide/svelte/icons/circle-x'
-  import TriangleAlert from '@lucide/svelte/icons/triangle-alert'
+  // End of a response, under its answer: why it did not succeed, when it did not,
+  // then the files it changed (cumulative counts of the applied operations). Each
+  // file opens its changes in the reader, or shows itself in the Finder. The time
+  // worked is in the bar of its steps (WorkBlock.svelte).
+  import ChevronRight from '@lucide/svelte/icons/chevron-right'
+  import ExternalLink from '@lucide/svelte/icons/external-link'
+  import Eye from '@lucide/svelte/icons/eye'
+  import { Button } from '$lib/components/ui/button'
   import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '$lib/components/ui/collapsible'
+  import FileIcon from '$lib/features/file-icons/FileIcon.svelte'
   import DiffStat from '$lib/layout/DiffStat.svelte'
-  import type { CommandEvidence, Conversation, RunEndItem, RunFileSummary, RunInfo } from '$lib/state/conversation.svelte'
-  import type { RunOutcome } from '$lib/ipc/engine'
+  import { readerFileReveal } from '$lib/ipc/reader'
+  import type { Conversation, RunEndItem, RunFileSummary, RunInfo } from '$lib/state/conversation.svelte'
   import { reader } from '$lib/state/reader.svelte'
-  import { formatDuration, parseTestCounts, plural, truncate } from '../format'
-  import { formatWorked, runEndSummary } from '../runend'
-  import MonoBlock from './MonoBlock.svelte'
+  import { plural } from '../format'
+  import { runEndSummary } from '../runend'
 
   let { item, conversation }: { item: RunEndItem; conversation: Conversation } = $props()
 
   const run: RunInfo | undefined = $derived(conversation.runs.get(item.runId))
   const summary = $derived(runEndSummary(run))
-  const worked = $derived(formatWorked(run?.workedMs ?? null))
-
-
-  const TONE: Record<RunOutcome, string> = {
-    succeeded: 'text-success',
-    incomplete: 'text-warning',
-    failed: 'text-destructive',
-    cancelled: 'text-muted-foreground',
-  }
 
   const files = $derived(
     run ? [...run.fileSummaries].sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path)) : [],
   )
-  const commands = $derived(run?.commands ?? [])
   const totals = $derived.by(() => {
     if (files.length === 0 || files.every((f) => f.binary)) return null
     let added = 0
@@ -48,160 +34,120 @@
     }
     return { added, removed }
   })
+  const unsatisfied = $derived(run?.approvalsUnsatisfied.length ?? 0)
+  const reason = $derived(summary.outcome === 'incomplete' ? summary.reason : null)
 
-  const STATUS: Record<CommandEvidence['status'], { label: string; tone: string }> = {
-    success: { label: 'Réussie', tone: 'text-muted-foreground' },
-    failure: { label: 'Échouée', tone: 'text-destructive' },
-    timed_out: { label: 'Délai dépassé', tone: 'text-destructive' },
-    cancelled: { label: 'Interrompue', tone: 'text-muted-foreground' },
-    running: { label: 'En cours', tone: 'text-muted-foreground' },
-    unknown: { label: 'État inconnu', tone: 'text-muted-foreground' },
+  let open = $state(true)
+  /** Error of the last « Afficher dans le Finder »; cleared by the next one. */
+  let revealError = $state<string | null>(null)
+
+  /**
+   * The folder of a file: its relative folder in the workspace, or only the name of
+   * its parent folder for an absolute path (the full path is in the title). Empty at the root.
+   */
+  function folderOf(file: RunFileSummary): string {
+    const path = file.path
+    const cut = path.lastIndexOf('/')
+    if (cut <= 0) return ''
+    const folder = path.slice(0, cut)
+    return path.startsWith('/') ? folder.slice(folder.lastIndexOf('/') + 1) : folder
   }
 
-  function openFile(file: RunFileSummary) {
-    reader.open({
+  function review(file: RunFileSummary) {
+    const tab = reader.open({
       sessionId: conversation.sessionId,
       projectId: conversation.projectId,
       agentId: file.agentIds[0] ?? null,
       path: file.path,
       absolute: file.absolute,
     })
+    // Falls back to the source while the file offers no changes.
+    tab.requested = 'changes'
   }
 
-  const trigger =
-    'group flex w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 py-1 text-start text-ui hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
-  const chevron = 'size-3.5 shrink-0 -rotate-90 text-muted-foreground transition-transform group-data-[state=open]:rotate-0'
+  async function reveal(file: RunFileSummary) {
+    revealError = null
+    try {
+      await readerFileReveal(conversation.sessionId, file.agentIds[0] ?? null, file.absolute ?? file.path)
+    } catch (e) {
+      revealError = e instanceof Error ? e.message : String(e)
+    }
+  }
 </script>
 
-<section
-  aria-label="Bilan de la réponse"
-  class="flex flex-col gap-1 rounded-lg border border-border bg-white px-2 py-1.5 text-sm text-card-foreground dark:bg-card"
->
-  <p class="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-1.5 py-0.5 text-ui">
-    <span class="inline-flex items-center gap-1.5 font-medium {summary.outcome ? TONE[summary.outcome] : 'text-muted-foreground'}">
-      {#if summary.outcome === 'succeeded'}
-        <CircleCheck class="size-3.5" aria-hidden="true" />
-      {:else if summary.outcome === 'incomplete'}
-        <TriangleAlert class="size-3.5" aria-hidden="true" />
-      {:else if summary.outcome === 'failed'}
-        <CircleX class="size-3.5" aria-hidden="true" />
-      {:else if summary.outcome === 'cancelled'}
-        <Ban class="size-3.5" aria-hidden="true" />
-      {:else}
-        <CircleAlert class="size-3.5" aria-hidden="true" />
-      {/if}
-      {summary.label}
-    </span>
-    {#if worked}
-      <span aria-hidden="true" class="text-muted-foreground">·</span>
-      <span class="text-muted-foreground tabular-nums">A travaillé {worked}</span>
-    {/if}
-  </p>
-
-  {#if summary.reason}
-    <p class="px-1.5 text-xs break-words text-warning">Motif : {summary.reason}.</p>
+{#if reason || summary.error || unsatisfied > 0 || files.length > 0}
+<div class="flex flex-col gap-2">
+  {#if reason}
+    <p class="text-xs break-words text-warning">Motif : {reason}.</p>
   {/if}
   {#if summary.error}
-    <p class="px-1.5 text-xs break-words whitespace-pre-wrap text-destructive">Erreur : {summary.error}</p>
+    <p class="text-xs break-words whitespace-pre-wrap text-destructive">Erreur : {summary.error}</p>
   {/if}
-  {#if run && run.approvalsUnsatisfied.length > 0}
-    <p class="px-1.5 text-xs text-warning">
-      {plural(run.approvalsUnsatisfied.length, 'autorisation non accordée', 'autorisations non accordées')}
+  {#if unsatisfied > 0}
+    <p class="text-xs text-warning">
+      {plural(unsatisfied, 'autorisation non accordée', 'autorisations non accordées')}
     </p>
   {/if}
 
   {#if files.length > 0}
-    <Collapsible>
-      <CollapsibleTrigger class={trigger}>
-        <ChevronDown class={chevron} aria-hidden="true" />
-        <span class="font-medium">{plural(files.length, 'fichier modifié', 'fichiers modifiés')}</span>
-        {#if totals}
-          <span title="Somme des opérations d’édition appliquées (pas un diff Git net)">
+    <section aria-label="Fichiers modifiés" class="rounded-xl border border-border bg-card text-ui text-card-foreground">
+      <Collapsible bind:open>
+        <CollapsibleTrigger
+          class="group flex w-full min-w-0 items-center gap-2 rounded-xl px-3 py-2 text-start hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        >
+          <ChevronRight
+            class="size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-90"
+            aria-hidden="true"
+          />
+          <span class="font-medium">{plural(files.length, 'fichier modifié', 'fichiers modifiés')}</span>
+          {#if totals}
             <DiffStat additions={totals.added} deletions={totals.removed} class="text-ui" />
-          </span>
-        {/if}
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <ul class="flex flex-col py-0.5 pl-6 text-ui">
-          {#each files as file (file.key)}
-            <li class="flex min-w-0 items-center gap-2 py-0.5">
-              <button
-                type="button"
-                class="inline-flex min-w-0 items-center gap-1.5 rounded-sm text-start font-mono text-xs hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                title={file.absolute ?? file.path}
-                onclick={() => openFile(file)}
-              >
+          {/if}
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <ul class="border-t border-border">
+            {#each files as file (file.key)}
+              {@const folder = folderOf(file)}
+              <li class="flex min-w-0 items-center gap-2 border-b border-border px-3 py-1.5 last:border-b-0">
                 <FileIcon path={file.path} />
-                <span class="min-w-0 truncate">{file.name}</span>
-              </button>
-              {#if file.binary}
-                <span class="text-xs text-muted-foreground">binaire</span>
-              {:else}
-                <span title="Somme des opérations d’édition appliquées (pas un diff Git net)">
-                  <DiffStat additions={file.added} deletions={file.removed} />
+                <span class="min-w-0 shrink-0 truncate font-medium" title={file.absolute ?? file.path}>{file.name}</span>
+                {#if folder}
+                  <span class="min-w-0 truncate text-xs text-muted-foreground">{folder}/</span>
+                {/if}
+                {#if file.binary}
+                  <span class="shrink-0 text-xs text-muted-foreground">binaire</span>
+                {:else}
+                  <DiffStat additions={file.added} deletions={file.removed} class="shrink-0" />
+                {/if}
+                <span class="ml-auto flex shrink-0 items-center gap-0.5">
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label={`Voir les modifications de ${file.name}`}
+                    title="Voir les modifications"
+                    onclick={() => review(file)}
+                  >
+                    <Eye aria-hidden="true" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label={`Afficher ${file.name} dans le Finder`}
+                    title="Afficher dans le Finder"
+                    onclick={() => reveal(file)}
+                  >
+                    <ExternalLink aria-hidden="true" />
+                  </Button>
                 </span>
-              {/if}
-            </li>
-          {/each}
-        </ul>
-      </CollapsibleContent>
-    </Collapsible>
+              </li>
+            {/each}
+          </ul>
+        </CollapsibleContent>
+      </Collapsible>
+      {#if revealError}
+        <p role="alert" class="border-t border-border px-3 py-1.5 text-xs break-words text-destructive">{revealError}</p>
+      {/if}
+    </section>
   {/if}
-
-  {#if commands.length > 0}
-    <Collapsible>
-      <CollapsibleTrigger class={trigger}>
-        <ChevronDown class={chevron} aria-hidden="true" />
-        <span class="font-medium">{plural(commands.length, 'commande exécutée', 'commandes exécutées')}</span>
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <ul class="flex flex-col gap-0.5 py-0.5 pl-6">
-          {#each commands as command (command.key)}
-            {@const status = STATUS[command.status]}
-            {@const tests = command.output ? parseTestCounts(command.output) : null}
-            <li class="text-xs">
-              <Collapsible>
-                <CollapsibleTrigger
-                  class="group flex w-full min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-start hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                >
-                  <ChevronDown class={chevron} aria-hidden="true" />
-                  {#if command.status === 'success'}
-                    <CircleCheck class="size-3.5 shrink-0 text-success" aria-hidden="true" />
-                  {:else if command.status === 'running' || command.status === 'unknown'}
-                    <CircleDashed class="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  {:else if command.status === 'cancelled'}
-                    <Ban class="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  {:else}
-                    <CircleX class="size-3.5 shrink-0 text-destructive" aria-hidden="true" />
-                  {/if}
-                  <span class="min-w-0 flex-1 truncate font-mono">{command.command || command.name}</span>
-                  <span class="shrink-0 {status.tone}">{status.label}</span>
-                  {#if command.durationMs !== null}
-                    <span class="shrink-0 whitespace-nowrap text-muted-foreground tabular-nums">{formatDuration(command.durationMs)}</span>
-                  {/if}
-                </CollapsibleTrigger>
-                <CollapsibleContent class="flex flex-col gap-1 py-1 pl-6">
-                  {#if tests}
-                    <p class="text-muted-foreground">
-                      <span class="tabular-nums">{tests.passed} réussi{tests.passed > 1 ? 's' : ''}</span>
-                      /
-                      <span class="tabular-nums {tests.failed > 0 ? 'text-destructive' : ''}">
-                        {tests.failed} échoué{tests.failed > 1 ? 's' : ''}
-                      </span>
-                      ({tests.framework})
-                    </p>
-                  {/if}
-                  {#if command.output}
-                    <MonoBlock text={command.output} label={`Sortie de ${truncate(command.command || command.name, 80)}`} />
-                  {:else}
-                    <p class="text-muted-foreground">Sortie non disponible.</p>
-                  {/if}
-                </CollapsibleContent>
-              </Collapsible>
-            </li>
-          {/each}
-        </ul>
-      </CollapsibleContent>
-    </Collapsible>
-  {/if}
-</section>
+</div>
+{/if}

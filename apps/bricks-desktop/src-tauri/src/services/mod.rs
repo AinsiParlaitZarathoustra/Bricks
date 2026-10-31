@@ -7,6 +7,7 @@ pub mod attachments;
 pub mod changes;
 pub mod computer_use;
 pub mod conversations;
+pub mod keep_awake;
 pub mod paths;
 pub mod prefs;
 pub mod projects;

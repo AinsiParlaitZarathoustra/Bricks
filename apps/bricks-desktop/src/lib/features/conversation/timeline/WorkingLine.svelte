@@ -1,7 +1,8 @@
 <script lang="ts">
   // The run at work: « Travaille depuis 1m 29s », counted from the engine's start
   // timestamp of the run (approval waits included, as in the « bilan »). Without a
-  // known start, no duration is shown. The timer lives only while this line is mounted.
+  // known start, no duration is shown. The timer lives only while this text is mounted;
+  // the work block (WorkBlock.svelte) places it in its bar.
   import type { Conversation } from '$lib/state/conversation.svelte'
   import { createClock } from '$lib/features/navigation/clock.svelte'
   import { formatWorked } from '../runend'
@@ -25,13 +26,8 @@
   })
 </script>
 
-<div class="flex flex-col gap-2">
-  <p class="text-ui text-muted-foreground">
-    {#if elapsed}
-      <span class="tabular-nums">Travaille depuis {elapsed}</span>
-    {:else}
-      Travaille…
-    {/if}
-  </p>
-  <div aria-hidden="true" class="h-px bg-border"></div>
-</div>
+{#if elapsed}
+  <span class="tabular-nums">Travaille depuis {elapsed}</span>
+{:else}
+  <span>Travaille…</span>
+{/if}

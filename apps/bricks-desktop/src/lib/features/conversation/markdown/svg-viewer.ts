@@ -19,7 +19,9 @@ export function mermaidSvg(result: string): string {
   } catch { return '' }
 }
 
-/** Only sanitized SVG reaches the isolated document or export. Every link stays inert. */
+/** A link the viewer may follow: a web page or a mail address (the sanitizer kept nothing else outward). */
+const FOLLOWED_LINK = /^\s*(?:https?:\/\/|mailto:)/i
+
 /** Natural size of an SVG, from its viewBox or its absolute width and height; null when unknown. */
 function naturalSize(root: Element): { width: number; height: number } | null {
   const box = (root.getAttribute('viewBox') ?? '').trim().split(/[\s,]+/).map(Number)
@@ -42,13 +44,28 @@ export function svgFrame(svg: string, options: DiagramViewerSettings, mode: 'lig
   const root = doc.querySelector('svg')
   if (!root) return { svg: '', document: '', size: null }
   const size = naturalSize(root)
-  for (const link of root.querySelectorAll('a')) link.replaceWith(...Array.from(link.childNodes))
+  // A followed link opens in the frame itself, where the app takes it to the browser
+  // (lib.rs, `external_links`); a target would ask for a window the sandbox refuses.
+  for (const link of root.querySelectorAll('a')) {
+    const href = link.getAttribute('href') ?? link.getAttribute('xlink:href') ?? ''
+    if (options.allowLinks && FOLLOWED_LINK.test(href)) {
+      link.setAttribute('href', href.trim())
+      link.removeAttribute('xlink:href')
+      link.removeAttribute('target')
+      link.setAttribute('rel', 'noopener noreferrer')
+    } else {
+      link.replaceWith(...Array.from(link.childNodes))
+    }
+  }
   if (!options.allowTooltips) {
     for (const title of root.querySelectorAll('title')) title.remove()
     for (const element of [root, ...root.querySelectorAll('[title]')]) element.removeAttribute('title')
   }
-  // Agent-authored CSS must not override the viewer's interaction policy.
-  const controls = /(?:-webkit-)?(?:all|user-select|animation(?:-[a-z-]+)?|transition(?:-[a-z-]+)?)\s*:[^;}]*;?/gi
+  // Agent-authored CSS must not override the viewer's interaction policy; its motion
+  // goes too unless animations are allowed.
+  const controls = options.allowAnimations
+    ? /(?:-webkit-)?(?:all|user-select)\s*:[^;}]*;?/gi
+    : /(?:-webkit-)?(?:all|user-select|animation(?:-[a-z-]+)?|transition(?:-[a-z-]+)?)\s*:[^;}]*;?/gi
   for (const element of [root, ...root.querySelectorAll('*')]) {
     const style = element.getAttribute('style')
     if (style) element.setAttribute('style', style.replace(controls, ''))
@@ -56,7 +73,9 @@ export function svgFrame(svg: string, options: DiagramViewerSettings, mode: 'lig
   }
   const safe = root.outerHTML
   const selection = options.allowSelection ? 'text' : 'none'
-  const style = `html,body{margin:0;width:100%;height:100%;overflow:hidden;color-scheme:${mode};background:${background === 'transparent' ? 'transparent' : mode === 'dark' ? '#111827' : '#fff'}}svg{display:block;width:100%!important;height:100%!important;max-width:none!important}*{user-select:${selection}!important;-webkit-user-select:${selection}!important;animation:none!important;transition:none!important}`
+  const still = 'animation:none!important;transition:none!important'
+  const motion = options.allowAnimations ? `@media (prefers-reduced-motion:reduce){*{${still}}}` : ''
+  const style = `html,body{margin:0;width:100%;height:100%;overflow:hidden;color-scheme:${mode};background:${background === 'transparent' ? 'transparent' : mode === 'dark' ? '#111827' : '#fff'}}svg{display:block;width:100%!important;height:100%!important;max-width:none!important}*{user-select:${selection}!important;-webkit-user-select:${selection}!important${options.allowAnimations ? '' : `;${still}`}}${motion}`
   return {
     svg: safe,
     size,

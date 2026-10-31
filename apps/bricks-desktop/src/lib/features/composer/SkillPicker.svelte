@@ -152,7 +152,6 @@
 
   <div class="flex flex-wrap items-center justify-between gap-2 border-t px-2 py-1.5 text-xs text-muted-foreground">
     <div class="flex min-w-0 flex-col">
-      <span>Entrée : choisir · Échap : fermer</span>
       {#if awaitingTrust}
         <span class="break-words">Skills du projet en attente d’autorisation : non proposés.</span>
       {/if}

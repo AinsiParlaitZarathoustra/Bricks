@@ -17,20 +17,22 @@ export function defaultDiagramSettings(): DiagramSettings {
     mermaid: { securityLevel: 'sandbox', theme: 'forest', look: 'classic' },
     diagramViewer: {
       followAppTheme: true, allowZoom: true, allowPan: true, allowFullscreen: true,
-      allowDownload: true, allowCopy: true, allowTooltips: true, allowLinks: false,
-      allowSelection: false, allowAnimations: false, allowEdit: false, allowJavaScript: false,
+      allowDownload: true, allowCopy: true, allowTooltips: true, allowLinks: true,
+      allowSelection: false, allowAnimations: true, allowEdit: false, allowJavaScript: false,
+      capabilitiesRevision: 1,
     },
   }
 }
 
-/** Old files get defaults; unsafe capabilities remain locked even before Rust responds. */
+/** Old files get defaults; script and editing remain locked even before Rust responds. */
 export function diagramSettings(value?: DiagramSettings): DiagramSettings {
   const defaults = defaultDiagramSettings()
   const mermaid = value?.mermaid
   const viewer = value?.diagramViewer
   const safeViewer = { ...defaults.diagramViewer }
   for (const key of Object.keys(safeViewer) as (keyof DiagramViewerSettings)[]) {
-    if (typeof viewer?.[key] === 'boolean') safeViewer[key] = viewer[key]
+    const value = viewer?.[key]
+    if (typeof value === typeof safeViewer[key]) (safeViewer as Record<string, unknown>)[key] = value
   }
   return {
     mermaid: {
@@ -38,7 +40,7 @@ export function diagramSettings(value?: DiagramSettings): DiagramSettings {
       theme: mermaid && MERMAID_THEMES.includes(mermaid.theme) ? mermaid.theme : defaults.mermaid.theme,
       look: mermaid && MERMAID_LOOKS.includes(mermaid.look) ? mermaid.look : defaults.mermaid.look,
     },
-    diagramViewer: { ...safeViewer, allowLinks: false, allowAnimations: false, allowEdit: false, allowJavaScript: false },
+    diagramViewer: { ...safeViewer, allowEdit: false, allowJavaScript: false },
   }
 }
 

@@ -494,6 +494,8 @@ export class Conversation {
   usageTotal = $state<{ input: number; output: number; costUsd?: number } | null>(null)
 
   draft = $state<Draft>({ text: '', attachments: [], skills: [] })
+  /** Keep the computer awake while this conversation runs (until the app quits). */
+  keepAwake = $state(false)
   /** Last refusal of a command (e.g. submit during a run). */
   lastRejection = $state<{ command: string; reason: string; at: number } | null>(null)
   /** Last answer to an `agent_control` command (apply/discard/cancel). */

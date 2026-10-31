@@ -29,10 +29,11 @@ describe('Bricks diagram settings', () => {
     expect(diagramSettings(invented).mermaid.securityLevel).toBe('sandbox')
   })
 
-  it('locks executable content capabilities and supplies defaults to old preferences', () => {
+  it('locks scripts and editing, keeps the links and animations chosen, and supplies defaults to old preferences', () => {
     expect(diagramSettings()).toEqual(defaultDiagramSettings())
+    expect(defaultDiagramSettings().diagramViewer).toMatchObject({ allowLinks: true, allowAnimations: true })
     const prefs = defaultDiagramSettings()
-    Object.assign(prefs.diagramViewer, { allowLinks: true, allowJavaScript: true, allowEdit: true, allowAnimations: true, allowZoom: false })
+    Object.assign(prefs.diagramViewer, { allowLinks: false, allowJavaScript: true, allowEdit: true, allowAnimations: false, allowZoom: false })
     expect(diagramSettings(prefs)).toMatchObject({ diagramViewer: { allowLinks: false, allowJavaScript: false, allowEdit: false, allowAnimations: false, allowZoom: false } })
   })
 })

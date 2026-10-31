@@ -111,14 +111,10 @@
 			spellcheck={false}
 			class="font-mono text-xs"
 			aria-invalid={shown.parameters ? 'true' : undefined}
-			aria-describedby={shown.parameters ? `${uid}-parameters-error` : `${uid}-parameters-help`}
+			aria-describedby={shown.parameters ? `${uid}-parameters-error` : undefined}
 		/>
 		{#if shown.parameters}
 			<p id={`${uid}-parameters-error`} role="alert" class="text-xs text-destructive">{shown.parameters}</p>
-		{:else}
-			<p id={`${uid}-parameters-help`} class="text-xs text-muted-foreground">
-				Ajoutés à la requête du modèle. Le moteur refuse les champs de structure.
-			</p>
 		{/if}
 	</div>
 

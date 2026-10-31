@@ -5,19 +5,28 @@
 pub mod commands;
 pub mod contract;
 pub mod engine;
+pub mod external_links;
 pub mod git;
 pub mod paths;
 pub mod pty;
 pub mod services;
+pub mod webview_menu;
+
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(external_links::init())
         .setup(|app| {
             engine::setup(app)?;
             pty::setup(app)?;
+            app.manage(services::keep_awake::KeepAwake::default());
+            if let Some(window) = app.get_webview_window("main") {
+                webview_menu::install(&window);
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -26,6 +35,7 @@ pub fn run() {
             commands::app::models_list,
             commands::app::prefs_get,
             commands::app::prefs_set,
+            commands::app::keep_awake_set,
             commands::app::app_icon_show,
             commands::app::permissions_default_get,
             commands::app::permissions_default_set,
@@ -103,6 +113,7 @@ pub fn run() {
             commands::agent_file::reveal_agent_file,
             // Reader of the conversation: windows of the files it names (Sprint 14.6.2)
             commands::reader_file::reader_file_read,
+            commands::reader_file::reader_file_reveal,
             // Provider/model editing
             commands::providers::providers_config,
             commands::providers::provider_update,

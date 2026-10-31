@@ -12,18 +12,21 @@ const RING = 'lib/features/context/ContextGauge.svelte';
 describe('context card: compact, one share, one meter, no session block', () => {
 	const card = src(CARD);
 
-	it('keeps the title and reads the share and the figures from contextGauge and formatCompact', () => {
+	it('keeps the title and reads the share from contextGauge and the figures from formatShort', () => {
 		expect(card).toContain('<SectionCard title="Contexte">');
-		expect(card).toContain('contextGauge(conversation.context ?? null, conversation.contextStale ?? false)');
-		expect(card).toContain('formatPercent(gauge.percent)');
-		expect(card).toContain('formatCompact(gauge.used)');
-		expect(card).toContain('formatCompact(gauge.total)');
+		expect(card).toContain('const status = $derived(conversation.context ?? null);');
+		expect(card).toContain('const stale = $derived(conversation.contextStale ?? false);');
+		expect(card).toContain('const gauge = $derived(contextGauge(status, stale));');
+		expect(card).toContain('`${Math.round(gauge.percent)} %`');
+		expect(card).toContain('formatShort(gauge.used)');
+		expect(card).toContain('formatShort(gauge.total)');
+		expect(card).not.toContain('formatCompact');
 	});
 
 	it('shows one meter bar with its role and its value, and an unknown share as a dash', () => {
 		expect(card).toContain('role="meter"');
 		expect(card).toContain("aria-label=\"Contexte utilisé\"");
-		expect(card).toContain("gauge.percent === null ? '—' : formatPercent(gauge.percent)");
+		expect(card).toContain("gauge.percent === null ? '—' : `${Math.round(gauge.percent)} %`");
 		expect(card).toContain("'inconnu'");
 	});
 

@@ -569,6 +569,9 @@ pub struct DiagramViewerSettings {
     pub allow_animations: bool,
     pub allow_edit: bool,
     pub allow_java_script: bool,
+    /// The defaults this file was written with: 0, links and animations were
+    /// locked off (a stored `false` was no choice); 1, they are allowed.
+    pub capabilities_revision: u32,
 }
 
 impl Default for DiagramViewerSettings {
@@ -581,11 +584,12 @@ impl Default for DiagramViewerSettings {
             allow_download: true,
             allow_copy: true,
             allow_tooltips: true,
-            allow_links: false,
+            allow_links: true,
             allow_selection: false,
-            allow_animations: false,
+            allow_animations: true,
             allow_edit: false,
             allow_java_script: false,
+            capabilities_revision: 0,
         }
     }
 }
@@ -619,6 +623,8 @@ pub struct Preferences {
     /// Computer Use (the built-in Cua Driver), off by default. Its tools
     /// are offered from the next run.
     pub computer_use_enabled: bool,
+    /// Keeps the computer from sleeping while Bricks is open, off by default.
+    pub keep_awake: bool,
 }
 
 impl Default for Preferences {
@@ -640,6 +646,7 @@ impl Default for Preferences {
             ask_timer: AskTimerPrefs::default(),
             memory_enabled: false,
             computer_use_enabled: false,
+            keep_awake: false,
         }
     }
 }

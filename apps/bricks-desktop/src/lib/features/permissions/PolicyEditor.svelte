@@ -82,14 +82,13 @@
 		<Select.Root type="single" value={profile} onValueChange={chooseProfile} {disabled}>
 			<Select.Trigger id={`${uid}-profile`} class="w-full max-w-72">
 				<span class="truncate">
-					{selectedProfile ? `${selectedProfile.label} · ${selectedProfile.detail}` : 'À choisir'}
+					{selectedProfile ? selectedProfile.label : 'À choisir'}
 				</span>
 			</Select.Trigger>
 			<Select.Content>
 				{#each PROFILE_OPTIONS as option (option.value)}
-					<Select.Item value={option.value} label={option.label}>
+					<Select.Item value={option.value} label={option.label} title={option.detail}>
 						<span class="font-medium">{option.label}</span>
-						<span class="text-muted-foreground">{option.detail}</span>
 					</Select.Item>
 				{/each}
 			</Select.Content>

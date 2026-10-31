@@ -7,17 +7,18 @@
 //! Once every symbolic link is followed, the file must still be inside the
 //! workspace. The window itself is the one of `project_file_read`: at most
 //! `WINDOW_LINES` lines, `READ_LIMIT` bytes read, binary and non UTF-8 content
-//! refused.
+//! refused. The file can also be revealed in the Finder, nothing more.
 
-use crate::commands::agent_file::{agent_root_of, candidate_of};
+use crate::commands::agent_file::{agent_root_of, candidate_of, resolve_reveal_target};
 use crate::commands::inspect::open_or_not_found;
 use crate::commands::project_file::{canonical_or_missing, canonical_root, read_target};
-use crate::contract::{IpcResult, ProjectFileWindow};
+use crate::contract::{IpcErrorCode, IpcResult, ProjectFileWindow};
 use crate::engine::AppState;
-use crate::services::{invalid, join_error, not_found};
+use crate::services::{error, invalid, join_error, not_found};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tauri::State;
+use tauri_plugin_opener::OpenerExt;
 
 /// A window of a file read by the reader: the window of `project_file_read`,
 /// and the canonical absolute path of the file (every link followed). The
@@ -92,6 +93,31 @@ pub async fn reader_file_read(
     tokio::task::spawn_blocking(move || read_in_root(&root, &path, line, end_line))
         .await
         .map_err(join_error)?
+}
+
+/// Reveals in the Finder a file of the reader of the open session `session_id`,
+/// resolved like `reader_file_read`; a deleted file reveals its nearest existing
+/// folder. Nothing is opened or run.
+#[tauri::command]
+pub async fn reader_file_reveal(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    session_id: String,
+    agent_id: Option<String>,
+    path: String,
+) -> IpcResult<()> {
+    let root = reader_root(&state, &session_id, agent_id.as_deref())?;
+    tokio::task::spawn_blocking(move || {
+        let target = resolve_reveal_target(&root, &path)?;
+        app.opener().reveal_item_in_dir(&target).map_err(|e| {
+            error(
+                IpcErrorCode::Io,
+                format!("affichage dans le Finder impossible : {e}"),
+            )
+        })
+    })
+    .await
+    .map_err(join_error)?
 }
 
 #[cfg(test)]

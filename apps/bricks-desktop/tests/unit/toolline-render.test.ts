@@ -18,23 +18,45 @@ function line(props: { name: string; state: ToolLineState; durationMs?: number }
 	return plain(body.replace(/<!--[^]*?-->/g, '').replace(/<span class="sr-only">[^]*?<\/span>/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
 }
 
+/** The text of the sr-only spans of the markup: what only assistive technology reads. */
+function srOnly(html: string): string[] {
+	return [...html.matchAll(/<span class="sr-only">([^]*?)<\/span>/g)].map((m) =>
+		plain(m[1].replace(/<!--[^]*?-->/g, '').trim()),
+	);
+}
+
 describe('ToolLine: what the line shows', () => {
-	it('shows the real tool name, its French state and the compact duration once finished', () => {
+	it('shows the real tool name and the compact duration once a call succeeded', () => {
 		expect(line({ name: 'Bash', state: 'done', durationMs: 6_100 })).toBe('Bash 6s');
-		expect(line({ name: 'Read', state: 'failed', durationMs: 15 })).toBe('Read 15ms');
+	});
+
+	it('shows a failed call with its visible state, then its duration', () => {
+		expect(line({ name: 'Read', state: 'failed', durationMs: 15 })).toBe('Read Échec 15ms');
 	});
 
 	it('shows the state without a duration when the engine gave none', () => {
 		expect(line({ name: 'Edit', state: 'done' })).toBe('Edit');
-		expect(line({ name: 'Edit', state: 'failed' })).toBe('Edit');
+		expect(line({ name: 'Edit', state: 'failed' })).toBe('Edit Échec');
 	});
 
 	it('shows no duration while the call runs, even if one is known', () => {
-		expect(line({ name: 'Bash', state: 'running', durationMs: 900 })).toBe('Bash En cours');
+		expect(line({ name: 'Bash', state: 'running', durationMs: 900 })).toBe('Bash');
+	});
+
+	it('says « En cours » and « Terminé » to assistive technology only, not on screen', () => {
+		expect(srOnly(render(ToolLine, { props: { name: 'Bash', state: 'running' } }).body)).toEqual(['En cours']);
+		expect(srOnly(render(ToolLine, { props: { name: 'Bash', state: 'done', durationMs: 42 } }).body)).toEqual(['Terminé']);
+		expect(srOnly(render(ToolLine, { props: { name: 'Read', state: 'failed' } }).body)).toEqual([]);
 	});
 
 	it('shows interruptions as Interrompu', () => {
 		expect(line({ name: 'Bash', state: 'interrupted' })).toBe('Bash Interrompu');
+	});
+
+	it('shows the icon of the tool, not one icon for every state', () => {
+		expect(render(ToolLine, { props: { name: 'Bash', state: 'done' } }).body).toContain('lucide-chevron-right');
+		expect(render(ToolLine, { props: { name: 'Read', state: 'done' } }).body).toContain('lucide-book-open-check');
+		expect(render(ToolLine, { props: { name: 'Bash', state: 'failed' } }).body).toContain('lucide-chevron-right');
 	});
 });
 

@@ -18,7 +18,7 @@
 	import ConversationList from './ConversationList.svelte';
 
 	/** Conversations listed under a project before « Afficher plus ». */
-	const SHOWN_PER_PROJECT = 5;
+	const SHOWN_PER_PROJECT = 3;
 
 	const uid = $props.id();
 
@@ -181,7 +181,6 @@
 		<form onsubmit={submitRename} class="flex flex-col gap-6">
 			<Dialog.Header>
 				<Dialog.Title>Renommer le projet</Dialog.Title>
-				<Dialog.Description>Le nom n’est utilisé que dans Bricks. Le dossier ne change pas.</Dialog.Description>
 			</Dialog.Header>
 			<div class="flex flex-col gap-2">
 				<Label for={`${uid}-name`}>Nom du projet</Label>

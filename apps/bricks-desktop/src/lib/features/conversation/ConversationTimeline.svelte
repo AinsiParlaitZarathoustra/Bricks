@@ -8,7 +8,8 @@
   import QuestionCard from './timeline/QuestionCard.svelte'
   import SkillsTrustBanner from './timeline/SkillsTrustBanner.svelte'
   import TimelineEntry from './timeline/TimelineEntry.svelte'
-  import WorkingLine from './timeline/WorkingLine.svelte'
+  import WorkBlock from './timeline/WorkBlock.svelte'
+  import { timelineBlocks } from './runBlocks'
 
   let { conversation }: { conversation: Conversation } = $props()
 
@@ -27,6 +28,14 @@
 
   const hiddenCount = $derived(Math.max(0, conversation.items.length - limit))
   const visible = $derived(hiddenCount > 0 ? conversation.items.slice(hiddenCount) : conversation.items)
+  const blocks = $derived(
+    timelineBlocks(visible, conversation.items, conversation.runs, conversation.runningRunId),
+  )
+  /** The run at work has no block when none of its items is in the view (it started elsewhere). */
+  const runningWithoutBlock = $derived(
+    conversation.runningRunId !== null &&
+      !blocks.some((block) => block.kind === 'work' && block.runId === conversation.runningRunId),
+  )
 
   /** Waiting approvals with no card in the timeline (e.g. after a reload). */
   const orphanApprovals = $derived(
@@ -179,14 +188,14 @@
     role="region"
     aria-label="Conversation"
     tabindex="0"
-    class="top-fade min-h-0 flex-1 overflow-y-auto overscroll-contain focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:outline-none"
+    class="edge-fade min-h-0 flex-1 overflow-y-auto overscroll-contain focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:outline-none"
   >
     <div
       bind:this={listEl}
       role="log"
       aria-live="off"
       aria-label="Échanges de la conversation"
-      class="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6"
+      class="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 pt-6 pb-10"
     >
       {#if hiddenCount > 0}
         <div class="flex justify-center">
@@ -196,8 +205,12 @@
         </div>
       {/if}
 
-      {#each visible as item (item.id)}
-        <TimelineEntry {item} {conversation} />
+      {#each blocks as block (block.key)}
+        {#if block.kind === 'work'}
+          <WorkBlock {conversation} runId={block.runId} items={block.items} answerReasoning={block.answerReasoning} />
+        {:else}
+          <TimelineEntry item={block.item} {conversation} answer={block.answer} />
+        {/if}
       {/each}
 
       {#each orphanApprovals as approval (approval.approval_id)}
@@ -208,9 +221,9 @@
         <QuestionCard {question} {conversation} />
       {/each}
 
-      <!-- A running run whose message is not in the view (it started elsewhere): its time goes last. -->
-      {#if conversation.running && !conversation.items.some((i) => i.kind === 'user' && i.runId === conversation.runningRunId)}
-        <WorkingLine {conversation} />
+      <!-- A running run with nothing in the view (it started elsewhere): its bar goes last. -->
+      {#if runningWithoutBlock && conversation.runningRunId}
+        <WorkBlock {conversation} runId={conversation.runningRunId} items={[]} />
       {/if}
 
       {#if conversation.skillsTrust}
@@ -240,11 +253,25 @@
 </div>
 
 <style>
-  /* Text scrolling under the top edge fades out instead of being cut. The fade
-     covers the list's top padding, so the first message is never dimmed. */
-  .top-fade {
-    --fade: 24px;
-    -webkit-mask-image: linear-gradient(to bottom, transparent, #000 var(--fade));
-    mask-image: linear-gradient(to bottom, transparent, #000 var(--fade));
+  /* Text scrolling under the top edge, or down towards the composer, fades out
+     instead of being cut. Each fade covers the list's padding on its side, so
+     the first and the last message are never dimmed at rest. */
+  .edge-fade {
+    --fade-top: 24px;
+    --fade-bottom: 40px;
+    -webkit-mask-image: linear-gradient(
+      to bottom,
+      transparent,
+      #000 var(--fade-top),
+      #000 calc(100% - var(--fade-bottom)),
+      transparent
+    );
+    mask-image: linear-gradient(
+      to bottom,
+      transparent,
+      #000 var(--fade-top),
+      #000 calc(100% - var(--fade-bottom)),
+      transparent
+    );
   }
 </style>

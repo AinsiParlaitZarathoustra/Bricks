@@ -123,15 +123,8 @@
 				<dd>
 					{#if cost.kind === 'exact'}
 						<span class="tabular-nums">{formatUsd(cost.usd)}</span>
-						<span class="block text-xs text-pretty text-muted-foreground"
-							>Estimation d’après les tarifs configurés, pas une facture.</span
-						>
 					{:else if cost.kind === 'partial'}
 						<span class="tabular-nums">Au moins {formatUsd(cost.usd)}</span>
-						<span class="block text-xs text-pretty text-muted-foreground"
-							>Sous-total partiel : pas de tarif pour
-							{cost.unpriced.length > 0 ? cost.unpriced.join(', ') : 'une partie de la consommation'}.</span
-						>
 					{:else}
 						<span>Coût inconnu (aucun tarif configuré)</span>
 					{/if}
@@ -248,7 +241,7 @@
 					</table>
 				</div>
 				<p class="text-xs text-pretty text-muted-foreground">
-					{plural(turns.length, 'réponse affichée', 'réponses affichées')}{#if turns.length >= 2000} · seules les 2 000 dernières sont conservées{/if}
+					{plural(turns.length, 'réponse affichée', 'réponses affichées')}
 				</p>
 			{/if}
 		</section>

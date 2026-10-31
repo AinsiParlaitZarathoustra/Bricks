@@ -44,6 +44,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   ask_timer: { enabled: false, mode: 'smart', seconds: 300 },
   memory_enabled: false,
   computer_use_enabled: false,
+  keep_awake: false,
 }
 
 /** An IPC refusal because a project's folder is missing. */

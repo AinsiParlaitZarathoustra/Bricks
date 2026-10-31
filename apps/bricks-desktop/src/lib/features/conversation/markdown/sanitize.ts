@@ -59,6 +59,8 @@ export function sanitizeMarkdown(html: string): string {
 /** `url(#id)`: a reference to this document. */
 const INTERNAL_URL = /url\(\s*(['"]?)#[A-Za-z0-9_.:-]*\1\s*\)/gi
 const INTERNAL_HREF = /^\s*#[A-Za-z0-9_.:-]*\s*$/
+/** A link out of a diagram: a web page or a mail address, nothing that runs or loads. */
+const EXTERNAL_HREF = /^\s*(?:https?:\/\/|mailto:)[^\s<>"]*\s*$/i
 
 /** An attribute value that must not reach the DOM (outside a `style` attribute). */
 function unsafeAttributeValue(value: string): boolean {
@@ -199,14 +201,16 @@ export function sanitizeKatex(html: string): string {
 
 const svgPurifier = purifier()
 
-svgPurifier?.addHook('uponSanitizeAttribute', (_node, data) => {
+svgPurifier?.addHook('uponSanitizeAttribute', (node, data) => {
   if (data.attrName === 'style') {
     data.attrValue = neutralizeCss(data.attrValue)
     if (data.attrValue.trim() === '') data.keepAttr = false
     return
   }
   if (data.attrName === 'href' || data.attrName === 'xlink:href') {
-    if (!INTERNAL_HREF.test(data.attrValue)) data.keepAttr = false
+    // An anchor may lead out (the viewer decides whether it is followed); anything else stays internal.
+    const external = node.nodeName.toLowerCase() === 'a' && EXTERNAL_HREF.test(data.attrValue)
+    if (!external && !INTERNAL_HREF.test(data.attrValue)) data.keepAttr = false
     return
   }
   if (unsafeAttributeValue(data.attrValue)) data.keepAttr = false

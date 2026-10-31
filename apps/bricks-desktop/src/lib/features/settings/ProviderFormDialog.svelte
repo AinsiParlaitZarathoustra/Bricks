@@ -204,15 +204,13 @@
 					spellcheck={false}
 					class="font-mono text-sm"
 					aria-invalid={shown.apiKeyEnv ? 'true' : undefined}
-					aria-describedby={`${uid}-env-help`}
+					aria-describedby={shown.apiKeyEnv || original?.has_inline_key ? `${uid}-env-help` : undefined}
 				/>
 				{#if shown.apiKeyEnv}
 					<p id={`${uid}-env-help`} role="alert" class="text-xs text-pretty text-destructive">{shown.apiKeyEnv}</p>
-				{:else}
+				{:else if original?.has_inline_key}
 					<p id={`${uid}-env-help`} class="text-xs text-pretty text-muted-foreground">
-						{original?.has_inline_key
-							? 'Une clé est écrite dans le fichier : la variable ne peut pas être définie ici.'
-							: 'Nom de la variable d’environnement qui contient la clé.'}
+						Une clé est écrite dans le fichier : la variable ne peut pas être définie ici.
 					</p>
 				{/if}
 			</div>

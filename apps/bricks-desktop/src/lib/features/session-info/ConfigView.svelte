@@ -69,7 +69,6 @@
 		refusal = await app.setPermissions(sessionId, next);
 		saving = false;
 	}
-	const WARNINGS_LABEL = 'Avertissements de configuration';
 </script>
 
 {#snippet field(label: string, value: string)}
@@ -91,8 +90,7 @@
 			<dl class="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-6 gap-y-2 px-3 pb-3 text-sm">
 				{@render field('Fournisseur', config.provider || 'inconnu')}
 				{@render field('Modèle', config.model || 'inconnu')}
-				{@render field('Effort demandé', config.reasoning ?? 'par défaut du modèle')}
-				{@render field('Effort appliqué', config.effective_reasoning ?? 'aucun')}
+				{@render field('Effort', config.effective_reasoning ?? 'aucun')}
 				{@render field('Dossier de travail', config.working_dir)}
 			</dl>
 		</SectionCard>
@@ -100,12 +98,7 @@
 		<SectionCard title="Permissions">
 			<div class="flex flex-col gap-4 px-3 pb-3 text-sm">
 				<dl class="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-6 gap-y-2">
-					{@render field(
-						'Approbations',
-						config.interactive
-							? 'demandées à une personne'
-							: 'aucune personne pour répondre : les actions à approuver sont refusées'
-					)}
+					{@render field('Approbations', config.interactive ? 'demandées' : 'refusées')}
 				</dl>
 
 				{#if policy}
@@ -119,19 +112,13 @@
 
 		<SectionCard title="Mémoire">
 			<dl class="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-6 gap-y-2 px-3 pb-3 text-sm">
-				{@render field(
-					'Espace',
-					config.memory_space ?? 'aucun : mémoire à long terme désactivée (section [memory] de bricks.toml)'
-				)}
+				{@render field('Espace', config.memory_space ?? 'désactivée')}
 			</dl>
 		</SectionCard>
 
 		<SectionCard title="Agents">
 			<dl class="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-6 gap-y-2 px-3 pb-3 text-sm">
-				{@render field(
-					'Sous-agents',
-					config.agents_enabled ? 'activés (section [agents] de bricks.toml)' : 'désactivés'
-				)}
+				{@render field('Sous-agents', config.agents_enabled ? 'activés' : 'désactivés')}
 			</dl>
 		</SectionCard>
 
@@ -144,11 +131,8 @@
 						{/each}
 					</ul>
 				{:else}
-					<p class="text-muted-foreground">
-						Aucun fichier de configuration lu : valeurs par défaut.
-					</p>
+					<p class="text-muted-foreground">Aucun fichier lu</p>
 				{/if}
-				
 			</div>
 		</SectionCard>
 
@@ -156,15 +140,7 @@
 			<dl class="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-6 gap-y-2 px-3 pb-3 text-sm">
 				{#each config.settings as entry, i (i)}
 					<dt class="text-muted-foreground">{entry.label}</dt>
-					<dd class="min-w-0 break-words">
-						{entry.value}
-						{#if entry.label === WARNINGS_LABEL && entry.value !== '0'}
-							<span class="block text-xs text-muted-foreground">
-								Les messages détaillés ne sont pas affichés : ils peuvent citer une valeur saisie
-								dans bricks.toml.
-							</span>
-						{/if}
-					</dd>
+					<dd class="min-w-0 break-words">{entry.value}</dd>
 				{/each}
 			</dl>
 		</SectionCard>

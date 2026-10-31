@@ -107,10 +107,7 @@
 		{/snippet}
 	</EmptyState>
 {:else if git?.status && !git.status.is_repo}
-	<EmptyState
-		title="Pas de dépôt Git"
-		description="Ce dossier n’est pas un dépôt Git : il n’y a ni état ni historique à afficher."
-	/>
+	<EmptyState title="Git n’est pas installé dans ce dossier" />
 {:else}
 	<div class="flex flex-col gap-4">
 		<header class="flex items-center gap-2">

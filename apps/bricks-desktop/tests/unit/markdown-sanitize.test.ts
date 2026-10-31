@@ -241,16 +241,21 @@ describe('SVG output sanitizing (Mermaid)', () => {
 		expect(handler).toContain('<rect');
 	});
 
-	it('keeps only internal references in href and xlink:href', () => {
+	it('keeps internal references, and web or mail links on anchors only', () => {
 		const out = parse(
 			sanitizeSvg(
-				'<svg><a href="https://evil.test/x"><text>a</text></a>' +
+				'<svg><a href="https://example.test/x"><text>a</text></a>' +
 					'<a xlink:href="#node-1"><text>b</text></a>' +
+					'<a href="mailto:me@example.test"><text>c</text></a>' +
+					'<a href="javascript:alert(1)"><text>d</text></a>' +
+					'<a href="data:text/html,x"><text>e</text></a>' +
 					'<image href="http://evil/x.png"/></svg>'
 			)
 		);
-		expect(out.innerHTML).not.toMatch(/evil|<image/);
+		expect(out.innerHTML).not.toMatch(/evil|<image|javascript|data:/);
 		expect(out.innerHTML).toContain('#node-1');
+		expect(out.innerHTML).toContain('https://example.test/x');
+		expect(out.innerHTML).toContain('mailto:me@example.test');
 	});
 
 	it('keeps internal url() references (markers, gradients) and drops external ones', () => {
@@ -365,11 +370,13 @@ describe('Mermaid bounds and neutralizing', () => {
 		expect(out).not.toMatch(/securityLevel|config/);
 	});
 
-	it('removes click interactions and keeps the edges', () => {
+	it('removes callbacks, keeps web links and the edges', () => {
 		const out = neutralizeMermaid(
 			'flowchart TD\nA-->B\nclick A call alert\nclick B href "https://x.y"\nclick C "https://z"\nA --> C'
 		);
-		expect(out).not.toMatch(/click/);
+		expect(out).not.toMatch(/call/);
+		expect(out).toContain('click B href "https://x.y"');
+		expect(out).toContain('click C "https://z"');
 		expect(out).toContain('A-->B');
 		expect(out).toContain('A --> C');
 	});
@@ -469,7 +476,22 @@ const { svgFrame, mermaidSvg, SVG_CSP, MAX_SVG_LENGTH } = await import('../../sr
 const { defaultDiagramSettings } = await import('../../src/lib/features/diagrams/settings');
 
 describe('isolated SVG documents', () => {
-  const options = defaultDiagramSettings().diagramViewer;
+  // Links and animations off: the strictest viewer.
+  const options = { ...defaultDiagramSettings().diagramViewer, allowLinks: false, allowAnimations: false };
+  const open = defaultDiagramSettings().diagramViewer;
+  it('keeps web links when links are allowed: followed in the frame itself, without a target', () => {
+    const frame = svgFrame('<svg><a href="https://example.test/doc" target="_top"><text>Doc</text></a><a href="#n1"><text>n</text></a></svg>', open, 'light');
+    expect(open.allowLinks).toBe(true);
+    expect(frame.svg).toContain('href="https://example.test/doc"');
+    expect(frame.svg).toContain('rel="noopener noreferrer"');
+    expect(frame.svg).not.toMatch(/target=|href="#n1"/);
+  });
+  it('lets the diagram move when animations are allowed, except for reduced motion', () => {
+    const frame = svgFrame('<svg><text style="animation:dash 2s linear infinite">x</text></svg>', open, 'light');
+    expect(frame.svg).toContain('animation:dash 2s linear infinite');
+    expect(frame.document).toContain('@media (prefers-reduced-motion:reduce){*{animation:none!important');
+    expect(frame.document).not.toMatch(/-webkit-user-select:none!important;animation:none/);
+  });
   it('removes scripts, foreign HTML, event handlers, external resources and all links before display/export', () => {
     const hostile = `<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script><foreignObject><iframe src="https://evil.test"></iframe></foreignObject><image href="https://evil.test/x"/><a href="https://evil.test"><text onclick="alert(1)">Label</text></a><animate attributeName="x" from="0" to="1"/></svg>`;
     const frame = svgFrame(hostile, options, 'light');

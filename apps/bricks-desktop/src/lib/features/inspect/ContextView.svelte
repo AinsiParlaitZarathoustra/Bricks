@@ -66,11 +66,6 @@
 	</div>
 
 	<div class="flex flex-col gap-2 text-sm" role="status" aria-live="polite">
-		{#if busy}
-			<p class="text-xs text-muted-foreground">
-				Une exécution ou une opération est en cours : compaction et vidage attendent sa fin.
-			</p>
-		{/if}
 		{#if compactPending}
 			<p class="text-muted-foreground">
 				Compaction en attente de la réponse du moteur…

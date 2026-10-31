@@ -1,7 +1,7 @@
 //! Agent runner: the core agentic loop.
 
 use crate::compact;
-use crate::context::{ModelView, RequestView};
+use crate::context::{ContextBreakdown, ContextChars, ModelView, RequestView};
 use crate::events::{AgentEvent, CompactReason};
 use crate::{Agent, AgentOutput, ToolCallRecord, UserInput};
 use bricks_hooks::{HookAction, HookContext, HookEvent};
@@ -664,6 +664,7 @@ async fn run_loop(
         };
 
         let status = ensure_budget(agent, &mut request, &event_tx, cancel).await?;
+        record_breakdown(agent, &request, turn);
         // The context this request describes: its usage measures it only if
         // nothing (a switch, a rewrite) changed it before the response.
         let mut sent_version = agent.context.lock().version();
@@ -729,6 +730,7 @@ async fn run_loop(
                         return Err(e);
                     }
                     request.messages = agent.messages.lock().clone();
+                    record_breakdown(agent, &request, turn);
                     sent_version = agent.context.lock().version();
                     continue;
                 }
@@ -1724,6 +1726,16 @@ fn benchmark_check_tests(tool_calls: &[ToolCallRecord]) -> BenchmarkVerification
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
+
+/// The text of the request about to be sent, by source, kept with the
+/// context it describes (counts only, never the content).
+fn record_breakdown(agent: &Agent, request: &CompletionRequest, turn: u32) {
+    let chars = ContextChars::of(request, model_view(agent).reasoning_resent);
+    agent
+        .context
+        .lock()
+        .record_breakdown(ContextBreakdown { turn, chars });
+}
 
 /// One response's usage, in its root run's ledger (once, as this agent's
 /// own: the session agent's or a descendant's).

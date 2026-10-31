@@ -162,7 +162,7 @@
 		{#if listing}
 			{#if listing.catalog_omitted > 0}
 				<p class="text-xs text-pretty text-muted-foreground">
-					Activables mais hors du catalogue du modèle (limites de taille) : {listing.catalog_omitted}.
+					Hors du catalogue du modèle : {listing.catalog_omitted}
 				</p>
 			{/if}
 

@@ -96,10 +96,15 @@ fn parse_fields(bytes: &[u8], file: &std::path::Path) -> Preferences {
 ///   ratio from it once, then saves it here.
 fn sanitize(mut p: Preferences) -> Preferences {
     // These capabilities cannot be enabled by editing the preferences file or IPC.
-    p.diagrams.diagram_viewer.allow_links = false;
-    p.diagrams.diagram_viewer.allow_animations = false;
-    p.diagrams.diagram_viewer.allow_edit = false;
-    p.diagrams.diagram_viewer.allow_java_script = false;
+    let viewer = &mut p.diagrams.diagram_viewer;
+    viewer.allow_edit = false;
+    viewer.allow_java_script = false;
+    // Links and animations were locked off before revision 1: they start allowed once.
+    if viewer.capabilities_revision < 1 {
+        viewer.allow_links = true;
+        viewer.allow_animations = true;
+        viewer.capabilities_revision = 1;
+    }
     p.left_width = p.left_width.clamp(*WIDTH.start(), *WIDTH.end());
     p.right_width = p.right_width.clamp(*WIDTH.start(), *WIDTH.end());
     p.terminal_height = p
@@ -315,14 +320,15 @@ mod tests {
             value["diagramViewer"],
             serde_json::json!({
                 "followAppTheme":true,"allowZoom":true,"allowPan":true,"allowFullscreen":true,
-                "allowDownload":true,"allowCopy":true,"allowTooltips":true,"allowLinks":false,
-                "allowSelection":false,"allowAnimations":false,"allowEdit":false,"allowJavaScript":false
+                "allowDownload":true,"allowCopy":true,"allowTooltips":true,"allowLinks":true,
+                "allowSelection":false,"allowAnimations":true,"allowEdit":false,"allowJavaScript":false,
+                "capabilitiesRevision":0
             })
         );
     }
 
     #[test]
-    fn diagram_preferences_round_trip_but_cannot_enable_active_content() {
+    fn diagram_preferences_round_trip_but_cannot_enable_scripts_or_editing() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("preferences.json");
         let mut prefs = Preferences::default();
@@ -348,12 +354,32 @@ mod tests {
         let viewer = saved.diagrams.diagram_viewer;
         assert!(!viewer.allow_zoom);
         assert!(viewer.allow_selection);
-        assert!(
-            !viewer.allow_java_script
-                && !viewer.allow_links
-                && !viewer.allow_animations
-                && !viewer.allow_edit
-        );
+        assert!(!viewer.allow_java_script && !viewer.allow_edit);
+        assert!(viewer.allow_links && viewer.allow_animations);
+        assert_eq!(viewer.capabilities_revision, 1);
+    }
+
+    #[test]
+    fn links_and_animations_start_allowed_once_then_follow_the_choice() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("preferences.json");
+        // Written while they were locked off: the stored `false` was no choice.
+        std::fs::write(
+            &file,
+            r#"{"diagrams":{"diagramViewer":{"allowZoom":false,"allowLinks":false,"allowAnimations":false}}}"#,
+        )
+        .unwrap();
+        let store = PrefsStore::at(file);
+        let mut prefs = store.get();
+        let viewer = &prefs.diagrams.diagram_viewer;
+        assert!(viewer.allow_links && viewer.allow_animations);
+        assert!(!viewer.allow_zoom, "the other choices are kept");
+        // Turned off now, they stay off.
+        prefs.diagrams.diagram_viewer.allow_animations = false;
+        prefs.diagrams.diagram_viewer.allow_links = false;
+        store.set(prefs).unwrap();
+        let viewer = store.get().diagrams.diagram_viewer;
+        assert!(!viewer.allow_links && !viewer.allow_animations);
     }
 
     #[test]

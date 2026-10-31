@@ -67,6 +67,26 @@ export function jobStatus(state: string): { dot: StatusState; label: string } {
 	}
 }
 
+/** The jobs in one line, by state in a fixed order: `1 en cours · 2 terminées`. */
+export function jobsSummary(jobs: readonly Pick<JobInfo, 'state'>[]): string {
+	if (jobs.length === 0) return 'Aucune tâche';
+	const counts = new Map<string, number>();
+	for (const job of jobs) counts.set(job.state, (counts.get(job.state) ?? 0) + 1);
+	const words: [string, string, string][] = [
+		['running', 'en cours', 'en cours'],
+		['completed', 'terminée', 'terminées'],
+		['failed', 'en échec', 'en échec'],
+		['stopped', 'arrêtée', 'arrêtées']
+	];
+	const parts = words.flatMap(([state, one, many]) => {
+		const n = counts.get(state) ?? 0;
+		counts.delete(state);
+		return n > 0 ? [`${n} ${n > 1 ? many : one}`] : [];
+	});
+	for (const [state, n] of counts) parts.push(`${n} ${state}`);
+	return parts.join(' · ');
+}
+
 /** Running jobs first, then the most recent. */
 export function sortJobs(jobs: JobInfo[]): JobInfo[] {
 	return [...jobs].sort(

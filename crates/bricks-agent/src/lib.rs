@@ -669,6 +669,14 @@ impl Agent {
         *self.compression_level.lock()
     }
 
+    /// Folder where full tool outputs are kept before compression or removal
+    /// from the context, when there is one.
+    pub fn raw_output_dir(&self) -> Option<std::path::PathBuf> {
+        self.compressor
+            .raw_store()
+            .map(|store| store.dir().to_path_buf())
+    }
+
     /// Change the tool-output compression level at runtime. Takes effect on
     /// the next tool call.
     pub fn set_compression_level(&self, level: bricks_compression::CompressionLevel) {

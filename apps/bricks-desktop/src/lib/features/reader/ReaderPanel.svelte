@@ -64,7 +64,7 @@
       {#each tabs as tab (tab.id)}
         <div
           class={[
-            'group flex shrink-0 items-center rounded-md text-ui',
+            'group flex max-w-48 min-w-12 shrink items-center rounded-md text-ui',
             tab.id === active?.id ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/60',
           ]}
         >
@@ -73,7 +73,7 @@
             role="tab"
             aria-selected={tab.id === active?.id}
             title={tab.fullPath}
-            class="flex max-w-48 min-w-0 items-center gap-1.5 rounded-md py-1 pr-1 pl-2 font-mono text-xs focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            class="flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1 pr-1 pl-2 font-mono text-xs focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
             onclick={() => reader.activate(tab.id)}
           >
             <FileIcon path={tab.fullPath || tab.title} />
@@ -83,7 +83,7 @@
             type="button"
             aria-label={`Fermer ${tab.title}`}
             title="Fermer"
-            class="mr-0.5 inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            class="mr-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
             onclick={() => reader.close(tab.id)}
           >
             <X class="size-3" aria-hidden="true" />

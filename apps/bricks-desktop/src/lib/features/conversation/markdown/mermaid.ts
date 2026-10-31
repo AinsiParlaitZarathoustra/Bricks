@@ -87,10 +87,16 @@ const STYLE_STATEMENT = /^\s*(?:classDef|style|linkStyle)\b/i
  * start of a line or after a `;` separator. The rest of its line goes with it.
  */
 const INTERACTION = /(^|;)\s*click\s+(?![-=.:])/i
+/**
+ * The one interaction kept: a link to a web page or an address, `click A href "https://…"`
+ * or `click A "mailto:…"`, with an optional tooltip and target. Callbacks never are.
+ */
+const LINK = /^;?\s*click\s+[\w.-]+\s+(?:href\s+)?"(?:https?:\/\/|mailto:)[^"\s<>]*"(?:\s+"[^"]*")?(?:\s+_(?:blank|self|parent|top))?/i
 
 /**
  * The source Mermaid receives: front matter, directives (`%%{ … }%%`),
- * interactions (`click`) and styles that load or run something are removed.
+ * interactions (`click`) other than web and mail links, and styles that load
+ * or run something are removed.
  */
 export function neutralizeMermaid(source: string): string {
   let text = source.replace(/\r\n?/g, '\n')
@@ -105,10 +111,15 @@ export function neutralizeMermaid(source: string): string {
     .join('\n')
 }
 
-/** The line up to its first interaction statement (the statement and what follows it are dropped). */
+/**
+ * The line up to its first interaction statement, which is kept only when it is a link
+ * (what follows the statement is dropped either way).
+ */
 function dropInteraction(line: string): string {
   const match = INTERACTION.exec(line)
-  return match ? line.slice(0, match.index) : line
+  if (!match) return line
+  const link = LINK.exec(line.slice(match.index))
+  return line.slice(0, match.index) + (link ? link[0] : '')
 }
 
 // ─── Theme and configuration ─────────────────────────────────────────────────

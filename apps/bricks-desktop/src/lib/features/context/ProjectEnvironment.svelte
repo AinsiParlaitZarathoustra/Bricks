@@ -162,7 +162,7 @@
 					<span class="min-w-0 text-pretty">Git indisponible : {gitView.message}</span>
 				</span>
 			{:else if !gitView.status.is_repo}
-				<span class="text-muted-foreground">Ce dossier n’est pas un dépôt Git.</span>
+				<span class="text-muted-foreground">Git n’est pas installé dans ce dossier</span>
 			{:else}
 				<div class="flex min-w-0 flex-col gap-1">
 					<span class="truncate font-mono">{headLabel(gitView.status)}</span>

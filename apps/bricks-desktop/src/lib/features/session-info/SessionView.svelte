@@ -107,10 +107,7 @@
 			<dt class="text-muted-foreground">Modèle</dt>
 			<dd class="min-w-0 font-mono text-xs break-all">{conv.model || 'inconnu'}</dd>
 
-			<dt class="text-muted-foreground">Effort demandé</dt>
-			<dd>{conv.reasoning ?? 'par défaut du modèle'}</dd>
-
-			<dt class="text-muted-foreground">Effort appliqué</dt>
+			<dt class="text-muted-foreground">Effort</dt>
 			<dd>{conv.effectiveReasoning ?? 'aucun'}</dd>
 
 			<dt class="text-muted-foreground">Activité</dt>

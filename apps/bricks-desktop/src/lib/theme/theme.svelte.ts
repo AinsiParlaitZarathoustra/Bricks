@@ -7,7 +7,8 @@
  *
  * Persistence is the caller's job (prefs IPC): read the saved value, pass it
  * to `initTheme()` once at startup, and call `setTheme()` when the user picks
- * a mode, then save it. This module never touches storage.
+ * a mode, then save it. Until then, the theme last shown (`last-theme.ts`, a
+ * display copy) is used, so a dark setup does not start light.
  *
  * Custom colours come from `app.prefs.colors` for the resolved
  * mode. A module-level effect applies them as soon as preferences load, when
@@ -21,6 +22,7 @@
 import { app } from '$lib/state/app.svelte';
 import { applyPaletteVariables, paletteVariables } from './palette';
 import tokens from './tokens.json';
+import { readLastTheme, rememberTheme } from './last-theme';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 export type ResolvedTheme = 'light' | 'dark';
@@ -31,9 +33,15 @@ export function isThemeMode(value: unknown): value is ThemeMode {
 	return value === 'light' || value === 'dark' || value === 'system';
 }
 
+function systemPrefersDark(): boolean {
+	return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+		? window.matchMedia(DARK_QUERY).matches
+		: false;
+}
+
 class ThemeState {
-	#mode = $state<ThemeMode>('system');
-	#systemDark = $state(false);
+	#mode = $state<ThemeMode>(readLastTheme() ?? 'system');
+	#systemDark = $state(systemPrefersDark());
 	#resolved = $derived<ResolvedTheme>(
 		this.#mode === 'system' ? (this.#systemDark ? 'dark' : 'light') : this.#mode
 	);
@@ -73,7 +81,11 @@ let disposeListener: (() => void) | null = null;
 function applyToDocument(resolved: ResolvedTheme): void {
 	if (typeof document === 'undefined') return;
 	document.documentElement.classList.toggle('dark', resolved === 'dark');
+	rememberTheme(resolved);
 }
+
+// The theme last shown, from the first paint on (the preferences load later).
+applyToDocument(state.resolved);
 
 // Custom colours of the resolved mode. Runs in its own root: it lives as long as the app.
 if (typeof document !== 'undefined') {

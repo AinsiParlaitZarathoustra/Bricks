@@ -179,11 +179,6 @@
 		</SettingsGroup>
 	{/if}
 
-	{#if overview?.legacy_store}
-		<p class="text-caption text-muted-foreground">
-			L’ancienne mémoire (memory.grafeo) est conservée telle quelle, sans migration.
-		</p>
-	{/if}
 </div>
 
 {#if pending}

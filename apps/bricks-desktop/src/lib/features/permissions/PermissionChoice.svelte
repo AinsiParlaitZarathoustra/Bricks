@@ -42,7 +42,6 @@
 					onclick={() => choose(option.value)}
 				>
 					{option.label}
-					<span class="text-muted-foreground">{option.detail}</span>
 				</Button>
 			{/each}
 		</div>

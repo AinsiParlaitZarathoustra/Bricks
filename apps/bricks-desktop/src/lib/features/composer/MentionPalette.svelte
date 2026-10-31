@@ -78,8 +78,7 @@
     <p role="status" class="px-3 py-2 text-sm text-muted-foreground">Recherche des fichiers…</p>
   {/if}
 
-  <div class="flex items-center justify-between gap-2 border-t px-2 py-1.5 text-xs text-muted-foreground">
-    <span>Entrée ou Tab : joindre · Échap : fermer</span>
+  <div class="flex items-center justify-end gap-2 border-t px-2 py-1.5 text-xs text-muted-foreground">
     <button
       type="button"
       class="inline-flex items-center gap-1.5 rounded-sm px-1.5 py-0.5 hover:bg-accent hover:text-accent-foreground"

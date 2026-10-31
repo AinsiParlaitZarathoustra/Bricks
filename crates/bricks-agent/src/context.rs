@@ -206,6 +206,10 @@ pub struct ContextStatus {
     pub totals: SessionTotals,
     /// Missing configuration, invalidations and similar remarks.
     pub notes: Vec<String>,
+    /// The text of the last request sent on this context, by source. Absent
+    /// before the first request, after a rewrite and from older engines.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub breakdown: Option<ContextBreakdown>,
 }
 
 impl ContextStatus {
@@ -215,6 +219,155 @@ impl ContextStatus {
             return 0.0;
         }
         self.context_used.tokens as f64 / self.input_limit as f64
+    }
+}
+
+// ─── Breakdown by source ─────────────────────────────────────────────────────
+
+/// Characters (Unicode scalar values) of the text a request carries, by where
+/// it comes from. Each text counts in one category only; images, audio,
+/// video, documents without text and encrypted items carry no characters. A
+/// share of the text, never a share of the tokens: it does not enter the
+/// budget, the cost or compaction.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContextChars {
+    /// The system prompt.
+    pub instructions: u64,
+    /// Messages, the model's tool calls and the reasoning sent back.
+    pub conversation: u64,
+    pub tool_results: u64,
+    pub tool_definitions: u64,
+    /// Text whose origin is not known (a document's own text).
+    pub other: u64,
+}
+
+/// The breakdown of one request: the turn of its run that sent it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContextBreakdown {
+    pub turn: u32,
+    pub chars: ContextChars,
+}
+
+/// Counts the characters written to it; JSON values are measured without a
+/// copy. serde_json writes non-ASCII text as is, so a byte that does not
+/// continue a UTF-8 sequence starts one character.
+#[derive(Default)]
+struct CharCounter(u64);
+
+impl std::io::Write for CharCounter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0 += buf.iter().filter(|b| (**b & 0xC0) != 0x80).count() as u64;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+fn chars(s: &str) -> u64 {
+    s.chars().count() as u64
+}
+
+fn json_chars(v: &serde_json::Value) -> u64 {
+    let mut counter = CharCounter::default();
+    // Writing to a counter cannot fail.
+    let _ = serde_json::to_writer(&mut counter, v);
+    counter.0
+}
+
+#[derive(Clone, Copy)]
+enum Source {
+    Conversation,
+    ToolResults,
+}
+
+impl ContextChars {
+    /// The text of `request` as it is sent: reasoning counts only where the
+    /// protocol sends it back (`reasoning_resent`).
+    pub fn of(request: &CompletionRequest, reasoning_resent: bool) -> Self {
+        let mut c = Self {
+            instructions: request.system.as_deref().map(chars).unwrap_or(0),
+            tool_definitions: request
+                .tools
+                .iter()
+                .map(|t| chars(&t.name) + chars(&t.description) + json_chars(&t.input_schema))
+                .sum(),
+            ..Self::default()
+        };
+        for m in &request.messages {
+            match &m.content {
+                MessageContent::Text(t) => c.conversation += chars(t),
+                MessageContent::Blocks(bs) => {
+                    for b in bs {
+                        c.block(b, Source::Conversation, reasoning_resent);
+                    }
+                }
+            }
+        }
+        c
+    }
+
+    fn add(&mut self, source: Source, n: u64) {
+        match source {
+            Source::Conversation => self.conversation += n,
+            Source::ToolResults => self.tool_results += n,
+        }
+    }
+
+    fn block(&mut self, b: &ContentBlock, source: Source, reasoning_resent: bool) {
+        match b {
+            ContentBlock::Text { text } => self.add(source, chars(text)),
+            ContentBlock::ToolUse { name, input, .. } => {
+                self.add(source, chars(name) + json_chars(input))
+            }
+            ContentBlock::ToolResult { content, .. } => match content {
+                ToolResultContent::Text(t) => self.tool_results += chars(t),
+                ToolResultContent::Blocks(bs) => {
+                    for b in bs {
+                        self.block(b, Source::ToolResults, reasoning_resent);
+                    }
+                }
+            },
+            ContentBlock::Thinking { thinking, .. } if reasoning_resent => {
+                self.add(source, chars(thinking))
+            }
+            // A document's text, inside a tool result where it comes from one.
+            ContentBlock::Document {
+                source: doc,
+                title,
+                context,
+                ..
+            } => {
+                let text = (doc.source_type == "text")
+                    .then(|| doc.data.as_deref().map(chars))
+                    .flatten()
+                    .unwrap_or(0);
+                let n = text
+                    + title.as_deref().map(chars).unwrap_or(0)
+                    + context.as_deref().map(chars).unwrap_or(0);
+                match source {
+                    Source::ToolResults => self.tool_results += n,
+                    Source::Conversation => self.other += n,
+                }
+            }
+            // Not text: signatures, encrypted reasoning, media, opaque items.
+            ContentBlock::Thinking { .. }
+            | ContentBlock::RedactedThinking { .. }
+            | ContentBlock::ProtocolItem { .. }
+            | ContentBlock::Image { .. }
+            | ContentBlock::Audio { .. }
+            | ContentBlock::Video { .. }
+            | ContentBlock::Opaque => {}
+        }
+    }
+
+    pub fn total(&self) -> u64 {
+        self.instructions
+            + self.conversation
+            + self.tool_results
+            + self.tool_definitions
+            + self.other
     }
 }
 
@@ -444,6 +597,8 @@ pub struct ContextManager {
     calibration: HashMap<String, f64>,
     totals: SessionTotals,
     last_invalidation: Option<String>,
+    /// The last request's breakdown, with the version it was measured on.
+    breakdown: Option<(u64, ContextBreakdown)>,
 }
 
 impl ContextManager {
@@ -474,6 +629,11 @@ impl ContextManager {
             .copied()
             .unwrap_or(1.0);
         Estimator::new(&self.policy, model.reasoning_resent, cal)
+    }
+
+    /// The breakdown of the request about to be sent on the current context.
+    pub fn record_breakdown(&mut self, breakdown: ContextBreakdown) {
+        self.breakdown = Some((self.version, breakdown));
     }
 
     /// The history was rewritten (compaction, removal, restore): the last
@@ -700,6 +860,10 @@ impl ContextManager {
             totals: self.totals.clone(),
             context_used: used,
             notes,
+            breakdown: self
+                .breakdown
+                .filter(|(version, _)| *version == self.version)
+                .map(|(_, b)| b),
         }
     }
 
@@ -1065,5 +1229,117 @@ mod tests {
                 .contains("compact_treshold")
         );
         assert!(policy_from_bricks_toml("[context]\npreflight_ratio = 1.5\n").is_err());
+    }
+
+    fn request(
+        system: &str,
+        tools: Vec<ToolDefinition>,
+        messages: Vec<Message>,
+    ) -> CompletionRequest {
+        let mut r = CompletionRequest::new("m");
+        r.system = Some(system.into());
+        r.tools = tools;
+        r.messages = messages;
+        r
+    }
+
+    #[test]
+    fn breakdown_counts_unicode_scalar_values_per_source() {
+        let r = request(
+            "Réponds en français.",
+            vec![ToolDefinition {
+                name: "Read".into(),
+                description: "Lit un fichier".into(),
+                input_schema: json!({"type": "object"}),
+            }],
+            vec![
+                Message::user("café 你好 👋🏽"),
+                Message::assistant_blocks(vec![ContentBlock::ToolUse {
+                    id: "t1".into(),
+                    name: "Read".into(),
+                    input: json!({"p": "é"}),
+                }]),
+                Message::user_blocks(vec![ContentBlock::ToolResult {
+                    tool_use_id: "t1".into(),
+                    content: ToolResultContent::Text("日本語".into()),
+                    is_error: None,
+                }]),
+            ],
+        );
+        let c = ContextChars::of(&r, true);
+        assert_eq!(c.instructions, 20);
+        // "café 你好 👋🏽": the skin tone is its own scalar value.
+        assert_eq!(
+            c.conversation,
+            10 + 4 + r#"{"p":"é"}"#.chars().count() as u64
+        );
+        assert_eq!(c.tool_results, 3);
+        assert_eq!(
+            c.tool_definitions,
+            4 + 14 + r#"{"type":"object"}"#.len() as u64
+        );
+        assert_eq!(c.other, 0);
+        assert_eq!(
+            c.total(),
+            c.instructions + c.conversation + c.tool_results + c.tool_definitions
+        );
+    }
+
+    #[test]
+    fn images_and_unsent_reasoning_carry_no_characters() {
+        let image = ContentBlock::Image {
+            source: ImageSource {
+                source_type: "base64".into(),
+                media_type: Some("image/png".into()),
+                data: Some("iVBORw0KGgo".repeat(1000)),
+                url: None,
+                file_id: None,
+            },
+        };
+        let r = request(
+            "",
+            vec![],
+            vec![
+                Message::user_blocks(vec![image.clone()]),
+                Message::user_blocks(vec![ContentBlock::ToolResult {
+                    tool_use_id: "t".into(),
+                    content: ToolResultContent::Blocks(vec![image]),
+                    is_error: None,
+                }]),
+                Message::assistant_blocks(vec![ContentBlock::Thinking {
+                    thinking: "hmm".into(),
+                    signature: "sig".into(),
+                }]),
+            ],
+        );
+        assert_eq!(ContextChars::of(&r, false), ContextChars::default());
+        assert_eq!(ContextChars::of(&r, true).conversation, 3);
+    }
+
+    #[test]
+    fn the_breakdown_follows_its_context_and_is_absent_from_older_states() {
+        let mut mgr = ContextManager::default();
+        let msgs = vec![Message::user("hello")];
+        let m = model(1000, 100, true);
+        assert_eq!(mgr.status(&m, &view(&msgs, &[])).breakdown, None);
+        let b = ContextBreakdown {
+            turn: 2,
+            chars: ContextChars {
+                conversation: 5,
+                ..ContextChars::default()
+            },
+        };
+        mgr.record_breakdown(b);
+        let status = mgr.status(&m, &view(&msgs, &[]));
+        assert_eq!(status.breakdown, Some(b));
+
+        // Older engines did not send it: their states still read.
+        let mut old = serde_json::to_value(&status).unwrap();
+        old.as_object_mut().unwrap().remove("breakdown");
+        let read: ContextStatus = serde_json::from_value(old).unwrap();
+        assert_eq!(read.breakdown, None);
+
+        mgr.invalidate("compacted");
+        assert_eq!(mgr.status(&m, &view(&msgs, &[])).breakdown, None);
     }
 }

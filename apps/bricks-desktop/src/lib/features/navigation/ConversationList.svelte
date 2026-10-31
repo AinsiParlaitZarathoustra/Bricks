@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { tick } from 'svelte';
+	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import Trash from '@lucide/svelte/icons/trash';
@@ -237,12 +238,17 @@
 			<button
 				type="button"
 				class={cn(
-					'w-full rounded-md py-1.5 pr-2 text-left text-xs text-muted-foreground transition-colors hover:bg-sidebar-accent/60 hover:text-foreground',
+					'flex w-full items-center gap-1 rounded-md py-1.5 pr-2 text-left text-xs font-medium text-foreground/70 transition-colors hover:bg-sidebar-accent/60 hover:text-foreground',
 					nested ? 'pl-8' : 'pl-2'
 				)}
+				aria-expanded={showAll}
 				onclick={() => (showAll = !showAll)}
 			>
 				{showAll ? 'Afficher moins' : 'Afficher plus'}
+				<ChevronDownIcon
+					class={cn('size-3.5 transition-transform', showAll && 'rotate-180')}
+					aria-hidden="true"
+				/>
 			</button>
 		</li>
 	{/if}

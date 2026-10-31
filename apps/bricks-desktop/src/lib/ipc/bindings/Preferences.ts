@@ -36,4 +36,8 @@ memory_enabled: boolean,
  * Computer Use (the built-in Cua Driver), off by default. Its tools
  * are offered from the next run.
  */
-computer_use_enabled: boolean, };
+computer_use_enabled: boolean, 
+/**
+ * Keeps the computer from sleeping while Bricks is open, off by default.
+ */
+keep_awake: boolean, };

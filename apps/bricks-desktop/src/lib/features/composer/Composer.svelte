@@ -28,7 +28,6 @@
   import SquareIcon from '@lucide/svelte/icons/square'
   import XIcon from '@lucide/svelte/icons/x'
   import SparklesIcon from '@lucide/svelte/icons/sparkles'
-  import ProjectStrip from './ProjectStrip.svelte'
   import AttachMenu from './AttachMenu.svelte'
   import AttachmentChip from './AttachmentChip.svelte'
   import ModelSelect from './ModelSelect.svelte'
@@ -129,13 +128,6 @@
   let refusal = $state<string | null>(null)
   let rootEl = $state<HTMLElement | null>(null)
   let editorEl = $state<HTMLTextAreaElement | null>(null)
-  let editorMultiline = $state(false)
-  let toolbarHeight = $state(0)
-
-  const capsule = $derived(
-    !editorMultiline && !draft.text.includes('\n') && toolbarHeight <= 36 &&
-    draft.attachments.length === 0 && draft.skills.length === 0 && !dragging && saving === 0,
-  )
 
   /** Why an attachment cannot be sent, or `null` when it can. */
   function chipError(a: DraftAttachment): string | null {
@@ -1087,29 +1079,14 @@
     el.style.height = 'auto'
     el.style.height = `${el.scrollHeight}px`
   })
-
-  // Measure wrapped lines too, including after a panel resize or a font change.
-  $effect(() => {
-    const el = editorEl
-    if (!el) return
-    const observer = new ResizeObserver(() => {
-      const style = getComputedStyle(el)
-      const padding = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom)
-      editorMultiline = el.clientHeight > parseFloat(style.lineHeight) + padding + 1
-    })
-    observer.observe(el)
-    return () => observer.disconnect()
-  })
 </script>
 
 <section
   bind:this={rootEl}
   aria-label="Zone de saisie"
-  class="shrink-0 border-t bg-background px-4 pt-2 pb-3"
+  class="shrink-0 px-4 pt-1 pb-3"
 >
   <div class="mx-auto flex max-w-3xl flex-col gap-2">
-    <ProjectStrip />
-
     {#if rejection && rejectionLabel}
       <div role="alert" class="flex items-start justify-between gap-2 text-sm text-destructive">
         <p>{rejectionLabel} : {rejection.reason}</p>
@@ -1133,11 +1110,10 @@
     {/if}
 
     <div
-      class="relative mt-1 flex flex-col gap-2 border bg-card px-4 py-2 shadow-xs transition-colors focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/20"
-      class:rounded-full={capsule}
-      class:rounded-2xl={!capsule}
-      class:border-ring={dragging}
-      class:bg-accent={dragging}
+      class={[
+        'relative mt-1 flex flex-col gap-2 rounded-2xl border bg-card px-4 py-2 shadow-[0_1px_2px_rgb(0_0_0/0.05),0_6px_20px_-6px_rgb(0_0_0/0.14)] transition-colors dark:shadow-[0_1px_2px_rgb(0_0_0/0.4),0_8px_24px_-8px_rgb(0_0_0/0.6)] focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/20',
+        dragging && 'border-ring bg-accent',
+      ]}
     >
       {#if paletteOpen}
         <CommandPalette
@@ -1236,7 +1212,7 @@
         class="max-h-[40vh] min-h-0 resize-none overflow-y-auto border-0 bg-transparent px-2 py-2 leading-5 text-start shadow-none focus-visible:ring-0 dark:bg-transparent"
       />
 
-      <div bind:clientHeight={toolbarHeight} class="flex flex-wrap items-center gap-1">
+      <div class="flex flex-wrap items-center gap-1">
         <AttachMenu
           disabled={!editable || sending}
           onPick={(paths, kind) => addPicked(paths, kind === 'folder')}

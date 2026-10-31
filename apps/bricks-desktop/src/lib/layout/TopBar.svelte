@@ -1,8 +1,10 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
-	import PanelLeftIcon from '@lucide/svelte/icons/panel-left';
-	import PanelRightIcon from '@lucide/svelte/icons/panel-right';
-	import PanelBottomIcon from '@lucide/svelte/icons/panel-bottom';
+	import PanelLeftOpenIcon from '@lucide/svelte/icons/panel-left-open';
+	import PanelLeftCloseIcon from '@lucide/svelte/icons/panel-left-close';
+	import PanelRightOpenIcon from '@lucide/svelte/icons/panel-right-open';
+	import PanelRightCloseIcon from '@lucide/svelte/icons/panel-right-close';
+	import TerminalIcon from '@lucide/svelte/icons/terminal';
 	import GitCompareIcon from '@lucide/svelte/icons/git-compare';
 	import BookOpenIcon from '@lucide/svelte/icons/book-open';
 	import PanelToggle from './PanelToggle.svelte';
@@ -76,7 +78,7 @@
 				tooltipShow="Afficher le panneau de gauche"
 				tooltipHide="Masquer le panneau de gauche"
 				pressed={leftPressed}
-				icon={PanelLeftIcon}
+				icon={leftPressed ? PanelLeftCloseIcon : PanelLeftOpenIcon}
 				onclick={onToggleLeft}
 			/>
 		{/if}
@@ -101,7 +103,7 @@
 						tooltipShow="Afficher le panneau de droite"
 						tooltipHide="Masquer le panneau de droite"
 						pressed={rightPressed}
-						icon={PanelRightIcon}
+						icon={rightPressed ? PanelRightCloseIcon : PanelRightOpenIcon}
 						onclick={onToggleRight}
 					/>
 				{/if}
@@ -114,7 +116,7 @@
 						tooltipShow="Afficher le terminal"
 						tooltipHide="Masquer le terminal"
 						pressed={terminalPressed}
-						icon={PanelBottomIcon}
+						icon={TerminalIcon}
 						onclick={onToggleTerminal}
 					/>
 				{/if}

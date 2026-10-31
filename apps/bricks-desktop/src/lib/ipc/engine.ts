@@ -137,6 +137,23 @@ export interface ContextStatus {
   total_tokens: number
   totals: SessionTotals
   notes: string[]
+  /** The text of the last request sent on this context, by source. Absent from older engines. */
+  breakdown?: ContextBreakdown
+}
+
+/** Characters (Unicode scalar values) of a request's text, by source. Not tokens. */
+export interface ContextChars {
+  instructions: number
+  conversation: number
+  tool_results: number
+  tool_definitions: number
+  other: number
+}
+
+export interface ContextBreakdown {
+  /** The turn of its run that sent the request. */
+  turn: number
+  chars: ContextChars
 }
 
 export interface FileChange {

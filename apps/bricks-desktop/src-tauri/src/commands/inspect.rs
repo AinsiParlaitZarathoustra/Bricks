@@ -12,9 +12,9 @@ use crate::engine::{self, AppState};
 use crate::pty;
 use crate::services::conversations::{item_from_summary, path_text};
 use crate::services::{error, io_error, join_error, not_found};
-use bricks_agent::BricksConfig;
+use bricks_agent::{Agent, BricksConfig};
 use bricks_agent::control::{Controller, Snapshot, list_sessions};
-use bricks_agent::permission::{PermissionEffect, PermissionProfile, SessionPolicy};
+use bricks_agent::permission::PermissionEffect;
 use bricks_tools::PermissionLevel;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -98,7 +98,7 @@ pub(crate) async fn config_of(
         permission_revision: snap.permission_revision,
         agents_enabled: project.bricks.agents.enabled,
         sources,
-        settings: settings_of(&snap, &project.bricks),
+        settings: settings_of(&snap, &project.bricks, &controller.agent()),
     })
 }
 
@@ -211,18 +211,6 @@ fn permission_level(name: &str) -> Option<PermissionLevel> {
     })
 }
 
-/// The session's permission profile, as the configuration shows it.
-fn profile_label(policy: &SessionPolicy) -> &'static str {
-    if !policy.chosen {
-        return "non choisi (ASK)";
-    }
-    match policy.profile {
-        PermissionProfile::Ask => "ASK",
-        PermissionProfile::Execute => "EXECUTE",
-        PermissionProfile::Custom => "CUSTOM",
-    }
-}
-
 fn effect_name(effect: PermissionEffect) -> &'static str {
     match effect {
         PermissionEffect::Allow => "allow",
@@ -284,57 +272,66 @@ fn config_sources(
     found
 }
 
-/// The other effective settings the TUI shows, as label/value pairs. Only
-/// numbers, modes and paths: free text from the configuration is not
-/// copied, because a malformed line can carry a value the person typed
-/// there. Diagnostics are counted, not quoted, for the same reason.
-fn settings_of(snap: &Snapshot, bricks: &BricksConfig) -> Vec<ConfigEntry> {
+/// The other settings in force, as label/value pairs: the values the engine
+/// applies (the model's limits from the providers file, the live compression
+/// and raw-output store), never a raw configuration line. Only numbers, modes
+/// and paths: free text from the configuration is not copied, because a
+/// malformed line can carry a value the person typed there. Diagnostics are
+/// counted, not quoted, for the same reason.
+fn settings_of(snap: &Snapshot, bricks: &BricksConfig, agent: &Agent) -> Vec<ConfigEntry> {
     let entry = |label: &str, value: String| ConfigEntry {
         label: label.to_string(),
         value,
     };
-    let or_default = |v: Option<String>, fallback: &str| v.unwrap_or_else(|| fallback.to_string());
-    let compression = serde_json::to_value(bricks.compression_level)
+    let compression = serde_json::to_value(agent.compression_level())
         .ok()
-        .and_then(|v| v.as_str().map(str::to_string));
+        .and_then(|v| v.as_str().map(str::to_string))
+        .map(|level| match level.as_str() {
+            "off" => "désactivée".to_string(),
+            "minimal" => "minimale".to_string(),
+            "aggressive" => "agressive".to_string(),
+            _ => level,
+        })
+        .unwrap_or_else(|| "inconnue".to_string());
     vec![
-        entry("Permissions", profile_label(&snap.permission_policy).to_string()),
-        entry("Budget de contexte", format!("{} jetons", snap.context.input_limit)),
-        entry("Marge de sécurité", format!("{} jetons", snap.context.margin)),
-        entry("Réserve pour la sortie", format!("{} jetons", snap.context.reserved_output)),
-        entry(
-            "Compression",
-            or_default(
-                compression.map(|c| match c.as_str() {
-                    "off" => "désactivée".to_string(),
-                    "minimal" => "minimale".to_string(),
-                    "aggressive" => "agressive".to_string(),
-                    other => other.to_string(),
-                }),
-                "par défaut",
-            ),
-        ),
+        entry("Contexte d’entrée", tokens_text(snap.context.input_limit)),
+        entry("Contexte de sortie", tokens_text(snap.context.reserved_output)),
+        entry("Marge de sécurité", tokens_text(snap.context.margin)),
+        entry("Compression", compression),
         entry(
             "Sorties brutes",
-            or_default(
-                bricks.raw_output_dir.as_deref().map(path_text),
-                "non définies",
-            ),
-        ),
-        entry(
-            "Raisonnement par défaut (configuration)",
-            or_default(bricks.agent.reasoning.clone(), "non défini"),
-        ),
-        entry(
-            "Jetons de sortie maximum (configuration)",
-            or_default(bricks.agent.max_tokens.map(|n| n.to_string()), "par défaut"),
+            agent
+                .raw_output_dir()
+                .map(|dir| path_text(&dir))
+                .unwrap_or_else(|| "aucune".to_string()),
         ),
         entry("Sous-agents simultanés", bricks.agents.max_concurrent.to_string()),
         entry("Profondeur maximale des sous-agents", bricks.agents.max_depth.to_string()),
         entry("Tâches de fond simultanées", bricks.background.max_jobs.to_string()),
-        entry("Fichiers analysés par la recherche sémantique", bricks.semantic.max_files.to_string()),
+        entry("Fichiers analysés par la recherche sémantique", grouped(bricks.semantic.max_files as u64)),
         entry("Avertissements de configuration", bricks.diagnostics.len().to_string()),
     ]
+}
+
+/// `1 000 000 tokens`; `inconnu` for a limit the model does not report.
+fn tokens_text(n: u64) -> String {
+    if n == 0 {
+        return "inconnu".to_string();
+    }
+    format!("{} tokens", grouped(n))
+}
+
+/// `20 000`: digits grouped by three with a narrow no-break space.
+fn grouped(n: u64) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            out.push('\u{202f}');
+        }
+        out.push(c);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -343,7 +340,7 @@ mod tests {
     use crate::contract::OpenSessionRequest;
     use bricks_agent::control::scripted::{Reply, Script, ScriptedCatalog};
     use bricks_agent::control::{Command, EngineConfig, OpenOptions, Prompt, SessionChoice};
-    use bricks_agent::permission::CustomRules;
+    use bricks_agent::permission::{CustomRules, PermissionProfile, SessionPolicy};
     use bricks_provider::ProviderRegistry;
     use std::time::Duration;
 
@@ -445,7 +442,6 @@ mod tests {
         assert!(tools.iter().all(|t| !t.reason.is_empty()), "every verdict says why");
         assert!(tools.iter().all(|t| !t.description.contains('\n')), "one line each");
         let info = config_of(&ctl, None).await.unwrap();
-        assert_eq!(setting(&info, "Permissions"), "non choisi (ASK)");
         assert!(!info.permission_policy.chosen);
 
         // CUSTOM: writes allowed, Bash refused by its own rule.
@@ -461,7 +457,7 @@ mod tests {
         assert_eq!(tool(&tools, "Bash").decision, "deny");
         assert_eq!(tool(&tools, "Read").decision, "allow");
         let info = config_of(&ctl, None).await.unwrap();
-        assert_eq!(setting(&info, "Permissions"), "CUSTOM");
+        assert_eq!(info.permission_policy.profile, PermissionProfile::Custom);
         assert_eq!(info.permission_revision, 1);
         ctl.close().await;
     }
@@ -478,7 +474,6 @@ mod tests {
         let tools = tools_of(&ctl).unwrap();
         assert!(tools.iter().all(|t| t.decision == "allow" || t.level == "forbidden"));
         let info = config_of(&ctl, None).await.unwrap();
-        assert_eq!(setting(&info, "Permissions"), "EXECUTE");
         assert_eq!(info.permission_policy.profile, PermissionProfile::Execute);
         ctl.close().await;
     }
@@ -714,5 +709,57 @@ max_output_tokens = 8000
         assert!(got[1].ends_with("bricks.toml"));
 
         assert_eq!(config_sources(None, &wd, None).len(), 1, "the project file only");
+    }
+
+    #[test]
+    fn token_counts_are_grouped_by_thousands_with_a_narrow_no_break_space() {
+        assert_eq!(tokens_text(812), "812 tokens");
+        assert_eq!(tokens_text(96_000), "96\u{202f}000 tokens");
+        assert_eq!(tokens_text(1_000_000), "1\u{202f}000\u{202f}000 tokens");
+        assert_eq!(tokens_text(12_345_678), "12\u{202f}345\u{202f}678 tokens");
+    }
+
+    #[test]
+    fn a_limit_the_model_does_not_report_reads_unknown() {
+        assert_eq!(tokens_text(0), "inconnu");
+    }
+
+    #[tokio::test]
+    async fn the_settings_carry_the_new_labels_and_never_the_old_ones() {
+        let fx = fixture();
+        let ctl = scripted(&fx, "", Script::new(vec![]), false).await;
+        let info = config_of(&ctl, None).await.unwrap();
+        let labels: Vec<&str> = info.settings.iter().map(|e| e.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            [
+                "Contexte d’entrée",
+                "Contexte de sortie",
+                "Marge de sécurité",
+                "Compression",
+                "Sorties brutes",
+                "Sous-agents simultanés",
+                "Profondeur maximale des sous-agents",
+                "Tâches de fond simultanées",
+                "Fichiers analysés par la recherche sémantique",
+                "Avertissements de configuration",
+            ]
+        );
+        let removed = [
+            "Permissions",
+            "Raisonnement par défaut (configuration)",
+            "Jetons de sortie maximum (configuration)",
+            "Budget de contexte",
+            "Réserve pour la sortie",
+            "Effort demandé",
+            "Effort appliqué",
+        ];
+        for old in removed {
+            assert!(!labels.contains(&old), "the removed label {old} is still shown");
+        }
+        // The input budget is read as the engine reports it, in the same grouping.
+        let input = ctl.snapshot().context.input_limit;
+        assert_eq!(setting(&info, "Contexte d’entrée"), tokens_text(input));
+        ctl.close().await;
     }
 }

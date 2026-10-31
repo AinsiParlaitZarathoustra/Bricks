@@ -45,3 +45,10 @@ export const readerFileRead = (request: ReaderFileRequest) =>
     line: request.line,
     endLine: request.endLine,
   })
+
+/**
+ * Reveals in the Finder a file of the reader of the open session, resolved like
+ * `readerFileRead`; a deleted file reveals its nearest existing folder.
+ */
+export const readerFileReveal = (sessionId: string, agentId: string | null, path: string) =>
+  call<void>('reader_file_reveal', { sessionId, agentId, path })

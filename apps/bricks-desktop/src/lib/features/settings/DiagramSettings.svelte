@@ -37,14 +37,17 @@
 	const LOOK_LABEL: Record<MermaidLook, string> = { classic: 'Classic', handDrawn: 'Hand drawn', neo: 'Neo' };
 	const THEMES = ['app', ...MERMAID_THEMES] as const;
 
-	const controls: { key: Exclude<keyof DiagramViewerSettings, 'followAppTheme'>; label: string }[] = [
+	type Control = Exclude<keyof DiagramViewerSettings, 'followAppTheme' | 'capabilitiesRevision'>;
+	const controls: { key: Control; label: string }[] = [
 		{ key: 'allowZoom', label: 'Zoom' },
 		{ key: 'allowPan', label: 'Déplacement' },
 		{ key: 'allowFullscreen', label: 'Plein écran' },
 		{ key: 'allowDownload', label: 'Téléchargement SVG' },
 		{ key: 'allowCopy', label: 'Copie de la source' },
 		{ key: 'allowTooltips', label: 'Infobulles' },
-		{ key: 'allowSelection', label: 'Sélection du texte' }
+		{ key: 'allowSelection', label: 'Sélection du texte' },
+		{ key: 'allowLinks', label: 'Liens' },
+		{ key: 'allowAnimations', label: 'Animations' }
 	];
 
 	const theme = $derived(diagramTheme(settings));
@@ -73,7 +76,7 @@
 		if (!look || look === settings.mermaid.look) return;
 		app.setPrefs({ diagrams: { ...settings, mermaid: { ...settings.mermaid, look } } });
 	}
-	function toggle(key: keyof DiagramViewerSettings, value: boolean) {
+	function toggle(key: Control, value: boolean) {
 		app.setPrefs({ diagrams: { ...settings, diagramViewer: { ...settings.diagramViewer, [key]: value } } });
 	}
 </script>

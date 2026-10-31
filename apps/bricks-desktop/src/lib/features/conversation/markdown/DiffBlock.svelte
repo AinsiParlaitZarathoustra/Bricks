@@ -74,8 +74,12 @@
           <span class="font-mono">patch</span>
         {/if}
         <span class="ml-auto tabular-nums">
-          <span class="text-diff-add">+{file.additions}</span>
-          <span class="text-diff-del">−{file.deletions}</span>
+          {#if file.additions > 0 || file.deletions === 0}
+            <span class="text-diff-add">+{file.additions}</span>
+          {/if}
+          {#if file.deletions > 0}
+            <span class="text-diff-del">−{file.deletions}</span>
+          {/if}
         </span>
       </div>
       <CollapsibleContent>

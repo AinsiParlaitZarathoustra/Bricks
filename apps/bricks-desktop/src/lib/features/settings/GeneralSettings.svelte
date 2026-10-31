@@ -8,6 +8,8 @@
 	import { unchosenPolicy } from '$lib/features/permissions/policy';
 	import { errorMessage, permissionsDefaultGet, permissionsDefaultSet } from '$lib/ipc/client';
 	import type { SessionPolicy } from '$lib/ipc/engine';
+	import { Switch } from '$lib/components/ui/switch';
+	import { app } from '$lib/state/app.svelte';
 
 	let policy = $state<SessionPolicy | null>(null);
 	let loadError = $state<string | null>(null);
@@ -61,6 +63,11 @@
 			</p>
 		{/if}
 	</section>
+
+	<label class="flex items-center justify-between gap-3 text-ui font-semibold text-foreground">
+		Maintenir l’ordinateur actif
+		<Switch checked={app.prefs.keep_awake} onCheckedChange={(on) => app.setPrefs({ keep_awake: on })} />
+	</label>
 
 	<DiagramSettings />
 	<AskTimerSettings />

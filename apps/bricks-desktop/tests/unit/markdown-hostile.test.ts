@@ -212,8 +212,15 @@ describe('KaTeX refuses what would make a link or a reference', () => {
 
 describe('Mermaid source, neutralized before Mermaid sees it', () => {
 	// Mermaid accepts `;` between statements: a statement after one starts no line.
-	it('(défense en profondeur) a click after a ";" statement separator is removed', () => {
+	it('(défense en profondeur) a callback after a ";" statement separator is removed, a web link is kept', () => {
 		expect(neutralizeMermaid('flowchart TD\nA-->B; click A call alert()')).not.toMatch(/click/)
-		expect(neutralizeMermaid('flowchart TD\nA-->B;click A href "https://x"')).not.toMatch(/click/)
+		expect(neutralizeMermaid('flowchart TD\nA-->B;click A href "https://x"')).toBe('flowchart TD\nA-->B;click A href "https://x"')
+		expect(neutralizeMermaid('flowchart TD\nA-->B;click A href "https://x"; click B call alert()')).not.toMatch(/call/)
+	})
+
+	it('keeps no link that runs or loads something', () => {
+		for (const url of ['javascript:alert(1)', 'data:text/html,x', 'file:///etc/passwd', 'vbscript:x', '//evil.test']) {
+			expect(neutralizeMermaid(`flowchart TD\nA-->B\nclick A href "${url}"`)).not.toMatch(/click/)
+		}
 	})
 })

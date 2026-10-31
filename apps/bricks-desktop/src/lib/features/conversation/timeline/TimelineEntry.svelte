@@ -10,9 +10,12 @@
   import RunEndCard from './RunEndCard.svelte'
   import ResponseCopy from './ResponseCopy.svelte'
   import AgentLine from './AgentLine.svelte'
-  import WorkingLine from './WorkingLine.svelte'
 
-  let { item, conversation }: { item: TimelineItem; conversation: Conversation } = $props()
+  let {
+    item,
+    conversation,
+    answer = false,
+  }: { item: TimelineItem; conversation: Conversation; answer?: boolean } = $props()
 
   /** The response this item ends, when it is complete and has text: its copy action follows the item. */
   const response = $derived(conversation.responseByAnchor(item.id))
@@ -20,12 +23,8 @@
 
 {#if item.kind === 'user'}
   <UserMessage {item} {conversation} />
-  <!-- The run at work shows its time right under the message that started it. -->
-  {#if item.runId && item.runId === conversation.runningRunId}
-    <WorkingLine {conversation} />
-  {/if}
 {:else if item.kind === 'assistant'}
-  <AssistantMessage {item} {conversation} />
+  <AssistantMessage {item} {conversation} part={answer ? 'answer' : 'all'} />
 {:else if item.kind === 'tool'}
   <ToolRow {item} {conversation} />
 {:else if item.kind === 'question'}

@@ -119,6 +119,8 @@ export const appInfo = () => call<AppInfo>('app_info')
 export const modelsList = () => call<ModelChoice[]>('models_list')
 export const prefsGet = () => call<Preferences>('prefs_get')
 export const prefsSet = (prefs: Preferences) => call<void>('prefs_set', { prefs })
+/** Keeps the computer from sleeping, or lets it sleep again. */
+export const keepAwakeSet = (active: boolean) => call<void>('keep_awake_set', { active })
 /** Shows the light or the dark icon in the Dock (macOS). */
 export const appIconShow = (dark: boolean) => call<void>('app_icon_show', { dark })
 export const permissionsDefaultGet = () => call<PermissionsDefault>('permissions_default_get')

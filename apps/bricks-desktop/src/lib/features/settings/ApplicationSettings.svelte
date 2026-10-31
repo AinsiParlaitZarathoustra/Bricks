@@ -22,7 +22,7 @@
 			</dl>
 		</SettingsGroup>
 
-		<SettingsGroup title="Dossiers" description="Où Bricks range sa configuration et ses conversations.">
+		<SettingsGroup title="Dossiers">
 			<div class="flex flex-col gap-2 p-3">
 				<span class="text-ui text-muted-foreground" id="settings-bricks-home-label">Dossier Bricks</span>
 				<div role="group" aria-labelledby="settings-bricks-home-label">

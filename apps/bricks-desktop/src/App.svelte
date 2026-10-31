@@ -10,8 +10,11 @@
   import TopBar from '$lib/layout/TopBar.svelte'
   import EmptyState from '$lib/layout/EmptyState.svelte'
   import type { ShellLayout } from '$lib/layout/types'
+  import StartSplash from '$lib/layout/StartSplash.svelte'
+  import { blockReload } from '$lib/layout/reload'
   import { initTheme, setTheme, theme } from '$lib/theme/theme.svelte'
-  import { appIconShow } from '$lib/ipc/client'
+  import { appIconShow, errorMessage, keepAwakeSet } from '$lib/ipc/client'
+  import { keepAwakeWanted } from '$lib/state/keepAwake'
   import { app } from '$lib/state/app.svelte'
   import NavigationPanel from '$lib/features/navigation/NavigationPanel.svelte'
   import ConversationView from '$lib/features/conversation/ConversationView.svelte'
@@ -69,7 +72,8 @@
   })
 
   onMount(() => {
-    const disposeTheme = initTheme('system')
+    // The theme last shown holds until the preferences say which one is chosen.
+    const disposeTheme = initTheme(theme.mode)
     const unlistenResize = watchFullscreen()
     app.init().then(() => {
       const p = app.prefs
@@ -87,6 +91,19 @@
       void unlistenResize.then((unlisten) => unlisten())
       app.dispose()
     }
+  })
+
+  // The computer stays awake while the preference or a running conversation asks for it.
+  let keptAwake = false
+  $effect(() => {
+    if (!app.ready) return
+    const wanted = keepAwakeWanted(app.prefs.keep_awake, app.conversations.values())
+    if (wanted === keptAwake) return
+    keptAwake = wanted
+    keepAwakeSet(wanted).catch((e) => {
+      keptAwake = !wanted
+      toast.error(errorMessage(e))
+    })
   })
 
   $effect(() => {
@@ -138,9 +155,11 @@
   }
 </script>
 
+<svelte:window onkeydown={import.meta.env.PROD ? blockReload : undefined} />
+
 <Tooltip.Provider>
   {#if !app.ready}
-    <div class="grid h-screen place-items-center text-sm text-muted-foreground">Démarrage de Bricks…</div>
+    <StartSplash />
   {:else if app.startError}
     <div class="grid h-screen place-items-center p-6">
       <EmptyState title="Bricks n’a pas pu démarrer" description={app.startError} />

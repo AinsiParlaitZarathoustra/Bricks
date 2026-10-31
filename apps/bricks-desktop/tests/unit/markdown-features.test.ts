@@ -366,7 +366,9 @@ describe('mermaid rendering', () => {
     await renderMermaid('%%{init:{"securityLevel":"loose"}}%%\nflowchart TD\nA-->B\nclick A "https://evil.test"', { theme: 'forest', look: 'handDrawn', fontFamily: 'sans-serif', id: 'm-sandbox-config' })
     expect(mermaidApi.initialize).toHaveBeenLastCalledWith(expect.objectContaining({ securityLevel: 'sandbox', theme: 'forest', look: 'handDrawn', startOnLoad: false, htmlLabels: false }))
     const source = (mermaidApi.render.mock.calls.at(-1) as unknown as [string, string])[1]
-    expect(source).not.toMatch(/securityLevel|click A|%%\{/)
+    expect(source).not.toMatch(/securityLevel|%%\{/)
+    // A web link is the one interaction kept.
+    expect(source).toContain('click A "https://evil.test"')
   })
 
   it('applies the security level chosen in the settings, and the app colours for the app theme', async () => {

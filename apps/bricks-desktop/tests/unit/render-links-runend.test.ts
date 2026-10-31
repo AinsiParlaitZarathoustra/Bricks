@@ -8,6 +8,7 @@ import UserMessage from '../../src/lib/features/conversation/timeline/UserMessag
 import RunEndCard from '../../src/lib/features/conversation/timeline/RunEndCard.svelte';
 import { Conversation, type RunEndItem, type UserItem } from '../../src/lib/state/conversation.svelte';
 import { EnvelopeFeed, MODEL, PROJECT_ID, T0, openedSession } from './fixtures';
+import type { ApprovalRequest, Termination } from '../../src/lib/ipc/engine';
 
 /** Narrow no-break spaces from fr-FR grouping are in the product; the tests compare plain text. */
 const plain = (s: string) => s.replace(/[  ]/g, ' ');
@@ -89,7 +90,13 @@ describe('user message: web addresses become links, the rest stays text', () => 
 
 /** A conversation fed with the envelopes of one run, as the engine streams them. */
 function runOf(
-	finish: { outcome: 'succeeded' | 'failed' | 'cancelled' | 'incomplete'; error?: string; at: number },
+	finish: {
+		outcome: 'succeeded' | 'failed' | 'cancelled' | 'incomplete';
+		error?: string;
+		at: number;
+		termination?: Termination;
+		approvals?: ApprovalRequest[];
+	},
 	edits: Array<{ path: string; kind: 'create' | 'modify' | 'delete'; added: number; removed: number; binary?: boolean }>,
 ) {
 	const feed = new EnvelopeFeed({ runId: 'run-1' });
@@ -113,6 +120,8 @@ function runOf(
 				error: finish.error,
 				text: 'Fait.',
 				turns: 3,
+				termination: finish.termination,
+				approvals_unsatisfied: finish.approvals ?? [],
 			},
 			{ at: finish.at },
 		),
@@ -122,68 +131,87 @@ function runOf(
 	return { conv, item };
 }
 
-function card(conv: Conversation, item: RunEndItem): string {
-	return textOf(render(RunEndCard, { props: { item, conversation: conv } }).body, ' ');
+/** The markup of the card. */
+function markup(conv: Conversation, item: RunEndItem): string {
+	return render(RunEndCard, { props: { item, conversation: conv } }).body;
 }
 
-/**
- * The header line only: the card text before the cost line, the reason, the error and the
- * two groups (« N fichiers modifiés », « N commandes exécutées »).
- */
-function summaryLine(conv: Conversation, item: RunEndItem): string {
-	return card(conv, item)
-		.split(/Coût de la réponse|Motif :|Erreur :|\d+ fichiers? modifiés?|\d+ commandes? exécutées?/)[0]
-		.trim();
+/** The card's visible text: the spoken totals of DiffStat (sr-only) are left out. */
+function visibleCard(conv: Conversation, item: RunEndItem): string {
+	return textOf(markup(conv, item).replace(/<span class="sr-only">[^]*?<\/span>/g, ''), ' ');
 }
 
-/** The files group trigger, with the spoken totals of DiffStat removed. */
-function filesGroup(conv: Conversation, item: RunEndItem): string | null {
-	const m = card(conv, item).match(/\d+ fichiers? modifiés?[^]*$/);
-	if (!m) return null;
-	return m[0].replace(/\s*\d+ ajouts?, \d+ suppressions?/, '').split(/\d+ commandes? exécutées?/)[0].trim();
-}
+const APPROVAL: ApprovalRequest = {
+	approval_id: 'ap-1',
+	tool_call_id: 'tc-9',
+	tool: 'Bash',
+	level: 'execute',
+	description: 'Lancer les tests',
+	input: { command: 'npm test' },
+	preview: null,
+};
 
-describe('run-end card: one compact header and closed groups from the real run data', () => {
-	it('reads « Terminé · A travaillé 762ms » with no turn count, no model id and no « Durée : » prefix', () => {
+describe('run-end card: a finished run shows its reason, its error and the files it changed', () => {
+	it('renders nothing for a run that edited no file and gave no reason: its state and time are in the work bar', () => {
+		for (const outcome of ['succeeded', 'cancelled'] as const) {
+			const { conv, item } = runOf({ outcome, at: T0 + 762 }, []);
+			expect(visibleCard(conv, item)).toBe('');
+		}
+	});
+
+	it('lists the edited files, open by default, with their counts and folder, and no time, model or turn count', () => {
 		const { conv, item } = runOf({ outcome: 'succeeded', at: T0 + 762 }, [
 			{ path: 'src/calcul.ts', kind: 'modify', added: 120, removed: 24 },
 		]);
-		const text = card(conv, item);
-		expect(summaryLine(conv, item)).toBe('Terminé · A travaillé 762ms');
-		expect(filesGroup(conv, item)).toMatch(/^1 fichier modifié \+120 −24 calcul\.ts/);
-		// The group is closed by default.
-		expect(render(RunEndCard, { props: { item, conversation: conv } }).body).toContain('aria-expanded="false"');
-		expect(text).not.toContain('Durée');
+		const text = visibleCard(conv, item);
+		expect(text).toContain('1 fichier modifié +120 −24');
+		expect(text).toContain('calcul.ts src/');
+		expect(text).not.toMatch(/A travaillé|762ms|Terminé|Durée/);
 		expect(text).not.toContain(MODEL);
-		expect(text).not.toMatch(/\btours?\b/i);
-		expect(text).not.toMatch(/\bturns?\b/i);
+		expect(text).not.toMatch(/\bturns?\b|\btours?\b/i);
+		expect(markup(conv, item)).toContain('aria-expanded="true"');
 	});
 
-	it('sums the text edits of the run in the files group, a binary file adding no counts', () => {
+	it('gives each file a button to review its changes and one to show it in the Finder, and no undo', () => {
+		const { conv, item } = runOf({ outcome: 'succeeded', at: T0 + 762 }, [
+			{ path: 'src/calcul.ts', kind: 'modify', added: 120, removed: 24 },
+		]);
+		const html = markup(conv, item);
+		expect(html).toContain('aria-label="Voir les modifications de calcul.ts"');
+		expect(html).toContain('aria-label="Afficher calcul.ts dans le Finder"');
+		expect(html).not.toMatch(/Annuler|Undo|Rétablir/i);
+	});
+
+	it('never shows a zero beside a real count, in the rows or in the total', () => {
+		const { conv, item } = runOf({ outcome: 'succeeded', at: T0 + 762 }, [
+			{ path: 'new.ts', kind: 'create', added: 12, removed: 0 },
+			{ path: 'old.ts', kind: 'delete', added: 0, removed: 3 },
+		]);
+		const text = visibleCard(conv, item);
+		expect(text).toContain('2 fichiers modifiés +12 −3');
+		expect(text).not.toMatch(/−0|\+0\b/);
+	});
+
+	it('sums the text edits in the files group, and a binary file adds no count', () => {
 		const { conv, item } = runOf({ outcome: 'succeeded', at: T0 + 900 }, [
 			{ path: 'a.ts', kind: 'modify', added: 2, removed: 1 },
 			{ path: 'img.png', kind: 'create', added: 0, removed: 0, binary: true },
 		]);
-		expect(summaryLine(conv, item)).toBe('Terminé · A travaillé 900ms');
-		expect(filesGroup(conv, item)).toMatch(/^2 fichiers modifiés \+2 −1 a\.ts/);
-		expect(card(conv, item)).toContain('img.png binaire');
+		const text = visibleCard(conv, item);
+		expect(text).toContain('2 fichiers modifiés +2 −1');
+		expect(text).toContain('img.png binaire');
 	});
 
-	it('shows no files group when the run edited nothing', () => {
-		const { conv, item } = runOf({ outcome: 'succeeded', at: T0 + 40 }, []);
-		expect(summaryLine(conv, item)).toBe('Terminé · A travaillé 40ms');
-		expect(filesGroup(conv, item)).toBeNull();
+	it('shows the error of a failed run as its only line: the state is in the work bar', () => {
+		const { conv, item } = runOf({ outcome: 'failed', error: 'quota dépassé', at: T0 + 120 }, []);
+		expect(visibleCard(conv, item)).toBe('Erreur : quota dépassé');
 	});
 
-	it('keeps the failed state and its error, and the cancelled state without a second sentence', () => {
-		const failed = runOf({ outcome: 'failed', error: 'quota dépassé', at: T0 + 120 }, []);
-		const failedText = card(failed.conv, failed.item);
-		expect(summaryLine(failed.conv, failed.item)).toBe('Échec · A travaillé 120ms');
-		expect(failedText).toContain('Erreur : quota dépassé');
-
-		const cancelled = runOf({ outcome: 'cancelled', at: T0 + 120 }, []);
-		const cancelledText = card(cancelled.conv, cancelled.item);
-		expect(summaryLine(cancelled.conv, cancelled.item)).toBe('Annulé · A travaillé 120ms');
-		expect(cancelledText).not.toMatch(/Erreur|Motif/);
+	it('gives the reason of an incomplete run and the approvals it never got', () => {
+		const { conv, item } = runOf(
+			{ outcome: 'incomplete', at: T0 + 120, termination: { kind: 'no_progress', repeats: 3 }, approvals: [APPROVAL] },
+			[],
+		);
+		expect(visibleCard(conv, item)).toBe('Motif : aucun progrès détecté (3 répétitions). 1 autorisation non accordée');
 	});
 });

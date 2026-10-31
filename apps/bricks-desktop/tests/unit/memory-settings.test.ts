@@ -147,9 +147,10 @@ describe('the retired memories', () => {
 		expect(settings).toContain('{#each overview.retired as r (r.project_id)}');
 	});
 
-	it('says the former store is kept as it is, when it exists', () => {
-		expect(settings).toContain('{#if overview?.legacy_store}');
-		expect(settings).toContain('L’ancienne mémoire (memory.grafeo) est conservée telle quelle, sans migration.');
+	it('does not show the former store note any more, and reads no former store', () => {
+		expect(settings).not.toContain('L’ancienne mémoire (memory.grafeo) est conservée telle quelle, sans migration.');
+		expect(settings).not.toContain('memory.grafeo');
+		expect(settings).not.toContain('legacy_store');
 	});
 });
 

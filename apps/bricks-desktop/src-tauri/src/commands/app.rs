@@ -50,6 +50,13 @@ pub fn app_icon_show(app: tauri::AppHandle, dark: bool) -> IpcResult<()> {
     Ok(())
 }
 
+/// Keeps the computer from sleeping (`true`) or lets it sleep again.
+#[tauri::command]
+pub fn keep_awake_set(keep: State<'_, crate::services::keep_awake::KeepAwake>, active: bool) -> IpcResult<()> {
+    keep.set(active)
+        .map_err(|e| crate::services::io_error("maintien de l’ordinateur actif", e))
+}
+
 #[tauri::command]
 pub async fn prefs_set(state: State<'_, AppState>, prefs: Preferences) -> IpcResult<()> {
     save_preferences(&state, prefs).await

@@ -8,7 +8,17 @@
   import type { FileReference, MarkdownHeading } from '../markdown/types'
   import MarkdownView from '../markdown/MarkdownView.svelte'
 
-  let { item, conversation }: { item: AssistantItem; conversation?: Conversation } = $props()
+  /**
+   * `reasoning`: only the reasoning, among the steps of the run; `answer`: only
+   * the text, when it is the run's answer (its reasoning stays with the steps).
+   */
+  type Part = 'all' | 'reasoning' | 'answer'
+
+  let {
+    item,
+    conversation,
+    part = 'all',
+  }: { item: AssistantItem; conversation?: Conversation; part?: Part } = $props()
 
   let reasoningOpen = $state(false)
   let tocOpen = $state(false)
@@ -31,7 +41,8 @@
   /** A table of contents only helps a finished answer with several headings. */
   const showToc = $derived(!item.streaming && headings.length >= 3)
 
-  const hasReasoning = $derived(item.thinking.trim().length > 0)
+  const hasReasoning = $derived(part !== 'answer' && item.thinking.trim().length > 0)
+  const hasText = $derived(part !== 'reasoning')
 
   function openFile(ref: FileReference) {
     const projectId = conversation?.projectId
@@ -75,7 +86,7 @@
     </Collapsible>
   {/if}
 
-  {#if showToc}
+  {#if hasText && showToc}
     <Collapsible bind:open={tocOpen}>
       <CollapsibleTrigger
         class="group inline-flex w-fit items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
@@ -103,7 +114,9 @@
     </Collapsible>
   {/if}
 
-  {#if item.text}
+  {#if !hasText}
+    <!-- The answer's text follows the steps. -->
+  {:else if item.text}
     <MarkdownView
       source={item.streaming ? throttled.value : item.text}
       streaming={item.streaming}
