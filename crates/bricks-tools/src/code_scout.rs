@@ -74,6 +74,8 @@ struct Input {
     max_results: Option<usize>,
     budget_tokens: Option<u64>,
     compiler_output: Option<String>,
+    /// Another workspace to read (an agent's worktree), absolute.
+    workspace: Option<String>,
 }
 
 /// At most this many compiler locations are explained per call.
@@ -116,7 +118,8 @@ impl Tool for CodeScoutTool {
                 "context": { "type": "string", "enum": ["auto", "none", "lines", "block", "function", "type"] },
                 "max_results": { "type": "integer" },
                 "budget_tokens": { "type": "integer", "description": "Context budget (capped by configuration)." },
-                "compiler_output": { "type": "string", "description": "Compiler output (cargo JSON preferred): explain the first locations it names." }
+                "compiler_output": { "type": "string", "description": "Compiler output (cargo JSON preferred): explain the first locations it names." },
+                "workspace": { "type": "string", "description": "Another agent's worktree to read (absolute; Messagent members lists them). Default: yours." }
             }
         })
     }
@@ -126,8 +129,29 @@ impl Tool for CodeScoutTool {
             Ok(i) => i,
             Err(e) => return e,
         };
-        let engine = engine_for(ctx);
-        let mut requester = Requester::new("agent", &ctx.working_dir);
+        let other = match input
+            .workspace
+            .as_deref()
+            .map(str::trim)
+            .filter(|w| !w.is_empty())
+        {
+            None => None,
+            Some(w) => match std::fs::canonicalize(w) {
+                Ok(dir) if dir.is_dir() => Some(dir),
+                _ => return ToolResult::error(format!("`workspace`: `{w}` is not a directory")),
+            },
+        };
+        let (engine, root) = match &other {
+            None => (engine_for(ctx), ctx.working_dir.clone()),
+            Some(dir) => {
+                let reg = SemanticRegistry::global();
+                let engine = reg
+                    .existing_for(dir)
+                    .unwrap_or_else(|| reg.engine_for(dir, &SemanticConfig::default()));
+                (engine, dir.clone())
+            }
+        };
+        let mut requester = Requester::new("agent", &root);
         if let Some(c) = ctx.extensions.get::<RunCancel>() {
             requester = requester.with_cancel(c.0.clone());
         }
@@ -306,5 +330,47 @@ mod tests {
             .await;
         assert!(r.content.contains("heuristic"), "{}", r.content);
         assert!(r.content.contains("intent: understand"), "{}", r.content);
+    }
+
+    /// `workspace` must name a folder: a file or a missing path is refused
+    /// before any engine is touched.
+    #[tokio::test]
+    async fn a_workspace_that_is_not_a_directory_is_refused() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("a.rs"), "fn a() {}\n").unwrap();
+        let c = ctx(d.path());
+        for workspace in [d.path().join("a.rs"), d.path().join("missing")] {
+            let r = CodeScoutTool
+                .execute(
+                    serde_json::json!({"query": "a", "workspace": workspace.display().to_string()}),
+                    &c,
+                )
+                .await;
+            assert!(r.is_error, "{}", r.content);
+            assert!(r.content.contains("is not a directory"), "{}", r.content);
+        }
+    }
+
+    /// A folder given as `workspace` is read with its own engine, not the
+    /// caller's folder: the definition found is the one in that folder.
+    #[tokio::test]
+    async fn a_workspace_is_read_instead_of_the_callers_folder() {
+        let caller = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        std::fs::write(target.path().join("a.rs"), "pub fn alpha() -> u32 { 1 }\n").unwrap();
+        // An engine for that folder already exists (LSP off, no server started).
+        let mut cfg = SemanticConfig::default();
+        cfg.lsp.enabled = false;
+        let canonical = std::fs::canonicalize(target.path()).unwrap();
+        let _ = SemanticRegistry::global().engine_for(&canonical, &cfg);
+        let c = ctx(caller.path());
+        let r = CodeScoutTool
+            .execute(
+                serde_json::json!({"query": "alpha", "workspace": target.path().display().to_string()}),
+                &c,
+            )
+            .await;
+        assert!(!r.is_error, "{}", r.content);
+        assert!(r.content.contains("a.rs:1:8 · definition"), "{}", r.content);
     }
 }

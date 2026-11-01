@@ -23,7 +23,7 @@
   import PermissionChoice from '$lib/features/permissions/PermissionChoice.svelte'
   import ContextPanel from '$lib/features/context/ContextPanel.svelte'
   import PlusMenu from '$lib/features/context/PlusMenu.svelte'
-  import AgentInspectorHost from '$lib/features/agents/AgentInspectorHost.svelte'
+  import AgentBranch from '$lib/features/agents/AgentBranch.svelte'
   import ChangesPanel from '$lib/features/changes/ChangesPanel.svelte'
   import ReaderPanel from '$lib/features/reader/ReaderPanel.svelte'
   import { reader } from '$lib/state/reader.svelte'
@@ -90,6 +90,17 @@
       disposeTheme()
       void unlistenResize.then((unlisten) => unlisten())
       app.dispose()
+    }
+  })
+
+  // The sub-agent whose branch is shown; another conversation closes it.
+  const branchAgent = $derived(ui.agentId ? (app.current?.agents.get(ui.agentId) ?? null) : null)
+  let branchSession: string | null = null
+  $effect(() => {
+    const id = app.current?.sessionId ?? null
+    if (id !== branchSession) {
+      branchSession = id
+      ui.closeAgent()
     }
   })
 
@@ -189,7 +200,15 @@
         <NavigationPanel />
       {/snippet}
       {#snippet center()}
-        <div class="flex h-full min-h-0 flex-col">
+        {#if app.current && branchAgent}
+          <div class="flex h-full min-h-0 flex-col">
+            {#key branchAgent.id}
+              <AgentBranch conversation={app.current} agent={branchAgent} />
+            {/key}
+          </div>
+        {/if}
+        <!-- Kept mounted under a branch: the conversation, its scroll and its draft wait for the way back. -->
+        <div class={['flex h-full min-h-0 flex-col', branchAgent && 'hidden']}>
           <div class="min-h-0 flex-1">
             {#if app.current}
               {#key app.current.sessionId}
@@ -228,6 +247,5 @@
   <SettingsDialog bind:open={ui.settingsOpen} />
   <FolderMissingDialog />
   <InspectorHost />
-  <AgentInspectorHost />
   <Toaster richColors />
 </Tooltip.Provider>

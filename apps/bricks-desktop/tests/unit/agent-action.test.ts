@@ -11,7 +11,7 @@ function tool(name: string, input: unknown, status: AgentToolCall['status'] = 'r
 }
 
 function agent(state: InstanceState, tools: AgentToolCall[] = [], overrides: Partial<AgentInfo> = {}): AgentInfo {
-	return { id: 'ag-1', spawn: spawnInfo(), state, spawnedAt: T0, tools, execution: 1, ...overrides };
+	return { id: 'ag-1', spawn: spawnInfo(), state, spawnedAt: T0, tools, execution: 1, log: [], ...overrides };
 }
 
 describe('agentAction: what a running sub-agent does now', () => {

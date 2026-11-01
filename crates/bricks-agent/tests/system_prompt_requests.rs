@@ -102,7 +102,7 @@ impl ProjectLoader for Loader {
             .map(|t| t.name().to_string())
             .collect();
         if self.agents {
-            tools.extend(["Agent", "Agents", "AgentControl", "AgentProfiles"].map(String::from));
+            tools.extend(["Agent", "AgentControl", "AgentProfiles", "Messagent"].map(String::from));
         }
         let system = build_system_prompt(&SystemPromptOptions {
             is_non_interactive: true,
@@ -278,7 +278,7 @@ async fn without_delegation_tools_the_bullet_is_absent_from_the_request() {
     assert!(
         !r.tools
             .iter()
-            .any(|t| t.name == "Agent" || t.name == "Agents")
+            .any(|t| t.name == "Agent")
     );
     let s = system(r);
     assert!(s.starts_with(&reference(true, false)), "{s}");
@@ -307,11 +307,11 @@ fn a_child_prompt_without_delegation_tools_has_no_delegation_bullet() {
     assert_eq!(without.matches(general.instructions.trim()).count(), 1);
     let with = bricks_agent::agents::spawn::child_system_prompt(
         &general,
-        &["Read".to_string(), "Agents".to_string()],
+        &["Read".to_string(), "Agent".to_string()],
         wd,
     );
     assert!(with.starts_with(&bricks_agent::system_prompt::bricks_foundation(&tools(&[
-        "Read", "Agents"
+        "Read", "Agent"
     ]))));
     assert_eq!(with.matches("## Délégation").count(), 1);
     assert_eq!(with.matches("## Your role").count(), 1);

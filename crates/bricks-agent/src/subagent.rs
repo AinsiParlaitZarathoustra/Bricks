@@ -20,7 +20,7 @@ use tokio_util::sync::CancellationToken;
 
 /// Tool names that start a sub-agent or control one. A child never
 /// receives them.
-pub const DELEGATION_TOOLS: &[&str] = &["Agent", "Agents", "AgentControl", "AgentProfiles"];
+pub const DELEGATION_TOOLS: &[&str] = &["Agent", "AgentControl", "AgentProfiles"];
 
 /// The current run's cancellation, put in the tool context by the runner
 /// at the start of each run: children are cancelled with it.

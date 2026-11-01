@@ -80,8 +80,9 @@ function toolAction(name: string, input: unknown): string {
 		case 'WebSearch':
 			return 'Recherche sur le web';
 		case 'Agent':
-		case 'Agents':
 			return 'Délégation à un sous-agent';
+		case 'Messagent':
+			return 'Message à l’équipe';
 		case 'AgentControl':
 			return 'Suivi de ses sous-agents';
 		default:
@@ -146,8 +147,6 @@ export function controlDoneLabel(action: string): string {
 	switch (action) {
 		case 'cancel':
 			return 'Arrêt demandé.';
-		case 'message':
-			return 'Message transmis : l’agent le lit à sa prochaine étape.';
 		case 'apply_changes':
 			return 'Modifications appliquées.';
 		case 'discard_changes':
@@ -162,8 +161,6 @@ export function controlFailedLabel(action: string): string {
 	switch (action) {
 		case 'cancel':
 			return 'Arrêt impossible';
-		case 'message':
-			return 'Message non transmis';
 		case 'apply_changes':
 			return 'Application impossible';
 		case 'discard_changes':

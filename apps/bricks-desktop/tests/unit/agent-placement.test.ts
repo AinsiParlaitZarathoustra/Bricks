@@ -16,7 +16,7 @@ function startRun(conv: Conversation, feed: EnvelopeFeed) {
 	conv.apply(feed.next({ type: 'run_started', prompt: 'Cherche', attachments: [], model: 'anthropic/claude-test' }, { at: T0 }));
 }
 
-function toolStarted(conv: Conversation, feed: EnvelopeFeed, toolCallId: string, name = 'Agents') {
+function toolStarted(conv: Conversation, feed: EnvelopeFeed, toolCallId: string, name = 'Agent') {
 	conv.apply(feed.next({ type: 'tool_started', tool_call_id: toolCallId, name, input: {} }));
 }
 

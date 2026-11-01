@@ -704,7 +704,7 @@ fn the_session_offers_the_native_agent_tools_and_never_delegate() {
         .iter()
         .filter_map(|t| t["function"]["name"].as_str().map(str::to_string))
         .collect();
-    for want in ["Agent", "Agents", "AgentControl", "AgentProfiles"] {
+    for want in ["Agent", "AgentControl", "AgentProfiles", "Messagent"] {
         assert!(
             names.iter().any(|n| n == want),
             "{want} is offered: {names:?}"

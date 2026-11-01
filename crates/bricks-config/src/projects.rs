@@ -50,7 +50,7 @@ pub fn announced_tools(bricks: &BricksConfig) -> Vec<String> {
     names.push("TodoWrite".to_string());
     if bricks.agents.enabled && !names.iter().any(|n| n == "Agent") {
         names.extend(
-            ["Agent", "Agents", "AgentControl", "AgentProfiles", "SendMessage"].map(String::from),
+            ["Agent", "AgentControl", "AgentProfiles", "Messagent"].map(String::from),
         );
     }
     names
@@ -109,15 +109,14 @@ mod tests {
         for t in [
             "CodeScout",
             "Agent",
-            "Agents",
             "AgentControl",
             "AgentProfiles",
-            "SendMessage",
+            "Messagent",
         ] {
             assert!(names.iter().any(|n| n == t), "{t}");
         }
         b.agents.enabled = false;
         let names = announced_tools(&b);
-        assert!(!names.iter().any(|n| n.starts_with("Agent") || n == "SendMessage"));
+        assert!(!names.iter().any(|n| n.starts_with("Agent") || n == "Messagent"));
     }
 }

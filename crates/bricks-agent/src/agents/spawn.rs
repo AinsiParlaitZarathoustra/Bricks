@@ -7,7 +7,6 @@
 //! request exists. A child is a regular [`Agent`] running the regular loop:
 //! there is no second agentic loop.
 
-use super::admission::writers_for;
 use super::profile::{
     AgentProfile, Isolation, ModelPref, ProfileScope, ProfileSource, ReasoningPref,
 };
@@ -219,7 +218,7 @@ pub struct SpawnInfo {
     pub description: Option<String>,
     /// UTC time of creation (RFC 3339), for records only.
     pub created_at: String,
-    /// Position in an `Agents` batch.
+    /// Position among the missions of one `Agent` call.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub batch_index: Option<usize>,
     #[serde(default)]
@@ -366,6 +365,8 @@ pub enum SubAgentEvent {
         #[serde(default = "first_execution")]
         execution: u32,
     },
+    /// What the child wrote in one turn, whole (before its tool calls).
+    Text { agent_id: String, text: String },
     ToolStarted {
         agent_id: String,
         tool_call_id: String,
@@ -729,7 +730,7 @@ pub type ChildTools = Arc<dyn Fn() -> Vec<Box<dyn Tool>> + Send + Sync>;
 pub struct BatchOptions {
     pub background: bool,
     pub fail_fast: bool,
-    /// Called as `Agents` (children carry their position).
+    /// Several missions in one call (children carry their position).
     pub batch: bool,
 }
 
@@ -1186,9 +1187,17 @@ impl AgentSpawner {
 
         let mut receivers = Vec::new();
         let mut handles_info = Vec::new();
-        let mut ids = Vec::new();
+        let mut ids: Vec<String> = Vec::new();
         for (i, (p, iso)) in prepared.into_iter().zip(isolations).enumerate() {
-            let agent_id = format!("agent_{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
+            let agent_id = match self.runtime.allocate_id() {
+                Ok(id) => id,
+                Err(e) => {
+                    for id in &ids {
+                        self.runtime.cancel(id);
+                    }
+                    return Err(SpawnError::Refused(format!("{e}.")));
+                }
+            };
             let reasoning = (p.resolved.reasoning.applied != "(none)")
                 .then(|| p.resolved.reasoning.applied.clone());
             let info = SpawnInfo {
@@ -1206,7 +1215,7 @@ impl AgentSpawner {
                     Isolation::Worktree => "worktree".into(),
                     _ => "shared".into(),
                 },
-                task: shorten(p.req.task.trim(), 200).0,
+                task: shorten(p.req.task.trim(), 4_000).0,
                 description: p.req.description.clone().filter(|d| !subagent::is_blank(d)),
                 created_at: now_rfc3339(),
                 batch_index: opts.batch.then_some(i),
@@ -1380,7 +1389,7 @@ impl AgentSpawner {
             .map(|t| t.name().to_string())
             .collect();
         available.extend(
-            ["Agent", "Agents", "AgentControl", "AgentProfiles", "SendMessage"].map(String::from),
+            ["Agent", "AgentControl", "AgentProfiles", "Messagent"].map(String::from),
         );
         if let Some(missing) = launch.tools.iter().find(|t| !available.contains(t)) {
             return Err(SpawnError::Refused(format!(
@@ -1622,67 +1631,25 @@ impl AgentSpawner {
             }
         };
 
-        // The shared workspace: one writer at a time.
-        let mut writer = None;
-        if iso == Isolation::Shared {
-            self.set_state(&sink, &id, InstanceState::WaitingAdmission, None);
-            let s3 = sink.clone();
-            let id3 = id.clone();
-            let this3 = Arc::clone(&self);
-            // The same admission window as a slot: a writer that never
-            // leaves does not keep this child (and its slot) forever.
-            let window = self.runtime.scheduler.limits.admission_timeout;
-            let waited = tokio::time::timeout(window, writers_for(&cwd)
-                .acquire(&id, &cancel, move |holder| {
-                    this3.emit(
-                        &s3,
-                        SubAgentEvent::State {
-                            agent_id: id3.clone(),
-                            state: InstanceState::WaitingAdmission,
-                            reason: Some(format!(
-                                "another writer is active in this workspace ({holder})"
-                            )),
-                            execution: this3.runtime.execution(&id3).unwrap_or(1),
-                        },
-                    );
-                }))
-                .await;
-            let g = match waited {
-                Ok(g) => g,
-                Err(_) => {
-                    drop(permit);
-                    return fail(
-                        &self,
-                        &info,
-                        "failed",
-                        format!(
-                            "AgentAdmissionTimeout: the workspace stayed held by another writer \
-                             for {} ms ([agents] admission_timeout_ms)",
-                            window.as_millis()
-                        ),
-                    );
-                }
-            };
-            match g {
-                Some(g) => writer = Some((cwd.clone(), g)),
-                None => {
-                    drop(permit);
-                    return fail(
-                        &self,
-                        &info,
-                        "cancelled",
-                        "cancelled while waiting for the workspace".into(),
-                    );
-                }
-            }
-        }
-        let lease = super::runtime::ActivityLease::new(
-            Arc::clone(&self.runtime.scheduler),
-            id.clone(),
-            permit,
-            writer,
-            cancel.clone(),
-        );
+        // The shared workspace: one writer at a time, from its first writing
+        // call (dispatch.rs); a child that only reads holds nothing there.
+        let lease = if iso == Isolation::Shared {
+            super::runtime::ActivityLease::shared(
+                Arc::clone(&self.runtime.scheduler),
+                id.clone(),
+                permit,
+                cwd.clone(),
+                cancel.clone(),
+            )
+        } else {
+            super::runtime::ActivityLease::new(
+                Arc::clone(&self.runtime.scheduler),
+                id.clone(),
+                permit,
+                None,
+                cancel.clone(),
+            )
+        };
         self.set_state(&sink, &id, InstanceState::Starting, None);
 
         let applied_reasoning = reasoning.clone();
@@ -1831,7 +1798,34 @@ impl AgentSpawner {
         let fwd_sink = sink.clone();
         let forward = tokio::spawn(async move {
             let mut files: Vec<String> = Vec::new();
+            // The text of the turn in progress, sent whole before what follows it.
+            let mut text = String::new();
+            let send = |e: SubAgentEvent| {
+                if rt.has_session_sink() {
+                    rt.emit(AgentEvent::SubAgent(e));
+                } else if let Some(s) = &fwd_sink {
+                    (s.0)(AgentEvent::SubAgent(e));
+                }
+            };
+            let flush = |text: &mut String| {
+                let t = std::mem::take(text);
+                (!t.trim().is_empty()).then(|| SubAgentEvent::Text {
+                    agent_id: fwd_id.clone(),
+                    text: t,
+                })
+            };
             while let Some(ev) = rx.recv().await {
+                if let AgentEvent::TextDelta(t) = &ev {
+                    text.push_str(t);
+                    continue;
+                }
+                if matches!(
+                    ev,
+                    AgentEvent::ToolStart { .. } | AgentEvent::TurnComplete { .. }
+                ) && let Some(e) = flush(&mut text)
+                {
+                    send(e);
+                }
                 let out = match ev {
                     AgentEvent::ToolStart { name, id, input } => Some(SubAgentEvent::ToolStarted {
                         agent_id: fwd_id.clone(),
@@ -1909,12 +1903,11 @@ impl AgentSpawner {
                     _ => None,
                 };
                 if let Some(e) = out {
-                    if rt.has_session_sink() {
-                        rt.emit(AgentEvent::SubAgent(e));
-                    } else if let Some(s) = &fwd_sink {
-                        (s.0)(AgentEvent::SubAgent(e));
-                    }
+                    send(e);
                 }
+            }
+            if let Some(e) = flush(&mut text) {
+                send(e);
             }
             files
         });
@@ -1946,7 +1939,7 @@ impl AgentSpawner {
         };
         let input = crate::UserInput::text(prompt);
         // Its message queue, reachable by its identity while it runs:
-        // `SendMessage` delivers there, at the next
+        // Messagent delivers there, at the next
         // model request (never between a tool call and its result).
         let run_cancel = child.begin_run();
         let controls = Arc::new(crate::events::StreamControls::new(run_cancel.clone()));
@@ -2012,18 +2005,15 @@ impl AgentSpawner {
         tools.push(Box::new(super::tool::NativeAgentTool::new(Arc::clone(
             self,
         ))));
-        tools.push(Box::new(super::tool::AgentsTool::new(Arc::clone(self))));
         tools.push(Box::new(super::tool::AgentControlTool::new(Arc::clone(
             self,
         ))));
         tools.push(Box::new(super::tool::AgentProfilesTool::new(Arc::clone(
             self,
         ))));
-        // SendMessage reaches one's own sub-agents: only a child that may
-        // start some (below `max_depth`) gets it.
-        let may_delegate = pc.depth + 2 <= self.bricks.agents.max_depth;
-        if may_delegate && !tools.iter().any(|t| t.name() == "SendMessage") {
-            tools.push(Box::new(super::message::SendMessageTool));
+        // Every member of the team writes to the others.
+        if !tools.iter().any(|t| t.name() == "Messagent") {
+            tools.push(Box::new(super::messagent::MessagentTool));
         }
         let names: Vec<String> = tools.iter().map(|t| t.name().to_string()).collect();
         let ext = subagent::child_extensions(pc.depth);
@@ -2300,10 +2290,10 @@ pub fn render_result(r: &AgentResult) -> String {
         out.push_str(&format!(
             "\n\n{}{}",
             r.summary,
-            if r.summary_truncated {
-                "\n[answer shortened; the full transcript is referenced below]"
-            } else {
-                ""
+            match (r.summary_truncated, r.transcript.is_some()) {
+                (true, true) => "\n[answer shortened; the full transcript is referenced below]",
+                (true, false) => "\n[answer shortened]",
+                _ => "",
             }
         ));
     }
@@ -2330,6 +2320,12 @@ pub fn render_result(r: &AgentResult) -> String {
     }
     for w in &r.warnings {
         out.push_str(&format!("\nWarning: {w}"));
+    }
+    if let Some(cs) = &r.changeset {
+        out.push_str(&format!(
+            "\nChangeSet {cs}: not applied. Review it (inspect_changes, check_changes), then \
+             apply_changes."
+        ));
     }
     if let Some(t) = &r.transcript {
         out.push_str(&format!("\nTranscript: {t}"));
@@ -2492,82 +2488,61 @@ mod tests {
     }
 
     /// A sub-agent's calls go through its parent's engine, read at each
-    /// decision: a change of the session's policy reaches a running child,
-    /// and a pending request is not answered by a change.
+    /// decision: a change of the session's policy reaches a running child.
+    /// Its Ask runs without asking anyone, interactive or not, and a Deny holds.
     #[tokio::test]
     async fn a_sub_agent_follows_the_policy_of_its_session() {
-        use crate::control::{ApprovalBroker, BrokerApprover, Decision};
+        use crate::control::{ApprovalBroker, BrokerApprover};
         use crate::permission::{PermissionEngine, PermissionProfile, PolicyCell, SessionPolicy};
         use bricks_tools::permissions::{PermissionDecision, PermissionPolicy, PermissionRequest};
         use bricks_tools::{PermissionLevel, ToolCategory};
-        use std::time::Duration;
 
-        let cell = PolicyCell::new(SessionPolicy::chosen(PermissionProfile::Ask), 0);
-        let broker = ApprovalBroker::new(true);
-        let (tx, _rx) = tokio::sync::mpsc::channel(64);
-        broker.begin_run(tx, tokio_util::sync::CancellationToken::new());
-        let parent: Arc<dyn PermissionPolicy> = Arc::new(PermissionEngine::new(
-            cell.clone(),
-            Arc::new(BrokerApprover::new(broker.clone())),
-        ));
-        let child: Arc<dyn PermissionPolicy> = Arc::new(ChildPolicy {
-            inner: parent,
-            agent_id: "sa_child".into(),
-        });
-        let request = || PermissionRequest {
-            tool_name: "Write".into(),
-            tool_input: serde_json::json!({}),
-            permission_level: PermissionLevel::Write,
-            category: ToolCategory::FileSystem,
-            description: "write".into(),
-            id: "call".into(),
-            preview: None,
-            agent_id: None,
-            policy_revision: None,
-        };
-        let pending = || async {
-            tokio::time::timeout(Duration::from_secs(5), async {
-                loop {
-                    if let Some(r) = broker.pending().first() {
-                        break r.clone();
-                    }
-                    tokio::task::yield_now().await;
-                }
-            })
-            .await
-            .expect("the child asks")
-        };
+        for interactive in [true, false] {
+            let cell = PolicyCell::new(SessionPolicy::chosen(PermissionProfile::Ask), 0);
+            let broker = ApprovalBroker::new(interactive);
+            let (tx, _rx) = tokio::sync::mpsc::channel(64);
+            broker.begin_run(tx, tokio_util::sync::CancellationToken::new());
+            let parent: Arc<dyn PermissionPolicy> = Arc::new(PermissionEngine::new(
+                cell.clone(),
+                Arc::new(BrokerApprover::new(broker.clone())),
+            ));
+            let child: Arc<dyn PermissionPolicy> = Arc::new(ChildPolicy {
+                inner: parent,
+                agent_id: "sub_0000".into(),
+            });
+            let request = || PermissionRequest {
+                tool_name: "Write".into(),
+                tool_input: serde_json::json!({}),
+                permission_level: PermissionLevel::Write,
+                category: ToolCategory::FileSystem,
+                description: "write".into(),
+                id: "call".into(),
+                preview: None,
+                agent_id: None,
+                policy_revision: None,
+            };
 
-        // ASK: the child asks, named, under the session's revision.
-        let mut asking = {
-            let child = Arc::clone(&child);
-            tokio::spawn(async move { child.check(&request()).await })
-        };
-        let r = pending().await;
-        assert_eq!(r.agent_id.as_deref(), Some("sa_child"), "the child is named");
-        assert_eq!(r.policy_revision, Some(0));
-        // A change while the request waits does not answer it.
-        cell.set(SessionPolicy::chosen(PermissionProfile::Execute));
-        assert!(
-            tokio::time::timeout(Duration::from_millis(100), &mut asking)
-                .await
-                .is_err(),
-            "the pending request is still waiting"
-        );
-        broker.respond(&r.approval_id, Decision::Allow, None).unwrap();
-        assert!(matches!(asking.await.unwrap(), PermissionDecision::AllowOnce));
+            // ASK: the child's Write runs; nobody is asked.
+            let d = child.check(&request()).await;
+            assert!(matches!(d, PermissionDecision::Allow), "{interactive}: {d:?}");
+            assert!(broker.pending().is_empty(), "{interactive}");
 
-        // EXECUTE: the child runs without asking.
-        let d = child.check(&request()).await;
-        assert!(matches!(d, PermissionDecision::Allow));
-        assert!(broker.pending().is_empty());
+            // EXECUTE, reached by the running child at its next decision.
+            cell.set(SessionPolicy::chosen(PermissionProfile::Execute));
+            let d = child.check(&request()).await;
+            assert!(matches!(d, PermissionDecision::Allow));
+            assert!(broker.pending().is_empty());
 
-        // CUSTOM with a denial: refused, nobody asked.
-        let mut custom = SessionPolicy::chosen(PermissionProfile::Custom);
-        custom.custom.tools.insert("Write".into(), crate::permission::PermissionEffect::Deny);
-        cell.set(custom);
-        let d = child.check(&request()).await;
-        assert!(matches!(d, PermissionDecision::Deny(r) if r.contains("own rule")));
-        assert!(broker.pending().is_empty());
+            // CUSTOM with a denial: refused, nobody asked.
+            let mut custom = SessionPolicy::chosen(PermissionProfile::Custom);
+            custom
+                .custom
+                .tools
+                .insert("Write".into(), crate::permission::PermissionEffect::Deny);
+            cell.set(custom);
+            let d = child.check(&request()).await;
+            assert!(matches!(d, PermissionDecision::Deny(r) if r.contains("own rule")));
+            assert!(broker.pending().is_empty());
+        }
     }
 }

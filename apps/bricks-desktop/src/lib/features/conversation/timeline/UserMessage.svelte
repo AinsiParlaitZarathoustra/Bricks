@@ -155,7 +155,7 @@
         class="flex shrink-0 items-center gap-0.5 pt-1.5 opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100 [@media(hover:none)]:opacity-100"
       >
         <!-- A message sent by a typed command (`/skill …`) is sent again by typing it. -->
-        {#if conversation && !item.commandLabel}
+        {#if conversation && !conversation.readOnly && !item.commandLabel}
           <button
             bind:this={editButton}
             type="button"

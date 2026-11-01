@@ -366,17 +366,17 @@ async fn the_previous_sessions_jobs_end_with_the_resume() {
 }
 
 #[tokio::test]
-async fn native_messaging_is_announced_and_agentcontrol_no_longer_sends() {
+async fn messagent_is_announced_and_agentcontrol_no_longer_sends() {
     let w = World::new(vec![
         Reply::tool(
             "send",
-            "SendMessage",
-            json!({"to": "agent_missing", "content": "hello"}),
+            "Messagent",
+            json!({"action": "send", "to": "sub_9999", "content": "hello"}),
         ),
         Reply::tool(
             "old",
             "AgentControl",
-            json!({"action": "message", "agent_id": "agent_missing"}),
+            json!({"action": "message", "agent_id": "sub_9999"}),
         ),
         Reply::text("done"),
     ]);
@@ -388,7 +388,7 @@ async fn native_messaging_is_announced_and_agentcontrol_no_longer_sends() {
     assert_eq!(
         ctl.tools()
             .iter()
-            .filter(|t| t.name == "SendMessage")
+            .filter(|t| t.name == "Messagent")
             .count(),
         1
     );

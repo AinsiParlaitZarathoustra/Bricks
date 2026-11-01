@@ -3,7 +3,7 @@
 // serializes; the desktop bridge forwards them unchanged.
 // Owner: orchestrator. Keep in sync with protocol.rs.
 
-export const SCHEMA_VERSION = 8
+export const SCHEMA_VERSION = 9
 
 export type PlanStatus = 'pending' | 'in_progress' | 'completed'
 
@@ -500,6 +500,8 @@ export type Event =
       /** The execution this state belongs to (absent: 1). */
       execution?: number
     }
+  /** What a sub-agent wrote in one turn, whole. */
+  | { type: 'agent_text'; agent_id: string; text: string }
   | {
       type: 'agent_tool_started'
       agent_id: string

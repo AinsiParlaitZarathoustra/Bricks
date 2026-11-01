@@ -5,6 +5,8 @@
   import StatusDot from '$lib/layout/StatusDot.svelte'
   import { app } from '$lib/state/app.svelte'
   import type { Conversation } from '$lib/state/conversation.svelte'
+  import { ui } from '$lib/state/ui.svelte'
+  import { agentName } from '$lib/features/agents/branch'
 
   let { conversation }: { conversation: Conversation | null } = $props()
 
@@ -18,6 +20,8 @@
   )
   const projectName = $derived(project && !project.chats ? project.name : null)
   const title = $derived(conversation ? conversation.title.trim() || 'Nouvelle conversation' : 'Bricks')
+  /** The sub-agent whose branch is shown, after the conversation's title. */
+  const branch = $derived(ui.agentId ? (conversation?.agents.get(ui.agentId) ?? null) : null)
 
   $effect(() => {
     if (editing && inputEl) {
@@ -69,13 +73,22 @@
         onkeydown={onKeydown}
         onblur={commit}
       />
+    {:else if branch}
+      <button
+        type="button"
+        class="min-w-0 truncate rounded-md px-1.5 py-0.5 text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        {title}
+        onclick={() => ui.closeAgent()}>{title}</button
+      >
+      <span aria-hidden="true" class="text-muted-foreground">/</span>
+      <span class="min-w-0 truncate px-1.5 py-0.5" data-tauri-drag-region>{agentName(branch)}</span>
     {:else}
       <!-- Plain text: renaming is the pencil button beside it (the single rename control). -->
       <span class="min-w-0 truncate px-1.5 py-0.5" title={title} data-tauri-drag-region>{title}</span>
     {/if}
   </h2>
 
-  {#if conversation && !editing}
+  {#if conversation && !editing && !branch}
     <Button variant="ghost" size="icon-xs" aria-label="Modifier le titre" onclick={startEdit}>
       <Pencil aria-hidden="true" />
     </Button>
@@ -85,7 +98,7 @@
     <span class="min-w-0 truncate text-xs text-muted-foreground" data-tauri-drag-region>{projectName}</span>
   {/if}
 
-  {#if conversation?.running}
+  {#if branch ? !branch.endedAt : conversation?.running}
     <StatusDot status="running" label="En cours" />
   {/if}
 </div>

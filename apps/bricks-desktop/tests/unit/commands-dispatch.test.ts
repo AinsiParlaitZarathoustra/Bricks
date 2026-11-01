@@ -249,7 +249,7 @@ describe('agent_control', () => {
 		expect(r.names()).toEqual(['parse']);
 	});
 
-	it('/agents status opens the sub-agent inspector, then sends the status command', async () => {
+	it('/agents status opens the sub-agent branch, then sends the status command', async () => {
 		const r = await run({
 			session: 'sess-1',
 			action: engine({ type: 'agent_control', action: 'status', agent_id: 'ag-1' })

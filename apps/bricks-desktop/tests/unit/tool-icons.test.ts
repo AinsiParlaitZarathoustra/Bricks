@@ -9,6 +9,7 @@ import ChartLineIcon from '@lucide/svelte/icons/chart-line';
 import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 import CodeIcon from '@lucide/svelte/icons/code';
 import CpuIcon from '@lucide/svelte/icons/cpu';
+import MailIcon from '@lucide/svelte/icons/mail';
 import MessageSquareIcon from '@lucide/svelte/icons/message-square';
 import PenIcon from '@lucide/svelte/icons/pen';
 import PenLineIcon from '@lucide/svelte/icons/pen-line';
@@ -35,8 +36,14 @@ describe('toolIcon: the icon says what the tool does', () => {
 		['Edit', PenLineIcon],
 		['WebSearch', BinocularsIcon],
 		['Agent', BotIcon],
+		['Messagent', MailIcon],
 	])('%s has its own icon', (name, icon) => {
 		expect(toolIcon(name)).toBe(icon);
+	});
+
+	it('the removed Agents and SendMessage tools have no icon of their own', () => {
+		expect(toolIcon('Agents')).toBe(WrenchIcon);
+		expect(toolIcon('SendMessage')).toBe(WrenchIcon);
 	});
 
 	it('the shell tools share the chevron, whatever their spelling', () => {

@@ -568,17 +568,14 @@ fn session_tools(
         tools.push(Box::new(crate::agents::NativeAgentTool::new(Arc::clone(
             &spawner,
         ))));
-        tools.push(Box::new(crate::agents::AgentsTool::new(Arc::clone(
-            &spawner,
-        ))));
         tools.push(Box::new(crate::agents::AgentControlTool::new(Arc::clone(
             &spawner,
         ))));
         tools.push(Box::new(crate::agents::AgentProfilesTool::new(Arc::clone(
             &spawner,
         ))));
-        if !tools.iter().any(|t| t.name() == "SendMessage") {
-            tools.push(Box::new(crate::agents::SendMessageTool));
+        if !tools.iter().any(|t| t.name() == "Messagent") {
+            tools.push(Box::new(crate::agents::MessagentTool));
         }
         spawner_out = Some(spawner);
     }
@@ -1063,6 +1060,17 @@ impl Controller {
         let revision = cell.set_saved(policy.clone(), |policy, revision| {
             crate::permission::save_session_policy(&dir, policy, revision)
         })?;
+        // Delegation withdrawn: the running sub-agents stop; their work,
+        // partial results and ChangeSets are kept.
+        if policy.delegation().is_err()
+            && let Some(sp) = self.inner.spawner.read().clone()
+        {
+            let rt = sp.runtime();
+            for r in rt.pending(None) {
+                rt.mark_stopped(&r.info.agent_id);
+                rt.cancel(&r.info.agent_id);
+            }
+        }
         self.inner
             .queue
             .push_now(None, Event::PermissionPolicyChanged { policy, revision });
@@ -1192,7 +1200,6 @@ impl Controller {
         action: &str,
         agent_id: Option<String>,
         changeset_id: Option<String>,
-        message: Option<String>,
     ) -> (bool, String) {
         let rt = sp.runtime();
         let wd = self.agent().working_dir().to_path_buf();
@@ -1219,18 +1226,6 @@ impl Controller {
                 Some(r) => match &r.result {
                     Some(res) => (true, crate::agents::render_result(res)),
                     None => (true, format!("no result yet ({})", r.state.as_str())),
-                },
-                None => (false, "unknown sub-agent".into()),
-            },
-            // The user writes to a running sub-agent: the same queue as
-            // SendMessage (the user sees every instance).
-            "message" => match rec(&agent_id) {
-                Some(r) => match crate::agents::tool::message_text(
-                    &r.info.agent_id,
-                    rt.send_message(&r.info.agent_id, None, message.unwrap_or_default()),
-                ) {
-                    Ok(t) => (true, t),
-                    Err(t) => (false, t),
                 },
                 None => (false, "unknown sub-agent".into()),
             },
@@ -1590,7 +1585,6 @@ impl Controller {
                 ref agent_id,
                 ref changeset_id,
                 ref job_id,
-                ref message,
             } => {
                 if action == "jobs" || action == "stop_job" {
                     let this = self.clone();
@@ -1610,15 +1604,11 @@ impl Controller {
                     );
                 };
                 let this = self.clone();
-                let (action, agent_id, changeset_id, message) = (
-                    action.clone(),
-                    agent_id.clone(),
-                    changeset_id.clone(),
-                    message.clone(),
-                );
+                let (action, agent_id, changeset_id) =
+                    (action.clone(), agent_id.clone(), changeset_id.clone());
                 tokio::spawn(async move {
                     let (ok, text) = this
-                        .agent_control(&sp, &action, agent_id, changeset_id, message)
+                        .agent_control(&sp, &action, agent_id, changeset_id)
                         .await;
                     let ev = Event::AgentControlResult { action, ok, text };
                     this.inner.queue.push(None, ev, None).await;
@@ -2214,7 +2204,25 @@ impl Controller {
         agent
             .extensions
             .insert(crate::runner::RootRunHint(run_id.clone()));
-        let result = crate::runner::run_prepared(&agent, &converted.input, tx, token.clone()).await;
+        // The orchestrator's queue: its sub-agents' reports and Messagent
+        // messages are read between two turns of this run.
+        let controls = Arc::new(crate::events::StreamControls::new(token.clone()));
+        let spawner = self.inner.spawner.read().clone();
+        if let Some(sp) = &spawner {
+            sp.runtime().set_main_controls(Some(Arc::clone(&controls)));
+        }
+        let result = crate::runner::run_prepared_controlled(
+            &agent,
+            &converted.input,
+            tx,
+            token.clone(),
+            Some(Arc::clone(&controls)),
+            Arc::clone(&agent.permission_policy),
+        )
+        .await;
+        if let Some(sp) = &spawner {
+            sp.runtime().set_main_controls(None);
+        }
         self.inner.broker.end_run();
         // A question left open by a cancelled run is closed as cancelled.
         for question in self.inner.ask.end_run() {
@@ -2750,6 +2758,7 @@ pub(crate) fn sub_agent_event(e: crate::agents::SubAgentEvent) -> Event {
             reason,
         },
         S::Spawned(info) => Event::AgentSpawned { agent: info },
+        S::Text { agent_id, text } => Event::AgentText { agent_id, text },
         S::State {
             agent_id,
             state,

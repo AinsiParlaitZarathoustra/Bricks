@@ -54,7 +54,7 @@ fn headless_sends_the_foundation_with_the_bullets_its_tools_decide() {
 
     let (s, tools) =
         first_request("[semantic.lsp]\nenabled = false\n\n[agents]\nenabled = false\n");
-    assert!(!tools.iter().any(|t| t == "Agent" || t == "Agents"));
+    assert!(!tools.iter().any(|t| t == "Agent" || t == "Messagent"));
     assert!(s.starts_with(&reference(true, false)), "{s}");
     assert!(!s.contains("Délègue"));
 }

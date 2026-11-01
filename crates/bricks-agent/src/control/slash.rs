@@ -198,7 +198,6 @@ pub const COMMANDS: &[SlashCommand] = &[
                         agent_id: None,
                         changeset_id: None,
                         job_id: None,
-                        message: None,
                     }));
                 }
                 (Some(a @ ("status" | "result" | "cancel")), Some(id)) => {
@@ -207,7 +206,6 @@ pub const COMMANDS: &[SlashCommand] = &[
                         agent_id: Some(id.into()),
                         changeset_id: None,
                         job_id: None,
-                        message: None,
                     }));
                 }
                 _ => {}
@@ -307,7 +305,6 @@ pub const COMMANDS: &[SlashCommand] = &[
                 agent_id: None,
                 changeset_id: Some(id.into()),
                 job_id: None,
-                message: None,
             }))
         },
     },
@@ -325,14 +322,12 @@ pub const COMMANDS: &[SlashCommand] = &[
                     agent_id: None,
                     changeset_id: None,
                     job_id: None,
-                    message: None,
                 })),
                 (Some("stop"), Some(id)) => Ok(Action::Engine(Command::AgentControl {
                     action: "stop_job".into(),
                     agent_id: None,
                     changeset_id: None,
                     job_id: Some(id.into()),
-                    message: None,
                 })),
                 _ => Err(SlashError::new(
                     "`/jobs` or `/jobs stop <job id>`",
@@ -761,7 +756,6 @@ mod tests {
                 agent_id: None,
                 changeset_id: Some("cs-1".into()),
                 job_id: None,
-                message: None,
             })
         );
         assert_eq!(
@@ -771,7 +765,6 @@ mod tests {
                 agent_id: None,
                 changeset_id: Some("cs-1".into()),
                 job_id: None,
-                message: None,
             })
         );
         assert_eq!(
@@ -781,7 +774,6 @@ mod tests {
                 agent_id: None,
                 changeset_id: Some("cs-1".into()),
                 job_id: None,
-                message: None,
             })
         );
         assert!(parse("/changes").is_err());
@@ -802,7 +794,6 @@ mod tests {
                 agent_id: None,
                 changeset_id: None,
                 job_id: None,
-                message: None,
             })
         );
         assert_eq!(
@@ -812,7 +803,6 @@ mod tests {
                 agent_id: None,
                 changeset_id: None,
                 job_id: Some("job-7".into()),
-                message: None,
             })
         );
         assert!(parse("/jobs stop").is_err());

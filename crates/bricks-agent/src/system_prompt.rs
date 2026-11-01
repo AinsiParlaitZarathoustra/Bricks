@@ -375,7 +375,7 @@ const WEB_TOOLS: &[&str] = &["WebFetch", "WebSearch"];
 
 /// Tools that start a sub-agent. Listing profiles (`AgentProfiles`) or
 /// controlling existing agents (`AgentControl`) is not delegating.
-pub const SPAWNING_TOOLS: &[&str] = &["Agent", "Agents"];
+pub const SPAWNING_TOOLS: &[&str] = &["Agent"];
 
 const FOUNDATION_HEAD: &str = "Tu es Bricks, un agent de développement autonome.
 
@@ -490,9 +490,11 @@ const SUB_AGENT_ROLE: &str = "
 ## Your role
 
 You are a sub-agent working on one task given by another agent, in a fresh context: \
-you do not see its conversation. Do that task within its scope, then reply with your result: \
-what you did, what you found (with file paths and evidence), what you verified and how, and \
-anything left undone. Stop as soon as the task is done; do not widen it.";
+you do not see its conversation. Do that task within its scope; Messagent reaches the team \
+(`main` is the orchestrator) when something moves the work forward, never for a mere \
+acknowledgement. Then reply with a concise report fitted to the task: the result and what \
+matters, the files changed, the checks run and their failures, what blocks and what is left \
+undone. Stop as soon as the task is done; do not widen it.";
 
 /// When TodoWrite is announced.
 const TASK_MANAGEMENT: &str = "
@@ -508,10 +510,10 @@ const TASK_MANAGEMENT: &str = "
 const DELEGATION_SECTION: &str = "
 ## Délégation
 
-- Délègue lorsque cela améliore le travail ; garde les petites tâches simples.
-- Donne au sous-agent l'objectif, le contexte nécessaire, les fichiers, les contraintes, le résultat et les vérifications attendus : il ne reçoit pas automatiquement la conversation.
-- Lis son résumé et examine les preuves avant de l'intégrer. Si le résumé est tronqué ou insuffisant, ouvre le transcript référencé ; distingue l'historique actif du fichier complet quand les deux existent.
-- Le résultat d'un sous-agent ne valide pas à lui seul l'intégration.";
+- Délègue lorsque cela améliore le travail ; garde les petites tâches simples. `Agent` lance une mission, ou plusieurs avec `missions`, en arrière-plan et rend aussitôt leurs identifiants (`sub_0000`…).
+- Un sous-agent part d'un contexte neuf : donne-lui l'objectif, le contexte, les fichiers, les contraintes, le résultat et les vérifications attendus.
+- Les rapports t'arrivent entre deux tours ; quand tu n'as plus rien d'utile à faire, `AgentControl wait` attend le prochain au lieu d'interroger. Messagent écrit à un ou plusieurs agents, ou à l'équipe.
+- Avant de répondre, relis les rapports et les preuves. Un ChangeSet ne s'applique jamais seul : examine son diff (`inspect_changes`), vérifie-le (`check_changes`), applique-le (`apply_changes`) puis lance les vérifications adaptées.";
 
 const COORDINATOR_SECTION: &str = r#"
 ## Coordinator Mode
@@ -858,9 +860,9 @@ mod tests {
     fn only_tools_that_start_a_sub_agent_enable_delegation() {
         for names in [
             vec!["AgentProfiles"],
-            vec!["SendMessage"],
+            vec!["Messagent"],
             vec!["AgentControl"],
-            vec!["AgentProfiles", "AgentControl", "SendMessage"],
+            vec!["AgentProfiles", "AgentControl", "Messagent"],
         ] {
             let p = build_system_prompt(&SystemPromptOptions {
                 tools_available: tools(&names),
@@ -868,14 +870,13 @@ mod tests {
             });
             assert!(!p.contains("## Délégation"), "{names:?}");
         }
-        for names in [vec!["Agent"], vec!["Agents"]] {
-            let p = build_system_prompt(&SystemPromptOptions {
-                tools_available: tools(&names),
-                ..default_opts()
-            });
-            assert_eq!(p.matches("## Délégation").count(), 1, "{names:?}");
-            assert!(stable(&p).contains("ouvre le transcript référencé"));
-        }
+        let p = build_system_prompt(&SystemPromptOptions {
+            tools_available: tools(&["Agent"]),
+            ..default_opts()
+        });
+        assert_eq!(p.matches("## Délégation").count(), 1);
+        assert!(stable(&p).contains("`Agent` lance une mission, ou plusieurs avec `missions`"));
+        assert!(stable(&p).contains("Messagent écrit à un ou plusieurs agents"));
     }
 
     #[test]
@@ -917,9 +918,8 @@ mod tests {
         let all_tools = tools(&[
             "CodeScout",
             "Agent",
-            "Agents",
             "AgentProfiles",
-            "SendMessage",
+            "Messagent",
             "TodoWrite",
             "Skill",
             "Bash",
@@ -969,7 +969,7 @@ mod tests {
     fn a_sub_agent_keeps_its_role_and_its_own_tools_decide() {
         for (names, delegates) in [
             (vec!["Read", "Bash", "CodeScout"], false),
-            (vec!["Read", "Agent", "Agents", "AgentControl"], true),
+            (vec!["Read", "Agent", "AgentControl"], true),
         ] {
             let prompt = build_system_prompt(&SystemPromptOptions {
                 prefix: Some(SystemPromptPrefix::SubAgent),

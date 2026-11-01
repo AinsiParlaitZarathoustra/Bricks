@@ -319,3 +319,39 @@ async fn binary_files_deletions_and_modes_survive_the_round_trip() {
         assert!(mode & 0o111 != 0, "executable bit kept");
     }
 }
+
+/// `check` says whether a ChangeSet would apply now, and writes nothing: the
+/// parent's tree is the same afterwards, and the ChangeSet is still ready.
+#[tokio::test]
+async fn check_says_whether_a_changeset_applies_and_writes_nothing() {
+    let r = repo();
+    let p = r.path();
+    let (m, _b) = manager();
+    let snap = m.snapshot(p).await.unwrap();
+    let w = m.create(&snap, "run_k", "agent_k").await.unwrap();
+    std::fs::write(w.root.join("b.txt"), "bee by child\n").unwrap();
+    let cs = m.finalize("agent_k", "t", vec![]).await.unwrap().unwrap();
+    let status_before = git(p, &["status", "--porcelain"]);
+
+    m.check(&cs.id, p).await.expect("it applies cleanly");
+    assert_eq!(
+        git(p, &["status", "--porcelain"]),
+        status_before,
+        "nothing written"
+    );
+    assert_eq!(std::fs::read_to_string(p.join("b.txt")).unwrap(), "bee\n");
+    assert_eq!(m.changeset(&cs.id).unwrap().state, ChangeSetState::Ready);
+
+    // The parent edits the same line meanwhile: a conflict, named, still nothing written.
+    std::fs::write(p.join("b.txt"), "bee by someone else\n").unwrap();
+    match m.check(&cs.id, p).await {
+        Err(WsError::Conflict { files, .. }) => assert_eq!(files, vec!["b.txt".to_string()]),
+        Err(e) => panic!("{e}"),
+        Ok(()) => panic!("the conflict is not seen"),
+    }
+    assert_eq!(
+        std::fs::read_to_string(p.join("b.txt")).unwrap(),
+        "bee by someone else\n"
+    );
+    assert_eq!(m.changeset(&cs.id).unwrap().state, ChangeSetState::Ready);
+}

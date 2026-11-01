@@ -20,6 +20,7 @@ import type {
   DecidedBy,
   Decision,
   Envelope,
+  Event as EngineEvent,
   InstanceState,
   PlanState,
   PromptBlock,
@@ -264,6 +265,56 @@ export interface AgentInfo {
   result?: AgentResult
   /** The current execution: 1 at launch, one more for each resume. */
   execution: number
+  /** Its work as the events of a conversation of its own: its read-only branch replays them. */
+  log: AgentStep[]
+}
+
+/** One step of a sub-agent, as an event of its branch (`agentBranch`). */
+export interface AgentStep {
+  event: EngineEvent
+  at: number
+  execution: number
+}
+
+/** A sub-agent's end, as the end of a run of its branch. */
+function agentRunFinished(result: AgentResult): EngineEvent {
+  const outcome: RunOutcome =
+    result.status === 'completed'
+      ? 'succeeded'
+      : result.status === 'failed'
+        ? 'failed'
+        : result.status === 'cancelled' || result.status === 'interrupted'
+          ? 'cancelled'
+          : 'incomplete'
+  return {
+    type: 'run_finished',
+    outcome,
+    error: result.error ?? undefined,
+    text: result.summary,
+    turns: result.turns,
+  }
+}
+
+/** The mission as the opening message of a branch run. */
+function agentRunStarted(spawn: SpawnInfo, resumed: boolean): EngineEvent {
+  return {
+    type: 'run_started',
+    prompt: resumed ? 'Reprise de la mission' : spawn.task,
+    attachments: [],
+    model: spawn.model.applied,
+  }
+}
+
+/** The end of a branch run: the report as its answer when no text came before it. */
+function closeAgentLog(agent: AgentInfo, result: AgentResult, at: number) {
+  const lastStart = agent.log.findLastIndex((s) => s.event.type === 'run_started')
+  // The run it ends: the one opened last, whatever the result says.
+  const execution = agent.log[lastStart]?.execution ?? result.execution ?? agent.execution
+  const wrote = agent.log.slice(lastStart + 1).some((s) => s.event.type === 'text_delta')
+  if (!wrote && result.summary.trim()) {
+    agent.log.push({ event: { type: 'text_delta', text: result.summary }, at, execution })
+  }
+  agent.log.push({ event: agentRunFinished(result), at, execution })
 }
 
 export interface DraftAttachment {
@@ -399,6 +450,16 @@ function isEngineSkillActivation(text: string): boolean {
   return t.startsWith('<skill_activation id="') && t.endsWith('</skill_activation>')
 }
 
+/**
+ * A delivery of the team to the orchestrator, kept as a user-role message
+ * (crates/bricks-agent `agents/messagent.rs`, `runtime.rs` notify_parent): a
+ * Messagent message or a sub-agent's report. The person did not type it.
+ */
+export function isTeamDelivery(text: string): boolean {
+  const t = text.trimStart()
+  return /^\[Messagent m\d{4} from /.test(t) || /^\[sub_\d{4} · .+ ended: /.test(t) || t.startsWith('[Messagent] ')
+}
+
 /** The cost of a stored run, from its record; `null` for a record written before usage was kept. */
 function usageOfRecord(usage: NonNullable<RunRecord['usage']> | null): RunUsageView | null {
   if (!usage) return null
@@ -459,6 +520,8 @@ function storedRun(record: RunRecord, prompt: string): RunInfo {
 export class Conversation {
   readonly sessionId: string
   projectId: string | null
+  /** A sub-agent's branch: shown, never written to (no revision, no answer). */
+  readOnly = false
 
   session = $state<SessionItem>() as SessionItem
   title = $state('')
@@ -658,8 +721,13 @@ export class Conversation {
           tools: [],
           result: r.result,
           execution: r.execution ?? 1,
+          log: [],
         }),
       )
+      const agent = this.agents.get(r.info.agent_id)!
+      const at = Date.parse(r.info.created_at) || r.updated_at_ms
+      agent.log.push({ event: agentRunStarted(r.info, false), at, execution: agent.execution })
+      if (r.result) closeAgentLog(agent, r.result, r.updated_at_ms)
       this.placeAgent(r.info.agent_id, r.info.root_run_id, r.info.tool_call_id ?? undefined, r.execution ?? 1)
     }
     for (const cs of changesets) if (!this.changesets.has(cs.id)) this.changesets.set(cs.id, reactive(cs))
@@ -788,7 +856,7 @@ export class Conversation {
           case 'text':
             if (!block.text.trim()) break
             // Only user text: an assistant text is never hidden, whatever it contains.
-            if (msg.role === 'user' && isEngineSkillActivation(block.text)) break
+            if (msg.role === 'user' && (isEngineSkillActivation(block.text) || isTeamDelivery(block.text))) break
             if (msg.role === 'user') {
               const item: UserItem = { kind: 'user', id: localId('u'), text: block.text, attachments: [] }
               items.push(item)
@@ -1158,6 +1226,7 @@ export class Conversation {
             spawnedAt: env.at,
             tools: [],
             execution: 1,
+            log: [{ event: agentRunStarted(env.agent, false), at: env.at, execution: 1 }],
           }),
         )
         this.placeAgent(env.agent.agent_id, env.agent.root_run_id, env.agent.tool_call_id ?? undefined, 1)
@@ -1172,6 +1241,7 @@ export class Conversation {
           a.endedAt = undefined
           a.result = undefined
           a.tools = []
+          a.log.push({ event: agentRunStarted(a.spawn, true), at: env.at, execution })
           this.placeAgent(a.id, env.run_id ?? a.spawn.root_run_id, undefined, execution)
         }
         // A state of an older execution is stale: it changes nothing.
@@ -1182,6 +1252,11 @@ export class Conversation {
         }
         break
       }
+      case 'agent_text': {
+        const a = this.agents.get(env.agent_id)
+        a?.log.push({ event: { type: 'text_delta', text: env.text }, at: env.at, execution: a.execution })
+        break
+      }
       case 'agent_tool_started': {
         const a = this.agents.get(env.agent_id)
         a?.tools.push({
@@ -1189,6 +1264,11 @@ export class Conversation {
           name: env.name,
           input: env.input,
           status: 'running',
+        })
+        a?.log.push({
+          event: { type: 'tool_started', tool_call_id: env.tool_call_id, name: env.name, input: env.input },
+          at: env.at,
+          execution: a.execution,
         })
         break
       }
@@ -1199,7 +1279,23 @@ export class Conversation {
           t.status = env.is_error ? 'error' : 'ok'
           t.durationMs = env.duration_ms
         }
-        if (agent) this.recordAgentCommand(env, agent, t?.input)
+        if (agent) {
+          this.recordAgentCommand(env, agent, t?.input)
+          agent.log.push({
+            event: {
+              type: 'tool_finished',
+              tool_call_id: env.tool_call_id,
+              name: env.name,
+              is_error: env.is_error,
+              duration_ms: env.duration_ms,
+              output: env.output ?? '',
+              executed: env.executed,
+              status: env.status,
+            },
+            at: env.at,
+            execution: agent.execution,
+          })
+        }
         break
       }
       case 'agent_finished': {
@@ -1207,6 +1303,7 @@ export class Conversation {
         if (a && (env.result.execution ?? 1) === a.execution) {
           a.result = env.result
           a.endedAt ??= env.at
+          closeAgentLog(a, env.result, env.at)
         }
         break
       }

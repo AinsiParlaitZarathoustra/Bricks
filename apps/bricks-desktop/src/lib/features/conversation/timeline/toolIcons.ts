@@ -16,6 +16,7 @@ import FolderSearchIcon from '@lucide/svelte/icons/folder-search'
 import GlobeIcon from '@lucide/svelte/icons/globe'
 import ImageIcon from '@lucide/svelte/icons/image'
 import ListTodoIcon from '@lucide/svelte/icons/list-todo'
+import MailIcon from '@lucide/svelte/icons/mail'
 import MessageSquareIcon from '@lucide/svelte/icons/message-square'
 import MessageCircleQuestionIcon from '@lucide/svelte/icons/message-circle-question-mark'
 import PackageOpenIcon from '@lucide/svelte/icons/package-open'
@@ -23,7 +24,6 @@ import PenIcon from '@lucide/svelte/icons/pen'
 import PenLineIcon from '@lucide/svelte/icons/pen-line'
 import PlugIcon from '@lucide/svelte/icons/plug'
 import SearchIcon from '@lucide/svelte/icons/search'
-import SendIcon from '@lucide/svelte/icons/send'
 import SquareDashedMousePointerIcon from '@lucide/svelte/icons/square-dashed-mouse-pointer'
 import WrenchIcon from '@lucide/svelte/icons/wrench'
 import ZapIcon from '@lucide/svelte/icons/zap'
@@ -53,10 +53,9 @@ const BY_NAME: Record<string, IconComponent> = {
   TodoWrite: ListTodoIcon,
   Ask: MessageCircleQuestionIcon,
   Agent: BotIcon,
-  Agents: BotIcon,
   AgentControl: BotIcon,
   AgentProfiles: BotIcon,
-  SendMessage: SendIcon,
+  Messagent: MailIcon,
   LoadTools: PackageOpenIcon,
   Skill: ZapIcon,
   LSP: BracesIcon,

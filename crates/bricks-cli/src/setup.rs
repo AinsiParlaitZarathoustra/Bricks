@@ -285,7 +285,7 @@ mod prompt_tests {
 
             let (s, tools) = sent(interactive, "[agents]\nenabled = false\n").await;
             let s = without_ask(&s);
-            assert!(!tools.iter().any(|t| t == "Agent" || t == "Agents"));
+            assert!(!tools.iter().any(|t| t == "Agent" || t == "Messagent"));
             assert!(s.starts_with(&without("- Délègue aux sous-agents")), "{s}");
         }
     }

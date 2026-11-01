@@ -100,7 +100,7 @@ fn custom(edit: impl FnOnce(&mut CustomRules)) -> SessionPolicy {
 }
 
 #[tokio::test]
-async fn ask_lets_reads_run_and_asks_writes_commands_network_and_sub_agents() {
+async fn ask_lets_reads_run_asks_writes_commands_and_network_and_refuses_delegation() {
     let (label, asked) = decide(
         ask(),
         0,
@@ -114,15 +114,21 @@ async fn ask_lets_reads_run_and_asks_writes_commands_network_and_sub_agents() {
         ("Write", PermissionLevel::Write, ToolCategory::FileSystem),
         ("Bash", PermissionLevel::Execute, ToolCategory::Shell),
         ("WebFetch", PermissionLevel::ReadOnly, ToolCategory::Web),
-        (
-            "Agent",
-            PermissionLevel::Execute,
-            ToolCategory::Orchestration,
-        ),
     ] {
         let (label, asked) = decide(ask(), 0, tool, level, category).await;
         assert_eq!((label.as_str(), asked), ("allow once", true), "{tool}");
     }
+    // Delegation is never asked: under ASK it is refused, nobody is asked.
+    let (label, asked) = decide(
+        ask(),
+        0,
+        "Agent",
+        PermissionLevel::Execute,
+        ToolCategory::Orchestration,
+    )
+    .await;
+    assert!(label.starts_with("deny: Access denied: insufficient permissions."), "{label}");
+    assert!(!asked);
 }
 
 #[tokio::test]
@@ -786,13 +792,15 @@ async fn an_unreadable_session_policy_is_an_error_never_an_allow() {
     assert!(err.contains("permissions.json"), "{err}");
 }
 
+/// A sub-agent's own asks are not put to anyone: its launch is the approval.
+/// Its write, which the session's CUSTOM rule asks, runs without a question.
 #[tokio::test]
-async fn a_sub_agent_asks_under_its_sessions_policy() {
-    let dir_default = custom(|c| {
+async fn a_sub_agent_does_not_ask_under_its_sessions_policy() {
+    let default = custom(|c| {
         c.tools.insert("Agent".into(), PermissionEffect::Allow);
     });
     let mut env = open_with_sub_agents(
-        Some(dir_default),
+        Some(default),
         vec![
             Reply::tool(
                 "c1",
@@ -809,26 +817,21 @@ async fn a_sub_agent_asks_under_its_sessions_policy() {
         ],
     )
     .await;
-    let (asked, evs) = run_answering(&mut env, "délègue", Decision::Allow).await;
+    let (asked, evs) = run_answering(&mut env, "délègue", Decision::Deny).await;
     assert_eq!(outcome(&evs), RunOutcome::Succeeded);
-    // The child's write is asked under the parent's policy, and says so.
-    assert_eq!(asked.len(), 1, "{asked:?}");
-    assert_eq!(asked[0].tool, "Write");
-    assert!(
-        asked[0]
-            .agent_id
-            .as_deref()
-            .is_some_and(|id| id.starts_with("agent_")),
-        "the question comes from the sub-agent: {:?}",
-        asked[0].agent_id
-    );
+    // Only the orchestrator could be asked, and it is not asked here: the
+    // child's write runs without any question.
+    assert!(asked.is_empty(), "{asked:?}");
     assert!(env.dir.path().join("sous.txt").exists());
 }
 
+/// A sub-agent is refused by a Deny of its session, at its own call, and
+/// nobody is asked.
 #[tokio::test]
-async fn a_running_sub_agent_takes_a_policy_change_at_its_next_call() {
+async fn a_sub_agent_is_refused_by_a_deny_of_its_session() {
     let default = custom(|c| {
         c.tools.insert("Agent".into(), PermissionEffect::Allow);
+        c.tools.insert("Write".into(), PermissionEffect::Deny);
     });
     let mut env = open_with_sub_agents(
         Some(default),
@@ -836,83 +839,22 @@ async fn a_running_sub_agent_takes_a_policy_change_at_its_next_call() {
             Reply::tool(
                 "c1",
                 "Agent",
-                json!({"task": "écrire deux fichiers", "isolation": "shared"}),
+                json!({"task": "écrire un fichier", "isolation": "shared"}),
             ),
             Reply::tool(
                 "cw1",
                 "Write",
-                json!({"file_path": "sous-1.txt", "content": "un\n"}),
-            ),
-            Reply::tool(
-                "cw2",
-                "Write",
-                json!({"file_path": "sous-2.txt", "content": "deux\n"}),
+                json!({"file_path": "refuse.txt", "content": "non\n"}),
             ),
             Reply::text("sous-agent terminé"),
             Reply::text("ok"),
         ],
     )
     .await;
-    env.ctl
-        .send(Command::Submit {
-            prompt: Prompt::text("délègue"),
-        })
-        .unwrap();
-
-    // The child's first write is asked, and waits.
-    let mut buffered = until(&mut env.events, |e| {
-        matches!(e, Event::ApprovalRequested { .. })
-    })
-    .await;
-    let first = match &buffered.last().unwrap().event {
-        Event::ApprovalRequested { approval } => approval.clone(),
-        other => panic!("not an approval: {other:?}"),
-    };
-    assert_eq!(first.tool, "Write");
-
-    // The policy changes while the question is open.
-    env.ctl
-        .send(Command::SetPermissionPolicy { policy: execute() })
-        .unwrap();
-    buffered.extend(
-        until(&mut env.events, |e| {
-            matches!(e, Event::PermissionPolicyChanged { .. })
-        })
-        .await,
-    );
-    assert!(
-        !buffered
-            .iter()
-            .any(|e| matches!(e.event, Event::ApprovalResolved { .. })),
-        "no question is resolved by a change of policy"
-    );
-    assert_eq!(env.ctl.snapshot().pending_approvals.len(), 1);
-
-    env.ctl
-        .send(Command::Approve {
-            approval_id: first.approval_id.clone(),
-            decision: Decision::Allow,
-            reason: None,
-        })
-        .unwrap();
-
-    // The second write is decided under EXECUTE: not asked.
-    let mut later = Vec::new();
-    loop {
-        let e = next(&mut env.events).await;
-        if let Event::ApprovalRequested { approval } = &e.event {
-            later.push(approval.clone());
-        }
-        let done = matches!(e.event, Event::RunFinished { .. });
-        buffered.push(e);
-        if done {
-            break;
-        }
-    }
-    assert!(later.is_empty(), "the second write is not asked: {later:?}");
-    assert!(env.dir.path().join("sous-1.txt").exists());
-    assert!(env.dir.path().join("sous-2.txt").exists());
-    assert_eq!(outcome(&buffered), RunOutcome::Succeeded);
+    let (asked, evs) = run_answering(&mut env, "délègue", Decision::Allow).await;
+    assert_eq!(outcome(&evs), RunOutcome::Succeeded);
+    assert!(asked.is_empty(), "{asked:?}");
+    assert!(!env.dir.path().join("refuse.txt").exists());
 }
 
 // ─── A hook that changes the input ───────────────────────────────────────────

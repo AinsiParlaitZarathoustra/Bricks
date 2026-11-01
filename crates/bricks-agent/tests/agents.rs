@@ -197,6 +197,26 @@ fn tool_output(evs: &[Envelope], name: &str) -> (bool, String) {
 }
 
 /// The result of the tool call with this id (`wait_<agent_id>` for a wait).
+/// The `AgentControl wait` result that reports the end of sub-agent `id`
+/// (a wait may return earlier, for another delivery: it is asked again).
+fn ended_wait(evs: &[Envelope], id: &str) -> (bool, String) {
+    evs.iter()
+        .find_map(|e| match &e.event {
+            Event::ToolFinished {
+                tool_call_id,
+                is_error,
+                output,
+                ..
+            } if tool_call_id.starts_with(&format!("wait_{id}"))
+                && output.contains(&format!("{id} has ended;")) =>
+            {
+                Some((*is_error, output.clone()))
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("no end reported for {id}"))
+}
+
 fn tool_output_by_id(evs: &[Envelope], id: &str) -> (bool, String) {
     evs.iter()
         .find_map(|e| match &e.event {
@@ -259,15 +279,13 @@ async fn a_profile_runs_in_parallel_with_a_fresh_context_and_a_compact_result() 
     // Auto isolation: a worktree, the children run in parallel.
     assert_eq!(spawned.isolation, "worktree");
     // `Agent` answers with the handle at once: its tool result comes before
-    // the child's end. The compact result comes with `AgentControl wait`.
+    // the child's end. The end is reported by `AgentControl wait`; the report
+    // itself comes to the parent between two turns.
     let (err, handle) = tool_output(&evs, "Agent");
     assert!(!err, "{handle}");
     assert!(handle.contains("sub-agent(s) started") && handle.contains(&spawned.agent_id));
-    let (err, waited) = tool_output_by_id(&evs, &format!("wait_{}", spawned.agent_id));
-    assert!(
-        !err && waited.contains("Edit Map: src/lib.rs, fn parse."),
-        "{waited}"
-    );
+    let (err, waited) = ended_wait(&evs, &spawned.agent_id);
+    assert!(!err, "{waited}");
     let results = finished(&evs);
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].status, "completed");
@@ -322,14 +340,15 @@ async fn a_profile_runs_in_parallel_with_a_fresh_context_and_a_compact_result() 
     assert!(names.contains(&"CodeScout") && names.contains(&"Bash"));
     // 10.5: the delegation tools pass on (recursion is bounded by the
     // scheduler). The legacy `delegate` tool is gone from the catalogue.
-    assert!(
-        names.contains(&"Agent") && names.contains(&"Agents") && names.contains(&"AgentControl")
-    );
+    assert!(names.contains(&"Agent") && names.contains(&"AgentControl"));
+    // Every member of the team writes to the others.
+    assert!(names.contains(&"Messagent"));
     assert!(!names.contains(&"delegate"));
     // The parent received the compact result, not the transcript.
     let parent_last = &reqs[2].1;
     let fed = serde_json::to_string(&parent_last.messages).unwrap();
-    assert!(fed.contains("Sub-agent agent_") && fed.contains("(inspecteur, model test/a"));
+    assert!(fed.contains(&format!("Sub-agent {} (inspecteur, model test/a", spawned.agent_id)));
+    assert!(fed.contains("Edit Map: src/lib.rs, fn parse."));
     assert!(fed.contains("completed in") && fed.contains(" ms,"));
 }
 
@@ -483,16 +502,19 @@ async fn delegation_and_the_childs_tools_go_through_the_parents_policy() {
     assert!(child_tool, "the child's Write was refused");
 }
 
+/// A launched sub-agent asks nothing: its commands run, while the session's
+/// own commands are still asked.
 #[tokio::test]
-async fn allowing_agent_once_does_not_allow_the_childs_commands() {
+async fn a_sub_agent_runs_its_commands_while_the_session_still_asks() {
     let mut env = open(
         vec![
             Reply::tool("c1", "Agent", json!({"task": "run a command"})),
-            Reply::tool("b1", "Bash", json!({"command": "echo hi"})),
+            Reply::tool("b1", "Bash", json!({"command": "echo child"})),
             Reply::text("ran"),
+            Reply::tool("b2", "Bash", json!({"command": "echo parent"})),
             Reply::text("done"),
         ],
-        None,
+        allow(&["Agent"]),
     )
     .await;
     env.ctl
@@ -501,7 +523,8 @@ async fn allowing_agent_once_does_not_allow_the_childs_commands() {
         })
         .unwrap();
     let mut approvals = Vec::new();
-    let evs = loop {
+    let mut all = Vec::new();
+    loop {
         let e = next(&mut env.events).await;
         if let Event::ApprovalRequested { approval } = &e.event {
             approvals.push(approval.clone());
@@ -513,23 +536,21 @@ async fn allowing_agent_once_does_not_allow_the_childs_commands() {
                 })
                 .unwrap();
         }
-        if matches!(e.event, Event::RunFinished { .. }) {
-            break vec![e];
+        let done = matches!(e.event, Event::RunFinished { .. });
+        all.push(e);
+        if done {
+            break;
         }
-    };
-    assert_eq!(run_outcome(&evs).0, RunOutcome::Succeeded);
-    assert_eq!(approvals.len(), 2, "Agent, then the child's Bash");
-    assert_eq!(approvals[0].tool, "Agent");
-    assert_eq!(approvals[0].level, "execute");
+    }
+    assert_eq!(run_outcome(&all).0, RunOutcome::Succeeded);
+    assert_eq!(approvals.len(), 1, "only the session's own command: {approvals:?}");
+    assert_eq!(approvals[0].tool, "Bash");
     assert!(approvals[0].agent_id.is_none());
-    assert_eq!(approvals[1].tool, "Bash");
-    assert!(
-        approvals[1]
-            .agent_id
-            .as_deref()
-            .unwrap()
-            .starts_with("agent_")
-    );
+    // The child's own command ran: its request carries the output.
+    let child_saw_output = env.script.requests().iter().any(|(_, r)| {
+        is_child(r) && serde_json::to_string(&r.messages).unwrap().contains("child")
+    });
+    assert!(child_saw_output, "the child's command ran");
 }
 
 /// No turn limit for sub-agents (formerly 30 by default, 100 at most):
@@ -694,7 +715,6 @@ async fn concurrent_delegations_run_at_the_same_time() {
             agent_id: Some(other.clone()),
             changeset_id: None,
             job_id: None,
-            message: None,
         })
         .unwrap();
     evs.extend(until_finished(&mut env.events).await);
@@ -758,7 +778,6 @@ async fn with_one_slot_the_second_delegation_waits_for_the_first() {
             agent_id: Some(holder.clone()),
             changeset_id: None,
             job_id: None,
-            message: None,
         })
         .unwrap();
     evs.extend(until_finished(&mut env.events).await);
@@ -812,7 +831,7 @@ async fn compaction_keeps_the_tool_the_profile_catalogue_and_the_policy() {
             && names.contains(&"AgentProfiles")
             && names.contains(&"CodeScout")
     );
-    for name in ["Agent", "Agents"] {
+    for name in ["Agent"] {
         let tool = last.tools.iter().find(|t| t.name == name).unwrap();
         let schema = serde_json::to_string(&tool.input_schema).unwrap();
         assert!(schema.contains("AgentProfiles"));
@@ -919,8 +938,8 @@ async fn a_worktree_launch_outside_git_is_refused_before_any_provider() {
         vec![
             Reply::tool(
                 "c1",
-                "Agents",
-                json!({"agents": [{"task": "one"}, {"task": "two"}]}),
+                "Agent",
+                json!({"missions": [{"task": "one"}, {"task": "two"}]}),
             ),
             Reply::tool(
                 "c2",
@@ -929,7 +948,7 @@ async fn a_worktree_launch_outside_git_is_refused_before_any_provider() {
             ),
             Reply::text("gave up"),
         ],
-        allow(&["Agent", "Agents"]),
+        allow(&["Agent"]),
     )
     .await;
     // Not a repository any more.

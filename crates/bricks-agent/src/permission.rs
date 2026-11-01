@@ -159,6 +159,33 @@ impl SessionPolicy {
         }
     }
 
+    /// Whether this policy lets the session's agent launch sub-agents:
+    /// EXECUTE, or CUSTOM with an explicit Allow rule on `Agent` (the rule
+    /// of its class is not enough). ASK never does, and nothing is asked.
+    pub fn delegation(&self) -> Result<(), String> {
+        match (self.chosen, self.profile) {
+            (true, PermissionProfile::Execute) => Ok(()),
+            (true, PermissionProfile::Custom)
+                if self.custom.tools.get(DELEGATION_TOOL) == Some(&PermissionEffect::Allow) =>
+            {
+                Ok(())
+            }
+            (true, PermissionProfile::Custom) => Err(
+                "Access denied: insufficient permissions. Under the CUSTOM profile, the Agent \
+                 tool must be explicitly set to « Autoriser » (Allow) to launch sub-agents; no \
+                 sub-agent was started. Tell the person that Agent must be explicitly set to \
+                 « Autoriser » in CUSTOM, with /config."
+                    .into(),
+            ),
+            _ => Err(
+                "Access denied: insufficient permissions. Launching sub-agents is not allowed \
+                 under the ASK profile; no sub-agent was started. Delegation needs EXECUTE, or \
+                 CUSTOM with the Agent tool explicitly set to « Autoriser » (Allow)."
+                    .into(),
+            ),
+        }
+    }
+
     /// The effect for a call, and why.
     pub fn effect(
         &self,
@@ -172,6 +199,16 @@ impl SessionPolicy {
                 format!("`{tool}` is forbidden in this context"),
             );
         };
+        // A delegation is allowed or refused, never asked.
+        if tool == DELEGATION_TOOL {
+            return match self.delegation() {
+                Ok(()) => (
+                    PermissionEffect::Allow,
+                    "delegation is allowed by the session's profile".into(),
+                ),
+                Err(why) => (PermissionEffect::Deny, why),
+            };
+        }
         let profile = match (self.chosen, self.profile) {
             (false, _) => "no permission policy is chosen yet (reads run, the rest is asked)",
             (true, PermissionProfile::Ask) => "the ASK profile",
@@ -197,6 +234,9 @@ impl SessionPolicy {
         (effect, format!("{} under {profile}", class.label()))
     }
 }
+
+/// The tool that launches sub-agents.
+pub const DELEGATION_TOOL: &str = "Agent";
 
 /// A session's policy and its revision, shared by its agents.
 #[derive(Clone)]
@@ -272,17 +312,34 @@ impl PermissionEngine {
 #[async_trait]
 impl PermissionPolicy for PermissionEngine {
     async fn check(&self, request: &PermissionRequest) -> PermissionDecision {
+        // Resuming an ended sub-agent starts it again: a delegation too.
+        let resume = request.tool_name == "AgentControl"
+            && request.tool_input["action"].as_str() == Some("resume");
         let verdict = self.cell.verdict(
-            &request.tool_name,
+            if resume {
+                DELEGATION_TOOL
+            } else {
+                &request.tool_name
+            },
             request.permission_level,
             request.category,
         );
         match verdict.effect {
             PermissionEffect::Allow => PermissionDecision::Allow,
             PermissionEffect::Deny => PermissionDecision::Deny(format!(
-                "{} (policy revision {})",
-                verdict.reason, verdict.policy_revision
+                "{} (policy revision {}){}",
+                verdict.reason,
+                verdict.policy_revision,
+                // The person changes this session's rules there.
+                if self.cell.get().0.profile == PermissionProfile::Custom {
+                    " The person can change this session's rules with /config."
+                } else {
+                    ""
+                }
             )),
+            // A launched sub-agent works without individual approvals: its
+            // launch was the approval. Deny rules still hold (above).
+            PermissionEffect::Ask if request.agent_id.is_some() => PermissionDecision::Allow,
             PermissionEffect::Ask => {
                 let mut request = request.clone();
                 request.policy_revision = Some(verdict.policy_revision);
@@ -457,6 +514,7 @@ mod tests {
             effect(&p, "WebFetch", PermissionLevel::ReadOnly, ToolCategory::Web),
             Ask
         );
+        // Delegation is never asked: under ASK it is refused.
         assert_eq!(
             effect(
                 &p,
@@ -464,8 +522,48 @@ mod tests {
                 PermissionLevel::Execute,
                 ToolCategory::Orchestration
             ),
-            Ask
+            Deny
         );
+    }
+
+    /// Delegation is allowed or refused, never asked: EXECUTE allows it;
+    /// CUSTOM needs an explicit Allow on `Agent` (the rule of its class is not
+    /// enough); ASK and an unchosen policy refuse it.
+    #[test]
+    fn delegation_is_allowed_or_refused_never_asked() {
+        let agent = |p: &SessionPolicy| {
+            p.effect(
+                "Agent",
+                PermissionLevel::Execute,
+                ToolCategory::Orchestration,
+            )
+        };
+        assert_eq!(
+            agent(&SessionPolicy::chosen(PermissionProfile::Execute)).0,
+            Allow
+        );
+        let (effect_ask, why) = agent(&SessionPolicy::chosen(PermissionProfile::Ask));
+        assert_eq!(effect_ask, Deny);
+        assert!(
+            why.starts_with("Access denied: insufficient permissions."),
+            "{why}"
+        );
+        assert_eq!(agent(&SessionPolicy::unchosen()).0, Deny);
+
+        let mut custom = SessionPolicy::chosen(PermissionProfile::Custom);
+        custom.custom.execute = Allow;
+        let (effect_custom, why) = agent(&custom);
+        assert_eq!(
+            effect_custom, Deny,
+            "the execute class does not allow delegation"
+        );
+        assert!(why.contains("CUSTOM") && why.contains("Agent"), "{why}");
+        custom.custom.tools.insert("Agent".into(), Allow);
+        assert_eq!(agent(&custom).0, Allow);
+        custom.custom.execute = Deny;
+        assert_eq!(agent(&custom).0, Allow, "the Agent rule alone is enough");
+        custom.custom.tools.insert("Agent".into(), Deny);
+        assert_eq!(agent(&custom).0, Deny);
     }
 
     #[test]
@@ -560,5 +658,74 @@ mod tests {
         save_session_policy(t.path(), &p, 7).unwrap();
         let s = load_session_policy(t.path()).unwrap().unwrap();
         assert_eq!((s.policy, s.revision), (p, 7));
+    }
+
+    /// Whoever is asked answers `answer`, and counts the asks.
+    struct Asked {
+        answer: PermissionDecision,
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait]
+    impl PermissionPolicy for Asked {
+        async fn check(&self, _request: &PermissionRequest) -> PermissionDecision {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.answer.clone()
+        }
+    }
+
+    /// A sub-agent's Ask runs without asking anyone, interactive or not; its
+    /// Deny holds; the orchestrator's Ask is asked, as before.
+    #[tokio::test]
+    async fn a_sub_agent_is_never_asked_and_a_denial_holds() {
+        use std::sync::atomic::Ordering::SeqCst;
+        let request = |agent: Option<&str>| PermissionRequest {
+            tool_name: "Write".into(),
+            tool_input: serde_json::json!({}),
+            permission_level: PermissionLevel::Write,
+            category: ToolCategory::FileSystem,
+            description: "write".into(),
+            id: "call".into(),
+            preview: None,
+            agent_id: agent.map(String::from),
+            policy_revision: None,
+        };
+        let refused = PermissionDecision::Deny(
+            "approval required, and nobody can be asked (non-interactive)".into(),
+        );
+        for (mode, answer) in [
+            ("interactive", PermissionDecision::AllowOnce),
+            ("non-interactive", refused),
+        ] {
+            let asked = Arc::new(Asked {
+                answer,
+                calls: std::sync::atomic::AtomicUsize::new(0),
+            });
+            let cell = PolicyCell::new(SessionPolicy::chosen(PermissionProfile::Ask), 1);
+            let engine = PermissionEngine::new(cell.clone(), asked.clone());
+
+            // ASK: the sub-agent's Write runs, and nobody is asked.
+            let d = engine.check(&request(Some("sub_0000"))).await;
+            assert!(matches!(d, PermissionDecision::Allow), "{mode}: {d:?}");
+            assert_eq!(asked.calls.load(SeqCst), 0, "{mode}");
+
+            // Its Deny holds, asked or not.
+            let mut custom = SessionPolicy::chosen(PermissionProfile::Custom);
+            custom.custom.write = Deny;
+            cell.set(custom);
+            let d = engine.check(&request(Some("sub_0000"))).await;
+            assert!(matches!(d, PermissionDecision::Deny(_)), "{mode}: {d:?}");
+            assert_eq!(asked.calls.load(SeqCst), 0, "{mode}");
+
+            // The orchestrator's own Ask goes to the approver.
+            cell.set(SessionPolicy::chosen(PermissionProfile::Ask));
+            let own = engine.check(&request(None)).await;
+            assert_eq!(asked.calls.load(SeqCst), 1, "{mode}");
+            assert_eq!(
+                matches!(own, PermissionDecision::AllowOnce),
+                mode == "interactive",
+                "{mode}: {own:?}"
+            );
+        }
     }
 }

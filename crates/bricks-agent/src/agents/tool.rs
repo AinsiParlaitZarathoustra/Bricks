@@ -1,11 +1,12 @@
-//! The native tools: `Agent` (one sub-agent), `Agents` (several, at once),
-//! `AgentControl` (instances, results, ChangeSets) and `AgentProfiles`
-//! (list and search the profiles). They are adapters of the session's
-//! spawner and runtime; none runs agents on its own.
+//! The native tools: `Agent` (one mission or several, each in the
+//! background), `AgentControl` (instances, results, ChangeSets) and
+//! `AgentProfiles` (list and search the profiles). They are adapters of the
+//! session's spawner and runtime; none runs agents on its own.
 //!
-//! `Agent` and `Agents` ask permission at the `execute` level through the
-//! normal policy; allowing them does not allow the children's own tool
-//! calls, which go through the same policy one by one.
+//! `Agent` is a delegation: the session's policy allows it (EXECUTE, or
+//! CUSTOM with `Agent` set to Allow) or refuses it at once (ASK); it never
+//! asks. A launched sub-agent asks for nothing either; Deny rules still
+//! hold for it.
 
 use super::runtime::{RuntimeHandle, while_waiting};
 use super::spawn::{AgentSpawnRequest, AgentSpawner, BatchOptions, Spawned, render_result};
@@ -75,7 +76,7 @@ fn render_spawned(s: Spawned) -> ToolResult {
                 })
                 .collect();
             ToolResult::success(format!(
-                "{} sub-agent(s) started; they work in parallel while you go on. Follow them with AgentControl: `wait` for their results, `result`, `status`, `resume` to continue an ended one, `cancel`; their ChangeSets with inspect_changes / apply_changes. Use SendMessage to guide a running sub-agent.\n{}",
+                "{} sub-agent(s) started in the background. Each report reaches you between two turns as it ends; `AgentControl wait` waits for the next one when you have nothing else to do. Messagent writes to them.\n{}",
                 hs.len(),
                 lines.join("\n")
             ))
@@ -102,7 +103,9 @@ impl Tool for NativeAgentTool {
     }
 
     fn description(&self) -> &str {
-        "Delegate one self-contained task in parallel. Returns an id; use AgentControl wait for its result. The child has fresh context and inherits your permissions and tools."
+        "Delegate one mission, or several with `missions`, to sub-agents working in the \
+         background. Returns their ids at once; each report reaches you as it ends. A sub-agent \
+         starts with a fresh context: give it everything it needs."
     }
 
     fn permission_level(&self) -> PermissionLevel {
@@ -114,11 +117,19 @@ impl Tool for NativeAgentTool {
     }
 
     fn input_schema(&self) -> Value {
-        json!({ "type": "object", "properties": item_schema(), "required": ["task"] })
+        let mut properties = item_schema();
+        properties["missions"] = json!({
+            "type": "array",
+            "minItems": 1,
+            "maxItems": MAX_MISSIONS,
+            "description": "Several missions at once (16 at most), instead of `task`: each one starts its own sub-agent.",
+            "items": { "type": "object", "properties": item_schema(), "required": ["task"] }
+        });
+        json!({ "type": "object", "properties": properties })
     }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> ToolResult {
-        let req: AgentSpawnRequest = match serde_json::from_value(input) {
+        let requests = match missions(input) {
             Ok(r) => r,
             Err(e) => {
                 return ToolResult::error(format!(
@@ -127,14 +138,15 @@ impl Tool for NativeAgentTool {
                 ));
             }
         };
+        let batch = requests.len() > 1;
         match self
             .spawner
             .spawn_batch(
-                vec![req],
+                requests,
                 BatchOptions {
                     background: true,
                     fail_fast: false,
-                    batch: false,
+                    batch,
                 },
                 ctx,
             )
@@ -146,23 +158,33 @@ impl Tool for NativeAgentTool {
     }
 }
 
-/// `Agents`: several sub-agents at once.
-pub struct AgentsTool {
-    spawner: Arc<AgentSpawner>,
-}
+/// Missions of one `Agent` call, at most: every report then fits the
+/// orchestrator's queue.
+const MAX_MISSIONS: usize = 16;
 
-impl AgentsTool {
-    pub fn new(spawner: Arc<AgentSpawner>) -> Self {
-        Self { spawner }
+/// The missions of an `Agent` call: one (`task` and its options) or a list
+/// (`missions`), never both.
+fn missions(input: Value) -> Result<Vec<AgentSpawnRequest>, String> {
+    #[derive(Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Many {
+        missions: Vec<AgentSpawnRequest>,
     }
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct AgentsInput {
-    agents: Vec<AgentSpawnRequest>,
-    #[serde(default)]
-    fail_fast: bool,
+    if input.get("missions").is_some() {
+        let many: Many = serde_json::from_value(input).map_err(|e| e.to_string())?;
+        if many.missions.is_empty() {
+            return Err("`missions` is empty".into());
+        }
+        if many.missions.len() > MAX_MISSIONS {
+            return Err(format!(
+                "{} missions at once; {MAX_MISSIONS} at most",
+                many.missions.len()
+            ));
+        }
+        return Ok(many.missions);
+    }
+    let one: AgentSpawnRequest = serde_json::from_value(input).map_err(|e| e.to_string())?;
+    Ok(vec![one])
 }
 
 #[cfg(test)]
@@ -170,112 +192,22 @@ mod input_tests {
     use super::*;
 
     #[test]
-    fn removed_batch_background_option_is_rejected() {
-        for value in [true, false] {
-            let result = serde_json::from_value::<AgentsInput>(json!({
-                "agents": [{"task": "Inspect the parser"}],
-                "background": value
-            }));
-            let Err(error) = result else {
-                panic!("obsolete background option was accepted");
-            };
-            assert!(error.to_string().contains("unknown field `background`"));
-        }
-    }
-}
-
-#[async_trait]
-impl Tool for AgentsTool {
-    fn name(&self) -> &str {
-        "Agents"
-    }
-
-    fn description(&self) -> &str {
-        "Run independent tasks in parallel as capacity allows; returns ids. Writers use isolated worktrees and ChangeSets. Read results with AgentControl wait. fail_fast cancels the others after a failure."
-    }
-
-    fn permission_level(&self) -> PermissionLevel {
-        PermissionLevel::Execute
-    }
-
-    fn category(&self) -> ToolCategory {
-        ToolCategory::Orchestration
-    }
-
-    fn input_schema(&self) -> Value {
-        json!({
-            "type": "object",
-            "properties": {
-                "agents": {
-                    "type": "array",
-                    "minItems": 1,
-                    "items": { "type": "object", "properties": item_schema(), "required": ["task"] }
-                },
-                "fail_fast": { "type": "boolean", "description": "Cancel the others when one fails (default false)." }
-            },
-            "required": ["agents"]
-        })
-    }
-
-    async fn execute(&self, input: Value, ctx: &ToolContext) -> ToolResult {
-        let i: AgentsInput = match serde_json::from_value(input) {
-            Ok(i) => i,
-            Err(e) => {
-                return ToolResult::error(format!("Invalid input: {e}. Nothing was started."));
-            }
-        };
-        match self
-            .spawner
-            .spawn_batch(
-                i.agents,
-                BatchOptions {
-                    background: true,
-                    fail_fast: i.fail_fast,
-                    batch: true,
-                },
-                ctx,
-            )
-            .await
-        {
-            Err(e) => ToolResult::error(e.to_string()),
-            Ok(s) => render_spawned(s),
-        }
-    }
-}
-
-/// The text of a message outcome: `Ok` when it was queued.
-pub(crate) fn message_text(
-    id: &str,
-    outcome: super::runtime::MessageOutcome,
-) -> Result<String, String> {
-    use super::runtime::MessageOutcome as M;
-    use crate::events::InjectRefusal as R;
-    match outcome {
-        M::Accepted {
-            message_id,
-            pending,
-        } => Ok(format!(
-            "message {message_id} queued for {id}: it reads it at its next step ({pending} \
-             waiting)."
-        )),
-        M::Unknown | M::OutOfScope => Err(format!(
-            "no sub-agent `{id}` in your scope; nothing was sent."
-        )),
-        M::NotRunning(state) => Err(format!(
-            "{id} is {}: nothing reads messages now; nothing was sent (use resume to continue \
-             an ended sub-agent).",
-            state.as_str()
-        )),
-        M::Refused(R::Empty) => Err("the message is empty; nothing was sent.".into()),
-        M::Refused(R::TooLarge) => Err(format!(
-            "the message is over {} bytes; nothing was sent.",
-            crate::events::MAX_INJECTED_BYTES
-        )),
-        M::Refused(R::QueueFull) => Err(format!(
-            "{id} already has {} messages waiting; nothing was sent.",
-            crate::events::MAX_PENDING_MESSAGES
-        )),
-        M::Refused(R::Finished) => Err(format!("{id} has just ended; nothing was sent.")),
+    fn one_mission_or_a_list_never_both() {
+        assert_eq!(
+            missions(json!({"task": "Inspect the parser"}))
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            missions(json!({"missions": [{"task": "a"}, {"task": "b"}]}))
+                .unwrap()
+                .len(),
+            2
+        );
+        assert!(missions(json!({"missions": []})).is_err());
+        assert!(missions(json!({"missions": [{"task": "a"}], "task": "b"})).is_err());
+        assert!(missions(json!({"agents": [{"task": "a"}]})).is_err());
     }
 }
 
@@ -358,12 +290,12 @@ impl Tool for AgentControlTool {
     }
 
     fn description(&self) -> &str {
-        "Follow and control your sub-agents: `list`, `status`/`result` (agent_id), `wait` \
-         (agent_id, timeout_ms), `resume` (agent_id, prompt: an ended sub-agent continues its own \
-         conversation, same profile, model and tools), `cancel` (agent_id, with its descendants); \
-         and their ChangeSets: `inspect_changes`, `apply_changes` (to your working tree; a \
-         conflict writes nothing), `discard_changes` (changeset_id or agent_id). Reading never \
-         starts a model request."
+        "Follow and control your sub-agents: `list`, `status`/`result` (agent_id), `wait` (until \
+         the next report or message, or agent_id's end; timeout_ms), `resume` (agent_id, prompt: \
+         an ended sub-agent continues its own conversation), `cancel` (agent_id); and their \
+         ChangeSets, never applied by themselves: `inspect_changes` (files and diff), \
+         `check_changes` (would it apply now? nothing written), `apply_changes` (to your working \
+         tree; a conflict writes nothing), `discard_changes` (changeset_id or agent_id)."
     }
 
     fn permission_level(&self) -> PermissionLevel {
@@ -373,7 +305,9 @@ impl Tool for AgentControlTool {
     /// Reads are read-only; cancel is `execute`; apply/discard write.
     fn permission_level_for(&self, input: &Value) -> PermissionLevel {
         match input["action"].as_str().unwrap_or("") {
-            "list" | "status" | "result" | "wait" | "inspect_changes" => PermissionLevel::ReadOnly,
+            "list" | "status" | "result" | "wait" | "inspect_changes" | "check_changes" => {
+                PermissionLevel::ReadOnly
+            }
             "cancel" | "resume" => PermissionLevel::Execute,
             _ => PermissionLevel::Write,
         }
@@ -387,11 +321,11 @@ impl Tool for AgentControlTool {
         json!({
             "type": "object",
             "properties": {
-                "action": { "type": "string", "enum": ["list", "status", "result", "wait", "resume", "cancel", "inspect_changes", "apply_changes", "discard_changes"] },
-                "agent_id": { "type": "string", "description": "Required for status, result, wait, resume, cancel; or to find an agent's ChangeSet." },
+                "action": { "type": "string", "enum": ["list", "status", "result", "wait", "resume", "cancel", "inspect_changes", "check_changes", "apply_changes", "discard_changes"] },
+                "agent_id": { "type": "string", "description": "Required for status, result, resume, cancel; for wait, the sub-agent whose end ends it; or to find an agent's ChangeSet." },
                 "prompt": { "type": "string", "description": "resume: what the ended sub-agent should do now." },
                 "changeset_id": { "type": "string", "description": "For inspect/apply/discard (or give agent_id)." },
-                "timeout_ms": { "type": "integer", "minimum": 1, "maximum": MAX_WAIT_MS, "description": "wait: how long (default 60000 ms); a timeout stops nothing." }
+                "timeout_ms": { "type": "integer", "minimum": 1, "maximum": MAX_WAIT_MS, "description": "wait: how long at most (default 60000 ms); a timeout stops nothing." }
             },
             "required": ["action"]
         })
@@ -460,26 +394,36 @@ impl Tool for AgentControlTool {
                     }
                 }
             },
-            "wait" => match need_agent(&i.agent_id) {
-                Err(e) => e,
-                Ok(id) => {
-                    let t =
-                        Duration::from_millis(i.timeout_ms.unwrap_or(60_000).clamp(1, MAX_WAIT_MS));
-                    let cancel = crate::subagent::run_token(&ctx.extensions).unwrap_or_default();
-                    let r = while_waiting(&ctx.extensions, rt.wait(&id, t, &cancel)).await;
-                    match r {
-                        Some(rec) if rec.result.is_some() => {
-                            ToolResult::success(render_result(rec.result.as_ref().expect("some")))
-                        }
-                        Some(rec) => ToolResult::success(format!(
-                            "{id} is still {} after {} (nothing was stopped).",
-                            rec.state.as_str(),
-                            bricks_types::duration::display_ms(t)
-                        )),
-                        None => ToolResult::error(format!("{id} disappeared")),
-                    }
+            "wait" => {
+                let ids = match &i.agent_id {
+                    None => Vec::new(),
+                    Some(_) => match need_agent(&i.agent_id) {
+                        Err(e) => return e,
+                        Ok(id) => vec![id],
+                    },
+                };
+                let t = Duration::from_millis(i.timeout_ms.unwrap_or(60_000).clamp(1, MAX_WAIT_MS));
+                let cancel = crate::subagent::run_token(&ctx.extensions).unwrap_or_default();
+                let me = who
+                    .clone()
+                    .unwrap_or_else(|| super::messagent::MAIN.to_string());
+                let outcome =
+                    while_waiting(&ctx.extensions, rt.wait_event(&me, &ids, t, &cancel)).await;
+                use super::runtime::WaitOutcome as W;
+                match outcome {
+                    W::Delivered(n) => ToolResult::success(format!(
+                        "{n} new delivery(ies) for you (reports or messages): you read them now."
+                    )),
+                    W::Ended(id) => ToolResult::success(format!(
+                        "{id} has ended; AgentControl result {id} gives its report."
+                    )),
+                    W::TimedOut => ToolResult::success(format!(
+                        "nothing new after {} (nothing was stopped).",
+                        bricks_types::duration::display_ms(t)
+                    )),
+                    W::Cancelled => ToolResult::error("the wait was cancelled."),
                 }
-            },
+            }
             "resume" => match need_agent(&i.agent_id) {
                 Err(e) => e,
                 Ok(id) => {
@@ -505,7 +449,7 @@ impl Tool for AgentControlTool {
                     ))
                 }
             },
-            "inspect_changes" | "apply_changes" | "discard_changes" => {
+            "inspect_changes" | "check_changes" | "apply_changes" | "discard_changes" => {
                 let cs_id = match (&i.changeset_id, &i.agent_id) {
                     (Some(c), _) => c.clone(),
                     (None, Some(_)) => match need_agent(&i.agent_id) {
@@ -553,6 +497,16 @@ impl Tool for AgentControlTool {
                             }
                         ))
                     }
+                    "check_changes" => match rt.workspaces.check(&cs_id, &ctx.working_dir).await {
+                        Ok(()) => ToolResult::success(format!(
+                            "ChangeSet {cs_id} applies cleanly to your working tree now; nothing was written. Review its diff before applying it."
+                        )),
+                        Err(WsError::Conflict { files, detail }) => ToolResult::error(format!(
+                            "ChangeSet {cs_id} would conflict in: {}. Nothing was written.\n{detail}",
+                            files.join(", ")
+                        )),
+                        Err(e) => ToolResult::error(e.to_string()),
+                    },
                     "apply_changes" => match rt.workspaces.apply(&cs_id, &ctx.working_dir).await {
                         Ok(done) => {
                             rt.changeset_applied(&done);
@@ -601,7 +555,7 @@ impl Tool for AgentControlTool {
                 }
             }
             other => ToolResult::error(format!(
-                "unknown action `{other}`: list, status, result, wait, resume, cancel, inspect_changes, apply_changes, discard_changes"
+                "unknown action `{other}`: list, status, result, wait, resume, cancel, inspect_changes, check_changes, apply_changes, discard_changes"
             )),
         }
     }
@@ -625,7 +579,7 @@ impl Tool for AgentProfilesTool {
     }
 
     fn description(&self) -> &str {
-        "List or search the sub-agent profiles usable with Agent and Agents: name, description, \
+        "List or search the sub-agent profiles usable with Agent: name, description, \
          source (project, user, built-in) and any invalid profile with its error."
     }
 

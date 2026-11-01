@@ -937,6 +937,43 @@ impl WorkspaceManager {
         Ok((String::from_utf8_lossy(&body[..cut]).to_string(), truncated))
     }
 
+    /// Whether a ChangeSet would apply to `dest_dir`'s working tree now,
+    /// without writing anything or changing its state: `Ok(())`, or the
+    /// files in conflict with git's detail.
+    pub async fn check(&self, id: &str, dest_dir: &Path) -> Result<(), WsError> {
+        let cs = self
+            .changeset(id)
+            .ok_or_else(|| WsError::NotFound(id.into()))?;
+        if !Path::new(&cs.patch).exists() {
+            return Err(WsError::NotFound(format!("patch of {id} ({})", cs.patch)));
+        }
+        let top = PathBuf::from(text(
+            git(dest_dir, &["rev-parse", "--show-toplevel"], &[])
+                .await
+                .map_err(|e| WsError::NotARepo(e.to_string()))?,
+        ));
+        match git(
+            &top,
+            &[
+                "apply",
+                "--check",
+                "--binary",
+                "--whitespace=nowarn",
+                &cs.patch,
+            ],
+            &[],
+        )
+        .await
+        {
+            Err(WsError::Git(detail)) => Err(WsError::Conflict {
+                files: conflicting_files(&detail, &cs),
+                detail,
+            }),
+            Err(e) => Err(e),
+            Ok(_) => Ok(()),
+        }
+    }
+
     /// Apply a ChangeSet to the working tree of `dest_dir`'s repository:
     /// all or nothing; a conflict writes nothing and keeps both versions.
     pub async fn apply(&self, id: &str, dest_dir: &Path) -> Result<ChangeSet, WsError> {

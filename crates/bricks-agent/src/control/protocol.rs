@@ -28,7 +28,7 @@ use serde::{Deserialize, Serialize};
 
 /// Version of the event and command schema. Incremented on any change a
 /// consumer could notice; documented in `docs/cli.md`.
-pub const SCHEMA_VERSION: u32 = 8;
+pub const SCHEMA_VERSION: u32 = 9;
 
 /// Largest patch an edit event carries for one file. A longer one is cut and
 /// marked (`patch_truncated`).
@@ -407,7 +407,12 @@ pub enum Event {
         #[serde(default = "crate::agents::spawn::first_execution")]
         execution: u32,
     },
-    /// A sub-agent's tool call started (its text is never streamed).
+    /// What a sub-agent wrote in one turn, whole (not streamed delta by delta).
+    AgentText {
+        agent_id: String,
+        text: String,
+    },
+    /// A sub-agent's tool call started.
     AgentToolStarted {
         agent_id: String,
         tool_call_id: String,
@@ -582,6 +587,7 @@ impl Event {
             Event::SearchResults { .. } => "search_results",
             Event::AgentSpawned { .. } => "agent_spawned",
             Event::AgentState { .. } => "agent_state",
+            Event::AgentText { .. } => "agent_text",
             Event::AgentToolStarted { .. } => "agent_tool_started",
             Event::AgentToolFinished { .. } => "agent_tool_finished",
             Event::AgentFinished { .. } => "agent_finished",
@@ -788,9 +794,6 @@ pub enum Command {
         /// For `jobs` (list the session's jobs) and `stop_job`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         job_id: Option<String>,
-        /// For `message`: the text for the running sub-agent (bounded).
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        message: Option<String>,
     },
     /// List the skills (all candidates, 20 per page, filtered by `query`);
     /// answered by `skills`. Accepted at any time.
@@ -905,7 +908,7 @@ mod tests {
 
     #[test]
     fn the_schema_is_seven_and_the_new_fields_are_only_written_when_set() {
-        assert_eq!(SCHEMA_VERSION, 8);
+        assert_eq!(SCHEMA_VERSION, 9);
         let mut w = written(false);
         let v = serde_json::to_value(&w).unwrap();
         assert!(

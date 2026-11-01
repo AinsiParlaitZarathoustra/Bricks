@@ -259,16 +259,16 @@ async fn run() {
     println!("  5. Orchestration Tools");
     println!("  ──────────────────────");
     {
-        let send = bricks_agent::agents::SendMessageTool;
-        let r = send
+        let mail = bricks_agent::agents::MessagentTool;
+        let r = mail
             .execute(
-                serde_json::json!({"to": "worker-1", "content": "Start task"}),
+                serde_json::json!({"action": "send", "to": "worker-1", "content": "Start task"}),
                 &ctx,
             )
             .await;
-        // Outside an agent runtime there is no recipient: nothing is claimed sent.
+        // Outside an agent runtime there is no team: nothing is claimed sent.
         check!(
-            "SendMessage refuses without a recipient",
+            "Messagent refuses without a team",
             r.is_error && r.content.contains("nothing was sent")
         );
         println!();

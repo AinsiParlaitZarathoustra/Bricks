@@ -823,19 +823,18 @@ async fn a_child_without_todowrite_gets_no_plan_tool_and_no_plan_block() {
     assert!(!children.is_empty(), "a child ran");
     let parent = reqs.iter().map(|(_, r)| r).find(|r| !is_child(r)).unwrap();
     assert!(
-        parent.tools.iter().any(|t| t.name == "SendMessage"),
-        "the session agent can message its sub-agents"
+        parent.tools.iter().any(|t| t.name == "Messagent"),
+        "the session agent writes to its team"
     );
     for child in &children {
         assert!(
             !child.tools.iter().any(|t| t.name == "TodoWrite"),
             "a child announces no TodoWrite"
         );
-        // With the default `max_depth = 1`, a child starts no sub-agent:
-        // SendMessage would have no one to reach.
+        // Every member of the team writes to the others, children included.
         assert!(
-            !child.tools.iter().any(|t| t.name == "SendMessage"),
-            "a child that cannot delegate gets no SendMessage"
+            child.tools.iter().any(|t| t.name == "Messagent"),
+            "a child is a member of the team and gets Messagent"
         );
         let s = system(child);
         assert!(!s.contains("<plan"), "{s}");

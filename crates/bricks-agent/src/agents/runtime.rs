@@ -22,7 +22,7 @@ use bricks_types::Usage;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -176,14 +176,21 @@ impl Scheduler {
 
 // ─── Activity lease ──────────────────────────────────────────────────────────
 
+/// How long a writing call of a shared-workspace child waits for another
+/// writer to finish before it is refused (the child goes on, reading).
+pub const WRITER_CLAIM_TIMEOUT: Duration = Duration::from_secs(60);
+
 /// What an active child holds: its slot and, in a shared workspace, the
-/// writer lease. Both are let go while it waits for its own children.
+/// writer lease from its first writing call on (a child that only reads
+/// never takes it). Both are let go while it waits for its own children.
 pub struct ActivityLease {
     scheduler: Arc<Scheduler>,
     holder: String,
     writer_dir: Option<PathBuf>,
     slot: tokio::sync::Mutex<Option<OwnedSemaphorePermit>>,
     writer: tokio::sync::Mutex<Option<WriterGuard>>,
+    /// The writer lease was claimed: it is taken back after a wait.
+    claimed: std::sync::atomic::AtomicBool,
     /// Number of waits in progress. Its lock also orders the transitions:
     /// the first wait lets the slot and lease go, the last one takes them
     /// back before another wait can start, so two waits of one child never
@@ -205,15 +212,67 @@ impl ActivityLease {
             Some((d, g)) => (Some(d), Some(g)),
             None => (None, None),
         };
+        let claimed = std::sync::atomic::AtomicBool::new(guard.is_some());
         Arc::new(Self {
             scheduler,
             holder,
             writer_dir,
             slot: tokio::sync::Mutex::new(Some(slot)),
             writer: tokio::sync::Mutex::new(guard),
+            claimed,
             waits: tokio::sync::Mutex::new(0),
             cancel,
         })
+    }
+
+    /// A child of the shared workspace `dir` that takes its writer lease at
+    /// its first writing call ([`Self::claim_writer`]), not before.
+    pub fn shared(
+        scheduler: Arc<Scheduler>,
+        holder: String,
+        slot: OwnedSemaphorePermit,
+        dir: PathBuf,
+        cancel: CancellationToken,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            scheduler,
+            holder,
+            writer_dir: Some(dir),
+            slot: tokio::sync::Mutex::new(Some(slot)),
+            writer: tokio::sync::Mutex::new(None),
+            claimed: std::sync::atomic::AtomicBool::new(false),
+            waits: tokio::sync::Mutex::new(0),
+            cancel,
+        })
+    }
+
+    /// The workspace this lease writes in, when it is a shared one.
+    pub fn writer_dir(&self) -> Option<&Path> {
+        self.writer_dir.as_deref()
+    }
+
+    /// Take the shared workspace's writer lease for the rest of the run, at
+    /// the first writing call (once held, at once). `Err` with the holder
+    /// when another writer keeps it past `timeout`; `Ok(false)` if cancelled.
+    pub async fn claim_writer(&self, timeout: Duration) -> Result<bool, String> {
+        let Some(dir) = &self.writer_dir else {
+            return Ok(true);
+        };
+        let mut writer = self.writer.lock().await;
+        if writer.is_some() {
+            return Ok(true);
+        }
+        let gate = writers_for(dir);
+        match tokio::time::timeout(timeout, gate.acquire(&self.holder, &self.cancel, |_| {})).await
+        {
+            Ok(Some(g)) => {
+                *writer = Some(g);
+                self.claimed.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(true)
+            }
+            Ok(None) => Ok(false),
+            Err(_) => Err(gate.holder().unwrap_or_else(|| "another agent".into())),
+        }
     }
 
     /// Run `fut` (waiting for children) without holding the slot or the
@@ -231,7 +290,9 @@ impl ActivityLease {
         let mut waits = self.waits.lock().await;
         *waits -= 1;
         if *waits == 0 {
-            if let Some(dir) = &self.writer_dir {
+            if let Some(dir) = &self.writer_dir
+                && self.claimed.load(std::sync::atomic::Ordering::SeqCst)
+            {
                 let g = writers_for(dir)
                     .acquire(&self.holder, &self.cancel, |_| {})
                     .await;
@@ -307,18 +368,6 @@ struct Live {
     controls: Option<Arc<crate::events::StreamControls>>,
 }
 
-/// The answer to a message sent to a sub-agent.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MessageOutcome {
-    /// Queued for its next model request (not read yet).
-    Accepted { message_id: String, pending: usize },
-    Unknown,
-    OutOfScope,
-    /// Ended (or not started yet): nothing would read it.
-    NotRunning(InstanceState),
-    Refused(crate::events::InjectRefusal),
-}
-
 /// Why a resume was refused before anything started.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResumeRefusal {
@@ -346,6 +395,26 @@ pub struct AgentRuntime {
     session_sink: Mutex<Option<SessionSink>>,
     manifest: Option<PathBuf>,
     pub workspaces: Arc<super::workspace::WorkspaceManager>,
+    /// Messagent: the team thread and the orchestrator's queue.
+    pub(crate) mail: Mutex<super::messagent::Mail>,
+    /// Grows at each delivery or end: waits wake up and look again.
+    wake: tokio::sync::watch::Sender<u64>,
+    /// The number of the next sub-agent (`sub_0000`…), never reused.
+    next_sub: Mutex<u32>,
+}
+
+/// Sub-agents of one session, at most (`sub_0000` to `sub_9999`).
+pub const MAX_SUB_AGENTS: u32 = 10_000;
+
+/// Why a wait for events ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WaitOutcome {
+    /// Deliveries wait for the waiter (results, messages): read next turn.
+    Delivered(usize),
+    /// One of the awaited sub-agents ended.
+    Ended(String),
+    TimedOut,
+    Cancelled,
 }
 
 /// Usage of one root run: the session agent's own, and its descendants'
@@ -388,6 +457,9 @@ impl AgentRuntime {
             session_sink: Mutex::new(None),
             manifest,
             workspaces,
+            mail: Mutex::new(Default::default()),
+            wake: tokio::sync::watch::channel(0).0,
+            next_sub: Mutex::new(0),
         });
         rt.recover();
         rt
@@ -505,8 +577,84 @@ impl AgentRuntime {
                 r.updated_at_ms = now_ms();
             }
         }
+        // Every id the manifest names counts, a record that cannot be read
+        // included: an id is never given twice.
+        let next = text
+            .match_indices("sub_")
+            .filter_map(|(i, _)| {
+                let digits = text.get(i + 4..i + 8)?;
+                digits
+                    .bytes()
+                    .all(|b| b.is_ascii_digit())
+                    .then(|| digits.parse::<u32>().ok())
+                    .flatten()
+            })
+            .chain(
+                records
+                    .iter()
+                    .filter_map(|r| r.info.agent_id.strip_prefix("sub_")?.parse::<u32>().ok()),
+            )
+            .max()
+            .map_or(0, |n| n + 1);
+        *self.next_sub.lock() = next;
         *self.records.lock() = records;
         self.save();
+    }
+
+    /// The next sub-agent id, `sub_0000` to `sub_9999`, never reused in
+    /// the session.
+    pub fn allocate_id(&self) -> Result<String, String> {
+        let mut next = self.next_sub.lock();
+        if *next >= MAX_SUB_AGENTS {
+            return Err(format!(
+                "this session already started {MAX_SUB_AGENTS} sub-agents (sub_0000 to sub_9999): \
+                 no id is left; resume an ended sub-agent instead"
+            ));
+        }
+        let id = format!("sub_{:04}", *next);
+        *next += 1;
+        Ok(id)
+    }
+
+    /// Something was delivered or ended: waits look again.
+    pub(crate) fn bump(&self) {
+        self.wake.send_modify(|n| *n = n.wrapping_add(1));
+    }
+
+    /// The message queue of a running sub-agent.
+    pub(crate) fn controls_of(&self, id: &str) -> Option<Arc<crate::events::StreamControls>> {
+        self.live.lock().get(id).and_then(|l| l.controls.clone())
+    }
+
+    /// Wait until something is delivered to `waiter`, one of `ids` ends,
+    /// the wait is cancelled, or `timeout` passes. Deliveries already
+    /// waiting end it at once; nothing is consumed (they are read next turn).
+    pub async fn wait_event(
+        &self,
+        waiter: &str,
+        ids: &[String],
+        timeout: Duration,
+        cancel: &CancellationToken,
+    ) -> WaitOutcome {
+        let deadline = tokio::time::Instant::now() + timeout;
+        let mut rx = self.wake.subscribe();
+        loop {
+            let waiting = self.waiting_for(waiter);
+            if waiting > 0 {
+                return WaitOutcome::Delivered(waiting);
+            }
+            if let Some(id) = ids.iter().find(|id| {
+                self.record(id)
+                    .is_some_and(|r| r.state.is_terminal() && r.result.is_some())
+            }) {
+                return WaitOutcome::Ended(id.clone());
+            }
+            tokio::select! {
+                changed = rx.changed() => if changed.is_err() { return WaitOutcome::Cancelled },
+                _ = tokio::time::sleep_until(deadline) => return WaitOutcome::TimedOut,
+                _ = cancel.cancelled() => return WaitOutcome::Cancelled,
+            }
+        }
     }
 
     fn save(&self) {
@@ -590,31 +738,6 @@ impl AgentRuntime {
         }
         if let Some(l) = self.live.lock().get_mut(id) {
             l.controls = controls;
-        }
-    }
-
-    /// Queue a message for a running sub-agent, after checking that
-    /// `viewer` may reach it. The answer says what really happened: an
-    /// accepted message is read at its next model request.
-    pub fn send_message(&self, id: &str, viewer: Option<&str>, text: String) -> MessageOutcome {
-        let state = match self.record(id) {
-            None => return MessageOutcome::Unknown,
-            Some(r) => r.state,
-        };
-        if !self.visible_to(id, viewer) {
-            return MessageOutcome::OutOfScope;
-        }
-        let controls = self.live.lock().get(id).and_then(|l| l.controls.clone());
-        let Some(controls) = controls else {
-            return MessageOutcome::NotRunning(state);
-        };
-        match controls.try_inject(text) {
-            Ok(()) => MessageOutcome::Accepted {
-                message_id: format!("msg_{}", &uuid::Uuid::new_v4().simple().to_string()[..12]),
-                pending: controls.pending_messages(),
-            },
-            Err(crate::events::InjectRefusal::Finished) => MessageOutcome::NotRunning(state),
-            Err(e) => MessageOutcome::Refused(e),
         }
     }
 
@@ -722,7 +845,47 @@ impl AgentRuntime {
             l.controls = None;
             let _ = l.done_tx.send(true);
         }
+        self.notify_parent(id);
+        self.bump();
         self.maybe_final_usage(id);
+    }
+
+    /// The end of a sub-agent, delivered once to the agent that launched
+    /// it (its report, shortened to fit one delivery; `AgentControl result`
+    /// gives it whole).
+    fn notify_parent(&self, id: &str) {
+        let Some(r) = self.record(id) else { return };
+        let Some(result) = &r.result else { return };
+        // The session's agent has an identity of its own (`main_…`): for the
+        // team it is `main`, the only parent that is no sub-agent.
+        let parent = r
+            .info
+            .parent_id
+            .clone()
+            .filter(|p| self.record(p).is_some())
+            .unwrap_or_else(|| super::messagent::MAIN.to_string());
+        let report = super::spawn::render_result(result);
+        const ROOM: usize = crate::events::MAX_INJECTED_BYTES - 512;
+        let body = if report.len() > ROOM {
+            let mut cut = ROOM;
+            while !report.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            format!(
+                "{}\n[report shortened here; AgentControl result {id} gives it whole]",
+                &report[..cut]
+            )
+        } else {
+            report
+        };
+        let _ = self.deliver(
+            &parent,
+            format!(
+                "[{id} · {} ended: {}]\n{body}",
+                super::messagent::member_name(&r.info),
+                result.status
+            ),
+        );
     }
 
     /// An explicit stop: a later message is refused, nothing resumes it
@@ -1291,100 +1454,492 @@ mod tests {
         assert_eq!(r.result.as_ref().map(|x| x.execution), Some(2));
     }
 
-    /// Exercise the native tool against the real runtime queue and visibility rules.
-    #[tokio::test]
-    async fn native_sendmessage_queues_only_for_visible_running_children() {
-        use super::super::message::SendMessageTool;
-        use bricks_tools::{CostTracker, Extensions, Tool, ToolContext};
-        let rt = runtime(None);
-        rt.register(info_of("agent_c"), false, CancellationToken::new());
-        rt.set_state("agent_c", InstanceState::Running, None);
-        let controls = Arc::new(crate::events::StreamControls::new(CancellationToken::new()));
-        rt.set_controls("agent_c", 1, Some(Arc::clone(&controls)));
-        let ctx = ToolContext {
+    /// The context of a tool call: by the sub-agent `who`, or by the
+    /// session's agent (`None`). Sub-agents are children of `main_1`, as the
+    /// controller names the session's agent.
+    fn tool_ctx(rt: &Arc<AgentRuntime>, who: Option<&str>) -> bricks_tools::ToolContext {
+        use bricks_tools::{CostTracker, Extensions, ToolContext};
+        let extensions = Extensions::default();
+        extensions.insert(RuntimeHandle(Arc::clone(rt)));
+        if let Some(id) = who {
+            extensions.insert(super::super::spawn::AgentIdentity {
+                agent_id: id.into(),
+                parent_id: Some("main_1".into()),
+                root_run_id: "run_1".into(),
+            });
+        }
+        ToolContext {
             working_dir: std::env::temp_dir(),
             session_id: "main_1".into(),
             permissions: Arc::new(bricks_tools::permissions::AllowAll),
             cost_tracker: Arc::new(CostTracker::new()),
             mcp_manager: None,
-            extensions: Extensions::default(),
-        };
-        let input = |to: &str, content: &str| serde_json::json!({"to": to, "content": content});
-        let missing = SendMessageTool
-            .execute(input("agent_c", "hello"), &ctx)
+            extensions,
+        }
+    }
+
+    /// Runs `Messagent` as `who` (`None`: the session's agent).
+    async fn messagent(
+        rt: &Arc<AgentRuntime>,
+        who: Option<&str>,
+        input: serde_json::Value,
+    ) -> bricks_tools::ToolResult {
+        use bricks_tools::Tool;
+        super::super::messagent::MessagentTool
+            .execute(input, &tool_ctx(rt, who))
+            .await
+    }
+
+    /// A sub-agent of the session, running, with its message queue.
+    fn running(rt: &Arc<AgentRuntime>, id: &str) -> Arc<crate::events::StreamControls> {
+        rt.register(info_of(id), false, CancellationToken::new());
+        rt.set_state(id, InstanceState::Running, None);
+        let queue = Arc::new(crate::events::StreamControls::new(CancellationToken::new()));
+        rt.set_controls(id, 1, Some(Arc::clone(&queue)));
+        queue
+    }
+
+    /// The orchestrator's queue, for one of its runs going on.
+    fn orchestrator_queue(rt: &Arc<AgentRuntime>) -> Arc<crate::events::StreamControls> {
+        let queue = Arc::new(crate::events::StreamControls::new(CancellationToken::new()));
+        rt.set_main_controls(Some(Arc::clone(&queue)));
+        queue
+    }
+
+    /// `send` reaches one agent, several (each once), or the team. Each
+    /// recipient reads it with its header; the sender is never one of them.
+    #[tokio::test]
+    async fn messagent_reaches_one_several_or_the_team() {
+        use serde_json::json;
+        let rt = runtime(None);
+        let c0 = running(&rt, "sub_0000");
+        let c1 = running(&rt, "sub_0001");
+        let cm = orchestrator_queue(&rt);
+
+        let one = messagent(
+            &rt,
+            None,
+            json!({"action": "send", "to": "sub_0000", "content": "one"}),
+        )
+        .await;
+        assert!(!one.is_error, "{}", one.content);
+        assert_eq!(one.content, "m0001 sent to sub_0000.");
+        assert_eq!(
+            c0.drain_messages(),
+            vec!["[Messagent m0001 from main to sub_0000]\none".to_string()]
+        );
+        assert_eq!(c1.pending_messages(), 0);
+
+        let several = messagent(
+            &rt,
+            None,
+            json!({"action": "send", "to": ["sub_0000", "sub_0001", "sub_0000"], "content": "both"}),
+        )
+        .await;
+        assert_eq!(several.content, "m0002 sent to sub_0000, sub_0001.");
+        assert_eq!(c0.pending_messages(), 1, "a repeated id is one recipient");
+        assert_eq!(c1.pending_messages(), 1);
+
+        let team = messagent(
+            &rt,
+            Some("sub_0000"),
+            json!({"action": "send", "to": "team", "content": "all"}),
+        )
+        .await;
+        assert_eq!(team.content, "m0003 sent to the team.");
+        assert_eq!(
+            cm.drain_messages(),
+            vec!["[Messagent m0003 from sub_0000 to team]\nall".to_string()]
+        );
+        assert_eq!(c1.pending_messages(), 2, "the team reaches the other sub-agent");
+        assert_eq!(c0.pending_messages(), 1, "the sender is not a recipient");
+
+        let from_main = messagent(
+            &rt,
+            None,
+            json!({"action": "send", "to": "team", "content": "again"}),
+        )
+        .await;
+        assert_eq!(from_main.content, "m0004 sent to the team.");
+        assert_eq!(cm.pending_messages(), 0, "the orchestrator is not its own recipient");
+        assert_eq!(c0.pending_messages(), 2);
+        assert_eq!(c1.pending_messages(), 3);
+    }
+
+    /// A refusal says what was not sent and sends nothing, to anyone.
+    #[tokio::test]
+    async fn messagent_refusals_send_nothing() {
+        use serde_json::json;
+        let rt = runtime(None);
+        let c0 = running(&rt, "sub_0000");
+        let c1 = running(&rt, "sub_0001");
+        let too_large = "x".repeat(super::super::messagent::MAX_TEXT_BYTES + 1);
+        let refused = [
+            (json!({"action": "send", "to": "sub_0000", "content": "  \n"}), "the message is empty; nothing was sent."),
+            (
+                json!({"action": "send", "to": "sub_0000", "content": too_large}),
+                "is over 15872 bytes",
+            ),
+            (json!({"action": "send", "to": "sub_9999", "content": "x"}), "no agent `sub_9999` in this team; nothing was sent."),
+            (json!({"action": "send", "to": "sub_0000", "content": "x", "reply_to": "m9999"}), "no message `m9999` to reply to; nothing was sent."),
+            (json!({"action": "send", "content": "x"}), "`send` needs `to`"),
+        ];
+        for (input, why) in refused {
+            let r = messagent(&rt, None, input).await;
+            assert!(r.is_error, "{}", r.content);
+            assert!(r.content.contains(why), "{} / {why}", r.content);
+        }
+        let myself = messagent(
+            &rt,
+            Some("sub_0000"),
+            json!({"action": "send", "to": "sub_0000", "content": "me"}),
+        )
+        .await;
+        assert!(myself.is_error && myself.content.contains("yourself"), "{}", myself.content);
+        assert_eq!(c0.pending_messages(), 0);
+        assert_eq!(c1.pending_messages(), 0);
+
+        // A full queue refuses, and says so.
+        for _ in 0..crate::events::MAX_PENDING_MESSAGES {
+            let ok = messagent(
+                &rt,
+                None,
+                json!({"action": "send", "to": "sub_0000", "content": "q"}),
+            )
             .await;
-        assert!(missing.is_error && missing.content.contains("nothing was sent"));
-        ctx.extensions.insert(RuntimeHandle(Arc::clone(&rt)));
-        let ok = SendMessageTool
-            .execute(input("agent_c", "hello"), &ctx)
-            .await;
+            assert!(!ok.is_error, "{}", ok.content);
+        }
+        let full = messagent(
+            &rt,
+            None,
+            json!({"action": "send", "to": "sub_0000", "content": "overflow"}),
+        )
+        .await;
         assert!(
-            !ok.is_error && ok.content.contains("queued for agent_c"),
+            full.is_error && full.content.contains("already has 32 messages waiting"),
             "{}",
-            ok.content
+            full.content
         );
-        assert_eq!(controls.pending_messages(), 1);
-        for content in [
-            String::new(),
-            "x".repeat(crate::events::MAX_INJECTED_BYTES + 1),
-        ] {
-            let err = SendMessageTool
-                .execute(input("agent_c", &content), &ctx)
-                .await;
-            assert!(
-                err.is_error && err.content.contains("nothing was sent"),
-                "{}",
-                err.content
-            );
-        }
-        let unknown = SendMessageTool
-            .execute(input("agent_nope", "x"), &ctx)
-            .await;
-        assert!(unknown.is_error && unknown.content.contains("nothing was sent"));
-        let sibling = ToolContext {
-            extensions: Extensions::default(),
-            ..ctx.clone()
-        };
-        sibling.extensions.insert(RuntimeHandle(Arc::clone(&rt)));
-        sibling
-            .extensions
-            .insert(super::super::spawn::AgentIdentity {
-                agent_id: "agent_sib".into(),
-                parent_id: Some("main_1".into()),
-                root_run_id: "run_1".into(),
-            });
-        rt.register(info_of("agent_sib"), false, CancellationToken::new());
-        let err = SendMessageTool
-            .execute(input("agent_c", "nope"), &sibling)
-            .await;
-        assert!(err.is_error && err.content.contains("nothing was sent"));
-        assert_eq!(controls.pending_messages(), 1);
-        for _ in 1..crate::events::MAX_PENDING_MESSAGES {
-            assert!(
-                !SendMessageTool
-                    .execute(input("agent_c", "queued"), &ctx)
-                    .await
-                    .is_error
-            );
-        }
-        let full = SendMessageTool
-            .execute(input("agent_c", "overflow"), &ctx)
-            .await;
-        assert!(full.is_error && full.content.contains("nothing was sent"));
         assert_eq!(
-            controls.pending_messages(),
-            crate::events::MAX_PENDING_MESSAGES
+            c0.pending_messages(),
+            crate::events::MAX_PENDING_MESSAGES,
+            "nothing of the refused message is queued"
         );
-        rt.finish("agent_c", AgentResult::lost(&info_of("agent_c")));
-        let err = SendMessageTool
-            .execute(input("agent_c", "late"), &ctx)
-            .await;
-        assert!(err.is_error && err.content.contains("nothing was sent"));
-        assert_eq!(
-            controls.pending_messages(),
-            crate::events::MAX_PENDING_MESSAGES
+
+        // An ended agent reads nothing: a message does not restart it.
+        rt.set_state("sub_0001", InstanceState::Completed, None);
+        rt.finish("sub_0001", AgentResult::lost(&info_of("sub_0001")));
+        let ended = messagent(
+            &rt,
+            None,
+            json!({"action": "send", "to": "sub_0001", "content": "late"}),
+        )
+        .await;
+        assert!(
+            ended.is_error && ended.content.contains("does not restart it"),
+            "{}",
+            ended.content
+        );
+
+        // Alone in the team, the orchestrator has nobody to write to.
+        let alone = runtime(None);
+        let nobody = messagent(
+            &alone,
+            None,
+            json!({"action": "send", "to": "team", "content": "hello?"}),
+        )
+        .await;
+        assert!(
+            nobody.is_error && nobody.content.contains("nobody else is in the team now"),
+            "{}",
+            nobody.content
         );
     }
+
+    /// The largest text a message takes is delivered whole, its header
+    /// included: a recipient never gets a refusal for a text the tool accepted.
+    #[tokio::test]
+    async fn a_message_of_the_largest_size_is_delivered_whole() {
+        use serde_json::json;
+        let rt = runtime(None);
+        let queue = running(&rt, "sub_0000");
+        let largest = "x".repeat(super::super::messagent::MAX_TEXT_BYTES);
+        let r = messagent(
+            &rt,
+            None,
+            json!({"action": "send", "to": "sub_0000", "content": largest}),
+        )
+        .await;
+        assert!(!r.is_error, "{}", r.content);
+        assert_eq!(queue.pending_messages(), 1);
+    }
+
+    /// A chain of replies runs to eight; the ninth is refused, and the
+    /// orchestrator is told when a sub-agent is the one who tried it.
+    #[test]
+    fn messagent_chain_stops_after_eight_replies_and_tells_the_orchestrator() {
+        use super::super::messagent::{MAIN, MAX_CHAIN, Target};
+        let rt = runtime(None);
+        running(&rt, "sub_0000");
+        let (first, _) = rt
+            .post(MAIN, Target::Agents(vec!["sub_0000".into()]), "start".into(), None)
+            .unwrap();
+        assert_eq!(first.chain, 0);
+        let mut last = first.id;
+        for step in 1..=MAX_CHAIN {
+            let (from, to) = if step % 2 == 1 {
+                ("sub_0000", MAIN)
+            } else {
+                (MAIN, "sub_0000")
+            };
+            let (post, missed) = rt
+                .post(
+                    from,
+                    Target::Agents(vec![to.into()]),
+                    format!("reply {step}"),
+                    Some(last.clone()),
+                )
+                .unwrap();
+            assert_eq!(post.chain, step);
+            assert!(missed.is_empty());
+            last = post.id;
+        }
+        let err = rt
+            .post(
+                "sub_0000",
+                Target::Agents(vec![MAIN.into()]),
+                "one more".into(),
+                Some(last),
+            )
+            .unwrap_err();
+        assert!(
+            err.contains("8 replies in a row") && err.contains("was refused"),
+            "{err}"
+        );
+        let told = rt.mail.lock().backlog.last().cloned().unwrap_or_default();
+        assert!(
+            told.contains("sub_0000 tried to continue") && told.contains("past 8 replies"),
+            "{told}"
+        );
+    }
+
+    /// `read` gives the team thread's posts the reader has not got yet: a
+    /// team post is delivered to its recipients' queues at once, so `read`
+    /// gives it to a late member (or one whose delivery failed), once; `all`
+    /// gives the whole thread.
+    #[tokio::test]
+    async fn messagent_read_gives_only_the_new_team_posts() {
+        use serde_json::json;
+        let rt = runtime(None);
+        running(&rt, "sub_0000");
+        let read = |who: Option<&'static str>, input: serde_json::Value| {
+            let rt = Arc::clone(&rt);
+            async move { messagent(&rt, who, input).await.content }
+        };
+        messagent(&rt, None, json!({"action": "send", "to": "team", "content": "one"})).await;
+        // A member who joins later has not got it: `read` gives it, once.
+        running(&rt, "sub_0001");
+        let first = read(Some("sub_0001"), json!({"action": "read"})).await;
+        assert!(first.contains("[Messagent m0001 from main to team]\none"), "{first}");
+        assert_eq!(
+            read(Some("sub_0001"), json!({"action": "read"})).await,
+            "No new message in the team thread."
+        );
+        // A team post reaches both queues: nothing is left for `read`.
+        messagent(&rt, Some("sub_0000"), json!({"action": "send", "to": "team", "content": "two"})).await;
+        assert_eq!(
+            read(Some("sub_0001"), json!({"action": "read"})).await,
+            "No new message in the team thread."
+        );
+        let whole = read(Some("sub_0001"), json!({"action": "read", "all": true})).await;
+        assert!(whole.contains("\none") && whole.contains("\ntwo"), "{whole}");
+        // The orchestrator got `two` in its queue: `read` does not give it again.
+        let main_reads = read(None, json!({"action": "read"})).await;
+        assert!(main_reads.contains("\none") && !main_reads.contains("\ntwo"), "{main_reads}");
+    }
+
+    /// `members` lists the orchestrator, then every sub-agent, with its state.
+    #[tokio::test]
+    async fn messagent_members_lists_the_team_with_its_states() {
+        use serde_json::json;
+        let rt = runtime(None);
+        running(&rt, "sub_0000");
+        running(&rt, "sub_0001");
+        rt.set_state("sub_0001", InstanceState::Completed, None);
+        let listed = messagent(&rt, Some("sub_0000"), json!({"action": "members"})).await;
+        assert!(!listed.is_error, "{}", listed.content);
+        let lines: Vec<&str> = listed.content.lines().collect();
+        assert_eq!(lines[0], "- main · Orchestrateur · running", "{}", listed.content);
+        assert_eq!(lines[1], "- sub_0000 · Agent p · running (you)", "{}", listed.content);
+        assert_eq!(lines[2], "- sub_0001 · Agent p · completed", "{}", listed.content);
+    }
+
+    /// What is sent to the orchestrator between its runs waits for its next
+    /// run, and is moved into it.
+    #[test]
+    fn what_the_orchestrator_gets_between_its_runs_waits_for_the_next_one() {
+        use super::super::messagent::{MAIN, Target};
+        let rt = runtime(None);
+        running(&rt, "sub_0000");
+        rt.post("sub_0000", Target::Agents(vec![MAIN.into()]), "waiting".into(), None)
+            .unwrap();
+        assert_eq!(rt.waiting_for(MAIN), 1);
+        let queue = orchestrator_queue(&rt);
+        assert_eq!(queue.pending_messages(), 1, "moved into the run that starts");
+        assert_eq!(rt.waiting_for(MAIN), 1);
+        assert_eq!(queue.drain_messages().len(), 1, "the run reads it between its turns");
+        rt.set_main_controls(None);
+        rt.post("sub_0000", Target::Agents(vec![MAIN.into()]), "later".into(), None)
+            .unwrap();
+        assert_eq!(rt.waiting_for(MAIN), 1, "kept until the next run");
+        let next = orchestrator_queue(&rt);
+        assert_eq!(next.pending_messages(), 1, "and moved into it");
+        assert_eq!(rt.waiting_for(MAIN), 1);
+    }
+
+    /// A wait ends at once when something waits for the waiter or when the
+    /// awaited agent has ended; without either, it times out, consuming nothing.
+    #[tokio::test]
+    async fn wait_ends_on_a_delivery_or_on_the_end_of_the_awaited_agent() {
+        use super::super::messagent::{MAIN, Target};
+        let rt = runtime(None);
+        running(&rt, "sub_0000");
+        let cancel = CancellationToken::new();
+        assert_eq!(
+            rt.wait_event(MAIN, &[], Duration::from_millis(30), &cancel).await,
+            WaitOutcome::TimedOut
+        );
+        rt.post("sub_0000", Target::Agents(vec![MAIN.into()]), "hi".into(), None)
+            .unwrap();
+        for _ in 0..2 {
+            assert_eq!(
+                rt.wait_event(MAIN, &[], Duration::from_secs(5), &cancel).await,
+                WaitOutcome::Delivered(1),
+                "read next turn, not consumed here"
+            );
+        }
+        let awaited = vec!["sub_0000".to_string()];
+        assert_eq!(
+            rt.wait_event("sub_0001", &awaited, Duration::from_millis(30), &cancel)
+                .await,
+            WaitOutcome::TimedOut
+        );
+        rt.set_state("sub_0000", InstanceState::Completed, None);
+        rt.finish("sub_0000", AgentResult::lost(&info_of("sub_0000")));
+        assert_eq!(
+            rt.wait_event("sub_0001", &awaited, Duration::from_secs(5), &cancel)
+                .await,
+            WaitOutcome::Ended("sub_0000".into())
+        );
+    }
+
+    /// The report of a sub-agent whose parent is the orchestrator (`main`,
+    /// the id the team uses) waits in the orchestrator's queue.
+    #[test]
+    fn the_report_of_a_sub_agent_waits_for_the_orchestrator() {
+        use super::super::messagent::MAIN;
+        let rt = runtime(None);
+        let mut info = info_of("sub_0000");
+        info.parent_id = Some(MAIN.into());
+        rt.register(info.clone(), false, CancellationToken::new());
+        rt.set_state("sub_0000", InstanceState::Completed, None);
+        rt.finish("sub_0000", AgentResult::lost(&info));
+        assert_eq!(rt.waiting_for(MAIN), 1);
+    }
+
+    /// A top-level run's identity is `main_<hex>` (runner.rs), and its
+    /// sub-agents carry that id as their parent: their report still reaches
+    /// the orchestrator, which the team names `main`.
+    #[test]
+    fn the_report_of_a_top_level_sub_agent_waits_for_the_orchestrator() {
+        use super::super::messagent::MAIN;
+        let rt = runtime(None);
+        rt.register(info_of("sub_0000"), false, CancellationToken::new());
+        rt.set_state("sub_0000", InstanceState::Completed, None);
+        rt.finish("sub_0000", AgentResult::lost(&info_of("sub_0000")));
+        assert_eq!(rt.waiting_for(MAIN), 1);
+    }
+
+    /// Sub-agent ids are `sub_0000`, `sub_0001`…, in order and never reused.
+    #[test]
+    fn allocate_id_counts_from_zero_and_is_never_reused() {
+        let rt = runtime(None);
+        assert_eq!(rt.allocate_id().unwrap(), "sub_0000");
+        assert_eq!(rt.allocate_id().unwrap(), "sub_0001");
+        let ids: std::collections::HashSet<String> =
+            (0..100).map(|_| rt.allocate_id().unwrap()).collect();
+        assert_eq!(ids.len(), 100);
+        assert!(ids.contains("sub_0101"));
+        assert_eq!(rt.allocate_id().unwrap(), "sub_0102");
+    }
+
+    /// After a restart, the ids go on after the last one recorded.
+    #[test]
+    fn allocate_id_goes_on_after_a_restart() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest = dir.path().join("manifest.json");
+        {
+            let rt = runtime(Some(manifest.clone()));
+            for _ in 0..3 {
+                let id = rt.allocate_id().unwrap();
+                rt.register(info_of(&id), false, CancellationToken::new());
+            }
+        }
+        let rt = runtime(Some(manifest));
+        assert_eq!(rt.allocate_id().unwrap(), "sub_0003");
+    }
+
+    /// A team post delivered to a member is not given again by its `read`,
+    /// even when the member joined after an earlier post.
+    #[tokio::test]
+    async fn a_late_member_does_not_read_again_what_was_delivered_to_it() {
+        use serde_json::json;
+        let rt = runtime(None);
+        running(&rt, "sub_0000");
+        messagent(&rt, None, json!({"action": "send", "to": "team", "content": "one"})).await;
+        running(&rt, "sub_0001");
+        messagent(&rt, None, json!({"action": "send", "to": "team", "content": "two"})).await;
+        let got = messagent(&rt, Some("sub_0001"), json!({"action": "read"})).await;
+        assert!(!got.content.contains("\ntwo"), "{}", got.content);
+    }
+
+    /// An id is not given again because its record cannot be read after a
+    /// restart: the unreadable record is left out, its id is not.
+    #[test]
+    fn an_unreadable_record_keeps_its_id_out_of_reach() {
+        let dir = tempfile::tempdir().unwrap();
+        let manifest = dir.path().join("manifest.json");
+        {
+            let rt = runtime(Some(manifest.clone()));
+            for _ in 0..2 {
+                let id = rt.allocate_id().unwrap();
+                rt.register(info_of(&id), false, CancellationToken::new());
+            }
+        }
+        let mut items: Vec<serde_json::Value> =
+            serde_json::from_str(&std::fs::read_to_string(&manifest).unwrap()).unwrap();
+        // Its state is no longer one the runtime knows: the record cannot be read.
+        items[1]["state"] = serde_json::json!("invented");
+        std::fs::write(&manifest, serde_json::to_string(&items).unwrap()).unwrap();
+        let rt = runtime(Some(manifest));
+        assert_eq!(rt.allocate_id().unwrap(), "sub_0002");
+    }
+
+    /// Ten thousand sub-agents per session, then no id is left: the refusal
+    /// says so and names the range.
+    #[test]
+    fn allocate_id_runs_out_after_ten_thousand() {
+        let rt = runtime(None);
+        for n in 0..MAX_SUB_AGENTS {
+            assert_eq!(rt.allocate_id().unwrap(), format!("sub_{n:04}"));
+        }
+        let err = rt.allocate_id().unwrap_err();
+        assert!(
+            err.contains("10000 sub-agents") && err.contains("sub_9999"),
+            "{err}"
+        );
+    }
+
 
     /// A manifest written by an earlier version, with a termination kind this
     /// version does not know, loads: the record is kept as historical and the
@@ -1442,5 +1997,175 @@ mod tests {
         drop(holder);
         assert_eq!(s.stats().active, 0);
         assert!(s.acquire(&never, || {}).await.is_ok());
+    }
+
+    /// A shared-workspace lease of `holder`, with a slot of its own.
+    async fn shared_lease(
+        s: &Arc<Scheduler>,
+        holder: &str,
+        dir: &Path,
+        cancel: &CancellationToken,
+    ) -> Arc<ActivityLease> {
+        let slot = s.acquire(cancel, || {}).await.expect("a free slot");
+        ActivityLease::shared(
+            Arc::clone(s),
+            holder.into(),
+            slot,
+            dir.to_path_buf(),
+            cancel.clone(),
+        )
+    }
+
+    /// A shared-workspace child holds no writer lease at launch: while it
+    /// has only read, another agent writes at once.
+    #[tokio::test]
+    async fn a_shared_child_holds_no_writer_lease_until_it_claims_one() {
+        let d = tempfile::tempdir().unwrap();
+        let s = Scheduler::new(limits(2, 3, 10, 4));
+        let never = CancellationToken::new();
+        let lease = shared_lease(&s, "sub_0000", d.path(), &never).await;
+        assert_eq!(lease.writer_dir(), Some(d.path()));
+        assert!(writers_for(d.path()).holder().is_none(), "nothing claimed at launch");
+        let other = tokio::time::timeout(
+            Duration::from_secs(1),
+            writers_for(d.path()).acquire("sub_0001", &never, |_| {}),
+        )
+        .await
+        .expect("an unclaimed lease does not block another writer")
+        .unwrap();
+        drop(other);
+        lease.release().await;
+        assert!(writers_for(d.path()).holder().is_none());
+    }
+
+    /// The first writing call takes the free workspace; a later one keeps it
+    /// at once; the end of the child lets it go.
+    #[tokio::test]
+    async fn the_first_writing_call_claims_the_free_workspace_until_the_end() {
+        let d = tempfile::tempdir().unwrap();
+        let s = Scheduler::new(limits(2, 3, 10, 4));
+        let never = CancellationToken::new();
+        let lease = shared_lease(&s, "sub_0000", d.path(), &never).await;
+        assert_eq!(lease.claim_writer(Duration::from_millis(50)).await, Ok(true));
+        assert_eq!(writers_for(d.path()).holder().as_deref(), Some("sub_0000"));
+        assert_eq!(lease.claim_writer(Duration::from_millis(50)).await, Ok(true));
+        lease.release().await;
+        assert!(writers_for(d.path()).holder().is_none());
+    }
+
+    /// Another writer keeps the workspace past the timeout: the claim fails
+    /// with its name, without taking it away; once it lets go, the claim works.
+    #[tokio::test]
+    async fn a_claim_is_refused_with_the_holder_name_while_another_keeps_the_workspace() {
+        let d = tempfile::tempdir().unwrap();
+        let s = Scheduler::new(limits(2, 3, 10, 4));
+        let never = CancellationToken::new();
+        let other = writers_for(d.path())
+            .acquire("sub_0009", &never, |_| {})
+            .await
+            .unwrap();
+        let lease = shared_lease(&s, "sub_0000", d.path(), &never).await;
+        assert_eq!(
+            lease.claim_writer(Duration::from_millis(50)).await,
+            Err("sub_0009".to_string())
+        );
+        assert_eq!(
+            writers_for(d.path()).holder().as_deref(),
+            Some("sub_0009"),
+            "not taken from its holder"
+        );
+        drop(other);
+        assert_eq!(lease.claim_writer(Duration::from_millis(50)).await, Ok(true));
+        assert_eq!(writers_for(d.path()).holder().as_deref(), Some("sub_0000"));
+        lease.release().await;
+    }
+
+    /// A child that only reads never takes the workspace: a sibling that
+    /// writes gets it at once, and the reader's own waits change nothing.
+    #[tokio::test]
+    async fn a_reader_child_never_blocks_a_writer_sibling() {
+        let d = tempfile::tempdir().unwrap();
+        let s = Scheduler::new(limits(3, 3, 10, 4));
+        let never = CancellationToken::new();
+        let reader = shared_lease(&s, "sub_0000", d.path(), &never).await;
+        let writer = shared_lease(&s, "sub_0001", d.path(), &never).await;
+        reader.waiting(async {}).await;
+        assert!(writers_for(d.path()).holder().is_none());
+        assert_eq!(writer.claim_writer(Duration::from_millis(50)).await, Ok(true));
+        assert_eq!(writers_for(d.path()).holder().as_deref(), Some("sub_0001"));
+        writer.release().await;
+        reader.release().await;
+    }
+
+    /// A claimed child that waits for its own child gives the workspace up
+    /// for that wait, and takes it back when the wait ends.
+    #[tokio::test]
+    async fn a_claimed_lease_is_released_during_a_wait_and_taken_back_after_it() {
+        let d = tempfile::tempdir().unwrap();
+        let s = Scheduler::new(limits(2, 3, 10, 4));
+        let never = CancellationToken::new();
+        let lease = shared_lease(&s, "sub_0000", d.path(), &never).await;
+        assert_eq!(lease.claim_writer(Duration::from_millis(50)).await, Ok(true));
+        let dir = d.path().to_path_buf();
+        let during = lease.waiting(async move { writers_for(&dir).holder() }).await;
+        assert_eq!(during, None, "released while waiting");
+        assert_eq!(
+            writers_for(d.path()).holder().as_deref(),
+            Some("sub_0000"),
+            "taken back after the wait"
+        );
+        lease.release().await;
+        assert!(writers_for(d.path()).holder().is_none());
+    }
+
+    /// A lease that never claimed does not take the workspace back after a
+    /// wait: another writer that took it in the meantime keeps it. (Had it
+    /// tried, the wait would never end, hence the timeout.)
+    #[tokio::test]
+    async fn an_unclaimed_lease_is_not_taken_back_after_a_wait() {
+        let d = tempfile::tempdir().unwrap();
+        let s = Scheduler::new(limits(2, 3, 10, 4));
+        let never = CancellationToken::new();
+        let lease = shared_lease(&s, "sub_0000", d.path(), &never).await;
+        let dir = d.path().to_path_buf();
+        let guard = tokio::time::timeout(
+            Duration::from_secs(2),
+            lease.waiting(async move {
+                writers_for(&dir)
+                    .acquire("sub_0009", &CancellationToken::new(), |_| {})
+                    .await
+            }),
+        )
+        .await
+        .expect("the wait ends: nothing is taken back from another writer");
+        assert!(guard.is_some());
+        assert_eq!(writers_for(d.path()).holder().as_deref(), Some("sub_0009"));
+        drop(guard);
+        lease.release().await;
+        assert!(writers_for(d.path()).holder().is_none());
+    }
+
+    /// `members` names the worktree of each sub-agent that has one; a
+    /// sub-agent of the shared workspace names none.
+    #[tokio::test]
+    async fn messagent_members_names_each_worktree_and_none_for_the_shared_workspace() {
+        use serde_json::json;
+        let rt = runtime(None);
+        running(&rt, "sub_0000");
+        let mut info = info_of("sub_0001");
+        info.isolation = "worktree".into();
+        info.workspace = "/wt/sub_0001".into();
+        rt.register(info, false, CancellationToken::new());
+        rt.set_state("sub_0001", InstanceState::Running, None);
+        let listed = messagent(&rt, Some("sub_0000"), json!({"action": "members"})).await;
+        assert!(!listed.is_error, "{}", listed.content);
+        let lines: Vec<&str> = listed.content.lines().collect();
+        assert_eq!(lines[1], "- sub_0000 · Agent p · running (you)", "{}", listed.content);
+        assert_eq!(
+            lines[2],
+            "- sub_0001 · Agent p · running · worktree /wt/sub_0001",
+            "{}",
+            listed.content
+        );
     }
 }
