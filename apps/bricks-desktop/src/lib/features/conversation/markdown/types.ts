@@ -13,6 +13,10 @@ export type RenderedBlock =
   | { key: string; kind: 'html'; html: string }
   /** A top-level ```mermaid fence. `complete` is false while the fence is still open (streaming). */
   | { key: string; kind: 'mermaid'; source: string; complete: boolean }
+  /** A top-level ```svg fence: the drawing, shown once the fence is closed. */
+  | { key: string; kind: 'svg'; source: string; complete: boolean }
+  /** A top-level ```vega-lite fence: a chart from its JSON specification, once closed. */
+  | { key: string; kind: 'vega'; source: string; complete: boolean }
   /** A top-level ```diff / ```patch fence: a proposal shown read-only, never an applied change. */
   | { key: string; kind: 'diff'; source: string; complete: boolean }
 

@@ -1,6 +1,9 @@
 <script lang="ts">
+  import Code from '@lucide/svelte/icons/code'
   import Copy from '@lucide/svelte/icons/copy'
   import Download from '@lucide/svelte/icons/download'
+  import FileImage from '@lucide/svelte/icons/file-image'
+  import ImageDown from '@lucide/svelte/icons/image-down'
   import Maximize2 from '@lucide/svelte/icons/maximize-2'
   import Move from '@lucide/svelte/icons/move'
   import ZoomIn from '@lucide/svelte/icons/zoom-in'
@@ -9,19 +12,28 @@
   import { app } from '$lib/state/app.svelte'
   import { theme } from '$lib/theme/theme.svelte'
   import { diagramMode, diagramSettings, diagramTheme } from '$lib/features/diagrams/settings'
-  import { saveSvgFile } from '$lib/ipc/client'
+  import { savePngFile, saveSvgFile } from '$lib/ipc/client'
   import { exportableSvg } from './mermaid'
   import { svgFrame } from './svg-viewer'
+  import { effectiveBackground, svgToPng } from './svg-png'
 
-  let { svg, source, title = 'Diagramme', fileName = 'diagramme.svg' }: {
-    svg: string; source?: string; title?: string; fileName?: string
+  /**
+   * `mermaid`: a diagram in the chosen Mermaid theme; `chart`: a chart drawn in
+   * the app's colours; `drawing`: an SVG the model wrote; `file`: a file read.
+   */
+  type Variant = 'mermaid' | 'chart' | 'drawing' | 'file'
+
+  let { svg, source, title = 'Diagramme', fileName = 'diagramme.svg', variant = source !== undefined ? 'mermaid' : 'file' }: {
+    svg: string; source?: string; title?: string; fileName?: string; variant?: Variant
   } = $props()
   const settings = $derived(diagramSettings(app.prefs.diagrams))
   const options = $derived(settings.diagramViewer)
-  // A Mermaid diagram drawn in the app's colours sits on the app's code background;
-  // any other SVG (a Mermaid theme, a file) keeps a plain background of its own.
-  const appColours = $derived(source !== undefined && diagramTheme(settings) === 'app')
-  const mode = $derived(source !== undefined ? diagramMode(settings, theme.resolved) : 'light')
+  // A diagram or chart drawn in the app's colours sits on the app's code background;
+  // any other SVG (a Mermaid theme, a drawing, a file) keeps a plain background of its own.
+  const appColours = $derived(variant === 'chart' || (variant === 'mermaid' && diagramTheme(settings) === 'app'))
+  const mode = $derived(
+    variant === 'chart' ? theme.resolved : variant === 'mermaid' ? diagramMode(settings, theme.resolved) : 'light',
+  )
   const frame = $derived(svgFrame(svg, options, mode, appColours ? 'transparent' : 'plain'))
   /** At most 26rem high, and never wider than the drawing itself. */
   const inlineSize = $derived(
@@ -35,6 +47,10 @@
   let moving = $state(false)
   let expanded = $state(false)
   let feedback = $state<string | null>(null)
+  let showSource = $state(false)
+  let figure = $state<HTMLElement | null>(null)
+  /** WebKit and Chromium write images to the clipboard; elsewhere the button is not shown. */
+  const canCopyImage = typeof ClipboardItem !== 'undefined' && typeof navigator !== 'undefined' && !!navigator.clipboard?.write
   let pointer: { id: number; x: number; y: number; startX: number; startY: number } | null = null
   let timer: ReturnType<typeof setTimeout> | undefined
   $effect(() => () => clearTimeout(timer))
@@ -76,6 +92,48 @@
     try { if (await saveSvgFile(fileName, exportableSvg(frame.svg))) flash('SVG enregistré') }
     catch { flash('Export impossible') }
   }
+  /** The colour the diagram is seen on: the frame's own plain background, else the figure's. */
+  function imageBackground(): string {
+    if (!appColours) return mode === 'dark' ? '#111827' : '#ffffff'
+    return effectiveBackground(figure, mode === 'dark' ? '#111827' : '#ffffff')
+  }
+  /** The whole diagram as a PNG, whatever the zoom or the position of the view. */
+  function png(): Promise<Blob> {
+    return svgToPng(exportableSvg(frame.svg), frame.size, imageBackground())
+  }
+  function copyImage() {
+    if (!options.allowCopy || !frame.svg || !canCopyImage) return
+    // Written at once, inside the click: WebKit keeps the user's gesture only
+    // until the first await; the image itself comes later, as a promise.
+    const image = png()
+    let written: Promise<void>
+    try {
+      written = navigator.clipboard.write([new ClipboardItem({ 'image/png': image })])
+    } catch {
+      image.catch(() => {})
+      flash('Copie impossible')
+      return
+    }
+    Promise.all([written, image]).then(
+      () => flash('Image copiée'),
+      () => flash('Copie impossible'),
+    )
+  }
+  /** What `save_png_file` accepts at most (32 Mio). */
+  const PNG_LIMIT = 32 * 1024 * 1024
+  async function downloadPng() {
+    if (!options.allowDownload || !frame.svg) return
+    try {
+      const blob = await png()
+      // The backend refuses more; the bytes are not even sent.
+      if (blob.size > PNG_LIMIT) {
+        flash('PNG trop volumineux')
+        return
+      }
+      const name = fileName.replace(/\.svg$/i, '') + '.png'
+      if (await savePngFile(name, new Uint8Array(await blob.arrayBuffer()))) flash('PNG enregistré')
+    } catch { flash('Export impossible') }
+  }
   const action = 'inline-flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40'
 </script>
 
@@ -95,15 +153,24 @@
     {#if options.allowDownload && frame.svg}
       <button type="button" class={action} title="Exporter en SVG" aria-label="Exporter en SVG" onclick={download}><Download class="size-3.5" aria-hidden="true" /></button>
     {/if}
+    {#if options.allowDownload && frame.svg}
+      <button type="button" class={action} title="Exporter en PNG" aria-label="Exporter en PNG" onclick={downloadPng}><FileImage class="size-3.5" aria-hidden="true" /></button>
+    {/if}
+    {#if source !== undefined}
+      <button type="button" class={action} title="Afficher la source" aria-label="Afficher la source" aria-pressed={showSource} onclick={() => (showSource = !showSource)}><Code class="size-3.5" aria-hidden="true" /></button>
+    {/if}
     {#if options.allowCopy}
       <button type="button" class={action} title="Copier la source" aria-label="Copier la source" onclick={copy}><Copy class="size-3.5" aria-hidden="true" /></button>
+      {#if canCopyImage}
+        <button type="button" class={action} title="Copier l’image" aria-label="Copier l’image" disabled={!frame.svg} onclick={copyImage}><ImageDown class="size-3.5" aria-hidden="true" /></button>
+      {/if}
     {/if}
     {#if feedback}<span role="status" class="px-1 text-xs">{feedback}</span>{/if}
   </div>
 {/snippet}
 
 {#snippet viewport(fullscreen = false)}
-  <div class={['relative overflow-hidden', !fullscreen && 'mx-auto w-full']} style={fullscreen ? 'height: calc(100dvh - 8rem);' : inlineSize}>
+  <div class={['relative overflow-hidden', !fullscreen && 'mx-auto w-full']} style={fullscreen ? `height: calc(100dvh - ${showSource && source !== undefined ? '25rem' : '8rem'});` : inlineSize}>
     <div class="size-full origin-center" style:transform>
       <iframe title={title} sandbox="" referrerpolicy="no-referrer" srcdoc={frame.document}
         class="size-full border-0" style:pointer-events={pan ? 'none' : 'auto'}></iframe>
@@ -118,7 +185,13 @@
   </div>
 {/snippet}
 
-<figure class={['my-2 overflow-hidden rounded-md border border-border text-card-foreground', appColours ? 'bg-code-bg' : 'bg-card']}>
+{#snippet sourceView()}
+  {#if showSource && source !== undefined}
+    <pre class="max-h-80 overflow-auto border-t border-border bg-code-bg p-2.5 text-xs leading-relaxed text-code-foreground"><code class="font-mono">{source}</code></pre>
+  {/if}
+{/snippet}
+
+<figure bind:this={figure} class={['my-2 overflow-hidden rounded-md border border-border text-card-foreground', appColours ? 'bg-code-bg' : 'bg-card']}>
   <figcaption class="flex flex-wrap items-center justify-between gap-1 px-2 py-1 text-xs text-muted-foreground">
     <span>{title}</span>{@render controls()}
   </figcaption>
@@ -127,11 +200,13 @@
   {:else}
     <p role="alert" class="p-3 text-xs text-destructive">SVG invalide ou trop volumineux.</p>
   {/if}
+  {#if !expanded}{@render sourceView()}{/if}
 </figure>
 <Dialog.Root open={expanded && options.allowFullscreen} onOpenChange={(open) => (expanded = open)}>
   <Dialog.Content class="flex h-[100dvh] w-screen max-w-none flex-col gap-2 rounded-none sm:max-w-none">
     <Dialog.Header><Dialog.Title class="text-ui">{title}</Dialog.Title></Dialog.Header>
     {@render controls(true)}
     {#if frame.svg}{@render viewport(true)}{/if}
+    {@render sourceView()}
   </Dialog.Content>
 </Dialog.Root>

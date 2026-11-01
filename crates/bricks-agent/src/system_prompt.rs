@@ -194,6 +194,10 @@ pub fn build_system_prompt(opts: &SystemPromptOptions) -> String {
     if has("TodoWrite") {
         parts.push(TASK_MANAGEMENT.to_string());
     }
+    // Figures, for a person reading the answers (never a sub-agent's report).
+    if prefix != SystemPromptPrefix::SubAgent && !opts.is_non_interactive {
+        parts.push(FIGURES_SECTION.to_string());
+    }
 
     // 4. Output style
     if let Some(style_text) = opts
@@ -495,6 +499,23 @@ you do not see its conversation. Do that task within its scope; Messagent reache
 acknowledgement. Then reply with a concise report fitted to the task: the result and what \
 matters, the files changed, the checks run and their failures, what blocks and what is left \
 undone. Stop as soon as the task is done; do not widen it.";
+
+/// The figures a person sees drawn in an answer (the app renders these fences).
+const FIGURES_SECTION: &str = r##"
+## Figures
+
+Quand une figure aide, choisis le bloc adapté ; sinon, du texte.
+- `mermaid` pour un schéma : flux, séquence, architecture, états.
+- `vega-lite` pour un graphique de données : spécification JSON complète, données intégrées dans `values` (aucune URL).
+- `svg` pour un dessin simple qui n'est ni l'un ni l'autre : un seul élément `<svg>` avec `viewBox`, sans script ni ressource externe.
+
+```vega-lite
+{"data": {"values": [{"x": 1, "y": 2}, {"x": 2, "y": 5}, {"x": 3, "y": 4}]}, "mark": "line", "encoding": {"x": {"field": "x", "type": "quantitative"}, "y": {"field": "y", "type": "quantitative"}}}
+```
+
+```svg
+<svg viewBox="0 0 120 40" xmlns="http://www.w3.org/2000/svg"><rect x="2" y="2" width="116" height="36" rx="6" fill="none" stroke="#4a6cf7"/><text x="60" y="25" text-anchor="middle" font-size="12">Bricks</text></svg>
+```"##;
 
 /// When TodoWrite is announced.
 const TASK_MANAGEMENT: &str = "
@@ -1096,13 +1117,31 @@ mod tests {
         ] {
             assert!(!prompt.contains(absent), "{absent}");
         }
+        // A person reads the answers: only the figures guidance is added.
         assert_eq!(
             prompt,
             format!(
-                "{}\n{SYSTEM_PROMPT_DYNAMIC_BOUNDARY}",
+                "{}\n{FIGURES_SECTION}\n{SYSTEM_PROMPT_DYNAMIC_BOUNDARY}",
                 bricks_foundation(&[])
             )
         );
+    }
+
+    #[test]
+    fn figures_guidance_is_for_a_person_reading_never_for_headless_runs_or_sub_agents() {
+        let prompt = build_system_prompt(&default_opts());
+        assert!(prompt.contains("## Figures"));
+        assert!(prompt.contains("```vega-lite") && prompt.contains("```svg") && prompt.contains("`mermaid`"));
+        let headless = build_system_prompt(&SystemPromptOptions {
+            is_non_interactive: true,
+            ..default_opts()
+        });
+        assert!(!headless.contains("## Figures"));
+        let child = build_system_prompt(&SystemPromptOptions {
+            prefix: Some(SystemPromptPrefix::SubAgent),
+            ..default_opts()
+        });
+        assert!(!child.contains("## Figures"));
     }
 
     // ── Specialised sections ──

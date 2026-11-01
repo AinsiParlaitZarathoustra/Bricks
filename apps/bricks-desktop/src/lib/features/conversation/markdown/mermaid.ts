@@ -474,7 +474,8 @@ function withDimension(attributes: string, name: string, value: number): string 
  * namespace (and xlink when used), and explicit width and height from the viewBox.
  */
 export function exportableSvg(svg: string): string {
-  const body = svg.replace(/^\s*<\?xml[^>]*>\s*/, '')
+  // The filtered SVG is serialized as HTML: `&nbsp;` is no XML entity.
+  const body = svg.replace(/^\s*<\?xml[^>]*>\s*/, '').replace(/&nbsp;/g, '&#160;')
   const open = /<svg\b([^>]*)>/i.exec(body)
   if (!open) return svg
   let attributes = open[1]

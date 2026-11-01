@@ -192,6 +192,9 @@ export const projectFileRead = (
 /** Native save dialog for an SVG document: the path written, or null when cancelled. */
 export const saveSvgFile = (defaultName: string, contents: string) =>
   call<string | null>('save_svg_file', { defaultName, contents })
+/** The save dialog for a PNG image; `null` when it is cancelled. */
+export const savePngFile = (defaultName: string, contents: Uint8Array) =>
+  call<string | null>('save_png_file', { defaultName, contents: Array.from(contents) })
 /**
  * Reveals in the Finder a file a sub-agent changed, resolved in that agent's
  * recorded workspace (shared project or isolated worktree) by Rust; a deleted

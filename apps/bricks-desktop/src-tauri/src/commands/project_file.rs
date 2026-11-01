@@ -315,3 +315,143 @@ pub async fn save_svg_file(
         .map_err(|e| io_error("écriture du diagramme", e))?;
     Ok(Some(shown))
 }
+
+/// A diagram image too large to be written (32 MiB).
+const PNG_LIMIT: usize = 32 * 1024 * 1024;
+
+/// A PNG to write: its signature, within the limit.
+pub fn check_png(contents: &[u8]) -> IpcResult<()> {
+    if contents.len() > PNG_LIMIT {
+        return Err(invalid(
+            "image trop volumineuse pour être enregistrée (32 Mio au maximum)",
+        ));
+    }
+    if !contents.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Err(invalid("le contenu n'est pas une image PNG"));
+    }
+    Ok(())
+}
+
+/// The file name proposed by the save dialog: no folder, always `.png`.
+pub fn png_file_name(requested: &str) -> String {
+    let name = svg_file_name(requested);
+    let lower = name.to_ascii_lowercase();
+    let base = if lower.ends_with(".png.svg") {
+        &name[..name.len() - 8]
+    } else if lower.ends_with(".svg") {
+        &name[..name.len() - 4]
+    } else {
+        &name
+    };
+    format!("{base}.png")
+}
+
+/// Shows the native save dialog and writes the PNG `contents` to the file
+/// the user picked. `None` when the dialog is cancelled; otherwise the path.
+#[tauri::command]
+pub async fn save_png_file(
+    app: tauri::AppHandle,
+    default_name: String,
+    contents: Vec<u8>,
+) -> IpcResult<Option<String>> {
+    check_png(&contents)?;
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter("PNG", &["png"])
+        .set_file_name(png_file_name(&default_name))
+        .save_file(move |picked| {
+            let _ = tx.send(picked);
+        });
+    let picked = rx.await.map_err(|_| IpcError {
+        code: IpcErrorCode::Internal,
+        message: "le dialogue d'enregistrement s'est fermé sans réponse".into(),
+    })?;
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let path = picked
+        .into_path()
+        .map_err(|e| io_error("chemin d'enregistrement", e))?;
+    let shown = path.display().to_string();
+    tokio::task::spawn_blocking(move || std::fs::write(&path, contents))
+        .await
+        .map_err(join_error)?
+        .map_err(|e| io_error("écriture de l'image", e))?;
+    Ok(Some(shown))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::contract::IpcErrorCode;
+
+    const SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+
+    #[test]
+    fn a_png_with_its_signature_is_accepted() {
+        assert!(check_png(SIGNATURE).is_ok());
+        let mut bytes = SIGNATURE.to_vec();
+        bytes.extend_from_slice(b"\0\0\0\rIHDR");
+        assert!(check_png(&bytes).is_ok());
+    }
+
+    #[test]
+    fn content_without_the_png_signature_is_refused_as_invalid() {
+        let cases: [&[u8]; 6] = [
+            b"",
+            b"<svg/>",
+            b"\xff\xd8\xff\xe0JFIF",
+            b"\x89PNG\n\r\x1a\n",
+            b"\x89PNG\r\n\x1a",
+            b"xx\x89PNG\r\n\x1a\n",
+        ];
+        for bytes in cases {
+            let err = check_png(bytes).unwrap_err();
+            assert_eq!(err.code, IpcErrorCode::Invalid, "{bytes:?}");
+            assert!(err.message.contains("PNG"), "{}", err.message);
+        }
+    }
+
+    #[test]
+    fn an_image_of_exactly_the_limit_is_accepted_and_one_byte_more_is_refused() {
+        let mut at_limit = SIGNATURE.to_vec();
+        at_limit.resize(PNG_LIMIT, 0);
+        assert!(check_png(&at_limit).is_ok());
+        at_limit.push(0);
+        let err = check_png(&at_limit).unwrap_err();
+        assert_eq!(err.code, IpcErrorCode::Invalid);
+        assert!(err.message.contains("32 Mio"), "{}", err.message);
+    }
+
+    #[test]
+    fn the_size_is_checked_before_the_signature() {
+        let oversized = vec![0u8; PNG_LIMIT + 1];
+        let err = check_png(&oversized).unwrap_err();
+        assert!(err.message.contains("32 Mio"), "{}", err.message);
+    }
+
+    #[test]
+    fn the_png_file_name_is_one_png_name_with_no_folder() {
+        assert_eq!(png_file_name("x"), "x.png");
+        assert_eq!(png_file_name("x.svg"), "x.png");
+        assert_eq!(png_file_name("x.png"), "x.png");
+        assert_eq!(png_file_name("X.SVG"), "X.png");
+        assert_eq!(png_file_name("x.PNG.SVG"), "x.png");
+        assert_eq!(png_file_name("a.svg.png"), "a.svg.png");
+        assert_eq!(png_file_name("é.SVG"), "é.png");
+    }
+
+    #[test]
+    fn the_png_file_name_keeps_only_the_last_component() {
+        assert_eq!(png_file_name("dossier/sous/diagramme.svg"), "diagramme.png");
+        assert_eq!(png_file_name("/abs/chemin/y.svg"), "y.png");
+        assert_eq!(png_file_name("  c.svg  "), "c.png");
+    }
+
+    #[test]
+    fn the_png_file_name_falls_back_and_drops_nul_bytes() {
+        assert_eq!(png_file_name(""), "diagramme.png");
+        assert_eq!(png_file_name("a\0b.svg"), "ab.png");
+    }
+}

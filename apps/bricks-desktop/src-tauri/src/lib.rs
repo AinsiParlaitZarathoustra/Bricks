@@ -109,6 +109,7 @@ pub fn run() {
             // Read-only file windows of message references, SVG save dialog (Sprint 14.5)
             commands::project_file::project_file_read,
             commands::project_file::save_svg_file,
+            commands::project_file::save_png_file,
             // Reveal in the Finder a file a sub-agent changed (Sprint 14.6)
             commands::agent_file::reveal_agent_file,
             // Reader of the conversation: windows of the files it names (Sprint 14.6.2)

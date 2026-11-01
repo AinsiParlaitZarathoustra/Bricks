@@ -69,7 +69,7 @@ interface Entry {
   raw: string
   /** Null for a text range marked emitted no token for. */
   token: Token | null
-  kind: 'none' | 'html' | 'mermaid' | 'diff'
+  kind: 'none' | 'html' | 'mermaid' | 'svg' | 'vega' | 'diff'
   footnote: { id: string; text: string } | null
   /** Normalized link labels the block refers to, and the definitions they resolved to when lexed. */
   labels: string[]
@@ -106,6 +106,8 @@ function kindOf(node: Tok | null): Entry['kind'] {
   if (node.type === 'code') {
     const language = fenceLanguage(node.lang as string | undefined)
     if (language === 'mermaid') return 'mermaid'
+    if (language === 'svg') return 'svg'
+    if (language === 'vega-lite' || language === 'vegalite') return 'vega'
     if (language === 'diff' || language === 'patch') return 'diff'
   }
   return 'html'
@@ -129,7 +131,7 @@ function makeEntry(start: number, raw: string, token: Token | null): Entry {
     refs: [],
     fnSig: '',
     mathCount: 0,
-    complete: kind === 'mermaid' || kind === 'diff' ? fenceClosed(raw) : false,
+    complete: kind !== 'html' && kind !== 'none' ? fenceClosed(raw) : false,
     output: null,
     outputSig: '',
     macros: null,
@@ -538,10 +540,8 @@ export class MarkdownDocument {
     }
     const node = entry.token as Tok
     const source = node.text as string
-    entry.output =
-      entry.kind === 'mermaid'
-        ? { key: entry.key, kind: 'mermaid', source, complete: entry.complete }
-        : { key: entry.key, kind: 'diff', source, complete: entry.complete }
+    const kind = entry.kind as 'mermaid' | 'svg' | 'vega' | 'diff'
+    entry.output = { key: entry.key, kind, source, complete: entry.complete }
     entry.outputSig = entry.raw
   }
 

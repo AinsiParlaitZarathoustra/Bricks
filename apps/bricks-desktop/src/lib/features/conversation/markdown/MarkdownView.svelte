@@ -9,6 +9,8 @@
   import { createMermaidCache } from './mermaid'
   import DiffBlock from './DiffBlock.svelte'
   import MermaidBlock from './MermaidBlock.svelte'
+  import SvgBlock from './SvgBlock.svelte'
+  import VegaBlock from './VegaBlock.svelte'
 
   interface Props {
     source: string
@@ -87,6 +89,10 @@
       {@html block.html}
     {:else if block.kind === 'mermaid'}
       <MermaidBlock source={block.source} complete={block.complete} id="{idPrefix}-{block.key}" cache={mermaidCache} />
+    {:else if block.kind === 'svg'}
+      <SvgBlock source={block.source} complete={block.complete} />
+    {:else if block.kind === 'vega'}
+      <VegaBlock source={block.source} complete={block.complete} />
     {:else}
       <DiffBlock source={block.source} complete={block.complete} {onFile} />
     {/if}
