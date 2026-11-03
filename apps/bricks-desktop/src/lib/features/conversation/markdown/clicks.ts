@@ -1,6 +1,7 @@
 // Delegated clicks of a rendered message. Copies code, opens external links through the
 // system (never while streaming), jumps to in-page anchors (headings, footnotes) inside the
 // conversation, and reports file references. Nothing here executes content.
+import { t } from '$lib/i18n/i18n.svelte'
 import type { Action } from 'svelte/action'
 import { openUrl } from '@tauri-apps/plugin-opener'
 import { isOpenableUrl } from '../links'
@@ -57,15 +58,15 @@ export const markdownClicks: Action<HTMLElement, MarkdownClickOptions | undefine
 
   const copyCode = async (button: HTMLButtonElement) => {
     const code = button.closest('.code-block')?.querySelector('code')?.textContent ?? ''
-    let label = 'Copié'
+    let label = t('common.copied')
     try {
       await navigator.clipboard.writeText(code)
     } catch {
-      label = 'Copie impossible'
+      label = t('common.couldNotCopy')
     }
     button.textContent = label
     setTimeout(() => {
-      if (button.isConnected) button.textContent = 'Copier'
+      if (button.isConnected) button.textContent = t('common.copy')
     }, 1500)
   }
 

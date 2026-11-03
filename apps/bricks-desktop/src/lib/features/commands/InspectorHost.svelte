@@ -1,6 +1,7 @@
 <script lang="ts">
   // Hosts the inspector view opened by a `/` command (ui.inspector).
   // Owner: orchestrator. Each view lives in its owner's feature folder.
+  import { t } from '$lib/i18n/i18n.svelte'
   import type { Component } from 'svelte'
   import * as Dialog from '$lib/components/ui/dialog'
   import { ui, type InspectorState, type InspectorView } from '$lib/state/ui.svelte'
@@ -23,22 +24,22 @@
 
   type ViewProps = { args: InspectorState['args'] }
   const VIEWS: Record<InspectorView, { title: string; component: Component<ViewProps> }> = {
-    help: { title: 'Commandes', component: HelpView },
-    search: { title: 'Recherche dans le code', component: SearchView },
-    memory: { title: 'Mémoire', component: MemoryView },
-    context: { title: 'Contexte', component: ContextView },
-    cost: { title: 'Consommation', component: CostView },
-    clear: { title: 'Vider le contexte', component: ClearView },
-    agents: { title: 'Profils d’agents', component: AgentProfilesView },
-    skills: { title: 'Skills', component: SkillsView },
-    jobs: { title: 'Tâches de fond', component: JobsView },
-    changeset: { title: 'Modifications isolées', component: ChangesetView },
-    session: { title: 'Session', component: SessionView },
-    sessions: { title: 'Reprendre une session', component: SessionsView },
-    tools: { title: 'Outils', component: ToolsView },
-    mcp: { title: 'Serveurs MCP', component: McpView },
-    config: { title: 'Configuration', component: ConfigView },
-    file: { title: 'Fichier du projet', component: FileView },
+    help: { get title() { return t('commands.commands') }, component: HelpView },
+    search: { get title() { return t('common.codeSearch') }, component: SearchView },
+    memory: { get title() { return t('common.memory') }, component: MemoryView },
+    context: { get title() { return t('common.context') }, component: ContextView },
+    cost: { get title() { return t('common.usage') }, component: CostView },
+    clear: { get title() { return t('common.clearContext') }, component: ClearView },
+    agents: { get title() { return t('common.agentProfiles') }, component: AgentProfilesView },
+    skills: { get title() { return t('common.skills') }, component: SkillsView },
+    jobs: { get title() { return t('common.backgroundJobs') }, component: JobsView },
+    changeset: { get title() { return t('common.isolatedChanges') }, component: ChangesetView },
+    session: { get title() { return t('common.session') }, component: SessionView },
+    sessions: { get title() { return t('commands.resumeASession') }, component: SessionsView },
+    tools: { get title() { return t('common.tools') }, component: ToolsView },
+    mcp: { get title() { return t('common.mcpServers') }, component: McpView },
+    config: { get title() { return t('common.configuration') }, component: ConfigView },
+    file: { get title() { return t('commands.projectFile') }, component: FileView },
   }
 
   const entry = $derived(ui.inspector ? VIEWS[ui.inspector.view] : null)

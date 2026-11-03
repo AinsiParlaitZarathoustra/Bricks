@@ -170,15 +170,15 @@ fn invalid_ranges_are_refused_with_a_clear_message() {
     write(dir.path(), "short.txt", &numbered(10));
     let (code, message) = code_of(read_window(dir.path(), "short.txt", Some(20), None));
     assert_eq!(code, IpcErrorCode::Invalid);
-    assert!(message.contains("au-delà de la fin"), "{message}");
+    assert!(message.contains("is past the end"), "{message}");
 
     let (code, message) = code_of(read_window(dir.path(), "short.txt", Some(20), Some(25)));
     assert_eq!(code, IpcErrorCode::Invalid);
-    assert!(message.contains("au-delà de la fin"), "{message}");
+    assert!(message.contains("is past the end"), "{message}");
 
     let (code, message) = code_of(read_window(dir.path(), "short.txt", Some(5), Some(3)));
     assert_eq!(code, IpcErrorCode::Invalid);
-    assert!(message.contains("plage invalide"), "{message}");
+    assert!(message.contains("invalid range"), "{message}");
 
     let (code, _) = code_of(read_window(dir.path(), "short.txt", Some(0), None));
     assert_eq!(code, IpcErrorCode::Invalid);
@@ -192,7 +192,7 @@ fn an_absent_file_is_not_found() {
     let dir = project();
     let (code, message) = code_of(read_window(dir.path(), "src/absent.rs", None, None));
     assert_eq!(code, IpcErrorCode::NotFound);
-    assert!(message.contains("n'existe pas"), "{message}");
+    assert!(message.contains("doesn’t exist"), "{message}");
 }
 
 #[test]
@@ -211,7 +211,7 @@ fn a_folder_is_not_a_file() {
     std::fs::create_dir_all(dir.path().join("src")).unwrap();
     let (code, message) = code_of(read_window(dir.path(), "src", None, None));
     assert_eq!(code, IpcErrorCode::Invalid);
-    assert!(message.contains("n'est pas un fichier"), "{message}");
+    assert!(message.contains("isn’t a file"), "{message}");
 }
 
 #[cfg(unix)]
@@ -224,7 +224,7 @@ fn a_symbolic_link_leaving_the_project_is_refused() {
         .unwrap();
     let (code, message) = code_of(read_window(project.path(), "link.txt", None, None));
     assert_eq!(code, IpcErrorCode::Invalid);
-    assert!(message.contains("sort du projet"), "{message}");
+    assert!(message.contains("leaves the project"), "{message}");
 }
 
 #[cfg(unix)]
@@ -245,7 +245,7 @@ fn a_binary_file_is_refused() {
     write(dir.path(), "image.dat", b"PNG\0\x01\x02 texte");
     let (code, message) = code_of(read_window(dir.path(), "image.dat", None, None));
     assert_eq!(code, IpcErrorCode::Invalid);
-    assert!(message.contains("binaire"), "{message}");
+    assert!(message.contains("binary file"), "{message}");
 }
 
 #[test]

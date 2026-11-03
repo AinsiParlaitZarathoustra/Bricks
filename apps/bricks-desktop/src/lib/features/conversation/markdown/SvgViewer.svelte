@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '$lib/i18n/i18n.svelte'
   import Code from '@lucide/svelte/icons/code'
   import Copy from '@lucide/svelte/icons/copy'
   import Download from '@lucide/svelte/icons/download'
@@ -23,7 +24,7 @@
    */
   type Variant = 'mermaid' | 'chart' | 'drawing' | 'file'
 
-  let { svg, source, title = 'Diagramme', fileName = 'diagramme.svg', variant = source !== undefined ? 'mermaid' : 'file' }: {
+  let { svg, source, title = t('conversation.diagram'), fileName = t('conversation.diagramSvg'), variant = source !== undefined ? 'mermaid' : 'file' }: {
     svg: string; source?: string; title?: string; fileName?: string; variant?: Variant
   } = $props()
   const settings = $derived(diagramSettings(app.prefs.diagrams))
@@ -84,13 +85,13 @@
   }
   async function copy() {
     if (!options.allowCopy) return
-    try { await navigator.clipboard.writeText(source ?? frame.svg); flash('Source copiée') }
-    catch { flash('Copie impossible') }
+    try { await navigator.clipboard.writeText(source ?? frame.svg); flash(t('conversation.sourceCopied')) }
+    catch { flash(t('common.couldNotCopy')) }
   }
   async function download() {
     if (!options.allowDownload || !frame.svg) return
-    try { if (await saveSvgFile(fileName, exportableSvg(frame.svg))) flash('SVG enregistré') }
-    catch { flash('Export impossible') }
+    try { if (await saveSvgFile(fileName, exportableSvg(frame.svg))) flash(t('conversation.svgSaved')) }
+    catch { flash(t('conversation.couldNotExport')) }
   }
   /** The colour the diagram is seen on: the frame's own plain background, else the figure's. */
   function imageBackground(): string {
@@ -111,12 +112,12 @@
       written = navigator.clipboard.write([new ClipboardItem({ 'image/png': image })])
     } catch {
       image.catch(() => {})
-      flash('Copie impossible')
+      flash(t('common.couldNotCopy'))
       return
     }
     Promise.all([written, image]).then(
-      () => flash('Image copiée'),
-      () => flash('Copie impossible'),
+      () => flash(t('conversation.imageCopied')),
+      () => flash(t('common.couldNotCopy')),
     )
   }
   /** What `save_png_file` accepts at most (32 Mio). */
@@ -127,12 +128,12 @@
       const blob = await png()
       // The backend refuses more; the bytes are not even sent.
       if (blob.size > PNG_LIMIT) {
-        flash('PNG trop volumineux')
+        flash(t('conversation.pngTooLarge'))
         return
       }
       const name = fileName.replace(/\.svg$/i, '') + '.png'
-      if (await savePngFile(name, new Uint8Array(await blob.arrayBuffer()))) flash('PNG enregistré')
-    } catch { flash('Export impossible') }
+      if (await savePngFile(name, new Uint8Array(await blob.arrayBuffer()))) flash(t('conversation.pngSaved'))
+    } catch { flash(t('conversation.couldNotExport')) }
   }
   const action = 'inline-flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40'
 </script>
@@ -140,29 +141,29 @@
 {#snippet controls(fullscreen = false)}
   <div class="flex flex-wrap items-center gap-0.5">
     {#if options.allowZoom && frame.svg}
-      <button type="button" class={action} title="Zoom arrière" aria-label="Zoom arrière" disabled={zoom <= 0.5} onclick={() => (zoom = Math.max(0.5, zoom - 0.25))}><ZoomOut class="size-3.5" aria-hidden="true" /></button>
-      <button type="button" class="rounded px-1 text-xs tabular-nums" title="Réinitialiser la vue" aria-label="Réinitialiser la vue" onclick={reset}>{Math.round(zoom * 100)} %</button>
-      <button type="button" class={action} title="Zoom avant" aria-label="Zoom avant" disabled={zoom >= 4} onclick={() => (zoom = Math.min(4, zoom + 0.25))}><ZoomIn class="size-3.5" aria-hidden="true" /></button>
+      <button type="button" class={action} title={t('conversation.zoomOut')} aria-label={t('conversation.zoomOut')} disabled={zoom <= 0.5} onclick={() => (zoom = Math.max(0.5, zoom - 0.25))}><ZoomOut class="size-3.5" aria-hidden="true" /></button>
+      <button type="button" class="rounded px-1 text-xs tabular-nums" title={t('conversation.resetTheView')} aria-label={t('conversation.resetTheView')} onclick={reset}>{Math.round(zoom * 100)} %</button>
+      <button type="button" class={action} title={t('conversation.zoomIn')} aria-label={t('conversation.zoomIn')} disabled={zoom >= 4} onclick={() => (zoom = Math.min(4, zoom + 0.25))}><ZoomIn class="size-3.5" aria-hidden="true" /></button>
     {/if}
     {#if options.allowPan && frame.svg}
-      <button type="button" class={action} title="Déplacer le diagramme (glisser ou utiliser les flèches)" aria-label="Déplacer le diagramme" aria-pressed={moving} onclick={() => (moving = !moving)}><Move class="size-3.5" aria-hidden="true" /></button>
+      <button type="button" class={action} title={t('conversation.moveTheDiagramDragOrUse')} aria-label={t('conversation.moveTheDiagram')} aria-pressed={moving} onclick={() => (moving = !moving)}><Move class="size-3.5" aria-hidden="true" /></button>
     {/if}
     {#if options.allowFullscreen && frame.svg && !fullscreen}
-      <button type="button" class={action} title="Plein écran" aria-label="Plein écran" onclick={() => (expanded = true)}><Maximize2 class="size-3.5" aria-hidden="true" /></button>
+      <button type="button" class={action} title={t('common.fullscreen')} aria-label={t('common.fullscreen')} onclick={() => (expanded = true)}><Maximize2 class="size-3.5" aria-hidden="true" /></button>
     {/if}
     {#if options.allowDownload && frame.svg}
-      <button type="button" class={action} title="Exporter en SVG" aria-label="Exporter en SVG" onclick={download}><Download class="size-3.5" aria-hidden="true" /></button>
+      <button type="button" class={action} title={t('conversation.exportAsSvg')} aria-label={t('conversation.exportAsSvg')} onclick={download}><Download class="size-3.5" aria-hidden="true" /></button>
     {/if}
     {#if options.allowDownload && frame.svg}
-      <button type="button" class={action} title="Exporter en PNG" aria-label="Exporter en PNG" onclick={downloadPng}><FileImage class="size-3.5" aria-hidden="true" /></button>
+      <button type="button" class={action} title={t('conversation.exportAsPng')} aria-label={t('conversation.exportAsPng')} onclick={downloadPng}><FileImage class="size-3.5" aria-hidden="true" /></button>
     {/if}
     {#if source !== undefined}
-      <button type="button" class={action} title="Afficher la source" aria-label="Afficher la source" aria-pressed={showSource} onclick={() => (showSource = !showSource)}><Code class="size-3.5" aria-hidden="true" /></button>
+      <button type="button" class={action} title={t('conversation.showTheSource')} aria-label={t('conversation.showTheSource')} aria-pressed={showSource} onclick={() => (showSource = !showSource)}><Code class="size-3.5" aria-hidden="true" /></button>
     {/if}
     {#if options.allowCopy}
-      <button type="button" class={action} title="Copier la source" aria-label="Copier la source" onclick={copy}><Copy class="size-3.5" aria-hidden="true" /></button>
+      <button type="button" class={action} title={t('conversation.copyTheSource')} aria-label={t('conversation.copyTheSource')} onclick={copy}><Copy class="size-3.5" aria-hidden="true" /></button>
       {#if canCopyImage}
-        <button type="button" class={action} title="Copier l’image" aria-label="Copier l’image" disabled={!frame.svg} onclick={copyImage}><ImageDown class="size-3.5" aria-hidden="true" /></button>
+        <button type="button" class={action} title={t('conversation.copyImage')} aria-label={t('conversation.copyImage')} disabled={!frame.svg} onclick={copyImage}><ImageDown class="size-3.5" aria-hidden="true" /></button>
       {/if}
     {/if}
     {#if feedback}<span role="status" class="px-1 text-xs">{feedback}</span>{/if}
@@ -176,10 +177,10 @@
         class="size-full border-0" style:pointer-events={pan ? 'none' : 'auto'}></iframe>
     </div>
     {#if pan}
-      <button type="button" aria-label="Déplacer le diagramme : glisser ou utiliser les flèches"
+      <button type="button" aria-label={t('conversation.moveTheDiagramDragOrUse2')}
         class="absolute inset-0 size-full cursor-grab touch-none outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         onpointerdown={start} onpointermove={drag} onpointerup={stop} onpointercancel={stop} onlostpointercapture={stop} onkeydown={key}>
-        <span class="sr-only">Déplacer le diagramme</span>
+        <span class="sr-only">{t('conversation.moveTheDiagram')}</span>
       </button>
     {/if}
   </div>
@@ -198,7 +199,7 @@
   {#if frame.svg}
     {#if !(expanded && options.allowFullscreen)}{@render viewport()}{/if}
   {:else}
-    <p role="alert" class="p-3 text-xs text-destructive">SVG invalide ou trop volumineux.</p>
+    <p role="alert" class="p-3 text-xs text-destructive">{t('conversation.invalidOrTooLargeSvg')}</p>
   {/if}
   {#if !expanded}{@render sourceView()}{/if}
 </figure>

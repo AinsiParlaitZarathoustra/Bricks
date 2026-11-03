@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { t } from '$lib/i18n/i18n.svelte';
 	import { app } from '$lib/state/app.svelte';
 	import { errorMessage } from '$lib/ipc/client';
 	import type { SessionSearchHit } from '$lib/ipc/client';
@@ -24,7 +25,7 @@
 	let failure = $state<string | null>(null);
 
 	const pending = $derived(query.trim() !== debounced);
-	const countLabel = $derived(hits.length === 1 ? '1 résultat' : `${hits.length} résultats`);
+	const countLabel = $derived(t('navigation.resultCount', { count: hits.length }));
 
 	// Debounce: the query is sent only once typing has paused.
 	$effect(() => {
@@ -71,7 +72,7 @@
 
 	function projectName(hit: SessionSearchHit): string {
 		const projectId = hit.session.project_id;
-		return app.projects.find((p) => p.id === projectId)?.name ?? 'Projet inconnu';
+		return app.projects.find((p) => p.id === projectId)?.name ?? t('common.unknownProject');
 	}
 
 	async function openHit(hit: SessionSearchHit) {
@@ -80,7 +81,7 @@
 		if (projectId && projectId !== app.currentProjectId) {
 			const project = app.projects.find((p) => p.id === projectId);
 			if (!project) {
-				app.fail(new Error('Le projet de cette conversation est introuvable.'));
+				app.fail(new Error(t('navigation.thisConversationsProjectCantBeFound')));
 				return;
 			}
 			if (app.requireFolder(projectId, () => openHit(hit))) {
@@ -106,13 +107,13 @@
 	{/each}
 {/snippet}
 
-<section aria-label="Résultats de recherche" class="flex flex-col gap-1 px-2 pb-3">
+<section aria-label={t('navigation.searchResults')} class="flex flex-col gap-1 px-2 pb-3">
 	{#if pending || loading}
-		<p role="status" class="px-2 py-2 text-xs text-muted-foreground">Recherche en cours…</p>
+		<p role="status" class="px-2 py-2 text-xs text-muted-foreground">{t('common.searching')}</p>
 	{:else if failure}
-		<p role="alert" class="px-2 py-2 text-xs text-destructive">Recherche impossible : {failure}</p>
+		<p role="alert" class="px-2 py-2 text-xs text-destructive">{t('common.searchFailed', { failure })}</p>
 	{:else if hits.length === 0}
-		<p role="status" class="px-2 py-2 text-sm text-muted-foreground">Aucun résultat pour « {debounced} ».</p>
+		<p role="status" class="px-2 py-2 text-sm text-muted-foreground">{t('navigation.noResultsFor', { debounced })}</p>
 	{:else}
 		<p role="status" class="px-2 text-xs text-muted-foreground">{countLabel}</p>
 		<ul class="flex flex-col gap-0.5">
@@ -134,7 +135,7 @@
 						<span class="flex w-full min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
 							<span class="truncate">{projectName(hit)}</span>
 							<span aria-hidden="true">·</span>
-							<span class="shrink-0">{hit.matched === 'title' ? 'Dans le titre' : 'Dans un message'}</span>
+							<span class="shrink-0">{hit.matched === 'title' ? t('navigation.inTheTitle') : t('navigation.inAMessage')}</span>
 						</span>
 						{#if hit.matched === 'message' && hit.snippet}
 							<span class="line-clamp-2 text-xs text-muted-foreground">

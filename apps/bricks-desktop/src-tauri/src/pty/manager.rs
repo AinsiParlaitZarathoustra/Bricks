@@ -6,6 +6,7 @@
 //! base64 events, batched), `pty-input` (queued input → PTY), `pty-exit`
 //! (waits for the shell, then reports `Exit`).
 
+use crate::i18n::{msg, tr};
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::io::{ErrorKind, Read, Write};
@@ -98,20 +99,20 @@ impl PtyManager {
         if !params.cwd.is_dir() {
             return Err(IpcError {
                 code: IpcErrorCode::FolderMissing,
-                message: "Le dossier du projet n'existe plus.".into(),
+                message: tr!(msg::THE_PROJECT_FOLDER_NO_LONGER_EXISTS).into(),
             });
         }
         let pair = native_pty_system()
             .openpty(pty_size(params.cols, params.rows))
-            .map_err(|e| io_error("Impossible d'ouvrir un terminal", e))?;
+            .map_err(|e| io_error(&tr!(msg::COULD_NOT_OPEN_A_TERMINAL), e))?;
         let reader = pair
             .master
             .try_clone_reader()
-            .map_err(|e| io_error("Impossible de lire le terminal", e))?;
+            .map_err(|e| io_error(&tr!(msg::COULD_NOT_READ_THE_TERMINAL), e))?;
         let writer = pair
             .master
             .take_writer()
-            .map_err(|e| io_error("Impossible d'écrire dans le terminal", e))?;
+            .map_err(|e| io_error(&tr!(msg::COULD_NOT_WRITE_TO_THE_TERMINAL), e))?;
 
         let mut command = CommandBuilder::new(&shell.program);
         command.args(&shell.args);
@@ -121,7 +122,7 @@ impl PtyManager {
         let child = pair
             .slave
             .spawn_command(command)
-            .map_err(|e| io_error(&format!("Impossible de lancer {}", shell.program), e))?;
+            .map_err(|e| io_error(&tr!(msg::COULD_NOT_LAUNCH_SHELL, program = shell.program), e))?;
         // Our copy of the slave must close, or the reader never sees the end.
         drop(pair.slave);
 
@@ -179,7 +180,7 @@ impl PtyManager {
         if let Err(err) = launched {
             control.kill();
             self.inner.remove_exited(&info.id, seq);
-            return Err(io_error("Impossible de démarrer le terminal", err));
+            return Err(io_error(&tr!(msg::COULD_NOT_START_THE_TERMINAL), err));
         }
         Ok(info)
     }
@@ -189,7 +190,7 @@ impl PtyManager {
         if data.len() > MAX_INPUT {
             return Err(IpcError {
                 code: IpcErrorCode::Invalid,
-                message: "Saisie trop longue pour le terminal.".into(),
+                message: tr!(msg::INPUT_TOO_LONG_FOR_THE_TERMINAL).into(),
             });
         }
         let session = self.session(id)?;
@@ -197,7 +198,7 @@ impl PtyManager {
             Ok(()) => Ok(()),
             Err(TrySendError::Full(_)) => Err(IpcError {
                 code: IpcErrorCode::Rejected,
-                message: "Le terminal ne suit pas la saisie : réessayez.".into(),
+                message: tr!(msg::THE_TERMINAL_CANT_KEEP_UP_WITH).into(),
             }),
             Err(TrySendError::Disconnected(_)) => Err(not_found()),
         }
@@ -210,7 +211,7 @@ impl PtyManager {
             .master
             .lock()
             .resize(size)
-            .map_err(|e| io_error("Redimensionnement du terminal impossible", e))
+            .map_err(|e| io_error(&tr!(msg::COULD_NOT_RESIZE_THE_TERMINAL), e))
     }
 
     /// Stop a terminal. It leaves the registry at once; `Exit` follows when
@@ -402,7 +403,7 @@ fn io_error(context: &str, err: impl Display) -> IpcError {
 fn not_found() -> IpcError {
     IpcError {
         code: IpcErrorCode::NotFound,
-        message: "Ce terminal n'existe plus.".into(),
+        message: tr!(msg::TERMINAL_GONE),
     }
 }
 

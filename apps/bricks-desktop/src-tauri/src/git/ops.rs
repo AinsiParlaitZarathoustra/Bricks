@@ -4,6 +4,7 @@
 //! sit below the repository root. Commands run with the project folder as
 //! their working directory and are scoped to it (`-- .`, `--relative`).
 
+use crate::i18n::{msg, tr};
 use std::collections::HashMap;
 use std::path::{Component, Path};
 
@@ -49,9 +50,9 @@ pub async fn status(dir: &Path) -> IpcResult<GitStatus> {
         run::capture(dir, &unstaged_args, LIST_CAP),
     );
     let (listing, staged, unstaged) = (listing?, staged?, unstaged?);
-    check_listing(&listing, "Lecture du statut Git impossible")?;
-    check_listing(&staged, "Lecture des changements indexés impossible")?;
-    check_listing(&unstaged, "Lecture des changements non indexés impossible")?;
+    check_listing(&listing, &tr!(msg::COULD_NOT_READ_THE_GIT_STATUS))?;
+    check_listing(&staged, &tr!(msg::COULD_NOT_READ_THE_STAGED_CHANGES))?;
+    check_listing(&unstaged, &tr!(msg::COULD_NOT_READ_THE_UNSTAGED_CHANGES))?;
 
     let parsed = parse::parse_status_v2(&listing.stdout);
     let staged_counts = by_path(parse::parse_numstat_z(&staged.stdout));
@@ -120,7 +121,7 @@ pub async fn diff(dir: &Path, path: &str, area: GitArea) -> IpcResult<FileDiff> 
             let out = run::capture(dir, &args, PATCH_LIMIT).await?;
             // `--no-index` exits 1 when the files differ, which is the normal case.
             if !(out.success() || out.truncated || out.code() == Some(1)) {
-                return Err(run::failure(&out, "Diff Git impossible"));
+                return Err(run::failure(&out, &tr!(msg::COULD_NOT_GET_THE_GIT_DIFF)));
             }
             out
         }
@@ -134,7 +135,7 @@ pub async fn diff(dir: &Path, path: &str, area: GitArea) -> IpcResult<FileDiff> 
             }
             args.push(path);
             let out = run::capture(dir, &args, PATCH_LIMIT).await?;
-            check_exit(&out, "Diff Git impossible")?;
+            check_exit(&out, &tr!(msg::COULD_NOT_GET_THE_GIT_DIFF))?;
             out
         }
         GitArea::Unstaged | GitArea::Conflicted => {
@@ -143,7 +144,7 @@ pub async fn diff(dir: &Path, path: &str, area: GitArea) -> IpcResult<FileDiff> 
             args.push("--");
             args.push(path);
             let out = run::capture(dir, &args, PATCH_LIMIT).await?;
-            check_exit(&out, "Diff Git impossible")?;
+            check_exit(&out, &tr!(msg::COULD_NOT_GET_THE_GIT_DIFF))?;
             out
         }
     };
@@ -198,13 +199,13 @@ pub async fn show(dir: &Path, rev: &str) -> IpcResult<Vec<FileDiff>> {
     ensure_folder(dir)?;
     validate_rev(rev)?;
     if repo_prefix(dir).await?.is_none() {
-        return Err(not_found("Ce dossier n'est pas un dépôt Git."));
+        return Err(not_found(&tr!(msg::THIS_FOLDER_ISNT_A_GIT_REPOSITORY)));
     }
 
     let spec = format!("{rev}^{{commit}}");
     let resolved = run::capture(dir, &["rev-parse", "--verify", "--quiet", &spec], 4096).await?;
     if !resolved.success() {
-        return Err(not_found(&format!("Révision introuvable : {rev}")));
+        return Err(not_found(&tr!(msg::REVISION_NOT_FOUND, rev = rev)));
     }
     let hash = String::from_utf8_lossy(&resolved.stdout).trim().to_string();
 
@@ -248,8 +249,8 @@ pub async fn show(dir: &Path, rev: &str) -> IpcResult<Vec<FileDiff>> {
         SHOW_CAP,
     )
     .await?;
-    check_listing(&names_out, "Liste des fichiers du commit illisible")?;
-    check_exit(&patch_out, "Diff du commit illisible")?;
+    check_listing(&names_out, &tr!(msg::COULD_NOT_READ_THE_COMMITS_FILE))?;
+    check_exit(&patch_out, &tr!(msg::COULD_NOT_READ_THE_COMMITS_DIFF))?;
 
     let names: Vec<String> = parse::parse_name_status_z(&names_out.stdout)
         .into_iter()
@@ -304,7 +305,7 @@ fn check_listing(out: &Captured, what: &str) -> IpcResult<()> {
     if out.truncated {
         return Err(IpcError {
             code: IpcErrorCode::Rejected,
-            message: "Trop de changements pour être affichés.".into(),
+            message: tr!(msg::TOO_MANY_CHANGES_TO_SHOW).into(),
         });
     }
     check_exit(out, what)
@@ -346,7 +347,7 @@ async fn repo_prefix(dir: &Path) -> IpcResult<Option<String>> {
         if out.stderr.contains("not a git repository") {
             return Ok(None);
         }
-        return Err(run::failure(&out, "Dépôt Git inaccessible"));
+        return Err(run::failure(&out, &tr!(msg::GIT_REPOSITORY_NOT_ACCESSIBLE)));
     }
     let text = String::from_utf8_lossy(&out.stdout).into_owned();
     let mut lines = text.lines();
@@ -376,7 +377,7 @@ async fn staged_rename_source(dir: &Path, path: &str) -> IpcResult<Option<String
         LIST_CAP,
     )
     .await?;
-    check_listing(&out, "Diff Git impossible")?;
+    check_listing(&out, &tr!(msg::COULD_NOT_GET_THE_GIT_DIFF))?;
     Ok(parse::parse_name_status_z(&out.stdout)
         .into_iter()
         .find(|entry| entry.code == 'R' && entry.path == path)
@@ -438,7 +439,7 @@ fn cut_section(text: &str, forced: bool) -> (&str, bool) {
 pub(crate) fn validate_relative_path(path: &str) -> IpcResult<()> {
     let invalid = || IpcError {
         code: IpcErrorCode::Invalid,
-        message: "Chemin invalide : il doit être relatif au projet.".into(),
+        message: tr!(msg::INVALID_PATH_IT_MUST_BE_RELATIVE).into(),
     };
     if path.is_empty() || path.len() > 4096 || path.contains('\0') {
         return Err(invalid());
@@ -460,7 +461,7 @@ fn validate_rev(rev: &str) -> IpcResult<()> {
     } else {
         Err(IpcError {
             code: IpcErrorCode::Invalid,
-            message: "Révision invalide.".into(),
+            message: tr!(msg::INVALID_REVISION).into(),
         })
     }
 }
@@ -471,7 +472,7 @@ fn ensure_folder(dir: &Path) -> IpcResult<()> {
     } else {
         Err(IpcError {
             code: IpcErrorCode::FolderMissing,
-            message: "Le dossier du projet n'existe plus.".into(),
+            message: tr!(msg::THE_PROJECT_FOLDER_NO_LONGER_EXISTS).into(),
         })
     }
 }

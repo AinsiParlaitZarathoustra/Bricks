@@ -2,6 +2,7 @@
 	// The first choice of permissions, above the composer, while the conversation's
 	// policy is not chosen. The choice applies to this conversation and becomes the
 	// one new conversations start from. CUSTOM opens the configuration to edit it.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import ShieldQuestion from '@lucide/svelte/icons/shield-question';
 	import { Button } from '$lib/components/ui/button';
 	import type { PermissionProfile } from '$lib/ipc/engine';
@@ -31,7 +32,7 @@
 		class="mx-auto flex w-full max-w-3xl flex-wrap items-center gap-x-3 gap-y-2 px-4 pt-2 text-sm"
 	>
 		<ShieldQuestion class="size-4 shrink-0 text-warning" aria-hidden="true" />
-		<h2 id="permission-choice" class="font-medium">Permissions</h2>
+		<h2 id="permission-choice" class="font-medium">{t('common.permissions')}</h2>
 		<div class="flex flex-wrap gap-1.5">
 			{#each PROFILE_OPTIONS as option (option.value)}
 				<Button

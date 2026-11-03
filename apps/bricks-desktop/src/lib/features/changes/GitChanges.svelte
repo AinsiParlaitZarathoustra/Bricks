@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { t } from '$lib/i18n/i18n.svelte';
 	import { untrack } from 'svelte';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
 	import { Badge } from '$lib/components/ui/badge';
@@ -14,10 +15,10 @@
 	import type { PatchSource } from './types';
 
 	const AREAS: { area: GitArea; title: string }[] = [
-		{ area: 'staged', title: 'Indexés' },
-		{ area: 'unstaged', title: 'Non indexés' },
-		{ area: 'untracked', title: 'Non suivis' },
-		{ area: 'conflicted', title: 'Conflits' },
+		{ area: 'staged', get title() { return t('changes.staged') } },
+		{ area: 'unstaged', get title() { return t('changes.unstaged') } },
+		{ area: 'untracked', get title() { return t('changes.untracked') } },
+		{ area: 'conflicted', get title() { return t('changes.conflicts') } },
 	];
 
 	type CommitDetail =
@@ -89,7 +90,7 @@
 		return [
 			{
 				key: `diff-${git?.revision ?? 0}`,
-				title: 'Diff',
+				title: t('common.diff'),
 				load: () => gitDiff(projectId, path, area),
 			},
 		];
@@ -99,34 +100,34 @@
 <svelte:window onfocus={() => void git?.refresh()} />
 
 {#if !app.currentProjectId}
-	<EmptyState title="Aucun projet ouvert" description="Choisissez un projet pour voir son état Git." />
+	<EmptyState title={t('common.noOpenProject')} description={t('changes.chooseAProjectToSeeIts')} />
 {:else if git?.statusError && !git.status}
-	<EmptyState title="Git indisponible" description={git.statusError}>
+	<EmptyState title={t('changes.gitUnavailable')} description={git.statusError}>
 		{#snippet action()}
-			<Button variant="outline" size="sm" onclick={() => git?.refresh()}>Réessayer</Button>
+			<Button variant="outline" size="sm" onclick={() => git?.refresh()}>{t('common.retry')}</Button>
 		{/snippet}
 	</EmptyState>
 {:else if git?.status && !git.status.is_repo}
-	<EmptyState title="Git n’est pas installé dans ce dossier" />
+	<EmptyState title={t('common.gitIsntInstalledInThisFolder')} />
 {:else}
 	<div class="flex flex-col gap-4">
 		<header class="flex items-center gap-2">
 			<div class="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
 				{#if git?.status?.detached}
-					<Badge variant="outline">HEAD détachée{git.status.head ? ` · ${git.status.head}` : ''}</Badge>
+					<Badge variant="outline">{t('changes.detachedHead', { value: git.status.head ? ` · ${git.status.head}` : '' })}</Badge>
 				{:else if git?.status?.branch}
 					<span class="truncate font-mono text-sm">{git.status.branch}</span>
 				{:else if git?.status}
-					<span class="text-sm text-muted-foreground">Pas encore de branche</span>
+					<span class="text-sm text-muted-foreground">{t('changes.noBranchYet')}</span>
 				{/if}
-				{#if ahead > 0}<Badge variant="secondary">{ahead} à pousser</Badge>{/if}
-				{#if behind > 0}<Badge variant="secondary">{behind} à récupérer</Badge>{/if}
+				{#if ahead > 0}<Badge variant="secondary">{t('changes.toPush', { ahead })}</Badge>{/if}
+				{#if behind > 0}<Badge variant="secondary">{t('changes.toPull', { behind })}</Badge>{/if}
 			</div>
 			<Button
 				variant="ghost"
 				size="icon-sm"
-				aria-label="Actualiser"
-				title="Actualiser"
+				aria-label={t('common.refresh')}
+				title={t('common.refresh')}
 				disabled={git?.statusLoading}
 				onclick={() => git?.refresh()}
 			>
@@ -135,9 +136,9 @@
 		</header>
 
 		{#if !git?.status}
-			<p class="px-3 py-6 text-center text-sm text-muted-foreground">Chargement…</p>
+			<p class="px-3 py-6 text-center text-sm text-muted-foreground">{t('common.loading')}</p>
 		{:else if sections.length === 0}
-			<p class="text-sm text-muted-foreground">Aucune modification : l’arbre de travail est propre.</p>
+			<p class="text-sm text-muted-foreground">{t('changes.noChangesTheWorkingTreeIs')}</p>
 		{:else}
 			{#each sections as section (section.area)}
 				<SectionCard title={section.title} count={section.entries.length}>
@@ -148,8 +149,8 @@
 							added={entry.added}
 							removed={entry.removed}
 							binary={entry.binary}
-							countLabel="lignes"
-							note={entry.orig_path ? `depuis ${entry.orig_path}` : undefined}
+							countLabel={t('common.lines')}
+							note={entry.orig_path ? t('changes.from', { origPath: entry.orig_path }) : undefined}
 							patches={diffSource(entry.path, entry.area)}
 						/>
 					{/each}
@@ -157,13 +158,13 @@
 			{/each}
 		{/if}
 
-		<SectionCard title="Commits" count={git?.commitsLoaded ? git.commits.length : undefined}>
+		<SectionCard title={t('changes.commits')} count={git?.commitsLoaded ? git.commits.length : undefined}>
 			{#if git?.commitsError}
-				<p role="alert" class="text-xs text-destructive">Historique indisponible : {git.commitsError}</p>
+				<p role="alert" class="text-xs text-destructive">{t('changes.historyUnavailable', { commitsError: git.commitsError })}</p>
 			{:else if !git?.commitsLoaded}
-				<p class="py-2 text-sm text-muted-foreground">Chargement…</p>
+				<p class="py-2 text-sm text-muted-foreground">{t('common.loading')}</p>
 			{:else if git.commits.length === 0}
-				<p class="py-2 text-sm text-muted-foreground">Aucun commit pour l’instant.</p>
+				<p class="py-2 text-sm text-muted-foreground">{t('changes.noCommitsYet')}</p>
 			{:else}
 				<ul class="flex flex-col">
 					{#each git.commits as commit (commit.hash)}
@@ -175,7 +176,7 @@
 								onclick={() => toggleCommit(commit)}
 							>
 								<span class="shrink-0 font-mono text-xs text-muted-foreground">{commit.short}</span>
-								<span class="min-w-0 flex-1 truncate text-sm">{commit.subject || '(sans message)'}</span>
+								<span class="min-w-0 flex-1 truncate text-sm">{commit.subject || t('changes.noMessage')}</span>
 							</button>
 							<p class="pl-[3.25rem] text-xs text-muted-foreground">
 								{commit.author} · <time class="tabular-nums">{formatDateTime(commit.at)}</time>
@@ -184,11 +185,11 @@
 								{@const detail = details[commit.hash]}
 								<div class="mt-1 pl-2">
 									{#if detail?.status === 'loading' || !detail}
-										<p class="text-xs text-muted-foreground">Chargement…</p>
+										<p class="text-xs text-muted-foreground">{t('common.loading')}</p>
 									{:else if detail.status === 'error'}
-										<p role="alert" class="text-xs text-destructive">Impossible de charger le commit : {detail.error}</p>
+										<p role="alert" class="text-xs text-destructive">{t('changes.couldNotLoadTheCommit', { error: detail.error })}</p>
 									{:else if detail.files.length === 0}
-										<p class="text-xs text-muted-foreground">Aucun fichier de ce projet dans ce commit.</p>
+										<p class="text-xs text-muted-foreground">{t('changes.noFileOfThisProjectIn')}</p>
 									{:else}
 										{#each detail.files as file (file.diff.path)}
 											<FileChangeRow
@@ -196,9 +197,9 @@
 												added={file.added}
 												removed={file.removed}
 												binary={file.diff.binary}
-												countLabel="lignes"
+												countLabel={t('common.lines')}
 												patches={[
-													{ key: 'diff', title: `Diff ${shortId(commit.hash)}`, load: async () => file.diff },
+													{ key: 'diff', title: t('changes.diff', { hash: shortId(commit.hash) }), load: async () => file.diff },
 												]}
 											/>
 										{/each}
@@ -216,7 +217,7 @@
 							disabled={git.commitsLoading}
 							onclick={() => git?.loadCommits(true)}
 						>
-							{git.commitsLoading ? 'Chargement…' : 'Charger plus'}
+							{git.commitsLoading ? t('common.loading') : t('changes.loadMore')}
 						</Button>
 					</div>
 				{/if}

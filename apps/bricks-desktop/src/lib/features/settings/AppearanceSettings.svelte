@@ -1,6 +1,7 @@
 <script lang="ts">
 	// « Apparence » of the settings: the light, dark or system mode, three colours per mode
 	// (accent, central background, panels), saved per resolved mode, and the app's icon.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import type { AppIcon } from '$lib/ipc/client';
 	import { app } from '$lib/state/app.svelte';
 	import { setTheme, theme, type ThemeMode } from '$lib/theme/theme.svelte';
@@ -29,9 +30,9 @@
 		label: string;
 		icon: Component<{ class?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>;
 	}[] = [
-		{ value: 'light', label: 'Clair', icon: Sun },
-		{ value: 'dark', label: 'Sombre', icon: Moon },
-		{ value: 'system', label: 'Système', icon: Monitor }
+		{ value: 'light', get label() { return t('settings.light') }, icon: Sun },
+		{ value: 'dark', get label() { return t('settings.dark') }, icon: Moon },
+		{ value: 'system', get label() { return t('settings.system') }, icon: Monitor }
 	];
 
 	/** The icon: always light, always dark, or the one of the mode on screen. */
@@ -40,22 +41,22 @@
 		label: string;
 		icon: Component<{ class?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>;
 	}[] = [
-		{ value: 'light', label: 'Claire', icon: Sun },
-		{ value: 'dark', label: 'Sombre', icon: Moon },
-		{ value: 'aligned', label: 'Alignée', icon: SunMoon }
+		{ value: 'light', get label() { return t('settings.light2') }, icon: Sun },
+		{ value: 'dark', get label() { return t('settings.dark') }, icon: Moon },
+		{ value: 'aligned', get label() { return t('settings.aligned') }, icon: SunMoon }
 	];
 
 	/** What each colour changes, shown as a sample on its preview. */
 	const SAMPLES: Record<ColorRole, string> = {
-		accent: 'Action principale',
-		background: 'Texte du fond principal',
-		panel: 'Texte des panneaux'
+		get accent() { return t('settings.primaryAction') },
+		get background() { return t('settings.mainBackgroundText') },
+		get panel() { return t('settings.panelText') }
 	};
 
 	const current = $derived(app.prefs.theme);
 	/** The mode whose colours are being edited: the one on screen (system resolves to light or dark). */
 	const mode = $derived<ResolvedMode>(theme.resolved);
-	const modeName = $derived(mode === 'dark' ? 'sombre' : 'clair');
+	const modeName = $derived(mode === 'dark' ? t('settings.modeDark') : t('settings.modeLight'));
 
 	/** Applies the mode at once and saves it with the other preferences. */
 	function choose(next: ThemeMode) {
@@ -73,9 +74,9 @@
 </script>
 
 <div class="flex flex-col gap-6">
-	<SettingsGroup title="Thème">
+	<SettingsGroup title={t('settings.theme')}>
 		<fieldset class="flex flex-col gap-0 p-0">
-			<legend class="sr-only">Thème</legend>
+			<legend class="sr-only">{t('settings.theme')}</legend>
 			<div class="grid gap-2 p-3 sm:grid-cols-3">
 				{#each OPTIONS as option (option.value)}
 					{@const Icon = option.icon}
@@ -98,7 +99,7 @@
 		</fieldset>
 	</SettingsGroup>
 
-	<SettingsGroup title={`Couleurs (mode ${modeName})`}>
+	<SettingsGroup title={t('settings.colorsMode', { modeName })}>
 		{#each COLOR_ROLES as role (role)}
 			<ColorChoice
 				label={COLOR_ROLE_LABELS[role]}
@@ -114,9 +115,9 @@
 		{/each}
 	</SettingsGroup>
 
-	<SettingsGroup title="Icône de l'app">
+	<SettingsGroup title={t('settings.appIcon')}>
 		<fieldset class="flex flex-col gap-0 p-0">
-			<legend class="sr-only">Icône de l'app</legend>
+			<legend class="sr-only">{t('settings.appIcon')}</legend>
 			<div class="grid gap-2 p-3 sm:grid-cols-3">
 				{#each ICON_OPTIONS as option (option.value)}
 					{@const Icon = option.icon}

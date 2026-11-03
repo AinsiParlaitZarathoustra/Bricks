@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { t } from '$lib/i18n/i18n.svelte';
 	import { tick } from 'svelte';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
@@ -163,7 +164,7 @@
 						<Input
 							{@attach focusAndSelect}
 							bind:value={draft}
-							aria-label="Nouveau titre de la conversation"
+							aria-label={t('navigation.newConversationTitle')}
 							maxlength={200}
 							autocomplete="off"
 							class="h-8 text-compact"
@@ -194,7 +195,7 @@
 							>{displayTitle(session.title)}</span
 						>
 						{#if session.running}
-							<StatusDot status="running" label="Conversation en cours" />
+							<StatusDot status="running" label={t('navigation.conversationRunning')} />
 						{/if}
 					</button>
 				{/if}
@@ -207,7 +208,7 @@
 								variant="ghost"
 								size="icon-sm"
 								class="absolute top-1/2 right-1 shrink-0 -translate-y-1/2 text-muted-foreground opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
-								aria-label={`Actions pour la conversation ${displayTitle(session.title)}`}
+								aria-label={t('navigation.actionsForConversation', { title: displayTitle(session.title) })}
 							>
 								<EllipsisVertical class="size-4" aria-hidden="true" />
 							</Button>
@@ -221,12 +222,12 @@
 							}}
 						>
 							<Pencil class="size-4" aria-hidden="true" />
-							Renommer
+							{t('navigation.rename')}
 						</DropdownMenu.Item>
 						<DropdownMenu.Separator />
 						<DropdownMenu.Item variant="destructive" onSelect={() => askDelete(session)}>
 							<Trash class="size-4" aria-hidden="true" />
-							Supprimer
+							{t('common.delete')}
 						</DropdownMenu.Item>
 					</DropdownMenu.Content>
 				</DropdownMenu.Root>
@@ -244,7 +245,7 @@
 				aria-expanded={showAll}
 				onclick={() => (showAll = !showAll)}
 			>
-				{showAll ? 'Afficher moins' : 'Afficher plus'}
+				{showAll ? t('navigation.showLess') : t('navigation.showMore')}
 				<ChevronDownIcon
 					class={cn('size-3.5 transition-transform', showAll && 'rotate-180')}
 					aria-hidden="true"
@@ -257,18 +258,17 @@
 <AlertDialog.Root bind:open={deleteOpen}>
 	<AlertDialog.Content>
 		<AlertDialog.Header>
-			<AlertDialog.Title>Supprimer « {displayTitle(deleteTarget?.title ?? '')} » ?</AlertDialog.Title>
+			<AlertDialog.Title>{t('navigation.delete', { value: displayTitle(deleteTarget?.title ?? '') })}</AlertDialog.Title>
 			<AlertDialog.Description>
 				{#if deleteTarget?.running}
-					La conversation est en cours : elle sera annulée avant sa suppression.
+					{t('navigation.theConversationIsRunningItWill')}
 				{/if}
-				Cette action est définitive. La conversation et ses messages seront supprimés et ne pourront pas être
-				récupérés.
+				{t('navigation.thisIsPermanentTheConversationAnd')}
 			</AlertDialog.Description>
 		</AlertDialog.Header>
 		<AlertDialog.Footer>
-			<AlertDialog.Cancel>Annuler</AlertDialog.Cancel>
-			<AlertDialog.Action variant="destructive" onclick={confirmDelete}>Supprimer</AlertDialog.Action>
+			<AlertDialog.Cancel>{t('common.cancel')}</AlertDialog.Cancel>
+			<AlertDialog.Action variant="destructive" onclick={confirmDelete}>{t('common.delete')}</AlertDialog.Action>
 		</AlertDialog.Footer>
 	</AlertDialog.Content>
 </AlertDialog.Root>

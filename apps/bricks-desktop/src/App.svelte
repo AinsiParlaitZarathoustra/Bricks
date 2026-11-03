@@ -1,6 +1,7 @@
 <script lang="ts">
   // Root: wires the shell, the global state and the feature entry points.
   // Owner: orchestrator.
+  import { t } from '$lib/i18n/i18n.svelte'
   import { onMount } from 'svelte'
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import { toast } from 'svelte-sonner'
@@ -173,7 +174,7 @@
     <StartSplash />
   {:else if app.startError}
     <div class="grid h-screen place-items-center p-6">
-      <EmptyState title="Bricks n’a pas pu démarrer" description={app.startError} />
+      <EmptyState title={t('app.bricksCouldNotStart')} description={app.startError} />
     </div>
   {:else}
     <AppShell
@@ -217,9 +218,9 @@
             {:else}
               <div class="grid h-full place-items-center p-6">
                 {#if !app.hasProviders}
-                  <EmptyState title="Aucun fournisseur configuré">
+                  <EmptyState title={t('app.noProviderConfigured')}>
                     {#snippet action()}
-                      <Button variant="ghost" size="sm" onclick={() => (ui.settingsOpen = true)}>Ouvrir les paramètres</Button>
+                      <Button variant="ghost" size="sm" onclick={() => (ui.settingsOpen = true)}>{t('app.openSettings')}</Button>
                     {/snippet}
                   </EmptyState>
                 {/if}

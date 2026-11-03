@@ -6,6 +6,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { bound, call } from './french-keys';
 
 const SRC = fileURLToPath(new URL('../../src/', import.meta.url));
 const src = (path: string) => readFileSync(join(SRC, path), 'utf8');
@@ -76,7 +77,7 @@ describe('the branch of a sub-agent (AgentBranch.svelte)', () => {
 	});
 
 	it('has nothing to write to: a fixed bar says so, and there is no field, form or command', () => {
-		expect(text).toContain('Vous ne pouvez pas écrire à un sous-agent !');
+		expect(text).toContain(call('Vous ne pouvez pas écrire à un sous-agent !'));
 		expect(text).not.toContain('<textarea');
 		expect(text).not.toContain('<form');
 		expect(text).not.toContain('control(');
@@ -104,7 +105,7 @@ describe('the title bar in a branch (ConversationTitle.svelte)', () => {
 	});
 
 	it('hides the rename pencil in a branch, and the running dot follows the branch', () => {
-		const pencil = text.indexOf('aria-label="Modifier le titre"');
+		const pencil = text.indexOf(bound('aria-label', 'Modifier le titre'));
 		expect(pencil).toBeGreaterThan(-1);
 		expect(text.slice(0, pencil)).toContain('{#if conversation && !editing && !branch}');
 		expect(text).toContain('{#if branch ? !branch.endedAt : conversation?.running}');

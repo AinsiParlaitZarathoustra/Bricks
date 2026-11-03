@@ -42,6 +42,7 @@ use crate::contract::{
     AttachmentKind, AttachmentPreview, AttachmentRef, ImportedAttachment, IpcError, IpcResult,
     ResolvedAttachment,
 };
+use crate::i18n::{msg, tr};
 use base64::Engine;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -117,7 +118,7 @@ fn check_id(id: &str, what: &str) -> IpcResult<()> {
     if valid_id(id) {
         Ok(())
     } else {
-        Err(invalid(format!("identifiant de {what} invalide")))
+        Err(invalid(tr!(msg::INVALID_IDENTIFIER, what = what)))
     }
 }
 
@@ -198,24 +199,22 @@ fn image_mime(head: &[u8]) -> Option<&'static str> {
 
 /// The refusal of a format that is not admitted, named.
 fn unsupported(what: &str) -> IpcError {
-    invalid(format!(
-        "format non pris en charge : {what} (texte UTF-8, PNG, JPEG, GIF ou WebP seulement)"
-    ))
+    invalid(tr!(msg::UNSUPPORTED_FORMAT_UTF_8_TEXT_PNG, what = what))
 }
 
 /// What a ZIP container is, by its extension (Office and OpenDocument files
 /// are ZIP containers too).
-fn zip_format(name: &str) -> &'static str {
+fn zip_format(name: &str) -> String {
     match Path::new(name)
         .extension()
         .and_then(|e| e.to_str())
         .map(str::to_ascii_lowercase)
         .as_deref()
     {
-        Some("docx" | "dotx") => "document Word",
-        Some("xlsx") => "classeur Excel",
-        Some("pptx") => "présentation PowerPoint",
-        _ => "archive ZIP",
+        Some("docx" | "dotx") => tr!(msg::WORD_DOCUMENT),
+        Some("xlsx") => tr!(msg::EXCEL_WORKBOOK),
+        Some("pptx") => tr!(msg::POWERPOINT_PRESENTATION),
+        _ => tr!(msg::ZIP_ARCHIVE),
     }
 }
 
@@ -229,21 +228,19 @@ pub fn recognise(head: &[u8], name: &str) -> IpcResult<Format> {
         return Err(unsupported("PDF"));
     }
     if head.starts_with(&[0xD0, 0xCF, 0x11, 0xE0]) {
-        return Err(unsupported(
-            "document Office ancien (Word, Excel, PowerPoint)",
-        ));
+        return Err(unsupported(&tr!(msg::OLD_OFFICE_DOCUMENT)));
     }
     if head.starts_with(b"PK\x03\x04") || head.starts_with(b"PK\x05\x06") {
-        return Err(unsupported(zip_format(name)));
+        return Err(unsupported(&zip_format(name)));
     }
     if head.contains(&0) {
-        return Err(unsupported("fichier binaire"));
+        return Err(unsupported(&tr!(msg::BINARY_FILE)));
     }
     match std::str::from_utf8(head) {
         Ok(_) => Ok(Format::Text),
         // The head may end inside a character: the rest decides.
         Err(e) if e.error_len().is_none() => Ok(Format::Text),
-        Err(_) => Err(unsupported("texte non UTF-8")),
+        Err(_) => Err(unsupported(&tr!(msg::NON_UTF8_TEXT))),
     }
 }
 
@@ -283,9 +280,9 @@ fn check_size(format: Format, size: u64) -> IpcResult<()> {
             "image trop volumineuse (maximum {} Mo)",
             MAX_IMAGE_BYTES / MIB
         ),
-        Format::Text => format!(
-            "fichier texte trop volumineux (maximum {} Mo)",
-            MAX_TEXT_BYTES / MIB
+        Format::Text => tr!(
+            msg::TEXT_FILE_TOO_LARGE_MB_AT,
+            detail = MAX_TEXT_BYTES / MIB
         ),
     }))
 }
@@ -295,7 +292,7 @@ fn check_size(format: Format, size: u64) -> IpcResult<()> {
 fn check_whole(format: Format, content: &[u8]) -> IpcResult<()> {
     check_size(format, content.len() as u64)?;
     if format == Format::Text && (content.contains(&0) || std::str::from_utf8(content).is_err()) {
-        return Err(unsupported("fichier binaire ou texte non UTF-8"));
+        return Err(unsupported(&tr!(msg::BINARY_FILE_OR_NON_UTF_8)));
     }
     Ok(())
 }
@@ -330,9 +327,9 @@ pub fn import_bytes(
     };
     // Refused before decoding: nothing larger than the image limit is kept.
     if data.len() > MAX_BASE64_CHARS {
-        return Err(invalid(format!(
-            "fichier trop volumineux (maximum {} Mo pour une image)",
-            MAX_IMAGE_BYTES / MIB
+        return Err(invalid(tr!(
+            msg::FILE_TOO_LARGE_MB_AT_MOST,
+            detail = MAX_IMAGE_BYTES / MIB
         )));
     }
     let content = base64::engine::general_purpose::STANDARD
@@ -357,10 +354,10 @@ pub fn import_path(
     }
     let path = Path::new(src);
     if !path.is_absolute() {
-        return Err(invalid("chemin absolu requis"));
+        return Err(invalid(tr!(msg::ABSOLUTE_PATH_REQUIRED)));
     }
     if path.components().any(|c| matches!(c, Component::ParentDir)) {
-        return Err(invalid("chemin non normalisé refusé"));
+        return Err(invalid(tr!(msg::NON_NORMALIZED_PATH_REFUSED)));
     }
     let name = safe_name(
         &path
@@ -370,15 +367,17 @@ pub fn import_path(
     );
     let link = std::fs::symlink_metadata(path).map_err(|e| missing_or_io(e, src))?;
     let target = if link.file_type().is_symlink() {
-        std::fs::canonicalize(path).map_err(|_| invalid("lien symbolique cassé"))?
+        std::fs::canonicalize(path).map_err(|_| invalid(tr!(msg::BROKEN_SYMBOLIC_LINK)))?
     } else {
         path.to_path_buf()
     };
     // The type is checked before the file is opened: a pipe would block the open.
     let meta = std::fs::metadata(&target).map_err(|e| missing_or_io(e, src))?;
     refuse_unless_regular(&meta)?;
-    let mut file = File::open(&target).map_err(|e| io_error("pièce jointe", e))?;
-    let opened = file.metadata().map_err(|e| io_error("pièce jointe", e))?;
+    let mut file = File::open(&target).map_err(|e| io_error(&tr!(msg::ATTACHMENT), e))?;
+    let opened = file
+        .metadata()
+        .map_err(|e| io_error(&tr!(msg::ATTACHMENT), e))?;
     refuse_unless_regular(&opened)?;
     let size = opened.len();
 
@@ -386,17 +385,17 @@ pub fn import_path(
     (&mut file)
         .take(SNIFF_BYTES as u64)
         .read_to_end(&mut head)
-        .map_err(|e| io_error("pièce jointe", e))?;
+        .map_err(|e| io_error(&tr!(msg::ATTACHMENT), e))?;
     let format = recognise(&head, &name)?;
     // An image over its limit is refused without reading it.
     check_size(format, size)?;
 
     file.seek(SeekFrom::Start(0))
-        .map_err(|e| io_error("pièce jointe", e))?;
+        .map_err(|e| io_error(&tr!(msg::ATTACHMENT), e))?;
     let mut content = Vec::with_capacity(size as usize);
     file.take(format.cap() + 1)
         .read_to_end(&mut content)
-        .map_err(|e| io_error("pièce jointe", e))?;
+        .map_err(|e| io_error(&tr!(msg::ATTACHMENT), e))?;
     // A file that grew while it was read is refused by its new size.
     check_whole(format, &content)?;
     store(drafts, draft_id, &name_for(&name, format), format, &content)
@@ -404,21 +403,19 @@ pub fn import_path(
 
 fn refuse_unless_regular(meta: &std::fs::Metadata) -> IpcResult<()> {
     if meta.is_dir() {
-        return Err(invalid(
-            "un dossier n'est pas copié : il reste une référence",
-        ));
+        return Err(invalid(tr!(msg::A_FOLDER_ISNT_COPIED_IT_STAYS)));
     }
     if !meta.is_file() {
-        return Err(invalid("seuls les fichiers réguliers sont copiés"));
+        return Err(invalid(tr!(msg::ONLY_REGULAR_FILES_ARE_COPIED)));
     }
     Ok(())
 }
 
 fn missing_or_io(e: std::io::Error, src: &str) -> IpcError {
     if e.kind() == std::io::ErrorKind::NotFound {
-        not_found(format!("élément introuvable : {src}"))
+        not_found(tr!(msg::ITEM_NOT_FOUND, src = src))
     } else {
-        io_error("pièce jointe", e)
+        io_error(&tr!(msg::ATTACHMENT), e)
     }
 }
 
@@ -441,13 +438,14 @@ fn store(
     let _guard = STORE.lock();
     let dir = draft_attachments(drafts, &draft);
     if folder_bytes(&dir) + content.len() as u64 > MAX_DRAFT_BYTES {
-        return Err(invalid(format!(
-            "brouillon plein : ses pièces jointes ne peuvent pas dépasser {} Mo",
-            MAX_DRAFT_BYTES / MIB
+        return Err(invalid(tr!(
+            msg::DRAFT_FULL_ITS_ATTACHMENTS_CANT_EXCEED,
+            detail = MAX_DRAFT_BYTES / MIB
         )));
     }
     let id = new_id();
-    write_atomic(&copy_path(&dir, &id, name), content).map_err(|e| io_error("pièce jointe", e))?;
+    write_atomic(&copy_path(&dir, &id, name), content)
+        .map_err(|e| io_error(&tr!(msg::ATTACHMENT), e))?;
     Ok(ImportedAttachment {
         draft_id: draft,
         attachment: AttachmentRef {
@@ -469,7 +467,7 @@ pub fn discard_draft_attachment(
     attachment_id: &str,
 ) -> IpcResult<()> {
     check_id(draft_id, "brouillon")?;
-    check_id(attachment_id, "pièce jointe")?;
+    check_id(attachment_id, &tr!(msg::ATTACHMENT))?;
     let _guard = STORE.lock();
     remove_copy(&draft_attachments(drafts, draft_id), attachment_id)
 }
@@ -478,7 +476,7 @@ pub fn discard_draft_attachment(
 pub fn remove_copy(dir: &Path, attachment_id: &str) -> IpcResult<()> {
     for (id, path) in copies(dir) {
         if id == attachment_id {
-            std::fs::remove_file(&path).map_err(|e| io_error("pièce jointe", e))?;
+            std::fs::remove_file(&path).map_err(|e| io_error(&tr!(msg::ATTACHMENT), e))?;
         }
     }
     Ok(())
@@ -495,7 +493,7 @@ fn remove_draft_dir(drafts: &Path, draft_id: &str) -> IpcResult<()> {
     match std::fs::remove_dir_all(drafts.join(draft_id)) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(io_error("brouillon", e)),
+        Err(e) => Err(io_error(&tr!(msg::DRAFT), e)),
     }
 }
 
@@ -521,13 +519,13 @@ pub fn promote(
     }
     let files = session_files(sessions, session_id);
     if !files.is_dir() {
-        return Err(not_found("conversation inconnue"));
+        return Err(not_found(tr!(msg::UNKNOWN_CONVERSATION)));
     }
     let incoming: u64 = sources.iter().map(|(_, p)| file_len(p)).sum();
     if folder_bytes(&session_attachments(&files)) + incoming > MAX_SESSION_BYTES {
-        return Err(invalid(format!(
-            "conversation pleine : ses pièces jointes ne peuvent pas dépasser {} Mo",
-            MAX_SESSION_BYTES / MIB
+        return Err(invalid(tr!(
+            msg::CONVERSATION_FULL_ITS_ATTACHMENTS_CANT_EXCEED,
+            detail = MAX_SESSION_BYTES / MIB
         )));
     }
     // A retry after a promotion that failed midway: the copies it already
@@ -563,7 +561,7 @@ pub fn promote(
 fn write_marker(draft: &Path, session_id: &str, copies: &[String]) -> IpcResult<()> {
     let marker = serde_json::json!({ "session_id": session_id, "copies": copies });
     write_atomic(&draft.join(PROMOTION_MARKER), marker.to_string().as_bytes())
-        .map_err(|e| io_error("promotion", e))
+        .map_err(|e| io_error(&tr!(msg::PROMOTION), e))
 }
 
 /// The session and the copies recorded by a draft's marker, if it has one.
@@ -589,14 +587,15 @@ fn read_marker(draft: &Path) -> Option<(String, Vec<String>)> {
 fn move_into(draft: &Path, files: &Path) -> IpcResult<Vec<AttachmentRef>> {
     let target = session_attachments(files);
     std::fs::create_dir_all(&target)
-        .map_err(|e| io_error("pièces jointes de la conversation", e))?;
+        .map_err(|e| io_error(&tr!(msg::CONVERSATION_ATTACHMENTS), e))?;
     let mut refs = Vec::new();
     for (_, source) in copies(&draft.join("attachments")) {
         let Some(file_name) = source.file_name() else {
             continue;
         };
         let dest = target.join(file_name);
-        std::fs::rename(&source, &dest).map_err(|e| io_error("promotion d'une pièce jointe", e))?;
+        std::fs::rename(&source, &dest)
+            .map_err(|e| io_error(&tr!(msg::PROMOTING_AN_ATTACHMENT), e))?;
         if let Some(attachment) = attachment_of_copy(&dest) {
             refs.push(attachment);
         }
@@ -608,7 +607,7 @@ fn remove_dir(dir: &Path) -> IpcResult<()> {
     match std::fs::remove_dir_all(dir) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(io_error("brouillon", e)),
+        Err(e) => Err(io_error(&tr!(msg::DRAFT), e)),
     }
 }
 
@@ -785,13 +784,13 @@ pub fn resolve(dir: &Path, ids: &[String]) -> IpcResult<Vec<ResolvedAttachment>>
     let found = copies(dir);
     ids.iter()
         .map(|id| {
-            check_id(id, "pièce jointe")?;
+            check_id(id, &tr!(msg::ATTACHMENT))?;
             let (_, path) = found
                 .iter()
                 .find(|(i, _)| i == id)
-                .ok_or_else(|| not_found("pièce jointe introuvable"))?;
-            let attachment =
-                attachment_of_copy(path).ok_or_else(|| not_found("pièce jointe introuvable"))?;
+                .ok_or_else(|| not_found(tr!(msg::ATTACHMENT_NOT_FOUND)))?;
+            let attachment = attachment_of_copy(path)
+                .ok_or_else(|| not_found(tr!(msg::ATTACHMENT_NOT_FOUND)))?;
             Ok(ResolvedAttachment {
                 id: id.clone(),
                 kind: attachment.kind,
@@ -805,20 +804,20 @@ pub fn resolve(dir: &Path, ids: &[String]) -> IpcResult<Vec<ResolvedAttachment>>
 /// bounded: an image is read whole (it is at most its limit, and a copy over it
 /// is refused), a text up to its first 256 KiB.
 pub fn preview(dir: &Path, attachment_id: &str) -> IpcResult<AttachmentPreview> {
-    check_id(attachment_id, "pièce jointe")?;
+    check_id(attachment_id, &tr!(msg::ATTACHMENT))?;
     let path = copies(dir)
         .into_iter()
         .find(|(id, _)| id == attachment_id)
         .map(|(_, p)| p)
-        .ok_or_else(|| not_found("pièce jointe introuvable"))?;
+        .ok_or_else(|| not_found(tr!(msg::ATTACHMENT_NOT_FOUND)))?;
     let attachment =
-        attachment_of_copy(&path).ok_or_else(|| not_found("pièce jointe introuvable"))?;
+        attachment_of_copy(&path).ok_or_else(|| not_found(tr!(msg::ATTACHMENT_NOT_FOUND)))?;
     let read = |limit: u64| -> IpcResult<Vec<u8>> {
-        let file = File::open(&path).map_err(|e| io_error("pièce jointe", e))?;
+        let file = File::open(&path).map_err(|e| io_error(&tr!(msg::ATTACHMENT), e))?;
         let mut bytes = Vec::new();
         file.take(limit)
             .read_to_end(&mut bytes)
-            .map_err(|e| io_error("pièce jointe", e))?;
+            .map_err(|e| io_error(&tr!(msg::ATTACHMENT), e))?;
         Ok(bytes)
     };
     match attachment.kind {
@@ -847,7 +846,7 @@ pub fn preview(dir: &Path, attachment_id: &str) -> IpcResult<AttachmentPreview> 
             let truncated = bytes.len() as u64 > PREVIEW_TEXT_BYTES;
             let kept = bytes.len().min(PREVIEW_TEXT_BYTES as usize);
             let text = utf8_prefix(&bytes[..kept])
-                .ok_or_else(|| unsupported("texte non UTF-8"))?
+                .ok_or_else(|| unsupported(&tr!(msg::NON_UTF8_TEXT)))?
                 .to_string();
             Ok(AttachmentPreview {
                 attachment,
@@ -995,7 +994,7 @@ mod tests {
         sparse(&long, &vec![b'a'; 8192], MAX_TEXT_BYTES + 1);
         let err = import_path(&drafts, None, long.to_str().unwrap()).unwrap_err();
         assert!(
-            err.message.contains("fichier texte trop volumineux"),
+            err.message.contains("text file too large"),
             "{}",
             err.message
         );
@@ -1007,20 +1006,20 @@ mod tests {
         let drafts = root.path().join("drafts");
         let pdf = import_bytes(&drafts, None, "cv.pdf", &b64(b"%PDF-1.7\n1 0 obj")).unwrap_err();
         assert!(
-            pdf.message.starts_with("format non pris en charge : PDF"),
+            pdf.message.starts_with("unsupported format: PDF"),
             "{}",
             pdf.message
         );
         let word = import_bytes(&drafts, None, "lettre.docx", &b64(b"PK\x03\x04rest")).unwrap_err();
-        assert!(word.message.contains("document Word"), "{}", word.message);
+        assert!(word.message.contains("Word document"), "{}", word.message);
         let zip = import_bytes(&drafts, None, "lot.zip", &b64(b"PK\x03\x04rest")).unwrap_err();
-        assert!(zip.message.contains("archive ZIP"), "{}", zip.message);
+        assert!(zip.message.contains("ZIP archive"), "{}", zip.message);
         let bin = import_bytes(&drafts, None, "a.dat", &b64(&[1, 2, 0, 3])).unwrap_err();
-        assert!(bin.message.contains("fichier binaire"), "{}", bin.message);
+        assert!(bin.message.contains("binary file"), "{}", bin.message);
         let latin =
             import_bytes(&drafts, None, "a.txt", &b64(&[0x63, 0xE9, 0x20, 0xFF])).unwrap_err();
         assert!(
-            latin.message.contains("texte non UTF-8"),
+            latin.message.contains("non-UTF-8 text"),
             "{}",
             latin.message
         );
@@ -1067,13 +1066,13 @@ mod tests {
         let to_folder = root.path().join("vers-dossier");
         std::os::unix::fs::symlink(&folder, &to_folder).unwrap();
         let err = import_path(&drafts, None, to_folder.to_str().unwrap()).unwrap_err();
-        assert!(err.message.contains("dossier"), "{}", err.message);
+        assert!(err.message.contains("a folder"), "{}", err.message);
 
         let dangling = root.path().join("casse.txt");
         std::os::unix::fs::symlink(root.path().join("absent"), &dangling).unwrap();
         let err = import_path(&drafts, None, dangling.to_str().unwrap()).unwrap_err();
         assert!(
-            err.message.contains("lien symbolique cassé"),
+            err.message.contains("broken symbolic link"),
             "{}",
             err.message
         );
@@ -1091,7 +1090,7 @@ mod tests {
         assert!(made.success());
         // Opening a pipe without a writer would block: the refusal must come first.
         let err = import_path(&drafts, None, pipe.to_str().unwrap()).unwrap_err();
-        assert!(err.message.contains("réguliers"), "{}", err.message);
+        assert!(err.message.contains("regular files"), "{}", err.message);
     }
 
     #[test]
@@ -1104,7 +1103,7 @@ mod tests {
         std::fs::write(&inside, "x").unwrap();
         let sneaky = format!("{}/../{}", root.path().join("drafts").display(), "a.txt");
         let err = import_path(&drafts, None, &sneaky).unwrap_err();
-        assert!(err.message.contains("normalisé"), "{}", err.message);
+        assert!(err.message.contains("non-normalized"), "{}", err.message);
     }
 
     #[test]
@@ -1122,7 +1121,7 @@ mod tests {
             );
         }
         let err = import_bytes(&drafts, Some(&draft), "more.txt", &b64(b"encore")).unwrap_err();
-        assert!(err.message.contains("brouillon plein"), "{}", err.message);
+        assert!(err.message.contains("draft full"), "{}", err.message);
         // Another draft is not affected.
         assert!(import_bytes(&drafts, None, "more.txt", &b64(b"encore")).is_ok());
     }

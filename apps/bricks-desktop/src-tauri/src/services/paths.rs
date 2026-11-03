@@ -1,6 +1,7 @@
 //! The application's own folder (`<bricks_home>/desktop`) and the file
 //! primitives every service shares.
 
+use crate::i18n::{msg, tr};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -14,7 +15,7 @@ pub fn desktop_dir() -> PathBuf {
 pub fn check_folder(path: &Path) -> Result<(), String> {
     let meta = std::fs::metadata(path).map_err(|e| e.to_string())?;
     if !meta.is_dir() {
-        return Err("ce n'est pas un dossier".into());
+        return Err(tr!(msg::THIS_ISNT_A_FOLDER).into());
     }
     std::fs::read_dir(path)
         .map(|_| ())
@@ -72,7 +73,7 @@ mod tests {
         assert!(check_folder(dir.path()).is_ok());
         let file = dir.path().join("f.txt");
         std::fs::write(&file, "x").unwrap();
-        assert!(check_folder(&file).unwrap_err().contains("dossier"));
+        assert!(check_folder(&file).unwrap_err().contains("isn’t a folder"));
         assert!(check_folder(&dir.path().join("absent")).is_err());
     }
 }

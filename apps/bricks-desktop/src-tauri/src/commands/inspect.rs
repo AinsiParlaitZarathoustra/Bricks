@@ -6,6 +6,7 @@
 //! what the TUI inspectors show. No provider key, token, authentication
 //! header or environment value leaves this module: the provider registry is
 //! read for the path of its file only.
+use crate::i18n::{msg, tr};
 use crate::contract::*;
 use crate::engine::live::{OpenSession, session_item};
 use crate::engine::{self, AppState};
@@ -31,7 +32,7 @@ pub(crate) fn open_or_not_found(
 ) -> IpcResult<Arc<OpenSession>> {
     state
         .open_entry(session_id)
-        .ok_or_else(|| not_found("cette conversation n'est pas ouverte"))
+        .ok_or_else(|| not_found(tr!(msg::THIS_CONVERSATION_ISNT_OPEN)))
 }
 
 /// Tools of an open session with the decision each one gets: the verdict of
@@ -42,7 +43,7 @@ pub(crate) fn tools_of(controller: &Controller) -> IpcResult<Vec<SessionToolInfo
         let level = permission_level(&info.level).ok_or_else(|| {
             error(
                 IpcErrorCode::Internal,
-                format!("niveau de permission inconnu : {}", info.level),
+                tr!(msg::UNKNOWN_PERMISSION_LEVEL, level = info.level),
             )
         })?;
         out.push(SessionToolInfo {
@@ -110,11 +111,11 @@ pub(crate) async fn locate_of(state: &AppState, session_id: &str) -> IpcResult<S
     }
     let stored = list_sessions(state.sessions_dir())
         .await
-        .map_err(|e| io_error("conversations", e))?;
+        .map_err(|e| io_error(&tr!(msg::CONVERSATIONS), e))?;
     let summary = stored
         .iter()
         .find(|s| s.id == session_id)
-        .ok_or_else(|| not_found("conversation inconnue"))?;
+        .ok_or_else(|| not_found(tr!(msg::UNKNOWN_CONVERSATION)))?;
     let owner = summary
         .working_dir
         .as_deref()
@@ -287,36 +288,36 @@ fn settings_of(snap: &Snapshot, bricks: &BricksConfig, agent: &Agent) -> Vec<Con
         .ok()
         .and_then(|v| v.as_str().map(str::to_string))
         .map(|level| match level.as_str() {
-            "off" => "désactivée".to_string(),
-            "minimal" => "minimale".to_string(),
-            "aggressive" => "agressive".to_string(),
+            "off" => tr!(msg::OFF).to_string(),
+            "minimal" => tr!(msg::MINIMAL).to_string(),
+            "aggressive" => tr!(msg::AGGRESSIVE).to_string(),
             _ => level,
         })
-        .unwrap_or_else(|| "inconnue".to_string());
+        .unwrap_or_else(|| tr!(msg::UNKNOWN).to_string());
     vec![
-        entry("Contexte d’entrée", tokens_text(snap.context.input_limit)),
-        entry("Contexte de sortie", tokens_text(snap.context.reserved_output)),
-        entry("Marge de sécurité", tokens_text(snap.context.margin)),
+        entry(&tr!(msg::INPUT_CONTEXT), tokens_text(snap.context.input_limit)),
+        entry(&tr!(msg::OUTPUT_CONTEXT), tokens_text(snap.context.reserved_output)),
+        entry(&tr!(msg::SAFETY_MARGIN), tokens_text(snap.context.margin)),
         entry("Compression", compression),
         entry(
-            "Sorties brutes",
+            &tr!(msg::RAW_OUTPUTS),
             agent
                 .raw_output_dir()
                 .map(|dir| path_text(&dir))
-                .unwrap_or_else(|| "aucune".to_string()),
+                .unwrap_or_else(|| tr!(msg::NONE).to_string()),
         ),
-        entry("Sous-agents simultanés", bricks.agents.max_concurrent.to_string()),
-        entry("Profondeur maximale des sous-agents", bricks.agents.max_depth.to_string()),
-        entry("Tâches de fond simultanées", bricks.background.max_jobs.to_string()),
-        entry("Fichiers analysés par la recherche sémantique", grouped(bricks.semantic.max_files as u64)),
-        entry("Avertissements de configuration", bricks.diagnostics.len().to_string()),
+        entry(&tr!(msg::CONCURRENT_SUB_AGENTS), bricks.agents.max_concurrent.to_string()),
+        entry(&tr!(msg::MAXIMUM_SUB_AGENT_DEPTH), bricks.agents.max_depth.to_string()),
+        entry(&tr!(msg::CONCURRENT_BACKGROUND_JOBS), bricks.background.max_jobs.to_string()),
+        entry(&tr!(msg::FILES_ANALYSED_BY_SEMANTIC_SEARCH), grouped(bricks.semantic.max_files as u64)),
+        entry(&tr!(msg::CONFIGURATION_WARNINGS), bricks.diagnostics.len().to_string()),
     ]
 }
 
 /// `1 000 000 tokens`; `inconnu` for a limit the model does not report.
 fn tokens_text(n: u64) -> String {
     if n == 0 {
-        return "inconnu".to_string();
+        return tr!(msg::UNKNOWN_LIMIT);
     }
     format!("{} tokens", grouped(n))
 }
@@ -327,7 +328,7 @@ fn grouped(n: u64) -> String {
     let mut out = String::new();
     for (i, c) in digits.chars().enumerate() {
         if i > 0 && (digits.len() - i) % 3 == 0 {
-            out.push('\u{202f}');
+            out.push_str(crate::i18n::pick(",", "\u{202f}"));
         }
         out.push(c);
     }
@@ -563,9 +564,9 @@ max_output_tokens = 8000
         let info = config_of(&ctl, None).await.unwrap();
         assert!(info.agents_enabled);
         assert!(info.sources.iter().any(|s| s.ends_with("bricks.toml")), "{:?}", info.sources);
-        assert_eq!(setting(&info, "Sous-agents simultanés"), "3");
-        assert_eq!(setting(&info, "Tâches de fond simultanées"), "16", "[background] is rejected: its default");
-        assert_eq!(setting(&info, "Avertissements de configuration"), "1");
+        assert_eq!(setting(&info, "Concurrent sub-agents"), "3");
+        assert_eq!(setting(&info, "Concurrent background jobs"), "16", "[background] is rejected: its default");
+        assert_eq!(setting(&info, "Configuration warnings"), "1");
         let text = serde_json::to_string(&info).unwrap();
         assert!(!text.contains(SECRET), "a value of bricks.toml was quoted");
         // The session's policy: not chosen yet, writes are asked.
@@ -712,16 +713,16 @@ max_output_tokens = 8000
     }
 
     #[test]
-    fn token_counts_are_grouped_by_thousands_with_a_narrow_no_break_space() {
+    fn token_counts_are_grouped_by_thousands() {
         assert_eq!(tokens_text(812), "812 tokens");
-        assert_eq!(tokens_text(96_000), "96\u{202f}000 tokens");
-        assert_eq!(tokens_text(1_000_000), "1\u{202f}000\u{202f}000 tokens");
-        assert_eq!(tokens_text(12_345_678), "12\u{202f}345\u{202f}678 tokens");
+        assert_eq!(tokens_text(96_000), "96,000 tokens");
+        assert_eq!(tokens_text(1_000_000), "1,000,000 tokens");
+        assert_eq!(tokens_text(12_345_678), "12,345,678 tokens");
     }
 
     #[test]
     fn a_limit_the_model_does_not_report_reads_unknown() {
-        assert_eq!(tokens_text(0), "inconnu");
+        assert_eq!(tokens_text(0), "unknown");
     }
 
     #[tokio::test]
@@ -733,16 +734,16 @@ max_output_tokens = 8000
         assert_eq!(
             labels,
             [
-                "Contexte d’entrée",
-                "Contexte de sortie",
-                "Marge de sécurité",
+                "Input context",
+                "Output context",
+                "Safety margin",
                 "Compression",
-                "Sorties brutes",
-                "Sous-agents simultanés",
-                "Profondeur maximale des sous-agents",
-                "Tâches de fond simultanées",
-                "Fichiers analysés par la recherche sémantique",
-                "Avertissements de configuration",
+                "Raw outputs",
+                "Concurrent sub-agents",
+                "Maximum sub-agent depth",
+                "Concurrent background jobs",
+                "Files analysed by semantic search",
+                "Configuration warnings",
             ]
         );
         let removed = [
@@ -759,7 +760,7 @@ max_output_tokens = 8000
         }
         // The input budget is read as the engine reports it, in the same grouping.
         let input = ctl.snapshot().context.input_limit;
-        assert_eq!(setting(&info, "Contexte d’entrée"), tokens_text(input));
+        assert_eq!(setting(&info, "Input context"), tokens_text(input));
         ctl.close().await;
     }
 }

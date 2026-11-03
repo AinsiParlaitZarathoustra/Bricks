@@ -2,6 +2,8 @@
 // the engine reports. No state, no IPC: the calls live in SkillsSettings.svelte.
 
 /** Page size of the engine's skills listing. */
+import { t } from '$lib/i18n/i18n.svelte';
+
 export const SKILLS_PER_PAGE = 20;
 
 export function pageCount(total: number): number {
@@ -13,20 +15,19 @@ export function clampPage(page: number, total: number): number {
 	return Math.min(Math.max(0, page), pageCount(total) - 1);
 }
 
-/** « 1 skill », « 3 skills ». */
 export function skillCountLabel(count: number): string {
-	return `${count} ${count === 1 ? 'skill' : 'skills'}`;
+	return t('common.skillCount', { count });
 }
 
 const STATE_LABELS: Record<string, string> = {
-	available: 'Disponible',
-	active: 'Active',
-	shadowed: 'Masquée',
-	invalid: 'Invalide',
-	incompatible: 'Incompatible',
-	pending_approval: 'Approbation requise',
-	refused: 'Refusée',
-	disabled: 'Désactivée'
+	get available() { return t('common.available') },
+	get active() { return t('common.active') },
+	get shadowed() { return t('common.hidden') },
+	get invalid() { return t('common.invalid') },
+	get incompatible() { return t('common.incompatible') },
+	get pending_approval() { return t('settings.approvalRequired') },
+	get refused() { return t('common.refused') },
+	get disabled() { return t('common.disabled') }
 };
 
 /** The French label of an engine state; an unknown state is shown as the engine wrote it. */
@@ -58,12 +59,12 @@ export function skillStateTone(state: string): SkillTone {
  * `store`, `user` and `project`.
  */
 export function skillSourceLabel(source: string): string {
-	if (source === 'builtin') return 'Intégrée';
-	if (isInstalledSkill(source)) return 'Installée';
-	if (source === 'user') return 'Personnelle';
-	if (source === 'project') return 'Projet';
-	if (source.startsWith('user:')) return `Personnelle · ${source.slice('user:'.length)}`;
-	if (source.startsWith('project:')) return `Projet · ${source.slice('project:'.length)}`;
+	if (source === 'builtin') return t('settings.builtIn');
+	if (isInstalledSkill(source)) return t('settings.installed');
+	if (source === 'user') return t('settings.personal');
+	if (source === 'project') return t('common.project');
+	if (source.startsWith('user:')) return t('settings.personal2', { value: source.slice('user:'.length) });
+	if (source.startsWith('project:')) return t('settings.project', { value: source.slice('project:'.length) });
 	if (source.startsWith('sdk:')) return `SDK · ${source.slice('sdk:'.length)}`;
 	return source;
 }

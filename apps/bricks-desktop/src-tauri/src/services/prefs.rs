@@ -1,5 +1,6 @@
 //! Window and display preferences, in `<bricks_home>/desktop/preferences.json`.
 
+use crate::i18n::{msg, tr};
 use super::paths::{desktop_dir, write_atomic};
 use super::{error, io_error};
 use crate::contract::{ColorSet, IpcErrorCode, IpcResult, Preferences, ThemeColors};
@@ -40,7 +41,7 @@ impl PrefsStore {
         let bytes = serde_json::to_vec_pretty(&clean)
             .map_err(|e| error(IpcErrorCode::Internal, e.to_string()))?;
         write_atomic(&self.file, &bytes)
-            .map_err(|e| io_error(&format!("préférences ({})", self.file.display()), e))
+            .map_err(|e| io_error(&tr!(msg::PREFERENCES, file = self.file.display()), e))
     }
 }
 
@@ -490,5 +491,23 @@ mod tests {
         let p = PrefsStore::at(file).get();
         assert_eq!(p.ask_timer, AskTimerPrefs::default(), "an unknown mode is ignored");
         assert_eq!(p.left_width, 310, "the other preferences are kept");
+    }
+
+    #[test]
+    fn the_language_is_english_unless_french_is_chosen() {
+        use crate::contract::Language;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("preferences.json");
+        std::fs::write(&file, r#"{"theme":"dark"}"#).unwrap();
+        assert_eq!(PrefsStore::at(file.clone()).get().language, Language::En, "no language: English");
+        std::fs::write(&file, r#"{"language":"fr"}"#).unwrap();
+        assert_eq!(PrefsStore::at(file.clone()).get().language, Language::Fr, "French is kept");
+        std::fs::write(&file, r#"{"language":"klingon"}"#).unwrap();
+        assert_eq!(PrefsStore::at(file.clone()).get().language, Language::En, "an unknown value gives English");
+        let store = PrefsStore::at(file);
+        store
+            .set(Preferences { language: Language::Fr, ..Preferences::default() })
+            .unwrap();
+        assert_eq!(store.get().language, Language::Fr, "a saved choice comes back");
     }
 }

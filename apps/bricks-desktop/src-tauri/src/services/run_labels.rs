@@ -10,6 +10,7 @@
 //! refused for good by this process, so a run still draining its events
 //! cannot recreate the file.
 
+use crate::i18n::{msg, tr};
 use super::conversations::message_text;
 use super::{error, invalid, io_error};
 use crate::contract::{IpcErrorCode, IpcResult, RunLabel};
@@ -93,7 +94,7 @@ impl RunLabelStore {
         }
         let line = serde_json::to_string(label)
             .map_err(|e| error(IpcErrorCode::Internal, e.to_string()))?;
-        append_line(&path, &line).map_err(|e| io_error("étiquettes des commandes", e))?;
+        append_line(&path, &line).map_err(|e| io_error(&tr!(msg::COMMAND_LABELS), e))?;
         Ok(true)
     }
 
@@ -108,12 +109,12 @@ impl RunLabelStore {
         if let Err(e) = std::fs::remove_file(&aside)
             && e.kind() != std::io::ErrorKind::NotFound
         {
-            return Err(io_error("étiquettes des commandes", e));
+            return Err(io_error(&tr!(msg::COMMAND_LABELS), e));
         }
         match std::fs::remove_file(self.path(session_id)) {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(io_error("étiquettes des commandes", e)),
+            Err(e) => Err(io_error(&tr!(msg::COMMAND_LABELS), e)),
         }
     }
 
@@ -134,7 +135,7 @@ impl RunLabelStore {
                     .is_ok_and(|l| l.user_index.is_some_and(|i| i >= user_index))
             },
         )
-        .map_err(|e| io_error("étiquettes des commandes", e))
+        .map_err(|e| io_error(&tr!(msg::COMMAND_LABELS), e))
     }
 
     /// Whether the session has a labels file (for the deletion check).
@@ -150,7 +151,7 @@ impl RunLabelStore {
         let text = match std::fs::read_to_string(path) {
             Ok(t) => t,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(e) => return Err(io_error("étiquettes des commandes", e)),
+            Err(e) => return Err(io_error(&tr!(msg::COMMAND_LABELS), e)),
         };
         let mut skipped = 0usize;
         let labels: Vec<RunLabel> = text
@@ -196,7 +197,7 @@ pub(crate) fn check_session_id(id: &str) -> IpcResult<()> {
     if ok {
         Ok(())
     } else {
-        Err(invalid("identifiant de conversation invalide"))
+        Err(invalid(tr!(msg::INVALID_CONVERSATION_IDENTIFIER)))
     }
 }
 

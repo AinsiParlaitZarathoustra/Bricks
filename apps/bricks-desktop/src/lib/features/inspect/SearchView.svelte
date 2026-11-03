@@ -1,6 +1,7 @@
 <script lang="ts">
 	// Workspace text search (`/search`, `/s`): a real search of the project's
 	// files by the engine. Not the conversation search.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import { onMount, untrack } from 'svelte';
 	import type { InspectorState } from '$lib/state/ui.svelte';
 	import { app } from '$lib/state/app.svelte';
@@ -11,7 +12,7 @@
 	import LoaderIcon from '@lucide/svelte/icons/loader';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import { cn } from '$lib/utils.js';
-	import { formatInt, formatMs, plural } from './format';
+	import { formatInt, formatMs } from './format';
 	import { groupByFile, highlight, readSearchInput, searchStatus } from './search';
 
 	let { args }: { args: InspectorState['args'] } = $props();
@@ -58,12 +59,12 @@
 		event?.preventDefault();
 		const current = app.current;
 		if (!current) {
-			formError = 'Ouvrez une session : la recherche porte sur le dossier du projet.';
+			formError = t('inspect.openASessionTheSearchCovers');
 			return;
 		}
 		const request = readSearchInput(text, regexSwitch);
 		if (request.text.trim() === '') {
-			formError = 'Saisissez le texte à chercher.';
+			formError = t('inspect.typeTheTextToSearchFor');
 			return;
 		}
 		formError = null;
@@ -92,12 +93,12 @@
 
 <div class="flex min-w-0 flex-col gap-4">
 	<form class="flex flex-col gap-2" onsubmit={submit}>
-		<Label for="{uid}-query">Texte à chercher dans les fichiers du projet</Label>
+		<Label for="{uid}-query">{t('inspect.textToSearchForInThe')}</Label>
 		<div class="flex gap-2">
 			<Input
 				id="{uid}-query"
 				bind:value={text}
-				placeholder="Texte, ou re:expression"
+				placeholder={t('inspect.textOrReExpression')}
 				autocomplete="off"
 				spellcheck={false}
 				class="font-mono"
@@ -105,17 +106,17 @@
 			<Button type="submit" disabled={pending || !hasText}>
 				{#if pending}
 					<LoaderIcon class="animate-spin" aria-hidden="true" />
-					Recherche…
+					{t('inspect.searching')}
 				{:else}
 					<SearchIcon aria-hidden="true" />
-					Rechercher
+					{t('common.search')}
 				{/if}
 			</Button>
 		</div>
 		<div class="flex flex-wrap items-center gap-x-4 gap-y-2">
 			<div class="flex items-center gap-2">
 				<Switch id="{uid}-regex" bind:checked={regexSwitch} />
-				<Label for="{uid}-regex" class="font-normal">Expression régulière</Label>
+				<Label for="{uid}-regex" class="font-normal">{t('inspect.regularExpression')}</Label>
 			</div>
 		</div>
 		{#if formError}
@@ -127,19 +128,19 @@
 		{#if pending}
 			<p class="flex items-center gap-2 text-muted-foreground">
 				<LoaderIcon class="size-4 animate-spin" aria-hidden="true" />
-				Recherche en cours dans {conv?.workingDir ?? 'le projet'}…
+				{t('inspect.searchingIn', { value: conv?.workingDir ?? t('inspect.theProject') })}
 			</p>
 		{:else if refusal !== null}
-			<p role="alert" class="text-destructive">Recherche refusée : {refusal}</p>
+			<p role="alert" class="text-destructive">{t('inspect.searchRefused', { refusal })}</p>
 		{/if}
 	</div>
 
 	{#if !pending && result && status}
-		<section class="flex min-w-0 flex-col gap-3" aria-label="Résultats de la recherche">
+		<section class="flex min-w-0 flex-col gap-3" aria-label={t('inspect.searchResults')}>
 			<header class="flex min-w-0 flex-col gap-1">
 				<div class="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
 					<h3 class="min-w-0 text-sm font-medium break-all">
-						Résultats pour « <span class="font-mono">{result.query}</span> »
+						{t('inspect.resultsFor')}<span class="font-mono">{result.query}</span>{t('inspect.resultsForEnd')}
 					</h3>
 					<span
 						class={cn(
@@ -152,8 +153,10 @@
 					>
 				</div>
 				<p class="text-xs text-muted-foreground tabular-nums">
-					{plural(result.hits.length, 'résultat affiché', 'résultats affichés')}
-					dans {plural(groups.length, 'fichier', 'fichiers')} · {formatMs(result.elapsedMs)}
+					{t('inspect.resultsInFiles', {
+						results: t('inspect.resultsShown', { count: result.hits.length }),
+						files: t('common.fileCount', { count: groups.length })
+					})} · {formatMs(result.elapsedMs)}
 				</p>
 			</header>
 
@@ -168,11 +171,11 @@
 			{#if groups.length === 0}
 				<p class="text-sm text-pretty text-muted-foreground">
 					{#if result.status === 'complete'}
-						Aucun résultat dans le texte des fichiers du projet.
+						{t('inspect.noResultsInTheTextOf')}
 					{:else if result.status === 'partial'}
-						Aucun résultat affiché, mais la recherche est partielle : l’absence ne prouve rien.
+						{t('inspect.noResultsShownButTheSearch')}
 					{:else}
-						Aucun résultat affiché.
+						{t('inspect.noResultsShown')}
 					{/if}
 				</p>
 			{:else}
@@ -206,11 +209,7 @@
 
 			{#if result.omitted > 0}
 				<p class="text-xs text-muted-foreground tabular-nums">
-					{plural(
-						result.omitted,
-						'occurrence trouvée n’est pas affichée',
-						'occurrences trouvées ne sont pas affichées'
-					)}.
+					{t('inspect.occurrencesHidden', { count: result.omitted })}
 				</p>
 			{/if}
 		</section>

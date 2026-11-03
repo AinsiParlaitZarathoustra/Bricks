@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '$lib/i18n/i18n.svelte'
   import { open } from '@tauri-apps/plugin-dialog'
   import { buttonVariants } from '$lib/components/ui/button'
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu'
@@ -31,7 +32,7 @@
       const picked = await open({
         multiple: true,
         directory: folder,
-        title: folder ? 'Choisir des dossiers' : 'Choisir des fichiers',
+        title: folder ? t('composer.chooseFolders') : t('composer.chooseFiles'),
       })
       const paths = picked === null ? [] : Array.isArray(picked) ? picked : [picked]
       if (paths.length > 0) onPick(paths, kind)
@@ -50,8 +51,8 @@
   <DropdownMenu.Trigger
     class={buttonVariants({ variant: 'ghost', size: 'icon-sm' })}
     {disabled}
-    aria-label="Joindre un fichier ou un dossier"
-    title="Joindre"
+    aria-label={t('composer.attachAFileOrFolder')}
+    title={t('composer.attach')}
   >
     <PlusIcon aria-hidden="true" />
   </DropdownMenu.Trigger>
@@ -67,16 +68,16 @@
   >
     <DropdownMenu.Item onSelect={() => pick('file')}>
       <FileIcon aria-hidden="true" />
-      Fichiers…
+      {t('composer.files')}
     </DropdownMenu.Item>
     <DropdownMenu.Item onSelect={() => pick('folder')}>
       <FolderIcon aria-hidden="true" />
-      Dossier…
+      {t('composer.folder')}
     </DropdownMenu.Item>
     {#if onSkills}
       <DropdownMenu.Item onSelect={askSkills}>
         <SparklesIcon aria-hidden="true" />
-        Skills…
+        {t('composer.skills')}
       </DropdownMenu.Item>
     {/if}
   </DropdownMenu.Content>

@@ -2,6 +2,7 @@
 // envelopes. One instance per open session, kept while the user looks
 // at other conversations so no event is lost. Owner: orchestrator.
 
+import { t } from '$lib/i18n/i18n.svelte'
 import { SvelteMap } from 'svelte/reactivity'
 import type { HistoryMessage, OpenedSession, RunLabel, RunRecord, SessionItem } from '$lib/ipc/client'
 import { sessionAttachmentPaths, sessionRunUserIndex } from '$lib/ipc/client'
@@ -299,7 +300,7 @@ function agentRunFinished(result: AgentResult): EngineEvent {
 function agentRunStarted(spawn: SpawnInfo, resumed: boolean): EngineEvent {
   return {
     type: 'run_started',
-    prompt: resumed ? 'Reprise de la mission' : spawn.task,
+    prompt: resumed ? t('app.resumingTheMission') : spawn.task,
     attachments: [],
     model: spawn.model.applied,
   }
@@ -671,7 +672,7 @@ export class Conversation {
     }
     for (const a of item.attachments) {
       const path = a.attachment_id ? paths.get(a.attachment_id) : a.path
-      if (!path) throw new Error(`La copie de « ${a.path} » est introuvable.`)
+      if (!path) throw new Error(t('app.theCopyOfCantBeFound', { path: a.path }))
       blocks.push({ kind: a.kind === 'image' ? 'image' : a.kind === 'folder' ? 'folder' : 'file', path })
     }
     return blocks
@@ -1141,7 +1142,7 @@ export class Conversation {
         this.contextStale = env.compacted || this.contextStale
         this.notice(
           'info',
-          `Compaction (${env.reason}) : ${env.outcome}`,
+          t('app.compaction', { reason: env.reason, outcome: env.outcome }),
           runId,
         )
         break
@@ -1152,7 +1153,7 @@ export class Conversation {
       case 'context_cleared':
         this.lastClear = { at: env.at, messagesRemoved: env.messages_removed }
         this.contextStale = true
-        this.notice('info', `Contexte vidé (${env.messages_removed} messages retirés).`, runId)
+        this.notice('info', t('app.contextClearedCount', { count: env.messages_removed }), runId)
         break
       case 'model_changed':
         this.model = env.model
@@ -1380,7 +1381,7 @@ export class Conversation {
         break
       case 'skill_activation_failed':
         if (!env.agent_id) this.lastSkill = { at: env.at, name: env.name, ok: false, reason: env.reason }
-        this.notice('error', `Skill « ${env.name} » non activé : ${env.reason}`, runId)
+        this.notice('error', t('app.skillNotActivated', { name: env.name, reason: env.reason }), runId)
         break
       case 'job_started':
         this.jobs.set(

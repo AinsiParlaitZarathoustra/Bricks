@@ -1,3 +1,4 @@
+use crate::i18n::{msg, tr};
 use std::sync::Arc;
 
 use tauri::{State, ipc::Channel};
@@ -28,7 +29,7 @@ pub async fn pty_open(
         .await
         .map_err(|e| IpcError {
             code: IpcErrorCode::Internal,
-            message: format!("Ouverture du terminal interrompue ({e})."),
+            message: tr!(msg::OPENING_THE_TERMINAL_WAS_INTERRUPTED, e = e),
         })?
 }
 

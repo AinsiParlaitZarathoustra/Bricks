@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { t } from '$lib/i18n/i18n.svelte';
 	import { untrack } from 'svelte';
 	import { changeLogDiff } from '$lib/ipc/client';
 	import { Button } from '$lib/components/ui/button';
@@ -9,7 +10,7 @@
 	import { conversationChanges, type FileView } from './conversation-changes';
 	import FileChangeRow from './FileChangeRow.svelte';
 	import { sessionJournal, type SessionJournal } from './journal.svelte';
-	import { formatDateTime, kindLabel, plural, shortId } from './format';
+	import { formatDateTime, kindLabel, shortId } from './format';
 	import type { PatchSource } from './types';
 
 	const conv = $derived(app.current);
@@ -36,7 +37,7 @@
 
 	function promptOf(runId: string | null): string {
 		const prompt = runId && conv ? conv.runs.get(runId)?.prompt.trim() : '';
-		if (!prompt) return 'Exécution';
+		if (!prompt) return t('common.run');
 		return prompt.length > 80 ? `${prompt.slice(0, 80)}…` : prompt;
 	}
 
@@ -48,7 +49,7 @@
 			return [
 				{
 					key: `${recordId}:${file.path}`,
-					title: op.at ? `Opération du ${formatDateTime(op.at)}` : 'Opération',
+					title: op.at ? t('changes.operationOf', { at: formatDateTime(op.at) }) : t('changes.operation'),
 					load: () => changeLogDiff(recordId, file.path),
 				},
 			];
@@ -58,23 +59,23 @@
 
 {#if !conv}
 	<EmptyState
-		title="Aucune conversation ouverte"
-		description="Ouvrez une conversation pour voir les fichiers qu’elle a modifiés."
+		title={t('common.noOpenConversation2')}
+		description={t('changes.openAConversationToSeeThe')}
 	/>
 {:else if groups.length === 0}
 	{#if journal?.error}
-		<EmptyState title="Journal indisponible" description={journal.error}>
+		<EmptyState title={t('changes.logUnavailable')} description={journal.error}>
 			{#snippet action()}
-				<Button variant="outline" size="sm" onclick={() => journal?.load()}>Réessayer</Button>
+				<Button variant="outline" size="sm" onclick={() => journal?.load()}>{t('common.retry')}</Button>
 			{/snippet}
 		</EmptyState>
 		{:else if !journal?.loaded}
-		<p class="px-3 py-6 text-center text-sm text-muted-foreground">Chargement…</p>
+		<p class="px-3 py-6 text-center text-sm text-muted-foreground">{t('common.loading')}</p>
 	{/if}
 {:else}
 	<div class="flex flex-col gap-4">
 				<p class="text-xs text-muted-foreground">
-			{plural(fileCount, 'fichier modifié', 'fichiers modifiés')}
+			{t('common.filesChanged', { count: fileCount })}
 		</p>
 
 		{#each groups as group (group.runId ?? 'sans-execution')}
@@ -93,7 +94,7 @@
 							added={file.added}
 							removed={file.removed}
 							binary={file.binary}
-							agents={file.agents.map((id) => `Agent ${shortId(id)}`)}
+							agents={file.agents.map((id) => t('common.agent', { profile: shortId(id) }))}
 							patches={patchesOf(file)}
 						>
 							{#snippet actions()}

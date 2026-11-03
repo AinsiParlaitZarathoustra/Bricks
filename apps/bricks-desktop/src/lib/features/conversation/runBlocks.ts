@@ -4,6 +4,7 @@
 // text is the answer and follows the block, then the run's end summary. Items
 // without a run (an older history) stay as they are. Pure: unit-tested
 // (tests/unit/run-blocks.test.ts).
+import { t } from '$lib/i18n/i18n.svelte'
 import type { AssistantItem, RunInfo, TimelineItem } from '$lib/state/conversation.svelte'
 import type { IconComponent } from '$lib/layout/types'
 import { MESSAGE_ICON, THINKING_ICON, toolIcon } from './timeline/toolIcons'
@@ -112,10 +113,10 @@ export function currentStep(items: readonly TimelineItem[]): CurrentStep | null 
   for (let i = items.length - 1; i >= 0; i--) {
     const item = items[i]
     if (item.kind === 'tool') return { icon: toolIcon(item.name), label: item.name }
-    if (item.kind === 'agent') return { icon: toolIcon('Agent'), label: 'Agent' }
+    if (item.kind === 'agent') return { icon: toolIcon('Agent'), label: t('common.agent2') }
     if (item.kind === 'assistant') {
-      if (item.text.trim()) return { icon: MESSAGE_ICON, label: 'Rédige' }
-      if (item.thinking.trim() || item.streaming) return { icon: THINKING_ICON, label: 'Réfléchit' }
+      if (item.text.trim()) return { icon: MESSAGE_ICON, label: t('conversation.writing') }
+      if (item.thinking.trim() || item.streaming) return { icon: THINKING_ICON, label: t('conversation.thinking') }
     }
   }
   return null

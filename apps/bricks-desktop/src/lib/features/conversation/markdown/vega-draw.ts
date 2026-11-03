@@ -20,7 +20,7 @@ export async function drawVegaLite(spec: object): Promise<string> {
   // Nothing is ever loaded: data are inline, images and links are not fetched.
   const loader = vegaLoader()
   const refuse = async () => {
-    throw new Error('les ressources externes ne sont pas chargées')
+    throw new Error('external resources are not loaded')
   }
   loader.load = refuse
   loader.sanitize = refuse

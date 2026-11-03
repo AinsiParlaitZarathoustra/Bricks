@@ -8,6 +8,7 @@
 
 use super::AppState;
 use crate::contract::*;
+use crate::i18n::{msg, tr};
 use crate::services::error;
 use crate::services::prefs::PrefsStore;
 use crate::services::projects::ProjectStore;
@@ -61,10 +62,9 @@ fn filter(f: MemoryEntryFilter) -> EntryFilter {
 
 fn ipc_error(e: MemoryError) -> IpcError {
     match e {
-        MemoryError::InUse(_) => error(
-            IpcErrorCode::SessionBusy,
-            "La mémoire est utilisée par une exécution en cours : attendez sa fin ou arrêtez-la, puis recommencez.",
-        ),
+        MemoryError::InUse(_) => {
+            error(IpcErrorCode::SessionBusy, tr!(msg::THE_MEMORY_IS_IN_USE_BY))
+        }
         MemoryError::Config(m) => error(IpcErrorCode::Invalid, m),
         other => error(IpcErrorCode::Io, other.to_string()),
     }
@@ -110,7 +110,7 @@ impl AppState {
     ) -> IpcResult<Option<String>> {
         let project = self.memory_project(project_id)?;
         if s == MemoryScope::Project && project.is_none() {
-            return Err(error(IpcErrorCode::Invalid, "aucun projet ouvert"));
+            return Err(error(IpcErrorCode::Invalid, tr!(msg::NO_OPEN_PROJECT)));
         }
         Ok(project)
     }
@@ -179,10 +179,7 @@ impl AppState {
         limit: u32,
     ) -> IpcResult<MemoryEntryPage> {
         if !(1..=50).contains(&limit) {
-            return Err(error(
-                IpcErrorCode::Invalid,
-                "une page compte de 1 à 50 entrées",
-            ));
+            return Err(error(IpcErrorCode::Invalid, tr!(msg::A_PAGE_HOLDS_1_TO_50)));
         }
         let project = self.scoped_project(s, project_id.as_deref())?;
         let names: std::collections::HashMap<String, String> = self
@@ -255,7 +252,7 @@ impl AppState {
         if self.projects.get(&project_id).is_ok() {
             return Err(error(
                 IpcErrorCode::Invalid,
-                "ce projet est encore dans la liste",
+                tr!(msg::THIS_PROJECT_IS_STILL_IN_THE),
             ));
         }
         self.memory

@@ -13,10 +13,11 @@
 //   clear) shows `—` for both figures until the next `context` event.
 // - Cumulative billed totals are never a numerator.
 
+import { t, numberFormat } from '$lib/i18n/i18n.svelte';
 import type { ContextChars, ContextStatus } from '$lib/ipc/engine';
 
-const NUMBER = new Intl.NumberFormat('fr-FR');
-const CURRENCY = new Intl.NumberFormat('fr-FR', {
+const NUMBER = numberFormat();
+const CURRENCY = numberFormat({
 	style: 'currency',
 	currency: 'USD',
 	maximumFractionDigits: 4
@@ -27,7 +28,7 @@ export function formatNumber(n: number): string {
 }
 
 export function formatTokens(n: number): string {
-	return `${formatNumber(n)} tokens`;
+	return t('common.tokens', { tokens: formatNumber(n) });
 }
 
 export function formatCost(usd: number): string {
@@ -61,7 +62,7 @@ export function contextLine(status: ContextStatus | null, stale: boolean): strin
 	const { used, total } = contextFigures(status, stale);
 	const numerator = used === null ? '—' : formatNumber(used);
 	const denominator = total === null ? '—' : formatNumber(total);
-	return `${numerator} / ${denominator} tokens`;
+	return t('context.tokens', { numerator, denominator });
 }
 
 /**
@@ -83,8 +84,8 @@ export function contextGauge(status: ContextStatus | null, stale: boolean): Cont
 	return { used, total, ratio: Math.min(1, Math.max(0, share)), percent: share * 100 };
 }
 
-const COMPACT = new Intl.NumberFormat('fr-FR', { notation: 'compact', maximumFractionDigits: 1 });
-const PERCENT = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1, minimumFractionDigits: 1 });
+const COMPACT = numberFormat({ notation: 'compact', maximumFractionDigits: 1 });
+const PERCENT = numberFormat({ maximumFractionDigits: 1, minimumFractionDigits: 1 });
 
 /** Compact figure of the ring panel: `686,1 k`, `1 M`. */
 export function formatCompact(n: number): string {
@@ -138,11 +139,11 @@ export interface ContextShare {
 }
 
 const SOURCES: { source: ContextSource; label: string }[] = [
-	{ source: 'conversation', label: 'Messages' },
-	{ source: 'tool_results', label: 'Sorties d’outils' },
-	{ source: 'tool_definitions', label: 'Définitions' },
-	{ source: 'instructions', label: 'Prompt système' },
-	{ source: 'other', label: 'Autre' }
+	{ source: 'conversation', get label() { return t('context.messages') } },
+	{ source: 'tool_results', get label() { return t('context.toolOutputs') } },
+	{ source: 'tool_definitions', get label() { return t('context.definitions') } },
+	{ source: 'instructions', get label() { return t('context.systemPrompt') } },
+	{ source: 'other', get label() { return t('common.other') } }
 ];
 
 /**

@@ -2,6 +2,7 @@
 // plug into the store and the session rules (terminal-store / terminal-session,
 // tested with fakes). The bottom pane uses the `terminals` instance below.
 
+import { t } from '$lib/i18n/i18n.svelte';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { errorMessage, ptyKill, ptyOpen, ptyResize, ptyWrite } from '$lib/ipc/client';
@@ -10,13 +11,11 @@ import { SCROLLBACK, type TerminalDeps, type TerminalEngine } from './terminal-s
 import { TerminalStore } from './terminal-store.svelte';
 import { terminalFont, terminalFontSize, terminalTheme } from './terminal-theme';
 
-// xterm's own screen-reader strings are English by default: set them in French
-// (static, shared by every terminal).
-Terminal.strings.promptLabel = 'Saisie du terminal';
-Terminal.strings.tooMuchOutput = 'Trop de sortie : lecture de chaque ligne désactivée';
-
 const liveDeps: TerminalDeps = {
 	createEngine({ font, theme }): TerminalEngine {
+		// xterm's own screen-reader strings are static and shared: each new terminal sets them.
+		Terminal.strings.promptLabel = t('terminal.terminalInput');
+		Terminal.strings.tooMuchOutput = t('terminal.tooMuchOutputLineByLine');
 		const term = new Terminal({
 			// Exposes the output to screen readers (NVDA, VoiceOver).
 			screenReaderMode: true,

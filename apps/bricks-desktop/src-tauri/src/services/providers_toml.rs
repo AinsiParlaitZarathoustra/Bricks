@@ -6,6 +6,7 @@
 use crate::contract::{
     IpcErrorCode, IpcResult, ModelPatch, PricingEdit, ProviderPatch, ReasoningProfileEdit,
 };
+use crate::i18n::{msg, tr};
 use crate::services::{error, invalid, not_found};
 use bricks_provider::Decimal;
 use bricks_provider::config::ProvidersConfig;
@@ -54,7 +55,11 @@ pub fn apply(text: &str, edit: &Edit, origin: &str) -> IpcResult<String> {
     let mut doc: DocumentMut = text.parse().map_err(|e: toml_edit::TomlError| {
         error(
             IpcErrorCode::Config,
-            format!("{origin} : TOML invalide ({})", position(text, &e)),
+            tr!(
+                msg::INVALID_TOML,
+                origin = origin,
+                position = position(text, &e)
+            ),
         )
     })?;
     match edit {
@@ -63,7 +68,7 @@ pub fn apply(text: &str, edit: &Edit, origin: &str) -> IpcResult<String> {
             let index = provider_index(providers, provider_id)?;
             let table = providers
                 .get_mut(index)
-                .ok_or_else(|| not_found(UNKNOWN_PROVIDER))?;
+                .ok_or_else(|| not_found(tr!(msg::UNKNOWN_PROVIDER)))?;
             apply_provider_patch(table, patch)?;
         }
         Edit::ModelUpdate {
@@ -75,12 +80,12 @@ pub fn apply(text: &str, edit: &Edit, origin: &str) -> IpcResult<String> {
             let index = provider_index(providers, provider_id)?;
             let table = providers
                 .get_mut(index)
-                .ok_or_else(|| not_found(UNKNOWN_PROVIDER))?;
+                .ok_or_else(|| not_found(tr!(msg::UNKNOWN_PROVIDER)))?;
             let models = models_mut(table)?;
             let index = model_index(models, model_id)?;
             let model = models
                 .get_mut(index)
-                .ok_or_else(|| not_found(UNKNOWN_MODEL))?;
+                .ok_or_else(|| not_found(tr!(msg::UNKNOWN_MODEL)))?;
             apply_model_patch(model, patch)?;
         }
         Edit::ProviderDelete { provider_id } => {
@@ -96,16 +101,16 @@ pub fn apply(text: &str, edit: &Edit, origin: &str) -> IpcResult<String> {
             let index = provider_index(providers, provider_id)?;
             let table = providers
                 .get_mut(index)
-                .ok_or_else(|| not_found(UNKNOWN_PROVIDER))?;
+                .ok_or_else(|| not_found(tr!(msg::UNKNOWN_PROVIDER)))?;
             let models = models_mut(table)?;
             let index = model_index(models, model_id)?;
             models.remove(index);
         }
         Edit::ProviderCreate { provider_id, patch } => {
-            let id = new_id("identifiant du fournisseur", provider_id)?;
+            let id = new_id(&tr!(msg::PROVIDER_IDENTIFIER), provider_id)?;
             let providers = providers_array_mut(&mut doc)?;
             if provider_index(providers, id).is_ok() {
-                return Err(invalid(format!("un fournisseur « {id} » existe déjà")));
+                return Err(invalid(tr!(msg::A_PROVIDER_ALREADY_EXISTS, id = id)));
             }
             let mut table = Table::new();
             set_str(&mut table, "id", id);
@@ -118,17 +123,15 @@ pub fn apply(text: &str, edit: &Edit, origin: &str) -> IpcResult<String> {
             model_id,
             patch,
         } => {
-            let id = new_id("identifiant du modèle", model_id)?;
+            let id = new_id(&tr!(msg::MODEL_IDENTIFIER), model_id)?;
             let providers = providers_mut(&mut doc)?;
             let index = provider_index(providers, provider_id)?;
             let provider = providers
                 .get_mut(index)
-                .ok_or_else(|| not_found(UNKNOWN_PROVIDER))?;
+                .ok_or_else(|| not_found(tr!(msg::UNKNOWN_PROVIDER)))?;
             let models = models_array_mut(provider)?;
             if model_index(models, id).is_ok() {
-                return Err(invalid(format!(
-                    "un modèle « {id} » existe déjà dans ce fournisseur"
-                )));
+                return Err(invalid(tr!(msg::A_MODEL_ALREADY_EXISTS_IN_THIS, id = id)));
             }
             let mut table = Table::new();
             set_str(&mut table, "id", id);
@@ -161,12 +164,9 @@ pub fn apply(text: &str, edit: &Edit, origin: &str) -> IpcResult<String> {
     // reaches the file. Messages of the validator name the field and never
     // carry a secret value.
     ProvidersConfig::from_toml_str(&next, origin)
-        .map_err(|e| invalid(format!("modification refusée : {e}")))?;
+        .map_err(|e| invalid(tr!(msg::CHANGE_REFUSED, e = e)))?;
     Ok(next)
 }
-
-const UNKNOWN_PROVIDER: &str = "fournisseur inconnu dans providers.toml";
-const UNKNOWN_MODEL: &str = "modèle inconnu dans ce fournisseur";
 
 /// `line N, column M` of a TOML error, from its span: never the source text
 /// (a line may hold a key).
@@ -187,7 +187,7 @@ fn position(text: &str, e: &toml_edit::TomlError) -> String {
 
 fn providers_mut(doc: &mut DocumentMut) -> IpcResult<&mut ArrayOfTables> {
     match doc.get_mut("providers") {
-        None => Err(not_found(UNKNOWN_PROVIDER)),
+        None => Err(not_found(tr!(msg::UNKNOWN_PROVIDER))),
         Some(item) => item.as_array_of_tables_mut().ok_or_else(inline_unsupported),
     }
 }
@@ -225,27 +225,20 @@ fn new_id<'a>(field: &str, id: &'a str) -> IpcResult<&'a str> {
     let valid = matches!(chars.next(), Some(c) if c.is_ascii_alphanumeric())
         && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
     if !valid {
-        return Err(invalid(format!(
-            "« {field} » : lettres, chiffres, « . », « _ » et « - » seulement, en commençant \
-             par une lettre ou un chiffre"
-        )));
+        return Err(invalid(tr!(msg::INVALID_ID_CHARACTERS, field = field)));
     }
     Ok(id)
 }
 
 fn models_mut(provider: &mut Table) -> IpcResult<&mut ArrayOfTables> {
     match provider.get_mut("models") {
-        None => Err(not_found(UNKNOWN_MODEL)),
+        None => Err(not_found(tr!(msg::UNKNOWN_MODEL))),
         Some(item) => item.as_array_of_tables_mut().ok_or_else(inline_unsupported),
     }
 }
 
 fn inline_unsupported() -> crate::contract::IpcError {
-    error(
-        IpcErrorCode::Config,
-        "providers.toml : les fournisseurs et les modèles doivent être écrits en tables \
-         [[providers]] et [[providers.models]] pour être modifiés depuis l'application",
-    )
+    error(IpcErrorCode::Config, tr!(msg::INLINE_PROVIDERS_UNSUPPORTED))
 }
 
 fn table_id(table: &Table) -> Option<&str> {
@@ -256,14 +249,14 @@ fn provider_index(providers: &ArrayOfTables, id: &str) -> IpcResult<usize> {
     providers
         .iter()
         .position(|t| table_id(t) == Some(id))
-        .ok_or_else(|| not_found(UNKNOWN_PROVIDER))
+        .ok_or_else(|| not_found(tr!(msg::UNKNOWN_PROVIDER)))
 }
 
 fn model_index(models: &ArrayOfTables, id: &str) -> IpcResult<usize> {
     models
         .iter()
         .position(|t| table_id(t) == Some(id))
-        .ok_or_else(|| not_found(UNKNOWN_MODEL))
+        .ok_or_else(|| not_found(tr!(msg::UNKNOWN_MODEL)))
 }
 
 /// Sets a string value. An existing value keeps its own decoration (a
@@ -295,7 +288,7 @@ fn set_or_remove(table: &mut dyn TableLike, key: &str, value: &str) {
 }
 
 fn set_count(table: &mut dyn TableLike, key: &str, value: u64) -> IpcResult<()> {
-    let n = i64::try_from(value).map_err(|_| invalid(format!("`{key}` est trop grand")))?;
+    let n = i64::try_from(value).map_err(|_| invalid(tr!(msg::IS_TOO_LARGE, key = key)))?;
     set_value(table, key, Value::from(n));
     Ok(())
 }
@@ -310,9 +303,7 @@ fn valid_env_name(name: &str) -> bool {
 /// fields before sending; an empty value here is a refusal, not a removal).
 fn filled<'a>(field: &str, value: &'a str) -> IpcResult<&'a str> {
     if value.trim().is_empty() {
-        return Err(invalid(format!(
-            "le champ « {field} » ne peut pas être vide"
-        )));
+        return Err(invalid(tr!(msg::FIELD_CANT_BE_EMPTY, field = field)));
     }
     Ok(value)
 }
@@ -335,18 +326,12 @@ fn apply_provider_patch(table: &mut Table, patch: &ProviderPatch) -> IpcResult<(
         set_or_remove(table, "auth_header", v);
     }
     if let Some(v) = &patch.api_key_env {
-        let v = filled("variable d'environnement de la clé", v)?;
+        let v = filled(&tr!(msg::KEY_ENVIRONMENT_VARIABLE), v)?;
         if table.contains_key("api_key") {
-            return Err(invalid(
-                "cette clé est écrite dans le fichier : une variable d'environnement ne peut \
-                 pas lui être ajoutée (la clé inline doit d'abord être retirée à la main)",
-            ));
+            return Err(invalid(tr!(msg::INLINE_KEY_BLOCKS_VARIABLE)));
         }
         if !valid_env_name(v) {
-            return Err(invalid(
-                "le nom de la variable d'environnement doit être un identifiant (lettres, \
-                 chiffres et _)",
-            ));
+            return Err(invalid(tr!(msg::INVALID_ENV_NAME)));
         }
         set_str(table, "api_key_env", v);
     }
@@ -378,7 +363,7 @@ fn apply_model_patch(table: &mut Table, patch: &ModelPatch) -> IpcResult<()> {
         } else {
             let mut list = Array::new();
             for t in types {
-                list.push(filled("types de fichiers acceptés", t.trim())?);
+                list.push(filled(&tr!(msg::ACCEPTED_FILE_TYPES), t.trim())?);
             }
             set_value(table, "document_mime_types", Value::Array(list));
         }
@@ -397,7 +382,12 @@ fn apply_model_patch(table: &mut Table, patch: &ModelPatch) -> IpcResult<()> {
         let limits = table
             .get_mut("limits")
             .and_then(Item::as_table_like_mut)
-            .ok_or_else(|| error(IpcErrorCode::Config, "ce modèle n'a pas de table [limits]"))?;
+            .ok_or_else(|| {
+                error(
+                    IpcErrorCode::Config,
+                    tr!(msg::THIS_MODEL_HAS_NO_LIMITS_TABLE),
+                )
+            })?;
         if let Some(v) = patch.max_input_tokens {
             set_count(limits, "max_input_tokens", v)?;
         }
@@ -438,31 +428,27 @@ fn apply_model_patch(table: &mut Table, patch: &ModelPatch) -> IpcResult<()> {
             && let Some(current) = default_profile(table)
             && !profiles.iter().any(|p| p.id == current)
         {
-            return Err(invalid(format!(
-                "le profil par défaut « {current} » est retiré ou renommé : choisissez un autre \
-                 profil par défaut, ou effacez-le dans la même modification"
+            return Err(invalid(tr!(
+                msg::DEFAULT_PROFILE_REMOVED,
+                current = current
             )));
         }
         if let Some(v) = &patch.reasoning_default
             && !profiles.iter().any(|p| &p.id == v)
         {
-            return Err(invalid(format!(
-                "le profil par défaut « {v} » n'est pas dans la liste des profils du modèle"
-            )));
+            return Err(invalid(tr!(msg::THE_DEFAULT_PROFILE_ISNT_IN_THE, v = v)));
         }
         write_profiles(table, profiles)?;
     }
     if patch.clear_reasoning_default && patch.reasoning_default.is_some() {
-        return Err(invalid(
-            "profil par défaut : valeur et suppression demandées ensemble",
-        ));
+        return Err(invalid(tr!(msg::DEFAULT_PROFILE_A_VALUE_AND_A)));
     }
     if patch.clear_reasoning_default {
         if let Some(reasoning) = table.get_mut("reasoning").and_then(Item::as_table_like_mut) {
             reasoning.remove("default");
         }
     } else if let Some(v) = &patch.reasoning_default {
-        let v = filled("profil par défaut", v)?;
+        let v = filled(&tr!(msg::DEFAULT_PROFILE), v)?;
         if !table.contains_key("reasoning") {
             table.insert("reasoning", Item::Table(Table::new()));
         }
@@ -472,7 +458,7 @@ fn apply_model_patch(table: &mut Table, patch: &ModelPatch) -> IpcResult<()> {
             .ok_or_else(|| {
                 error(
                     IpcErrorCode::Config,
-                    "ce modèle : [reasoning] n'est pas une table",
+                    tr!(msg::THIS_MODEL_REASONING_ISNT_A_TABLE),
                 )
             })?;
         set_str(reasoning, "default", v);
@@ -487,11 +473,8 @@ const PRICE_PER_TOKENS: u64 = 1_000_000;
 /// A price as the form sends it: an exact decimal, `0` allowed, no sign.
 fn price<'a>(field: &str, value: &'a str) -> IpcResult<&'a str> {
     let value = filled(field, value.trim())?;
-    Decimal::parse(value).map_err(|_| {
-        invalid(format!(
-            "« {field} » : un nombre positif ou nul est attendu (par exemple 0.30)"
-        ))
-    })?;
+    Decimal::parse(value)
+        .map_err(|_| invalid(tr!(msg::A_POSITIVE_NUMBER_OR_ZERO_IS, field = field)))?;
     Ok(value)
 }
 
@@ -507,7 +490,7 @@ fn pricing_table(model: &mut Table) -> IpcResult<&mut dyn TableLike> {
         .ok_or_else(|| {
             error(
                 IpcErrorCode::Config,
-                "ce modèle : [pricing] n'est pas une table",
+                tr!(msg::THIS_MODEL_PRICING_ISNT_A_TABLE),
             )
         })?;
     set_str(pricing, "currency", PRICE_CURRENCY);
@@ -518,9 +501,9 @@ fn pricing_table(model: &mut Table) -> IpcResult<&mut dyn TableLike> {
 /// Input, output and cache-read prices; the other price keys (cache write,
 /// variants) are kept as written.
 fn write_prices(model: &mut Table, prices: &PricingEdit) -> IpcResult<()> {
-    let input = price("coût d'entrée", &prices.input)?;
-    let output = price("coût de sortie", &prices.output)?;
-    let cache_read = price("coût du cache", &prices.cache_read)?;
+    let input = price(&tr!(msg::INPUT_COST), &prices.input)?;
+    let output = price(&tr!(msg::OUTPUT_COST), &prices.output)?;
+    let cache_read = price(&tr!(msg::CACHE_COST), &prices.cache_read)?;
     let pricing = pricing_table(model)?;
     set_str(pricing, "input", input);
     set_str(pricing, "output", output);
@@ -572,25 +555,24 @@ fn check_profiles(profiles: &[ReasoningProfileEdit]) -> IpcResult<()> {
     let mut seen = BTreeSet::new();
     for profile in profiles {
         if profile.id.trim().is_empty() {
-            return Err(invalid("un profil de raisonnement a un identifiant vide"));
+            return Err(invalid(tr!(msg::A_REASONING_PROFILE_HAS_AN_EMPTY)));
         }
         if !seen.insert(profile.id.as_str()) {
-            return Err(invalid(format!(
-                "identifiant de profil en double : « {} »",
-                profile.id
-            )));
+            return Err(invalid(tr!(msg::DUPLICATE_PROFILE_ID, id = profile.id)));
         }
         let Some(parameters) = profile.parameters.as_object() else {
-            return Err(invalid(format!(
-                "profil « {} » : les paramètres doivent être un objet JSON",
-                profile.id
+            return Err(invalid(tr!(
+                msg::PROFILE_PARAMETERS_MUST_BE_A_JSON,
+                id = profile.id
             )));
         };
         for (key, value) in parameters {
             json_to_toml(value).map_err(|m| {
-                invalid(format!(
-                    "profil « {} », paramètre « {key} » : {m}",
-                    profile.id
+                invalid(tr!(
+                    msg::PROFILE_PARAMETER,
+                    key = key,
+                    m = m,
+                    id = profile.id
                 ))
             })?;
         }
@@ -605,19 +587,15 @@ fn check_profiles(profiles: &[ReasoningProfileEdit]) -> IpcResult<()> {
 /// The shape a JSON Pointer must have (RFC 6901), checked before writing.
 fn check_pointer(pointer: &str) -> Result<(), String> {
     if pointer.is_empty() {
-        return Err("un pointeur vide supprimerait toute la requête".into());
+        return Err(tr!(msg::AN_EMPTY_POINTER_WOULD_REMOVE_THE).into());
     }
     if !pointer.starts_with('/') {
-        return Err(format!(
-            "« {pointer} » n'est pas un pointeur JSON (il doit commencer par /)"
-        ));
+        return Err(tr!(msg::ISNT_A_JSON_POINTER_IT_MUST, pointer = pointer));
     }
     let mut chars = pointer.chars().peekable();
     while let Some(c) = chars.next() {
         if c == '~' && !matches!(chars.peek(), Some('0' | '1')) {
-            return Err(format!(
-                "« {pointer} » : le caractère ~ doit être écrit ~0 ou ~1"
-            ));
+            return Err(tr!(msg::THE_CHARACTER_MUST_BE_WRITTEN_0, pointer = pointer));
         }
     }
     Ok(())
@@ -628,15 +606,13 @@ fn check_pointer(pointer: &str) -> Result<(), String> {
 fn json_to_toml(value: &Json) -> Result<Value, String> {
     Ok(match value {
         Json::Null => {
-            return Err(
-                "une valeur vide (null) ne peut pas être écrite dans providers.toml".into(),
-            );
+            return Err(tr!(msg::AN_EMPTY_VALUE_NULL_CANT_BE).into());
         }
         Json::Bool(b) => Value::from(*b),
         Json::Number(n) => match n.as_i64() {
             Some(i) => Value::from(i),
             None if n.is_f64() => Value::from(n.as_f64().unwrap_or_default()),
-            None => return Err("nombre hors de l'intervalle des entiers TOML".into()),
+            None => return Err(tr!(msg::NUMBER_OUTSIDE_THE_RANGE_OF_TOML).into()),
         },
         Json::String(s) => Value::from(s.as_str()),
         Json::Array(items) => {
@@ -744,7 +720,7 @@ fn write_profiles(model: &mut Table, profiles: &[ReasoningProfileEdit]) -> IpcRe
         .ok_or_else(|| {
             error(
                 IpcErrorCode::Config,
-                "ce modèle : [reasoning] n'est pas une table",
+                tr!(msg::THIS_MODEL_REASONING_ISNT_A_TABLE),
             )
         })?;
     if inline {
@@ -806,9 +782,10 @@ fn write_profile(table: &mut dyn TableLike, profile: &ReasoningProfileEdit) -> I
         .is_some_and(|old| same_json(&old, &profile.parameters))
     {
         let inline = object_to_inline(&parameters).map_err(|m| {
-            invalid(format!(
-                "profil « {} » : paramètres non écrivables : {m}",
-                profile.id
+            invalid(tr!(
+                msg::PROFILE_PARAMETERS_THAT_CANT_BE_WRITTEN,
+                m = m,
+                id = profile.id
             ))
         })?;
         table.insert("parameters", Item::Value(Value::InlineTable(inline)));
@@ -1116,7 +1093,7 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_text_field_is_refused_with_a_french_message_naming_it() {
+    fn an_empty_text_field_is_refused_with_a_clear_message_naming_it() {
         let empty = |s: &str| s.to_string();
         let cases: Vec<(Edit, &str)> = vec![
             (
@@ -1210,17 +1187,13 @@ mod tests {
                         ..Default::default()
                     },
                 ),
-                "profil",
+                "profile",
             ),
         ];
         for (edit, field) in cases {
             let err = apply(PROVIDERS, &edit, "test").expect_err("an empty value is refused");
             assert_eq!(err.code, IpcErrorCode::Invalid, "{edit:?}");
-            assert!(
-                err.message.contains("ne peut pas être vide"),
-                "{}",
-                err.message
-            );
+            assert!(err.message.contains("can’t be empty"), "{}", err.message);
             assert!(
                 err.message.contains(field),
                 "names the field: {}",
@@ -1384,7 +1357,7 @@ mod tests {
         );
         let err = apply(PROVIDERS, &without_default, "test").unwrap_err();
         assert_eq!(err.code, IpcErrorCode::Invalid);
-        assert!(err.message.contains("« fast »"), "{}", err.message);
+        assert!(err.message.contains("“fast”"), "{}", err.message);
 
         let replaced = Edit::ModelUpdate {
             provider_id: "local".into(),
@@ -1413,7 +1386,7 @@ mod tests {
     }
 
     #[test]
-    fn a_default_outside_the_new_list_is_refused_in_french() {
+    fn a_default_outside_the_new_list_is_refused_in_english() {
         let edit = Edit::ModelUpdate {
             provider_id: "local".into(),
             model_id: "small".into(),
@@ -1425,7 +1398,7 @@ mod tests {
         };
         let err = apply(PROVIDERS, &edit, "test").unwrap_err();
         assert_eq!(err.code, IpcErrorCode::Invalid);
-        assert!(err.message.contains("« ghost »"), "{}", err.message);
+        assert!(err.message.contains("“ghost”"), "{}", err.message);
     }
 
     #[test]
@@ -1436,28 +1409,28 @@ mod tests {
                     profile("a", None, json!({}), &[]),
                     profile("a", None, json!({}), &[]),
                 ],
-                "en double",
+                "duplicate profile identifier",
             ),
             (
                 vec![profile("  ", None, json!({}), &[])],
-                "identifiant vide",
+                "empty identifier",
             ),
             (
                 vec![profile("a", None, json!(["not", "an", "object"]), &[])],
-                "objet JSON",
+                "must be a JSON object",
             ),
             (vec![profile("a", None, json!({"x": null}), &[])], "null"),
             (
                 vec![profile("a", None, json!({"x": 1}), &["no-slash"])],
-                "pointeur JSON",
+                "JSON pointer",
             ),
             (
                 vec![profile("a", None, json!({"x": 1}), &["/bad~2escape"])],
-                "~0 ou ~1",
+                "~0 or ~1",
             ),
             (
                 vec![profile("a", None, json!({"x": 1}), &[""])],
-                "pointeur vide",
+                "empty pointer",
             ),
         ];
         for (profiles, expected) in cases {
@@ -1615,12 +1588,12 @@ mod tests {
     fn a_duplicate_or_malformed_id_is_refused() {
         let err = apply(PROVIDERS, &new_provider("local"), "test").unwrap_err();
         assert!(
-            err.message.contains("« local » existe déjà"),
+            err.message.contains("“local” already exists"),
             "{}",
             err.message
         );
         let err = apply(PROVIDERS, &new_provider("a b"), "test").unwrap_err();
-        assert!(err.message.contains("lettres, chiffres"), "{}", err.message);
+        assert!(err.message.contains("letters, digits"), "{}", err.message);
         let err = apply(
             PROVIDERS,
             &new_model("local", "small", priced_model()),
@@ -1628,7 +1601,7 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            err.message.contains("« small » existe déjà"),
+            err.message.contains("“small” already exists"),
             "{}",
             err.message
         );
@@ -1644,11 +1617,7 @@ mod tests {
             },
         };
         let err = apply(PROVIDERS, &edit, "test").unwrap_err();
-        assert!(
-            err.message.starts_with("modification refusée"),
-            "{}",
-            err.message
-        );
+        assert!(err.message.starts_with("change refused"), "{}", err.message);
     }
 
     #[test]
@@ -1706,7 +1675,7 @@ mod tests {
             cache_read: "0".into(),
         });
         let err = apply(PROVIDERS, &model_update("local", "small", patch), "test").unwrap_err();
-        assert!(err.message.contains("coût d'entrée"), "{}", err.message);
+        assert!(err.message.contains("input cost"), "{}", err.message);
     }
 
     #[test]

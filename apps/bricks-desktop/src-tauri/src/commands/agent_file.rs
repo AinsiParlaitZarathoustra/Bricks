@@ -12,6 +12,7 @@ use crate::commands::inspect::open_or_not_found;
 use crate::contract::{IpcError, IpcErrorCode, IpcResult};
 use crate::engine::AppState;
 use crate::git::validate_relative_path;
+use crate::i18n::{msg, tr};
 use crate::services::{error, invalid, io_error, join_error, not_found};
 use std::path::{Component, Path, PathBuf};
 use tauri::State;
@@ -36,19 +37,21 @@ pub(crate) fn agent_root(
         "shared" => PathBuf::from(workspace),
         "worktree" => match worktree {
             None => {
-                return Err(not_found(
-                    "l'espace isolé de cet agent n'est pas enregistré",
-                ));
+                return Err(not_found(tr!(
+                    msg::THIS_AGENTS_ISOLATED_WORKSPACE_ISNT_RECORDED
+                )));
             }
             Some(("removed", _)) => {
-                return Err(not_found("l'espace isolé de cet agent a été supprimé"));
+                return Err(not_found(tr!(
+                    msg::THIS_AGENTS_ISOLATED_WORKSPACE_WAS_DELETED
+                )));
             }
             Some((_, root)) => root.to_path_buf(),
         },
-        other => return Err(invalid(format!("mode d'isolation inconnu : `{other}`"))),
+        other => return Err(invalid(tr!(msg::UNKNOWN_ISOLATION_MODE, other = other))),
     };
     if root.as_os_str().is_empty() || root.to_string_lossy().contains('\0') {
-        return Err(invalid("l'espace de travail de l'agent est inconnu"));
+        return Err(invalid(tr!(msg::THE_AGENTS_WORKSPACE_IS_UNKNOWN)));
     }
     Ok(root)
 }
@@ -64,10 +67,10 @@ pub(crate) fn agent_root_of(
     let runtime = entry
         .controller
         .agent_runtime()
-        .ok_or_else(|| not_found("cette conversation n'a pas de sous-agents"))?;
+        .ok_or_else(|| not_found(tr!(msg::THIS_CONVERSATION_HAS_NO_SUB_AGENTS)))?;
     let record = runtime
         .record(agent_id)
-        .ok_or_else(|| not_found("agent inconnu dans cette conversation"))?;
+        .ok_or_else(|| not_found(tr!(msg::UNKNOWN_AGENT_IN_THIS_CONVERSATION)))?;
     let registered = runtime
         .workspaces
         .worktree(agent_id)
@@ -87,7 +90,7 @@ pub(crate) fn agent_root_of(
 pub fn resolve_reveal_target(root: &Path, path: &str) -> IpcResult<PathBuf> {
     let root = std::fs::canonicalize(root).map_err(|e| IpcError {
         code: IpcErrorCode::FolderMissing,
-        message: format!("l'espace de travail de l'agent n'est plus accessible : {e}"),
+        message: tr!(msg::THE_AGENTS_WORKSPACE_IS_NO_LONGER, e = e),
     })?;
     let mut existing = candidate_of(&root, path)?;
     // The deepest existing entry: a missing file or folder is replaced by its parent.
@@ -99,15 +102,15 @@ pub fn resolve_reveal_target(root: &Path, path: &str) -> IpcResult<PathBuf> {
                     return Err(outside(path));
                 }
             }
-            Err(e) => return Err(io_error(&format!("lecture de `{path}`"), e)),
+            Err(e) => return Err(io_error(&tr!(msg::READING, path = path), e)),
         }
     }
     // Canonical form: every link on the way is followed, so a link out of `root` shows here.
     let resolved = std::fs::canonicalize(&existing).map_err(|e| match e.kind() {
-        std::io::ErrorKind::NotFound => invalid(format!(
-            "`{path}` passe par un lien symbolique cassé : refusé"
-        )),
-        _ => io_error(&format!("lecture de `{path}`"), e),
+        std::io::ErrorKind::NotFound => {
+            invalid(tr!(msg::GOES_THROUGH_A_BROKEN_SYMBOLIC_LINK, path = path))
+        }
+        _ => io_error(&tr!(msg::READING, path = path), e),
     })?;
     if !resolved.starts_with(&root) {
         return Err(outside(path));
@@ -120,7 +123,7 @@ pub fn resolve_reveal_target(root: &Path, path: &str) -> IpcResult<PathBuf> {
 pub(crate) fn candidate_of(root: &Path, path: &str) -> IpcResult<PathBuf> {
     if Path::new(path).is_absolute() {
         if path.is_empty() || path.len() > PATH_LIMIT || path.contains('\0') {
-            return Err(invalid("chemin invalide"));
+            return Err(invalid(tr!(msg::INVALID_PATH)));
         }
         // An absolute path holds no `..`: a folder not yet there cannot be resolved lexically.
         let escapes = Path::new(path)
@@ -144,9 +147,7 @@ fn is_missing(e: &std::io::Error) -> bool {
 }
 
 fn outside(path: &str) -> IpcError {
-    invalid(format!(
-        "`{path}` sort de l'espace de travail de l'agent : refusé"
-    ))
+    invalid(tr!(msg::LEAVES_THE_AGENTS_WORKSPACE_REFUSED, path = path))
 }
 
 /// Reveals in the Finder the file `path` that sub-agent `agent_id` of the open
@@ -162,12 +163,9 @@ pub async fn reveal_agent_file(
     let root = agent_root_of(&state, &session_id, &agent_id)?;
     tokio::task::spawn_blocking(move || {
         let target = resolve_reveal_target(&root, &path)?;
-        app.opener().reveal_item_in_dir(&target).map_err(|e| {
-            error(
-                IpcErrorCode::Io,
-                format!("affichage dans le Finder impossible : {e}"),
-            )
-        })
+        app.opener()
+            .reveal_item_in_dir(&target)
+            .map_err(|e| error(IpcErrorCode::Io, tr!(msg::COULD_NOT_SHOW_IT_IN_THE, e = e)))
     })
     .await
     .map_err(join_error)?

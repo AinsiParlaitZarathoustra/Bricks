@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { t } from '$lib/i18n/i18n.svelte';
 	import type { ApprovalRequest } from '$lib/ipc/engine';
 
 	interface Props {
@@ -15,7 +16,7 @@
 		class="rounded-lg border border-warning bg-warning-soft p-3 text-sm text-foreground"
 	>
 		<h2 id="pending-approvals-title" class="flex items-center gap-2 text-sm font-medium">
-			Approbations en attente
+			{t('context.pendingApprovals')}
 			<span class="font-mono text-xs tabular-nums">{approvals.length}</span>
 		</h2>
 		<ul class="mt-2 flex flex-col gap-2">
@@ -24,7 +25,7 @@
 					<span class="font-mono font-medium break-all">{approval.tool}</span>
 					<span class="text-pretty text-muted-foreground">{approval.description}</span>
 					{#if approval.agent_id}
-						<span class="text-muted-foreground">Demandée par un sous-agent.</span>
+						<span class="text-muted-foreground">{t('context.requestedByASubAgent')}</span>
 					{/if}
 				</li>
 			{/each}

@@ -1,6 +1,7 @@
 <script lang="ts">
 	// Tools of the session (`/tools`): name, description, permission level and
 	// the decision of the session's permission policy.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import { untrack } from 'svelte';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
@@ -60,40 +61,40 @@
 
 {#if !conv || !sessionId}
 	<EmptyState
-		title="Aucune conversation ouverte"
+		title={t('common.noOpenConversation2')}
 	/>
 {:else if loadError}
-	<p role="alert" class="text-sm text-destructive">Lecture des outils impossible : {loadError}</p>
+	<p role="alert" class="text-sm text-destructive">{t('sessionInfo.couldNotReadTheTools', { loadError })}</p>
 {:else if tools === null}
-	<p class="text-sm text-muted-foreground" aria-live="polite">Chargement des outils…</p>
+	<p class="text-sm text-muted-foreground" aria-live="polite">{t('sessionInfo.loadingTools')}</p>
 {:else if tools.length === 0}
-	<EmptyState title="Aucun outil disponible" />
+	<EmptyState title={t('sessionInfo.noToolAvailable')} />
 {:else}
 	<div class="flex flex-col gap-3">
 		<Input
 			type="search"
 			bind:value={filter}
-			placeholder="Filtrer par nom ou description"
-			aria-label="Filtrer les outils"
+			placeholder={t('sessionInfo.filterByNameOrDescription')}
+			aria-label={t('sessionInfo.filterTools')}
 			autocomplete="off"
 		/>
 
 		{#if visible.length === 0}
-			<p class="text-sm text-muted-foreground">Aucun outil ne correspond à « {filter.trim()} ».</p>
+			<p class="text-sm text-muted-foreground">{t('sessionInfo.noToolMatches', { filter: filter.trim() })}</p>
 		{:else}
 			<p class="text-xs text-muted-foreground" aria-live="polite">
 				{visible.length === tools.length
-					? `${tools.length} outils`
-					: `${visible.length} sur ${tools.length} outils`}
+					? t('sessionInfo.toolCount', { count: tools.length })
+					: t('sessionInfo.ofTools', { visible: visible.length, count: tools.length })}
 			</p>
 			<div class="overflow-x-auto rounded-lg border border-border">
 				<table class="w-full min-w-[32rem] text-left text-sm">
-					<caption class="sr-only">Outils de la session, avec leur niveau et leur décision</caption>
+					<caption class="sr-only">{t('sessionInfo.sessionToolsWithTheirLevelAnd')}</caption>
 					<thead class="bg-muted text-xs text-muted-foreground">
 						<tr>
-							<th scope="col" class="px-3 py-2 font-medium">Outil</th>
-							<th scope="col" class="px-3 py-2 font-medium">Niveau</th>
-							<th scope="col" class="px-3 py-2 font-medium">Décision</th>
+							<th scope="col" class="px-3 py-2 font-medium">{t('sessionInfo.tool')}</th>
+							<th scope="col" class="px-3 py-2 font-medium">{t('sessionInfo.level')}</th>
+							<th scope="col" class="px-3 py-2 font-medium">{t('sessionInfo.decision')}</th>
 						</tr>
 					</thead>
 					<tbody class="divide-y divide-border">

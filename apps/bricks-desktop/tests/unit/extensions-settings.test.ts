@@ -12,6 +12,7 @@ import ExtensionsSettings from '../../src/lib/features/settings/ExtensionsSettin
 import * as ipc from '../../src/lib/ipc/client';
 import type { ComputerUseStatus } from '../../src/lib/ipc/bindings/ComputerUseStatus';
 import { DEFAULT_PREFERENCES, app } from '../../src/lib/state/app.svelte';
+import { call } from './french-keys';
 
 vi.mock('@tauri-apps/api/core', () => {
 	class Channel {
@@ -222,7 +223,7 @@ describe('the Extensions section of the settings', () => {
 	const dialog = src('lib/features/settings/SettingsDialog.svelte');
 
 	it('is a section named Extensions, between Skills and Application, showing ExtensionsSettings', () => {
-		expect(dialog).toContain("{ id: 'extensions', label: 'Extensions', icon: Plug }");
+		expect(dialog).toContain(`{ id: 'extensions', get label() { return ${call('Extensions')} }, icon: Plug }`);
 		const sections = dialog.slice(dialog.indexOf('const SECTIONS'), dialog.indexOf('];', dialog.indexOf('const SECTIONS')));
 		expect(sections.indexOf("id: 'skills'")).toBeLessThan(sections.indexOf("id: 'extensions'"));
 		expect(sections.indexOf("id: 'extensions'")).toBeLessThan(sections.indexOf("id: 'application'"));

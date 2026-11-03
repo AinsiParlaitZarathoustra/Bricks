@@ -14,6 +14,7 @@ use crate::commands::inspect::open_or_not_found;
 use crate::commands::project_file::{canonical_or_missing, canonical_root, read_target};
 use crate::contract::{IpcErrorCode, IpcResult, ProjectFileWindow};
 use crate::engine::AppState;
+use crate::i18n::{msg, tr};
 use crate::services::{error, invalid, join_error, not_found};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -59,17 +60,12 @@ pub fn read_in_root(
     line: Option<u32>,
     end_line: Option<u32>,
 ) -> IpcResult<ReaderFileWindow> {
-    let root = canonical_root(root, "le dossier de lecture")?;
+    let root = canonical_root(root, &tr!(msg::THE_READING_FOLDER))?;
     let candidate = candidate_of(&root, path)?;
-    let target = canonical_or_missing(&candidate, path)?.ok_or_else(|| {
-        not_found(format!(
-            "`{path}` n'existe plus : le fichier a été supprimé ou déplacé"
-        ))
-    })?;
+    let target = canonical_or_missing(&candidate, path)?
+        .ok_or_else(|| not_found(tr!(msg::NO_LONGER_EXISTS_THE_FILE_WAS, path = path)))?;
     if !target.starts_with(&root) {
-        return Err(invalid(format!(
-            "`{path}` sort de l'espace de travail : refusé"
-        )));
+        return Err(invalid(tr!(msg::LEAVES_THE_WORKSPACE_REFUSED, path = path)));
     }
     let window = read_target(&target, path, line, end_line)?;
     Ok(ReaderFileWindow {
@@ -109,12 +105,9 @@ pub async fn reader_file_reveal(
     let root = reader_root(&state, &session_id, agent_id.as_deref())?;
     tokio::task::spawn_blocking(move || {
         let target = resolve_reveal_target(&root, &path)?;
-        app.opener().reveal_item_in_dir(&target).map_err(|e| {
-            error(
-                IpcErrorCode::Io,
-                format!("affichage dans le Finder impossible : {e}"),
-            )
-        })
+        app.opener()
+            .reveal_item_in_dir(&target)
+            .map_err(|e| error(IpcErrorCode::Io, tr!(msg::COULD_NOT_SHOW_IT_IN_THE, e = e)))
     })
     .await
     .map_err(join_error)?
@@ -182,7 +175,7 @@ mod tests {
         let path = outside.path().join("secret.txt");
         let (code, message) = code_of(read_in_root(dir.path(), path.to_str().unwrap(), None, None));
         assert_eq!(code, IpcErrorCode::Invalid);
-        assert!(message.contains("sort de l'espace de travail"), "{message}");
+        assert!(message.contains("leaves the workspace"), "{message}");
     }
 
     #[test]
@@ -219,7 +212,7 @@ mod tests {
         .unwrap();
         let (code, message) = code_of(read_in_root(dir.path(), "lien.txt", None, None));
         assert_eq!(code, IpcErrorCode::Invalid);
-        assert!(message.contains("sort de l'espace de travail"), "{message}");
+        assert!(message.contains("leaves the workspace"), "{message}");
     }
 
     #[cfg(unix)]
@@ -245,7 +238,7 @@ mod tests {
         write(dir.path(), "src/a.rs", b"a\n");
         let (code, message) = code_of(read_in_root(dir.path(), "src/supprime.rs", None, None));
         assert_eq!(code, IpcErrorCode::NotFound);
-        assert!(message.contains("n'existe plus"), "{message}");
+        assert!(message.contains("no longer exists"), "{message}");
         let (code, _) = code_of(read_in_root(dir.path(), "src/a.rs/encore", None, None));
         assert_eq!(
             code,
@@ -260,7 +253,7 @@ mod tests {
         std::fs::create_dir_all(dir.path().join("src")).unwrap();
         let (code, message) = code_of(read_in_root(dir.path(), "src", None, None));
         assert_eq!(code, IpcErrorCode::Invalid);
-        assert!(message.contains("n'est pas un fichier"), "{message}");
+        assert!(message.contains("isn’t a file"), "{message}");
     }
 
     #[test]
@@ -270,7 +263,7 @@ mod tests {
         write(dir.path(), "latin.txt", b"caf\xe9\n");
         let (code, message) = code_of(read_in_root(dir.path(), "image.dat", None, None));
         assert_eq!(code, IpcErrorCode::Invalid);
-        assert!(message.contains("binaire"), "{message}");
+        assert!(message.contains("binary file"), "{message}");
         let (code, message) = code_of(read_in_root(dir.path(), "latin.txt", None, None));
         assert_eq!(code, IpcErrorCode::Invalid);
         assert!(message.contains("UTF-8"), "{message}");
@@ -310,7 +303,7 @@ mod tests {
         assert_eq!(paged.window.lines.last().unwrap(), "ligne 800");
         let (code, message) = code_of(read_in_root(dir.path(), "big.txt", Some(1001), None));
         assert_eq!(code, IpcErrorCode::Invalid);
-        assert!(message.contains("au-delà de la fin"), "{message}");
+        assert!(message.contains("is past the end"), "{message}");
     }
 
     #[test]
@@ -400,7 +393,7 @@ mod tests {
             .expect("project folder");
         let (code, message) = code_of(reader_root(&state, "absente", None));
         assert_eq!(code, IpcErrorCode::NotFound);
-        assert!(message.contains("n'est pas ouverte"), "{message}");
+        assert!(message.contains("isn’t open"), "{message}");
         let (code, _) = code_of(reader_root(&state, "absente", Some("agent-1")));
         assert_eq!(code, IpcErrorCode::NotFound);
         let (code, _) = code_of(reader_root(&state, "absente", Some("")));

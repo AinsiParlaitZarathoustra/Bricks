@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { t } from '$lib/i18n/i18n.svelte';
 	import type { Snippet } from 'svelte';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import { Badge } from '$lib/components/ui/badge';
@@ -99,7 +100,7 @@
 					{#if status}<span>{status}</span>{/if}
 					{#if agents.length > 0}<span>{agents.join(', ')}</span>{/if}
 					{#if binary}
-						<Badge variant="outline">Binaire</Badge>
+						<Badge variant="outline">{t('changes.binary')}</Badge>
 					{:else if hasCounts}
 						<DiffStat additions={added ?? 0} deletions={removed ?? 0} label={countLabel} />
 					{/if}
@@ -123,9 +124,9 @@
 					{#if entry?.diff}
 						<DiffView patch={entry.diff.patch} truncated={entry.diff.truncated} binary={entry.diff.binary} />
 					{:else if entry?.error}
-						<p role="alert" class="text-xs text-destructive">Impossible de charger le diff : {entry.error}</p>
+						<p role="alert" class="text-xs text-destructive">{t('changes.couldNotLoadTheDiff', { error: entry.error })}</p>
 					{:else}
-						<p aria-live="polite" class="text-xs text-muted-foreground">Chargement…</p>
+						<p aria-live="polite" class="text-xs text-muted-foreground">{t('common.loading')}</p>
 					{/if}
 				</div>
 			{/each}

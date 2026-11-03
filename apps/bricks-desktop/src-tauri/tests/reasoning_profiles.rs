@@ -215,7 +215,7 @@ fn a_duplicate_profile_id_is_refused_and_the_file_is_unchanged() {
     )
     .expect_err("two profiles with one id are refused");
     assert_eq!(err.code, IpcErrorCode::Invalid);
-    assert!(err.message.contains("en double"), "{}", err.message);
+    assert!(err.message.contains("duplicate profile identifier"), "{}", err.message);
     assert_eq!(std::fs::read_to_string(&s.path).unwrap(), before, "nothing written");
     assert_eq!(revision(&s.path), rev, "the revision is unchanged");
 }
@@ -273,7 +273,7 @@ fn a_removed_default_profile_without_a_replacement_is_refused_and_nothing_is_wri
     )
     .expect_err("the default cannot silently disappear");
     assert_eq!(err.code, IpcErrorCode::Invalid);
-    assert!(err.message.contains("« fast »"), "{}", err.message);
+    assert!(err.message.contains("“fast”"), "{}", err.message);
     assert_eq!(std::fs::read_to_string(&s.path).unwrap(), before, "nothing written");
 }
 
@@ -325,7 +325,7 @@ fn a_default_outside_the_list_is_refused_and_nothing_is_written() {
     )
     .expect_err("a default must be one of the profiles");
     assert_eq!(err.code, IpcErrorCode::Invalid);
-    assert!(err.message.contains("« fantome »"), "{}", err.message);
+    assert!(err.message.contains("“fantome”"), "{}", err.message);
     assert_eq!(std::fs::read_to_string(&s.path).unwrap(), before, "nothing written");
 }
 

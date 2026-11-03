@@ -1,6 +1,7 @@
 <script lang="ts">
 	// One colour choice of the appearance settings: its current value, the button that opens the
 	// palette, and the reset to the theme token.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import RotateCcw from '@lucide/svelte/icons/rotate-ccw';
 	import { Button } from '$lib/components/ui/button';
 	import * as Popover from '$lib/components/ui/popover';
@@ -38,14 +39,14 @@
 	<div class="flex min-w-0 flex-col gap-0.5">
 		<span class="text-ui font-medium text-foreground">{label}</span>
 		<span class="font-mono text-xs text-muted-foreground tabular-nums">
-			{custom ? value : `${value}, couleur du thème`}
+			{custom ? value : t('settings.themeColor', { value })}
 		</span>
 	</div>
 
 	<div class="flex shrink-0 items-center gap-1">
-		<Button variant="ghost" size="sm" disabled={!custom} onclick={onReset} aria-label={`Réinitialiser : ${label}`}>
+		<Button variant="ghost" size="sm" disabled={!custom} onclick={onReset} aria-label={t('settings.reset', { label })}>
 			<RotateCcw aria-hidden="true" />
-			Réinitialiser
+			{t('settings.reset2')}
 		</Button>
 
 		<Popover.Root bind:open>
@@ -56,7 +57,7 @@
 						type="button"
 						class="size-8 shrink-0 rounded-md border border-border shadow-xs focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
 						style:background-color={value}
-						aria-label={`Modifier la couleur : ${label}, ${value}`}
+						aria-label={t('settings.editTheColor', { label, value })}
 					></button>
 				{/snippet}
 			</Popover.Trigger>

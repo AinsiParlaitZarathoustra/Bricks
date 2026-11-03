@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '$lib/i18n/i18n.svelte'
   import * as Select from '$lib/components/ui/select'
   import type { ProfileChoice } from '$lib/ipc/engine'
 
@@ -37,7 +38,7 @@
 
   function defaultText(id: string | null): string {
     const name = labelOf(id)
-    return name ? `Par défaut (${name})` : 'Par défaut'
+    return name ? t('composer.default', { name }) : t('composer.default2')
   }
 
   const triggerLabel = $derived(
@@ -57,7 +58,7 @@
   <Select.Trigger
     size="sm"
     class="max-w-56 min-w-0 text-ui border-transparent bg-transparent text-muted-foreground shadow-none hover:bg-muted hover:text-foreground data-[state=open]:bg-muted dark:bg-transparent dark:hover:bg-muted"
-    aria-label={`Effort de raisonnement : ${triggerLabel}`}
+    aria-label={t('composer.reasoningEffort', { triggerLabel })}
   >
     <span class="truncate">{triggerLabel}</span>
   </Select.Trigger>

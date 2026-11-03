@@ -467,7 +467,7 @@ dependencies = [
 
 [[package]]
 name = "bricks"
-version = "0.6.1"
+version = "1.0.0-alpha.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -504,7 +504,7 @@ dependencies = [
 
 [[package]]
 name = "bricks-agent"
-version = "0.6.1"
+version = "1.0.0-alpha.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -548,7 +548,7 @@ dependencies = [
 
 [[package]]
 name = "bricks-agentlang"
-version = "0.6.1"
+version = "1.0.0-alpha.1"
 dependencies = [
  "async-trait",
  "bricks-tools",
@@ -564,7 +564,7 @@ dependencies = [
 
 [[package]]
 name = "bricks-agentrl"
-version = "0.6.1"
+version = "1.0.0-alpha.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -595,7 +595,7 @@ dependencies = [
 
 [[package]]
 name = "bricks-cli"
-version = "0.6.1"
+version = "1.0.0-alpha.1"
 dependencies = [
  "bricks-agent",
  "bricks-config",
@@ -619,7 +619,7 @@ dependencies = [
 
 [[package]]
 name = "bricks-compression"
-version = "0.6.1"
+version = "1.0.0-alpha.1"
 dependencies = [
  "anyhow",
  "bricks-types",
@@ -641,7 +641,7 @@ dependencies = [
 
 [[package]]
 name = "bricks-config"
-version = "0.6.1"
+version = "1.0.0-alpha.1"
 dependencies = [
  "bricks-agent",
  "bricks-embeddings",
@@ -658,7 +658,7 @@ dependencies = [
 
 [[package]]
 name = "bricks-desktop"
-version = "0.6.1"
+version = "1.0.0-alpha.1"
 dependencies = [
  "base64 0.22.1",
  "bricks-agent",
@@ -694,7 +694,7 @@ dependencies = [
 
 [[package]]
 name = "bricks-embeddings"
-version = "0.6.1"
+version = "1.0.0-alpha.1"
 dependencies = [
  "async-trait",
  "bricks-types",
@@ -710,7 +710,7 @@ dependencies = [
 
 [[package]]
 name = "bricks-hooks"
-version = "0.6.1"
+version = "1.0.0-alpha.1"
 dependencies = [
  "async-trait",
  "bricks-types",
@@ -721,7 +721,7 @@ dependencies = [
 
 [[package]]
 name = "bricks-lsp"
-version = "0.6.1"
+version = "1.0.0-alpha.1"
 dependencies = [
  "bricks-lsp",
  "dashmap",
@@ -737,7 +737,7 @@ dependencies = [
 
 [[package]]
 name = "bricks-mcp"
-version = "0.6.1"
+version = "1.0.0-alpha.1"
 dependencies = [
  "bricks-testkit",
  "bricks-types",
@@ -763,7 +763,7 @@ dependencies = [
 
 [[package]]
 name = "bricks-memory"
-version = "0.6.1"
+version = "1.0.0-alpha.1"
 dependencies = [
  "async-trait",
  "bricks-embeddings",
@@ -787,7 +787,7 @@ dependencies = [
 
 [[package]]
 name = "bricks-provider"
-version = "0.6.1"
+version = "1.0.0-alpha.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -808,7 +808,7 @@ dependencies = [
 
 [[package]]
 name = "bricks-semantic"
-version = "0.6.1"
+version = "1.0.0-alpha.1"
 dependencies = [
  "bricks-lsp",
  "bricks-types",
@@ -834,7 +834,7 @@ dependencies = [
 
 [[package]]
 name = "bricks-skills"
-version = "0.6.1"
+version = "1.0.0-alpha.1"
 dependencies = [
  "libc",
  "parking_lot 0.12.5",
@@ -849,7 +849,7 @@ dependencies = [
 
 [[package]]
 name = "bricks-tbench"
-version = "0.6.1"
+version = "1.0.0-alpha.1"
 dependencies = [
  "anyhow",
  "bricks-agent",
@@ -867,7 +867,7 @@ dependencies = [
 
 [[package]]
 name = "bricks-testkit"
-version = "0.6.1"
+version = "1.0.0-alpha.1"
 dependencies = [
  "futures",
  "tokio",
@@ -875,7 +875,7 @@ dependencies = [
 
 [[package]]
 name = "bricks-tools"
-version = "0.6.1"
+version = "1.0.0-alpha.1"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -929,7 +929,7 @@ dependencies = [
 
 [[package]]
 name = "bricks-tools-derive"
-version = "0.6.1"
+version = "1.0.0-alpha.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -938,7 +938,7 @@ dependencies = [
 
 [[package]]
 name = "bricks-types"
-version = "0.6.1"
+version = "1.0.0-alpha.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -955,7 +955,7 @@ dependencies = [
 
 [[package]]
 name = "bricks-vms"
-version = "0.6.1"
+version = "1.0.0-alpha.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -982,7 +982,7 @@ dependencies = [
 
 [[package]]
 name = "bricks-web"
-version = "0.6.1"
+version = "1.0.0-alpha.1"
 dependencies = [
  "bm25",
  "bricks-testkit",
@@ -1007,7 +1007,7 @@ dependencies = [
 
 [[package]]
 name = "bricks-workflows"
-version = "0.6.1"
+version = "1.0.0-alpha.1"
 dependencies = [
  "async-trait",
  "bricks-agent",
@@ -3845,7 +3845,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "longmem-bench"
-version = "0.6.1"
+version = "1.0.0-alpha.1"
 dependencies = [
  "anyhow",
  "async-trait",

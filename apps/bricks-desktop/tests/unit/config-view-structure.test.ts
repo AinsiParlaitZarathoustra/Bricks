@@ -4,6 +4,7 @@
 // rows, and the removed labels are gone. Same approach as context-card-structure.test.ts.
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { call } from './french-keys';
 
 const src = (path: string) => readFileSync(new URL(`../../src/${path}`, import.meta.url), 'utf8');
 
@@ -13,7 +14,7 @@ describe('the model card: one effort line', () => {
 	const config = src(CONFIG);
 
 	it('shows one « Effort » line from the effective effort, or « aucun » when there is none', () => {
-		expect(config).toContain("{@render field('Effort', config.effective_reasoning ?? 'aucun')}");
+		expect(config).toContain(`{@render field(${call('Effort')}, config.effective_reasoning ?? ${call('aucun')})}`);
 	});
 
 	it('no longer has « Effort demandé », « Effort appliqué » nor « par défaut du modèle »', () => {
@@ -33,7 +34,7 @@ describe('the other settings', () => {
 	});
 
 	it('the permissions card keeps the approval line and the policy editor, and no default-permissions line', () => {
-		expect(config).toContain("{@render field('Approbations', config.interactive ? 'demandées' : 'refusées')}");
+		expect(config).toContain(`{@render field(${call('Approbations')}, config.interactive ? ${call('demandées')} : ${call('refusées')})}`);
 		expect(config).toContain('<PolicyEditor {policy} tools={toolNames} disabled={saving} onchange={change} />');
 		expect(config).not.toContain("field('Permissions'");
 	});

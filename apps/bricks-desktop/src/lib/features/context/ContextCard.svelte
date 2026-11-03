@@ -3,6 +3,7 @@
 	// and, once a request was sent on this context, its sources. The bar's fill is
 	// the occupation; each source colours the part of it its share of the last
 	// request's text stands for. Unknown or stale reads `—`.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import type { Conversation } from '$lib/state/conversation.svelte';
 	import SectionCard from '$lib/layout/SectionCard.svelte';
 	import { contextGauge, contextShares, formatPercent, formatShort, type ContextSource } from './contextView';
@@ -37,7 +38,7 @@
 	};
 </script>
 
-<SectionCard title="Contexte">
+<SectionCard title={t('common.context')}>
 	<div class="flex items-baseline justify-between gap-3 text-ui">
 		<span
 			class={[
@@ -47,18 +48,18 @@
 					: gauge.ratio !== null && gauge.ratio >= 0.75
 						? 'text-warning'
 						: 'text-foreground'
-			]}>{share} utilisé</span
+			]}>{t('context.used', { share })}</span
 		>
 		<span class="tabular-nums text-muted-foreground">{figures}</span>
 	</div>
 	<div
 		class="mt-2 h-1.5 overflow-hidden rounded-full bg-muted"
 		role="meter"
-		aria-label="Contexte utilisé"
+		aria-label={t('context.contextUsed')}
 		aria-valuemin={0}
 		aria-valuemax={100}
 		aria-valuenow={gauge.percent === null ? undefined : Math.round(Math.min(100, gauge.percent))}
-		aria-valuetext={gauge.percent === null ? 'inconnu' : `${share} (${figures})`}
+		aria-valuetext={gauge.percent === null ? t('common.unknownValue') : `${share} (${figures})`}
 	>
 		{#if gauge.ratio !== null}
 			{#if shares}
@@ -76,20 +77,20 @@
 		{/if}
 	</div>
 	{#if shares}
-		<ul class="mt-2.5 flex flex-col gap-1 text-xs" aria-label="Répartition du contexte">
+		<ul class="mt-2.5 flex flex-col gap-1 text-xs" aria-label={t('context.contextBreakdown')}>
 			{#each shares as part (part.source)}
 				<li class="flex min-w-0 items-center gap-1.5">
 					<span aria-hidden="true" class={['size-2 shrink-0 rounded-sm', COLOR[part.source]]}></span>
 					<span class="min-w-0 flex-1 truncate text-foreground" title={part.label}>{part.label}</span>
-					<span class="shrink-0 tabular-nums text-muted-foreground">{formatShort(part.tokens)} tokens</span>
+					<span class="shrink-0 tabular-nums text-muted-foreground">{t('common.tokens', { tokens: formatShort(part.tokens) })}</span>
 					<span class="w-11 shrink-0 text-right whitespace-nowrap tabular-nums text-foreground">{formatPercent(part.share * 100)}</span>
 				</li>
 			{/each}
 			{#if free !== null}
 				<li class="flex min-w-0 items-center gap-1.5">
 					<span aria-hidden="true" class="size-2 shrink-0 rounded-sm border border-border bg-muted"></span>
-					<span class="min-w-0 flex-1 truncate text-muted-foreground">Espace libre</span>
-					<span class="shrink-0 tabular-nums text-muted-foreground">{formatShort(free)} tokens</span>
+					<span class="min-w-0 flex-1 truncate text-muted-foreground">{t('context.freeSpace')}</span>
+					<span class="shrink-0 tabular-nums text-muted-foreground">{t('common.tokens', { tokens: formatShort(free) })}</span>
 					<span class="w-11 shrink-0" aria-hidden="true"></span>
 				</li>
 			{/if}

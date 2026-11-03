@@ -5,6 +5,7 @@
 // defect is present and must be turned into `it` once the product is fixed.
 import { readFileSync, readdirSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { bound, call } from './french-keys';
 
 const src = (path: string) => readFileSync(new URL(`../../src/${path}`, import.meta.url), 'utf8');
 
@@ -57,24 +58,24 @@ describe('the run-end card and the composer keep only what the spec keeps', () =
 
 	it('the send button tooltip is « Envoyer » and the placeholder « Quelque chose à dire ? » stays', () => {
 		const composer = src('lib/features/composer/Composer.svelte');
-		expect(composer).toContain('<Tooltip.Content side="top">Envoyer</Tooltip.Content>');
-		expect(composer).toContain("'Quelque chose à dire ?'");
+		expect(composer).toContain(`<Tooltip.Content side="top">{${call('Envoyer')}}</Tooltip.Content>`);
+		expect(composer).toContain(call('Quelque chose à dire ?'));
 	});
 });
 
 describe('model form: two limits, no context window field', () => {
 	it('the form says « Nom API » and keeps the two token limits, and no longer edits the window', () => {
 		const text = src('lib/features/settings/ModelFormDialog.svelte');
-		expect(text).toContain('Nom API');
-		expect(text).toContain('Entrée maximale (tokens)');
-		expect(text).toContain('Sortie maximale (tokens)');
+		expect(text).toContain(call('Nom API'));
+		expect(text).toContain(call('Entrée maximale (tokens)'));
+		expect(text).toContain(call('Sortie maximale (tokens)'));
 		expect(forbidden(text, ['Modèle de l’API', "Modèle de l'API", 'Fenêtre de contexte', 'context_window'])).toEqual([]);
 	});
 
 	it('the model card shows the two limits and no context window', () => {
 		const text = src('lib/features/settings/ModelRow.svelte');
-		expect(text).toContain('Entrée maximale');
-		expect(text).toContain('Sortie maximale');
+		expect(text).toContain(call('Entrée maximale'));
+		expect(text).toContain(call('Sortie maximale'));
 		expect(forbidden(text, ['Fenêtre de contexte', 'context_window'])).toEqual([]);
 	});
 });

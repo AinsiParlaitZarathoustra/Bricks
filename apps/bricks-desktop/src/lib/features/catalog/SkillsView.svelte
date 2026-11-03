@@ -1,11 +1,11 @@
 <script lang="ts">
+	import { t } from '$lib/i18n/i18n.svelte';
 	import { onMount } from 'svelte';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
-	import { plural } from '$lib/features/agents/agentView';
 	import { app } from '$lib/state/app.svelte';
 	import type { InspectorState } from '$lib/state/ui.svelte';
 	import Pager from './Pager.svelte';
@@ -59,22 +59,22 @@
 
 <div class="flex flex-col gap-4 text-sm">
 	{#if !conv}
-		<p class="text-muted-foreground">Aucune conversation ouverte.</p>
+		<p class="text-muted-foreground">{t('common.noOpenConversation')}</p>
 	{:else}
 		{#if decision !== null}
 			<section
-				aria-label="Skills du projet"
+				aria-label={t('common.projectSkills')}
 				class="flex flex-col gap-2 rounded-md border border-border p-3"
 			>
-				<h3 class="text-xs font-medium text-muted-foreground">Skills du projet</h3>
+				<h3 class="text-xs font-medium text-muted-foreground">{t('common.projectSkills')}</h3>
 				{#if decision === 'pending'}
 					<p class="text-xs text-pretty">
-						En attente de votre décision pour cette session.
+						{t('catalog.waitingForYourDecisionForThis')}
 					</p>
 				{:else if decision === 'granted'}
-					<p class="text-xs text-pretty">Autorisés pour cette session.</p>
+					<p class="text-xs text-pretty">{t('catalog.allowedForThisSession')}</p>
 				{:else}
-					<p class="text-xs text-pretty">Refusés pour cette session.</p>
+					<p class="text-xs text-pretty">{t('catalog.refusedForThisSession')}</p>
 				{/if}
 
 				{#if trustRequest}
@@ -83,7 +83,7 @@
 						{#each trustRequest.sources as source, i (i)}
 							<li>
 								<span class="font-mono">{scopeLabel(source.source)}</span>
-								· {plural(source.skills, 'skill', 'skills')}
+								· {t('common.skillCount', { count: source.skills })}
 								· <span class="font-mono break-all text-muted-foreground">{source.path}</span>
 							</li>
 						{/each}
@@ -93,19 +93,19 @@
 				<div class="flex flex-wrap gap-2">
 					{#if decision === 'pending' || decision === 'denied'}
 						<Button size="sm" disabled={trust.pending} onclick={() => decide(true)}>
-							Autoriser les skills du projet pour cette session
+							{t('catalog.allowProjectSkillsForThisSession')}
 						</Button>
 					{/if}
 					{#if decision === 'pending' || decision === 'granted'}
 						<Button variant="outline" size="sm" disabled={trust.pending} onclick={() => decide(false)}>
-							Refuser
+							{t('common.refuse')}
 						</Button>
 					{/if}
 				</div>
 
 				{#if trust.refusal}
 					<p role="alert" class="rounded-md bg-destructive/10 px-3 py-2 text-xs text-pretty text-destructive">
-						Commande refusée : {trust.refusal}
+						{t('catalog.commandRefused', { refusal: trust.refusal })}
 					</p>
 				{/if}
 			</section>
@@ -113,44 +113,44 @@
 
 		<form role="search" class="flex flex-wrap items-end gap-2" onsubmit={onSearch}>
 			<label class="flex min-w-0 flex-1 basis-56 flex-col gap-1 text-xs text-muted-foreground">
-				Rechercher un skill
+				{t('common.searchForASkill')}
 				<Input
 					type="search"
 					bind:value={draft}
-					placeholder="Nom ou description"
+					placeholder={t('common.nameOrDescription')}
 					class="text-sm text-foreground"
 				/>
 			</label>
 			<Button type="submit" variant="outline" size="sm" disabled={request.pending}>
 				<SearchIcon aria-hidden="true" />
-				Rechercher
+				{t('common.search')}
 			</Button>
 			<Button type="button" variant="outline" size="sm" disabled={request.pending} onclick={reload}>
 				<RefreshCwIcon aria-hidden="true" />
-				Recharger
+				{t('common.reload')}
 			</Button>
 		</form>
 
 		<div role="status" aria-live="polite" class="text-xs text-muted-foreground">
 			{#if request.pending}
-				Chargement…
+				{t('common.loading')}
 			{:else if listing}
-				{plural(listing.total, 'skill', 'skills')}
+				{t('common.skillCount', { count: listing.total })}
 			{/if}
 		</div>
 
 		{#if request.refusal}
 			<p role="alert" class="rounded-md bg-destructive/10 px-3 py-2 text-xs text-pretty text-destructive">
-				Commande refusée : {request.refusal}
+				{t('catalog.commandRefused', { refusal: request.refusal })}
 			</p>
 		{/if}
 
 		{#if listing && listing.diagnostics && listing.diagnostics.length > 0}
 			<section
-				aria-label="Diagnostic des skills"
+				aria-label={t('catalog.skillDiagnostics')}
 				class="flex flex-col gap-1 rounded-md bg-warning-soft px-3 py-2 text-xs text-pretty"
 			>
-				<h3 class="font-medium">Diagnostic</h3>
+				<h3 class="font-medium">{t('catalog.diagnostics')}</h3>
 				<ul class="flex list-disc flex-col gap-0.5 pl-4">
 					{#each listing.diagnostics as diagnostic, i (i)}
 						<li class="break-all">{diagnostic}</li>
@@ -162,13 +162,13 @@
 		{#if listing}
 			{#if listing.catalog_omitted > 0}
 				<p class="text-xs text-pretty text-muted-foreground">
-					Hors du catalogue du modèle : {listing.catalog_omitted}
+					{t('catalog.outsideTheModelsCatalog', { catalogOmitted: listing.catalog_omitted })}
 				</p>
 			{/if}
 
 			{#if listing.entries.length === 0}
 				<p class="text-muted-foreground">
-					{query ? `Aucun skill ne correspond à « ${query} ».` : 'Aucun skill disponible.'}
+					{query ? t('common.noSkillMatches', { query }) : t('catalog.noSkillsAvailable')}
 				</p>
 			{:else}
 				<!-- A named, focusable scroll container: keyboard users must be able to scroll
@@ -176,7 +176,7 @@
 				<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 				<div
 					role="region"
-					aria-label="Skills"
+					aria-label={t('common.skills')}
 					tabindex="0"
 					class="flex max-h-[46vh] flex-col gap-3 overflow-y-auto rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
 				>
@@ -189,7 +189,7 @@
 									<Badge variant="outline">{scopeLabel(entry.source)}</Badge>
 									<Badge variant={view.variant}>{view.label}</Badge>
 									{#if entry.revision}
-										<span class="font-mono text-xs text-muted-foreground">révision {entry.revision}</span>
+										<span class="font-mono text-xs text-muted-foreground">{t('catalog.revision', { revision: entry.revision })}</span>
 									{/if}
 								</div>
 								{#if entry.description}

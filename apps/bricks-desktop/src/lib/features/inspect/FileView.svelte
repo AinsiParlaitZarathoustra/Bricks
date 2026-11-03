@@ -2,6 +2,7 @@
   // Read-only window of a project file opened from a file reference in a
   // message. The path is resolved and checked by Rust (`project_file_read`)
   // in the project of the conversation the message belongs to.
+  import { t } from '$lib/i18n/i18n.svelte'
   import { tick } from 'svelte'
   import FileIcon from '$lib/features/file-icons/FileIcon.svelte'
   import { projectFileRead } from '$lib/ipc/client'
@@ -51,14 +52,14 @@
   {#if error}
     <p class="text-xs text-destructive" role="alert">{error}</p>
   {:else if !file}
-    <p class="text-xs text-muted-foreground" role="status">Lecture…</p>
+    <p class="text-xs text-muted-foreground" role="status">{t('common.reading2')}</p>
   {:else}
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <div
       bind:this={scroller}
       class="max-h-[60vh] overflow-auto rounded-md bg-code-bg font-mono text-xs leading-5 text-code-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
       role="region"
-      aria-label={`Contenu de ${path}`}
+      aria-label={t('common.contentOf', { path })}
       tabindex="0"
     >
       <div class="min-w-max py-1">
@@ -77,7 +78,7 @@
     </div>
     {#if file.truncated}
       <p class="text-xs text-muted-foreground">
-        Lignes {file.start} à {file.start + file.lines.length - 1} sur {file.totalLines}.
+        {t('inspect.linesToOf', { start: file.start, value: file.start + file.lines.length - 1, totalLines: file.totalLines })}
       </p>
     {/if}
   {/if}

@@ -1,6 +1,8 @@
 // Pure helpers shared by the composer components. No Svelte runes here.
 
 /** Extensions sent as `image` blocks; the engine decides what the model accepts. */
+import { t } from '$lib/i18n/i18n.svelte';
+
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp'])
 
 /** Last path segment, without a trailing separator. */
@@ -32,7 +34,7 @@ export function blobToBase64(blob: Blob): Promise<string> {
       const result = String(reader.result ?? '')
       resolve(result.slice(result.indexOf(',') + 1))
     }
-    reader.onerror = () => reject(reader.error ?? new Error('Lecture de la pièce jointe impossible.'))
+    reader.onerror = () => reject(reader.error ?? new Error(t('composer.couldNotReadTheAttachment')))
     reader.readAsDataURL(blob)
   })
 }

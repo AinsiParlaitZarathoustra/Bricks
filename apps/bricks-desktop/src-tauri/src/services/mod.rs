@@ -18,6 +18,7 @@ pub mod run_records;
 pub mod skills;
 
 use crate::contract::{IpcError, IpcErrorCode};
+use crate::i18n::{msg, tr};
 use std::fmt::Display;
 
 pub(crate) fn error(code: IpcErrorCode, message: impl Into<String>) -> IpcError {
@@ -37,7 +38,7 @@ pub(crate) fn not_found(message: impl Into<String>) -> IpcError {
 
 /// A failed read or write of an application file, with what was attempted.
 pub(crate) fn io_error(context: &str, e: impl Display) -> IpcError {
-    error(IpcErrorCode::Io, format!("{context} : {e}"))
+    error(IpcErrorCode::Io, tr!(msg::TEXT, context = context, e = e))
 }
 
 /// A blocking task that failed to finish (panicked or was cancelled).

@@ -3,6 +3,7 @@
 //! uses; this file only maps its actions to the contract types. Messages
 //! are French.
 use crate::contract::*;
+use crate::i18n::{msg, tr};
 use bricks_agent::control::Command;
 use bricks_agent::control::slash::{self, Action, Present};
 
@@ -14,7 +15,8 @@ pub(crate) fn command_list() -> Vec<SlashCommandInfo> {
             name: c.name.to_string(),
             aliases: c.aliases.iter().map(|a| a.to_string()).collect(),
             args: c.args.to_string(),
-            description: c.description_fr.to_string(),
+            description: c.description.to_string(),
+            description_fr: c.description_fr.to_string(),
         })
         .collect()
 }
@@ -24,7 +26,7 @@ pub async fn slash_commands() -> IpcResult<Vec<SlashCommandInfo>> {
     Ok(command_list())
 }
 
-/// Parses one `/` line; `Invalid` with a French message on an unknown
+/// Parses one `/` line; `Invalid` with a message on an unknown
 /// command or a bad argument.
 #[tauri::command]
 pub async fn slash_parse(line: String) -> IpcResult<SlashAction> {
@@ -34,7 +36,7 @@ pub async fn slash_parse(line: String) -> IpcResult<SlashAction> {
 pub(crate) fn parse_line(line: &str) -> IpcResult<SlashAction> {
     let action = slash::parse(line).map_err(|e| IpcError {
         code: IpcErrorCode::Invalid,
-        message: e.message_fr().to_string(),
+        message: crate::i18n::pick(e.message(), e.message_fr()).to_string(),
     })?;
     to_ipc(action)
 }
@@ -51,7 +53,7 @@ pub(crate) fn to_ipc(action: Action) -> IpcResult<SlashAction> {
         Action::Engine(command) => {
             let command = serde_json::to_value(&command).map_err(|e| IpcError {
                 code: IpcErrorCode::Internal,
-                message: format!("commande impossible à transmettre : {e}"),
+                message: tr!(msg::COULD_NOT_FORWARD_THE_COMMAND, e = e),
             })?;
             Ok(SlashAction::Engine { command })
         }
@@ -218,20 +220,20 @@ mod tests {
     }
 
     #[test]
-    fn unknown_commands_and_bad_arguments_are_invalid_in_french() {
+    fn unknown_commands_and_bad_arguments_are_invalid_in_english() {
         let unknown = refusal("/nope");
         assert_eq!(unknown.code, IpcErrorCode::Invalid);
-        assert_eq!(unknown.message, "commande inconnue /nope (essayez /help)");
+        assert_eq!(unknown.message, "unknown command /nope (try /help)");
 
         let no_request = refusal("/skill pdf");
         assert_eq!(no_request.code, IpcErrorCode::Invalid);
-        assert!(no_request.message.contains("donnez la demande"));
+        assert!(no_request.message.contains("give the request"));
 
         let bad_arg = refusal("/context all");
         assert_eq!(bad_arg.code, IpcErrorCode::Invalid);
         assert_eq!(
             bad_arg.message,
-            "argument inconnu `all` : /context ou /context details"
+            "unknown argument `all`: /context or /context details"
         );
 
         assert_eq!(refusal("/file").code, IpcErrorCode::Invalid);
@@ -239,17 +241,13 @@ mod tests {
     }
 
     #[test]
-    fn the_palette_lists_the_registry_in_french() {
+    fn the_palette_lists_the_registry_in_english() {
         let list = command_list();
         assert_eq!(list.len(), slash::COMMANDS.len());
         let model = list.iter().find(|c| c.name == "model").unwrap();
         assert_eq!(model.aliases, vec!["m".to_string()]);
         assert_eq!(model.args, "[provider/model [profile]]");
-        assert!(
-            model.description.contains("modèle"),
-            "{}",
-            model.description
-        );
+        assert!(model.description.contains("model"), "{}", model.description);
         let mut names = std::collections::HashSet::new();
         for c in &list {
             assert!(names.insert(c.name.clone()), "/{} twice", c.name);

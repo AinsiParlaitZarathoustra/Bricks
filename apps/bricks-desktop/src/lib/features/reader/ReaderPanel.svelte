@@ -3,6 +3,7 @@
   // conversation, and per tab a source view (highlighted, numbered lines,
   // read in bounded windows), a Markdown preview, and the recorded edit
   // operations of that file (each patch on its own, never merged).
+  import { t, numberFormat } from '$lib/i18n/i18n.svelte'
   import X from '@lucide/svelte/icons/x'
   import FileIcon from '$lib/features/file-icons/FileIcon.svelte'
   import DiffView from '$lib/features/changes/DiffView.svelte'
@@ -26,9 +27,9 @@
   })
 
   const MODES: { id: ReaderTab['mode']; label: string }[] = [
-    { id: 'source', label: 'Source' },
-    { id: 'preview', label: 'Aperçu' },
-    { id: 'changes', label: 'Modifications' },
+    { id: 'source', get label() { return t('reader.source') } },
+    { id: 'preview', get label() { return t('reader.preview') } },
+    { id: 'changes', get label() { return t('common.changes') } },
   ]
   function available(tab: ReaderTab, mode: ReaderTab['mode']): boolean {
     if (mode === 'preview') return tab.isMarkdown || tab.isSvg
@@ -53,14 +54,14 @@
     return `r${safe.length}-${safe}`
   }
 
-  const nf = new Intl.NumberFormat('fr-FR')
+  const nf = numberFormat()
 </script>
 
-<section aria-label="Lecteur" class="flex h-full min-h-0 flex-col bg-background">
+<section aria-label={t('common.reader')} class="flex h-full min-h-0 flex-col bg-background">
   {#if tabs.length === 0}
-    <p class="p-4 text-ui text-muted-foreground">Aucun fichier ouvert.</p>
+    <p class="p-4 text-ui text-muted-foreground">{t('reader.noOpenFile')}</p>
   {:else}
-    <div role="tablist" aria-label="Fichiers ouverts" class="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border/50 px-1.5 py-1">
+    <div role="tablist" aria-label={t('reader.openFiles')} class="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-border/50 px-1.5 py-1">
       {#each tabs as tab (tab.id)}
         <div
           class={[
@@ -81,8 +82,8 @@
           </button>
           <button
             type="button"
-            aria-label={`Fermer ${tab.title}`}
-            title="Fermer"
+            aria-label={t('reader.close', { title: tab.title })}
+            title={t('common.close')}
             class="mr-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
             onclick={() => reader.close(tab.id)}
           >
@@ -94,7 +95,7 @@
 
     {#if active}
       <div class="flex shrink-0 items-center gap-2 px-2 py-1">
-        <div role="radiogroup" aria-label="Mode de lecture" class="flex items-center gap-0.5">
+        <div role="radiogroup" aria-label={t('reader.readingMode')} class="flex items-center gap-0.5">
           {#each MODES as mode (mode.id)}
             {#if available(active, mode.id)}
               <button
@@ -122,44 +123,43 @@
         bind:this={scroller}
         onscroll={onScroll}
         role="region"
-        aria-label={`Contenu de ${active.title}`}
+        aria-label={t('common.contentOf', { path: active.title })}
         tabindex="0"
         class="min-h-0 flex-1 overflow-auto overscroll-contain outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
       >
         {#if active.mode === 'changes'}
           <div class="flex flex-col gap-3 p-2">
             {#each active.operations as op, i (op.key)}
-              <section aria-label={`Opération ${i + 1}`} class="flex flex-col gap-1">
+              <section aria-label={t('reader.operation', { value: i + 1 })} class="flex flex-col gap-1">
                 <p class="flex items-center gap-2 px-0.5 text-xs text-muted-foreground">
-                  <span>Opération {i + 1} sur {active.operations.length}</span>
+                  <span>{t('reader.operationOf', { value: i + 1, operations: active.operations.length })}</span>
                   <DiffStat additions={op.added} deletions={op.removed} />
                 </p>
                 {#if op.patch}
                   <DiffView patch={op.patch} truncated={op.truncated} loose />
                 {:else if op.truncated}
-                  <p class="px-0.5 text-xs text-muted-foreground">Modifications trop volumineuses : non conservées pour cette opération.</p>
+                  <p class="px-0.5 text-xs text-muted-foreground">{t('reader.changesTooLargeNotKeptFor')}</p>
                 {:else}
-                  <p class="px-0.5 text-xs text-muted-foreground">Modifications non enregistrées pour cette opération.</p>
+                  <p class="px-0.5 text-xs text-muted-foreground">{t('reader.changesNotSavedForThisOperation')}</p>
                 {/if}
               </section>
             {/each}
           </div>
         {:else if !active.window || active.window.loading}
-          <p class="p-3 text-xs text-muted-foreground" role="status">Lecture…</p>
+          <p class="p-3 text-xs text-muted-foreground" role="status">{t('common.reading2')}</p>
         {:else if active.window.error}
           <p class="p-3 text-xs text-destructive" role="alert">{active.window.error}</p>
         {:else if active.mode === 'preview'}
           <div class="flex flex-col gap-2 p-3">
             {#if active.window.truncated}
               <p class="text-xs text-muted-foreground">
-                Aperçu partiel : lignes {nf.format(active.window.start)} à {nf.format(active.window.start + active.window.lines.length - 1)}
-                sur {nf.format(active.window.totalLines)}.
+                {t('reader.partialPreviewLinesToOf', { start: nf.format(active.window.start), value: nf.format(active.window.start + active.window.lines.length - 1), totalLines: nf.format(active.window.totalLines) })}
               </p>
             {/if}
             {#key active.id}
               {#if active.isSvg}
                 {#if active.window.truncated}
-                  <p class="text-xs text-muted-foreground">Le fichier SVG doit être entièrement chargé pour afficher son aperçu.</p>
+                  <p class="text-xs text-muted-foreground">{t('reader.theSvgFileMustBeFully')}</p>
                 {:else}
                   <SvgViewer svg={active.window.lines.join('\n')} title={active.title} fileName={active.title} />
                 {/if}
@@ -184,7 +184,7 @@
         {@const w = active.window}
         <div class="flex shrink-0 items-center gap-2 border-t border-border/50 px-2 py-1 text-xs text-muted-foreground">
           <span class="tabular-nums">
-            Lignes {nf.format(w.start)}–{nf.format(w.start + w.lines.length - 1)} sur {nf.format(w.totalLines)}
+            {t('reader.linesOf', { start: nf.format(w.start), value: nf.format(w.start + w.lines.length - 1), totalLines: nf.format(w.totalLines) })}
           </span>
           <button
             type="button"
@@ -192,7 +192,7 @@
             disabled={w.start <= 1}
             onclick={() => reader.loadWindow(active.id, Math.max(1, w.start - 400))}
           >
-            Précédentes
+            {t('reader.previous')}
           </button>
           <button
             type="button"
@@ -200,7 +200,7 @@
             disabled={w.start + w.lines.length > w.totalLines}
             onclick={() => reader.loadWindow(active.id, w.start + w.lines.length)}
           >
-            Suivantes
+            {t('reader.next')}
           </button>
         </div>
       {/if}

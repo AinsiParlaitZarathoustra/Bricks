@@ -3,6 +3,7 @@
   // fence is closed, drawn as an SVG at the width available, in the app's theme
   // under the chart's own colours. Vega is loaded on demand. While it streams,
   // and when it cannot be drawn, its source stays shown.
+  import { t } from '$lib/i18n/i18n.svelte'
   import { onMount } from 'svelte'
   import { fontsReady, theme } from '$lib/theme/theme.svelte'
   import { mermaidColors } from './mermaid-colors'
@@ -83,10 +84,10 @@
 
 <div bind:this={host} class="w-full">
   {#if svg}
-    <SvgViewer {svg} {source} title="Vega-Lite" variant="chart" fileName="graphique.svg" />
+    <SvgViewer {svg} {source} title="Vega-Lite" variant="chart" fileName={t('conversation.chartSvg')} />
   {:else}
     <figure class="my-2 overflow-hidden rounded-md bg-code-bg text-code-foreground" aria-busy={!error && complete}>
-      {#if error}<p class="px-2.5 pt-2 text-xs text-destructive" role="alert">Graphique non rendu : {error}</p>{/if}
+      {#if error}<p class="px-2.5 pt-2 text-xs text-destructive" role="alert">{t('conversation.chartNotRendered', { error })}</p>{/if}
       <pre class="overflow-x-auto p-2.5 text-xs leading-relaxed"><code class="font-mono">{source}</code></pre>
     </figure>
   {/if}

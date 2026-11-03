@@ -13,6 +13,7 @@ pub mod memory;
 pub mod relocate;
 pub mod sessions;
 
+use crate::i18n::{msg, tr};
 use crate::contract::{AppInfo, IpcErrorCode, IpcResult, ProviderInfo};
 use crate::services::attachments as store;
 use crate::services::changes::ChangeJournal;
@@ -85,6 +86,10 @@ impl AppState {
     /// loaded once here. Nothing fails: problems are kept in
     /// `config_errors` and the application keeps running.
     pub fn load() -> Self {
+        // What loading reports (a damaged projects file) speaks the saved language.
+        let home = bricks_config::bricks_home();
+        let prefs = PrefsStore::at(home.join("desktop").join("preferences.json"));
+        crate::i18n::set_language(prefs.get().language);
         let providers_path = providers_file();
         let registry = bricks_config::load_registry(Some(&providers_path)).map(Arc::new);
         Self::assemble_at(bricks_config::bricks_home(), registry, providers_path)
@@ -184,7 +189,7 @@ impl AppState {
         check_folder(&path).map_err(|e| {
             error(
                 IpcErrorCode::FolderMissing,
-                format!("le dossier {} n'est plus accessible : {e}", project.path),
+                tr!(msg::FOLDER_IS_NO_LONGER_ACCESSIBLE, e = e, path = project.path),
             )
         })?;
         Ok(path)

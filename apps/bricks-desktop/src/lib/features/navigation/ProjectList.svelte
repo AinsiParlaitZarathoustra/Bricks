@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { t } from '$lib/i18n/i18n.svelte';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import Folder from '@lucide/svelte/icons/folder';
 	import FolderOpen from '@lucide/svelte/icons/folder-open';
@@ -72,7 +73,7 @@
 		if (!target || renaming) return;
 		const name = renameName.trim();
 		if (!name) {
-			renameError = 'Donnez un nom au projet.';
+			renameError = t('navigation.giveTheProjectAName');
 			return;
 		}
 		if (name === target.name) {
@@ -93,7 +94,7 @@
 	}
 </script>
 
-<ul class="flex flex-col gap-2" aria-label="Projets">
+<ul class="flex flex-col gap-2" aria-label={t('navigation.projects')}>
 	{#each app.folders as project (project.id)}
 		{@const expanded = !app.collapsedProjects.has(project.id)}
 		{@const drafting = project.id === app.currentProjectId && app.currentSessionId === null}
@@ -122,14 +123,14 @@
 					<span class="truncate text-compact font-medium">{project.name}</span>
 				</button>
 				{#if project.missing}
-					<span id={`${uid}-${project.id}-missing`} class="sr-only">Dossier introuvable</span>
+					<span id={`${uid}-${project.id}-missing`} class="sr-only">{t('navigation.folderNotFound')}</span>
 				{/if}
 
 				<Button
 					variant="ghost"
 					size="icon-sm"
 					class="shrink-0 text-muted-foreground opacity-0 group-focus-within:opacity-100 group-hover:opacity-100"
-					aria-label={`Nouvelle conversation dans ${project.name}`}
+					aria-label={t('navigation.newConversationIn', { name: project.name })}
 					onclick={() => startConversation(project)}
 				>
 					<Plus class="size-4" aria-hidden="true" />
@@ -143,7 +144,7 @@
 								variant="ghost"
 								size="icon-sm"
 								class="shrink-0 text-muted-foreground opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
-								aria-label={`Actions pour le projet ${project.name}`}
+								aria-label={t('navigation.actionsForProject', { name: project.name })}
 							>
 								<EllipsisVertical class="size-4" aria-hidden="true" />
 							</Button>
@@ -152,12 +153,12 @@
 					<DropdownMenu.Content align="end" class="w-44" onCloseAutoFocus={onMenuClose}>
 						<DropdownMenu.Item onSelect={() => openRename(project)}>
 							<Pencil class="size-4" aria-hidden="true" />
-							Renommer…
+							{t('navigation.rename2')}
 						</DropdownMenu.Item>
 						<DropdownMenu.Separator />
 						<DropdownMenu.Item variant="destructive" onSelect={() => openRemove(project)}>
 							<Trash class="size-4" aria-hidden="true" />
-							Retirer de Bricks
+							{t('navigation.removeFromBricks')}
 						</DropdownMenu.Item>
 					</DropdownMenu.Content>
 				</DropdownMenu.Root>
@@ -166,7 +167,7 @@
 				<div class="mt-0.5">
 					<ConversationList
 						projectId={project.id}
-						label={`Conversations de ${project.name}`}
+						label={t('navigation.conversationsOf', { name: project.name })}
 						limit={SHOWN_PER_PROJECT}
 						nested
 					/>
@@ -180,10 +181,10 @@
 	<Dialog.Content showCloseButton={false} class="sm:max-w-sm">
 		<form onsubmit={submitRename} class="flex flex-col gap-6">
 			<Dialog.Header>
-				<Dialog.Title>Renommer le projet</Dialog.Title>
+				<Dialog.Title>{t('navigation.renameTheProject')}</Dialog.Title>
 			</Dialog.Header>
 			<div class="flex flex-col gap-2">
-				<Label for={`${uid}-name`}>Nom du projet</Label>
+				<Label for={`${uid}-name`}>{t('navigation.projectName')}</Label>
 				<Input
 					id={`${uid}-name`}
 					bind:value={renameName}
@@ -197,8 +198,8 @@
 				{/if}
 			</div>
 			<Dialog.Footer>
-				<Button type="button" variant="outline" onclick={() => (renameOpen = false)}>Annuler</Button>
-				<Button type="submit" disabled={renaming}>Enregistrer</Button>
+				<Button type="button" variant="outline" onclick={() => (renameOpen = false)}>{t('common.cancel')}</Button>
+				<Button type="submit" disabled={renaming}>{t('common.save')}</Button>
 			</Dialog.Footer>
 		</form>
 	</Dialog.Content>
@@ -207,15 +208,14 @@
 <AlertDialog.Root bind:open={removeOpen}>
 	<AlertDialog.Content>
 		<AlertDialog.Header>
-			<AlertDialog.Title>Retirer « {removeTarget?.name ?? ''} » de Bricks ?</AlertDialog.Title>
+			<AlertDialog.Title>{t('navigation.removeFromBricks2', { value: removeTarget?.name ?? '' })}</AlertDialog.Title>
 			<AlertDialog.Description>
-				Le projet disparaît de la liste de Bricks. Les fichiers du dossier et les conversations ne sont pas
-				supprimés.
+				{t('navigation.theProjectLeavesBricksListThe')}
 			</AlertDialog.Description>
 		</AlertDialog.Header>
 		<AlertDialog.Footer>
-			<AlertDialog.Cancel>Annuler</AlertDialog.Cancel>
-			<AlertDialog.Action onclick={confirmRemove}>Retirer</AlertDialog.Action>
+			<AlertDialog.Cancel>{t('common.cancel')}</AlertDialog.Cancel>
+			<AlertDialog.Action onclick={confirmRemove}>{t('navigation.remove')}</AlertDialog.Action>
 		</AlertDialog.Footer>
 	</AlertDialog.Content>
 </AlertDialog.Root>

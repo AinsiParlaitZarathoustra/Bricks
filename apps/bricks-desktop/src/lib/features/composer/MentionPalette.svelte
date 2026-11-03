@@ -2,6 +2,7 @@
   // The `@` popover above the composer: project files and folders matching the
   // text after `@`. Same listbox pattern as the command palette: the editor keeps
   // the keyboard (aria-activedescendant); this component renders and reports.
+  import { t } from '$lib/i18n/i18n.svelte'
   import type { ProjectFileEntry } from '$lib/ipc/bindings/ProjectFileEntry'
   import { Kbd } from '$lib/components/ui/kbd'
   import FileIcon from '$lib/features/file-icons/FileIcon.svelte'
@@ -43,7 +44,7 @@
   class="absolute inset-x-0 bottom-full z-20 mb-2 overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-md"
 >
   {#if items.length > 0}
-    <div role="listbox" {id} aria-label="Fichiers du projet" class="max-h-64 overflow-y-auto p-1">
+    <div role="listbox" {id} aria-label={t('composer.projectFiles')} class="max-h-64 overflow-y-auto p-1">
       {#each items as entry, i (entry.path)}
         <div
           role="option"
@@ -69,13 +70,13 @@
       {/each}
     </div>
   {:else if status === 'error'}
-    <p role="alert" class="px-3 py-2 text-sm text-destructive">Fichiers indisponibles : {error}</p>
+    <p role="alert" class="px-3 py-2 text-sm text-destructive">{t('composer.filesUnavailable', { error })}</p>
   {:else if status === 'ready'}
     <p role="status" class="px-3 py-2 text-sm text-muted-foreground">
-      Aucun fichier ne correspond à « @{query} ».
+      {t('composer.noFileMatches', { query })}
     </p>
   {:else}
-    <p role="status" class="px-3 py-2 text-sm text-muted-foreground">Recherche des fichiers…</p>
+    <p role="status" class="px-3 py-2 text-sm text-muted-foreground">{t('composer.searchingFiles')}</p>
   {/if}
 
   <div class="flex items-center justify-end gap-2 border-t px-2 py-1.5 text-xs text-muted-foreground">
@@ -83,12 +84,12 @@
       type="button"
       class="inline-flex items-center gap-1.5 rounded-sm px-1.5 py-0.5 hover:bg-accent hover:text-accent-foreground"
       aria-keyshortcuts="Control+R"
-      title="Actualiser la liste des fichiers (Ctrl+R)"
+      title={t('composer.refreshTheFileListCtrlR')}
       onmousedown={(e) => e.preventDefault()}
       onclick={onRefresh}
     >
       <RefreshCwIcon class="size-3.5" aria-hidden="true" />
-      Actualiser
+      {t('common.refresh')}
       <Kbd>Ctrl R</Kbd>
     </button>
   </div>

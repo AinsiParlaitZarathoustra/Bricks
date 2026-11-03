@@ -55,8 +55,8 @@ const model: ModelView = {
 describe('model required texts', () => {
 	it('refuses an empty name or model API name', () => {
 		const errors = validateModelForm({ ...modelForm(model), name: '  ', apiModel: '' });
-		expect(errors.name).toBe(REQUIRED_MESSAGE);
-		expect(errors.apiModel).toBe(REQUIRED_MESSAGE);
+		expect(errors.name).toBe(REQUIRED_MESSAGE());
+		expect(errors.apiModel).toBe(REQUIRED_MESSAGE());
 		expect(hasFormErrors(errors)).toBe(true);
 	});
 
@@ -71,8 +71,8 @@ describe('provider required texts', () => {
 	it('refuses an empty name or endpoint, and never sends them empty', () => {
 		const form = { ...providerForm(provider), name: ' ', endpoint: '' };
 		const errors = validateProviderForm(form, provider);
-		expect(errors.name).toBe(REQUIRED_MESSAGE);
-		expect(errors.endpoint).toBe(REQUIRED_MESSAGE);
+		expect(errors.name).toBe(REQUIRED_MESSAGE());
+		expect(errors.endpoint).toBe(REQUIRED_MESSAGE());
 		const patch = buildProviderPatch(provider, form);
 		expect(patch.name).toBeNull();
 		expect(patch.endpoint).toBeNull();
@@ -82,7 +82,7 @@ describe('provider required texts', () => {
 describe('api_key_env', () => {
 	it('requires a variable name while the authentication needs a key', () => {
 		const form = { ...providerForm(provider), apiKeyEnv: '' };
-		expect(validateProviderForm(form, provider).apiKeyEnv).toBe(API_KEY_ENV_REQUIRED_MESSAGE);
+		expect(validateProviderForm(form, provider).apiKeyEnv).toBe(API_KEY_ENV_REQUIRED_MESSAGE());
 	});
 
 	it('does not require one when the authentication is none and none was set', () => {
@@ -100,7 +100,7 @@ describe('api_key_env', () => {
 	it('refuses to clear a variable that cannot be removed in this window', () => {
 		const none = { ...provider, auth: 'none' };
 		const form = { ...providerForm(none), apiKeyEnv: '' };
-		expect(validateProviderForm(form, none).apiKeyEnv).toBe(API_KEY_ENV_CLEAR_MESSAGE);
+		expect(validateProviderForm(form, none).apiKeyEnv).toBe(API_KEY_ENV_CLEAR_MESSAGE());
 	});
 
 	it('is never sent as an empty string', () => {

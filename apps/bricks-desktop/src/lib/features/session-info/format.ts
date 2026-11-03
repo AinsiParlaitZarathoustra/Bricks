@@ -1,16 +1,17 @@
 // Labels and pure helpers of the session inspectors (French, no state, no IPC).
 
+import { t, localeTag } from '$lib/i18n/i18n.svelte';
 import type { BadgeVariant } from '$lib/components/ui/badge';
 import type { Activity } from '$lib/ipc/engine';
 
 /** Permission levels as the engine names them (`SessionToolInfo.level`). */
 const LEVEL_LABELS: Record<string, string> = {
-	none: 'Aucune',
-	read_only: 'Lecture',
-	write: 'Écriture',
-	execute: 'Exécution',
-	dangerous: 'Dangereux',
-	forbidden: 'Interdit'
+	get none() { return t('common.none') },
+	get read_only() { return t('common.reading') },
+	get write() { return t('common.write') },
+	get execute() { return t('common.run') },
+	get dangerous() { return t('sessionInfo.dangerous') },
+	get forbidden() { return t('sessionInfo.forbidden') }
 };
 
 export function levelLabel(level: string): string {
@@ -21,11 +22,11 @@ export function levelLabel(level: string): string {
 export function decisionLabel(decision: string): string {
 	switch (decision) {
 		case 'allow':
-			return 'Autorisé';
+			return t('common.allowed');
 		case 'ask':
-			return 'Sur demande';
+			return t('sessionInfo.onRequest');
 		case 'deny':
-			return 'Refusé';
+			return t('common.refused2');
 		default:
 			return decision;
 	}
@@ -46,11 +47,11 @@ export function decisionVariant(decision: string): BadgeVariant {
 export function activityLabel(activity: Activity): string {
 	switch (activity.state) {
 		case 'idle':
-			return 'Inactive';
+			return t('sessionInfo.idle');
 		case 'running':
-			return 'Exécution en cours';
+			return t('sessionInfo.runInProgress');
 		case 'busy':
-			return `Occupée : ${activity.what}`;
+			return t('sessionInfo.busy', { what: activity.what });
 	}
 }
 
@@ -62,12 +63,12 @@ export interface McpStatusView {
 
 /** An MCP server state as the engine reports it (`Connected`, `Error("…")`, ...). */
 export function mcpStatusView(status: string): McpStatusView {
-	if (status === 'Connected') return { label: 'Connecté', detail: null, tone: 'success' };
-	if (status === 'Disconnected') return { label: 'Déconnecté', detail: null, tone: 'muted' };
+	if (status === 'Connected') return { label: t('sessionInfo.connected'), detail: null, tone: 'success' };
+	if (status === 'Disconnected') return { label: t('sessionInfo.disconnected'), detail: null, tone: 'muted' };
 	const error = /^Error\((.*)\)$/s.exec(status);
-	if (error) return { label: 'Erreur', detail: unquote(error[1]), tone: 'error' };
+	if (error) return { label: t('common.error'), detail: unquote(error[1]), tone: 'error' };
 	if (status.startsWith('not connected yet')) {
-		return { label: 'Pas encore connecté', detail: 'Connexion à la première exécution.', tone: 'muted' };
+		return { label: t('sessionInfo.notConnectedYet'), detail: t('sessionInfo.connectsOnTheFirstRun'), tone: 'muted' };
 	}
 	return { label: status, detail: null, tone: 'muted' };
 }
@@ -84,10 +85,10 @@ function unquote(text: string): string {
 
 /** Whether a tool matches the filter (name or description, case-insensitive). */
 export function matchesTool(tool: { name: string; description: string }, filter: string): boolean {
-	const needle = filter.trim().toLocaleLowerCase('fr');
+	const needle = filter.trim().toLocaleLowerCase(localeTag());
 	if (!needle) return true;
 	return (
-		tool.name.toLocaleLowerCase('fr').includes(needle) ||
-		tool.description.toLocaleLowerCase('fr').includes(needle)
+		tool.name.toLocaleLowerCase(localeTag()).includes(needle) ||
+		tool.description.toLocaleLowerCase(localeTag()).includes(needle)
 	);
 }

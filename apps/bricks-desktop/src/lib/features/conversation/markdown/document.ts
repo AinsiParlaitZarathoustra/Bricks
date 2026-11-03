@@ -4,6 +4,7 @@
 // labels (definitions), its heading ids (earlier headings), its footnote numbers and the math
 // renderer/macro state in source order. `final` re-lexes everything and reuses every unchanged block, so it equals
 // `renderReference` of the same source.
+import { t } from '$lib/i18n/i18n.svelte'
 import type { Token } from 'marked'
 import { DUPLICATE_MARK, fenceClosed, fenceLanguage, forEachNode, labelsOf, plainText, slugify, type Tok } from './extensions'
 import {
@@ -236,6 +237,7 @@ export class MarkdownDocument {
   /** The last rendering of each block (by key), least recently used first, within a byte budget. */
   private readonly cache = new Map<string, CachedBlock>()
   private cacheBytes = 0
+  private language = ''
   /** The highlighted body of the open code block: the text it covers, and its body. */
   private openCode: { key: string; language: string; text: string; body: string } | null = null
   private lastSource: string | null = null
@@ -279,6 +281,15 @@ export class MarkdownDocument {
     if (renderer === this.math) return
     this.math = renderer
     this.mathVersion += 1
+  }
+
+  /** Rendered blocks hold interface words (a copy button): a new language renders them again. */
+  setLanguage(language: string) {
+    if (language === this.language) return
+    this.language = language
+    this.cache.clear()
+    this.cacheBytes = 0
+    this.section = null
   }
 
   /** Releases the cache and the blocks. Later updates return nothing. */
@@ -622,7 +633,7 @@ export class MarkdownDocument {
     entry.output = {
       key: entry.key,
       kind: 'html',
-      html: withCodeIcons(codeShell(fenceLanguage(info) || 'texte', body, fenceIconId(info))),
+      html: withCodeIcons(codeShell(fenceLanguage(info) || t('conversation.codeLanguageText'), body, fenceIconId(info))),
     }
     entry.outputSig = OPEN_SIG
     stats.renderedBlocks += 1

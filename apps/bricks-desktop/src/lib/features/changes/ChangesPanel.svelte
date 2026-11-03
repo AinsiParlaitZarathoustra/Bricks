@@ -2,6 +2,7 @@
 	// Right panel « Modifications »: what the conversation changed, what the
 	// project's journal recorded, and the Git state of the project folder.
 	// Owner: Haiku 7 (changes feature).
+	import { t } from '$lib/i18n/i18n.svelte';
 	import * as Tabs from '$lib/components/ui/tabs';
 	import ConversationChanges from './ConversationChanges.svelte';
 	import HistoryChanges from './HistoryChanges.svelte';
@@ -11,19 +12,19 @@
 </script>
 
 <div class="flex h-full min-h-0 flex-col">
-	<h2 class="px-3 pt-3 pb-2 text-ui font-medium">Modifications</h2>
+	<h2 class="px-3 pt-3 pb-2 text-ui font-medium">{t('common.changes')}</h2>
 	<Tabs.Root bind:value={tab} class="flex min-h-0 flex-1 flex-col gap-0">
 		<Tabs.List class="mx-3 grid grid-cols-3">
-			<Tabs.Trigger value="conversation" class="min-w-0 truncate text-xs">Conversation</Tabs.Trigger>
+			<Tabs.Trigger value="conversation" class="min-w-0 truncate text-xs">{t('common.conversation')}</Tabs.Trigger>
 			<!-- The visible label is short for the 280 px panel; the full name stays
 				accessible and still contains the visible word (WCAG 2.5.3). -->
 			<Tabs.Trigger
 				value="historique"
 				class="min-w-0 truncate text-xs"
-				aria-label="Historique du projet"
-				title="Historique du projet"
+				aria-label={t('changes.projectHistory')}
+				title={t('changes.projectHistory')}
 			>
-				Historique
+				{t('changes.history')}
 			</Tabs.Trigger>
 			<Tabs.Trigger value="git" class="min-w-0 truncate text-xs">Git</Tabs.Trigger>
 		</Tabs.List>

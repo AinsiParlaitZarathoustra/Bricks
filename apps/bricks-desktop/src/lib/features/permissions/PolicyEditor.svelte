@@ -2,6 +2,7 @@
 	// Edits a permission policy: the profile, and for CUSTOM an effect per class of
 	// action and per tool. Every change is handed to `onchange` as a whole policy;
 	// the caller saves it and passes the policy in force back.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import X from '@lucide/svelte/icons/x';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -78,11 +79,11 @@
 
 <div class="flex flex-col gap-4">
 	<div class="flex flex-col gap-1.5">
-		<Label for={`${uid}-profile`} class="text-xs text-muted-foreground">Profil</Label>
+		<Label for={`${uid}-profile`} class="text-xs text-muted-foreground">{t('permissions.profile')}</Label>
 		<Select.Root type="single" value={profile} onValueChange={chooseProfile} {disabled}>
 			<Select.Trigger id={`${uid}-profile`} class="w-full max-w-72">
 				<span class="truncate">
-					{selectedProfile ? selectedProfile.label : 'À choisir'}
+					{selectedProfile ? selectedProfile.label : t('permissions.toChoose')}
 				</span>
 			</Select.Trigger>
 			<Select.Content>
@@ -97,7 +98,7 @@
 
 	{#if profile === 'custom'}
 		<div class="flex flex-col gap-2">
-			<h4 class="text-xs font-medium text-muted-foreground">Par action</h4>
+			<h4 class="text-xs font-medium text-muted-foreground">{t('permissions.perAction')}</h4>
 			<ul class="flex flex-col gap-2">
 				{#each CLASS_ROWS as row (row.key)}
 					<li class="flex items-center justify-between gap-3">
@@ -111,7 +112,7 @@
 		</div>
 
 		<div class="flex flex-col gap-2">
-			<h4 class="text-xs font-medium text-muted-foreground">Par outil</h4>
+			<h4 class="text-xs font-medium text-muted-foreground">{t('permissions.perTool')}</h4>
 			{#if rules.length > 0}
 				<ul class="flex flex-col gap-2">
 					{#each rules as rule (rule.name)}
@@ -125,7 +126,7 @@
 									size="icon"
 									variant="ghost"
 									class="size-8"
-									aria-label={`Retirer la règle de ${rule.name}`}
+									aria-label={t('permissions.removeTheRuleFor', { name: rule.name })}
 									{disabled}
 									onclick={() => onchange(withTool(policy, rule.name, null))}
 								>
@@ -139,8 +140,8 @@
 			{#if tools.length > 0}
 				{#if free.length > 0}
 					<Select.Root type="single" value="" onValueChange={(name) => name && addTool(name)} {disabled}>
-						<Select.Trigger class="w-full max-w-72" aria-label="Ajouter une règle pour un outil">
-							<span class="truncate text-muted-foreground">Ajouter un outil</span>
+						<Select.Trigger class="w-full max-w-72" aria-label={t('permissions.addARuleForATool')}>
+							<span class="truncate text-muted-foreground">{t('permissions.addATool')}</span>
 						</Select.Trigger>
 						<Select.Content>
 							{#each free as name (name)}
@@ -161,15 +162,15 @@
 				>
 					<Input
 						bind:value={newTool}
-						placeholder="Nom de l’outil"
-						aria-label="Nom de l’outil"
+						placeholder={t('permissions.toolName')}
+						aria-label={t('permissions.toolName')}
 						autocomplete="off"
 						spellcheck={false}
 						class="font-mono text-xs"
 						{disabled}
 					/>
 					<Button type="submit" size="sm" variant="outline" disabled={disabled || !newTool.trim()}>
-						Ajouter
+						{t('common.add')}
 					</Button>
 				</form>
 			{/if}

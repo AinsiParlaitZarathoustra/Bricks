@@ -1,6 +1,7 @@
 <script lang="ts">
 	// Session inspector (`/session`): identifier, title, folder, model and effort
 	// (requested and applied), activity, memory space, approvals.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import { onDestroy, untrack } from 'svelte';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import CopyIcon from '@lucide/svelte/icons/copy';
@@ -67,28 +68,28 @@
 			clearTimeout(copyTimer);
 			copyTimer = setTimeout(() => (copied = false), 1500);
 		} catch {
-			copyError = 'Copie impossible : sélectionnez l’identifiant et copiez-le.';
+			copyError = t('sessionInfo.couldNotCopySelectTheIdentifier');
 		}
 	}
 
-	const activity = $derived(snapshot ? activityLabel(snapshot.activity) : 'Chargement…');
+	const activity = $derived(snapshot ? activityLabel(snapshot.activity) : t('common.loading'));
 </script>
 
 {#if !conv || !sessionId}
 	<EmptyState
-		title="Aucune conversation ouverte"
+		title={t('common.noOpenConversation2')}
 	/>
 {:else}
 	<div class="flex flex-col gap-4">
 		<dl class="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-6 gap-y-3 text-sm">
-			<dt class="text-muted-foreground">Identifiant</dt>
+			<dt class="text-muted-foreground">{t('common.identifier')}</dt>
 			<dd class="flex min-w-0 items-center gap-2">
 				<code class="min-w-0 break-all font-mono text-xs select-all">{sessionId}</code>
 				<Button
 					variant="ghost"
 					size="icon-sm"
 					onclick={copyId}
-					aria-label={copied ? 'Identifiant copié' : 'Copier l’identifiant'}
+					aria-label={copied ? t('sessionInfo.identifierCopied') : t('sessionInfo.copyTheIdentifier')}
 				>
 					{#if copied}
 						<CheckIcon aria-hidden="true" />
@@ -98,38 +99,38 @@
 				</Button>
 			</dd>
 
-			<dt class="text-muted-foreground">Titre</dt>
+			<dt class="text-muted-foreground">{t('sessionInfo.title')}</dt>
 			<dd class="min-w-0 break-words">{displayTitle(conv.title)}</dd>
 
-			<dt class="text-muted-foreground">Dossier</dt>
-			<dd class="min-w-0 font-mono text-xs break-all">{conv.workingDir || 'inconnu'}</dd>
+			<dt class="text-muted-foreground">{t('common.folder')}</dt>
+			<dd class="min-w-0 font-mono text-xs break-all">{conv.workingDir || t('common.unknownValue')}</dd>
 
-			<dt class="text-muted-foreground">Modèle</dt>
-			<dd class="min-w-0 font-mono text-xs break-all">{conv.model || 'inconnu'}</dd>
+			<dt class="text-muted-foreground">{t('common.model')}</dt>
+			<dd class="min-w-0 font-mono text-xs break-all">{conv.model || t('common.unknownValue')}</dd>
 
-			<dt class="text-muted-foreground">Effort</dt>
-			<dd>{conv.effectiveReasoning ?? 'aucun'}</dd>
+			<dt class="text-muted-foreground">{t('sessionInfo.effort')}</dt>
+			<dd>{conv.effectiveReasoning ?? t('common.noValue')}</dd>
 
-			<dt class="text-muted-foreground">Activité</dt>
+			<dt class="text-muted-foreground">{t('sessionInfo.activity')}</dt>
 			<dd>{activity}</dd>
 
-			<dt class="text-muted-foreground">Espace de mémoire</dt>
+			<dt class="text-muted-foreground">{t('sessionInfo.memorySpace')}</dt>
 			<dd class="min-w-0 break-words">
 				{#if snapshot}
-					{snapshot.memory_space ?? 'aucun (mémoire à long terme désactivée)'}
+					{snapshot.memory_space ?? t('sessionInfo.noneLongTermMemoryDisabled')}
 				{:else}
-					Chargement…
+					{t('common.loading')}
 				{/if}
 			</dd>
 
-			<dt class="text-muted-foreground">Approbations</dt>
+			<dt class="text-muted-foreground">{t('sessionInfo.approvals')}</dt>
 			<dd>
 				{#if snapshot}
 					{snapshot.interactive
-						? 'demandées à une personne'
-						: 'aucune personne pour répondre : les actions à approuver sont refusées'}
+						? t('sessionInfo.askedOfAPerson')
+						: t('sessionInfo.nobodyToAnswerActionsNeedingApproval')}
 				{:else}
-					Chargement…
+					{t('common.loading')}
 				{/if}
 			</dd>
 		</dl>
@@ -139,7 +140,7 @@
 		{/if}
 		{#if loadError}
 			<p role="alert" class="text-sm text-destructive">
-				Lecture de la session impossible : {loadError}
+				{t('sessionInfo.couldNotReadTheSession', { loadError })}
 			</p>
 		{/if}
 	</div>

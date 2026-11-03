@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '$lib/i18n/i18n.svelte'
   import { cn } from '$lib/utils.js'
 
   interface Props {
@@ -48,6 +49,6 @@
     class="mt-1 rounded text-xs text-primary underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
     onclick={() => (showAll = true)}
   >
-    Afficher tout ({hiddenCount} ligne{hiddenCount > 1 ? 's' : ''} de plus)
+    {t('conversation.showAllMoreLine', { count: hiddenCount })}
   </button>
 {/if}

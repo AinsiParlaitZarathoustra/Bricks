@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { t } from '$lib/i18n/i18n.svelte';
 	import ChevronLeftIcon from '@lucide/svelte/icons/chevron-left';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import { Button } from '$lib/components/ui/button';
@@ -15,7 +16,7 @@
 </script>
 
 {#if pages > 1}
-	<nav aria-label="Pages" class="flex items-center justify-between gap-2">
+	<nav aria-label={t('catalog.pages')} class="flex items-center justify-between gap-2">
 		<Button
 			variant="outline"
 			size="sm"
@@ -23,16 +24,16 @@
 			onclick={() => onchange(page - 1)}
 		>
 			<ChevronLeftIcon aria-hidden="true" />
-			Précédente
+			{t('catalog.previous')}
 		</Button>
-		<span class="text-xs tabular-nums text-muted-foreground">Page {page + 1} sur {pages}</span>
+		<span class="text-xs tabular-nums text-muted-foreground">{t('common.pageOf', { value: page + 1, pages })}</span>
 		<Button
 			variant="outline"
 			size="sm"
 			disabled={disabled || page >= pages - 1}
 			onclick={() => onchange(page + 1)}
 		>
-			Suivante
+			{t('catalog.next')}
 			<ChevronRightIcon aria-hidden="true" />
 		</Button>
 	</nav>

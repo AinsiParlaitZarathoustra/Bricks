@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { t } from '$lib/i18n/i18n.svelte';
 	import type { Snippet } from 'svelte';
 	import PanelLeftOpenIcon from '@lucide/svelte/icons/panel-left-open';
 	import PanelLeftCloseIcon from '@lucide/svelte/icons/panel-left-close';
@@ -74,9 +75,9 @@
 	<div data-tauri-drag-region class="flex min-w-0 items-center justify-self-start">
 		{#if onToggleLeft}
 			<PanelToggle
-				ariaLabel="Panneau de gauche"
-				tooltipShow="Afficher le panneau de gauche"
-				tooltipHide="Masquer le panneau de gauche"
+				ariaLabel={t('layout.leftPanel')}
+				tooltipShow={t('layout.showTheLeftPanel')}
+				tooltipHide={t('layout.hideTheLeftPanel')}
 				pressed={leftPressed}
 				icon={leftPressed ? PanelLeftCloseIcon : PanelLeftOpenIcon}
 				onclick={onToggleLeft}
@@ -96,12 +97,12 @@
 		{/if}
 
 		{#if hasRightToggles}
-			<div role="group" aria-label="Affichage" class="ml-1 flex shrink-0 items-center gap-0.5">
+			<div role="group" aria-label={t('layout.view')} class="ml-1 flex shrink-0 items-center gap-0.5">
 				{#if onToggleRight}
 					<PanelToggle
-						ariaLabel="Panneau de droite"
-						tooltipShow="Afficher le panneau de droite"
-						tooltipHide="Masquer le panneau de droite"
+						ariaLabel={t('layout.rightPanel')}
+						tooltipShow={t('layout.showTheRightPanel')}
+						tooltipHide={t('layout.hideTheRightPanel')}
 						pressed={rightPressed}
 						icon={rightPressed ? PanelRightCloseIcon : PanelRightOpenIcon}
 						onclick={onToggleRight}
@@ -112,9 +113,9 @@
 				{/if}
 				{#if onToggleTerminal}
 					<PanelToggle
-						ariaLabel="Terminal"
-						tooltipShow="Afficher le terminal"
-						tooltipHide="Masquer le terminal"
+						ariaLabel={t('common.terminal')}
+						tooltipShow={t('layout.showTheTerminal')}
+						tooltipHide={t('common.hideTheTerminal')}
 						pressed={terminalPressed}
 						icon={TerminalIcon}
 						onclick={onToggleTerminal}
@@ -122,9 +123,9 @@
 				{/if}
 				{#if onToggleChanges}
 					<PanelToggle
-						ariaLabel="Modifications"
-						tooltipShow="Afficher les modifications"
-						tooltipHide="Masquer les modifications"
+						ariaLabel={t('common.changes')}
+						tooltipShow={t('layout.showChanges')}
+						tooltipHide={t('layout.hideChanges')}
 						pressed={changesPressed}
 						icon={GitCompareIcon}
 						onclick={onToggleChanges}
@@ -132,9 +133,9 @@
 				{/if}
 				{#if onToggleReader}
 					<PanelToggle
-						ariaLabel="Lecteur"
-						tooltipShow="Afficher le lecteur"
-						tooltipHide="Masquer le lecteur"
+						ariaLabel={t('common.reader')}
+						tooltipShow={t('layout.showTheReader')}
+						tooltipHide={t('layout.hideTheReader')}
 						pressed={readerPressed}
 						icon={BookOpenIcon}
 						onclick={onToggleReader}

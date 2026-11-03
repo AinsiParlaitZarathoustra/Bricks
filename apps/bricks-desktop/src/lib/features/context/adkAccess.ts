@@ -9,6 +9,7 @@
 // - Labels are the titles the inspector dialog shows, so the user recognises them.
 // - Every entry reads the shown conversation: the menu is disabled without one.
 
+import { t } from '$lib/i18n/i18n.svelte';
 import type { InspectorView } from '$lib/state/ui.svelte';
 
 export interface AdkAccessItem {
@@ -24,28 +25,28 @@ export interface AdkAccessGroup {
 
 export const ADK_ACCESS_GROUPS: readonly AdkAccessGroup[] = [
 	{
-		label: 'Conversation',
+		get label() { return t('common.conversation') },
 		items: [
-			{ view: 'session', label: 'Session' },
-			{ view: 'tools', label: 'Outils' },
-			{ view: 'mcp', label: 'Serveurs MCP' },
-			{ view: 'config', label: 'Configuration' }
+			{ view: 'session', get label() { return t('common.session') } },
+			{ view: 'tools', get label() { return t('common.tools') } },
+			{ view: 'mcp', get label() { return t('common.mcpServers') } },
+			{ view: 'config', get label() { return t('common.configuration') } }
 		]
 	},
 	{
-		label: 'Agents',
+		get label() { return t('common.agents') },
 		items: [
-			{ view: 'agents', label: 'Profils d’agents' },
-			{ view: 'jobs', label: 'Tâches de fond' }
+			{ view: 'agents', get label() { return t('common.agentProfiles') } },
+			{ view: 'jobs', get label() { return t('common.backgroundJobs') } }
 		]
 	},
 	{
-		label: 'Contexte et mémoire',
+		get label() { return t('context.contextAndMemory') },
 		items: [
-			{ view: 'context', label: 'Contexte' },
-			{ view: 'cost', label: 'Consommation' },
-			{ view: 'memory', label: 'Mémoire' },
-			{ view: 'search', label: 'Recherche dans le code' }
+			{ view: 'context', get label() { return t('common.context') } },
+			{ view: 'cost', get label() { return t('common.usage') } },
+			{ view: 'memory', get label() { return t('common.memory') } },
+			{ view: 'search', get label() { return t('common.codeSearch') } }
 		]
 	}
 ];

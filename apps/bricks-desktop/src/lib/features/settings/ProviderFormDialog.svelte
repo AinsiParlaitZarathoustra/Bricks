@@ -1,6 +1,7 @@
 <script lang="ts">
 	// Form of a provider: a new one (`provider` null) or an existing one, from its values when opened.
 	// Cancel discards.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import { untrack } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Select from '$lib/components/ui/select';
@@ -83,7 +84,7 @@
 		<form onsubmit={submit} class="flex flex-col gap-5">
 			<Dialog.Header>
 				<Dialog.Title>
-					{original ? `Modifier le fournisseur ${displayName(original.name, original.id)}` : 'Ajouter un fournisseur'}
+					{original ? t('settings.editProvider', { id: displayName(original.name, original.id) }) : t('settings.addAProvider')}
 				</Dialog.Title>
 			</Dialog.Header>
 
@@ -93,7 +94,7 @@
 
 			{#if !original}
 				<div class="flex flex-col gap-2">
-					<Label for={`${uid}-id`}>Identifiant</Label>
+					<Label for={`${uid}-id`}>{t('common.identifier')}</Label>
 					<Input
 						id={`${uid}-id`}
 						bind:value={id}
@@ -111,7 +112,7 @@
 			{/if}
 
 			<div class="flex flex-col gap-2">
-				<Label for={`${uid}-name`}>Nom</Label>
+				<Label for={`${uid}-name`}>{t('settings.name')}</Label>
 				<Input
 					id={`${uid}-name`}
 					bind:value={form.name}
@@ -126,7 +127,7 @@
 			</div>
 
 			<div class="flex flex-col gap-2">
-				<Label for={`${uid}-endpoint`}>Adresse de l’API</Label>
+				<Label for={`${uid}-endpoint`}>{t('settings.apiAddress')}</Label>
 				<Input
 					id={`${uid}-endpoint`}
 					bind:value={form.endpoint}
@@ -142,7 +143,7 @@
 			</div>
 
 			<div class="flex flex-col gap-2">
-				<Label for={`${uid}-protocol`}>Protocole</Label>
+				<Label for={`${uid}-protocol`}>{t('settings.protocol')}</Label>
 				<Select.Root
 					type="single"
 					value={form.protocol}
@@ -162,7 +163,7 @@
 			</div>
 
 			<div class="flex flex-col gap-2">
-				<Label for={`${uid}-auth`}>Authentification</Label>
+				<Label for={`${uid}-auth`}>{t('settings.authentication')}</Label>
 				<Select.Root
 					type="single"
 					value={form.auth}
@@ -183,7 +184,7 @@
 
 			{#if form.auth === 'api_key_header'}
 				<div class="flex flex-col gap-2">
-					<Label for={`${uid}-header`}>En-tête de la clé</Label>
+					<Label for={`${uid}-header`}>{t('settings.keyHeader')}</Label>
 					<Input
 						id={`${uid}-header`}
 						bind:value={form.authHeader}
@@ -195,7 +196,7 @@
 			{/if}
 
 			<div class="flex flex-col gap-2">
-				<Label for={`${uid}-env`}>Variable d’environnement de la clé</Label>
+				<Label for={`${uid}-env`}>{t('settings.keyEnvironmentVariable')}</Label>
 				<Input
 					id={`${uid}-env`}
 					bind:value={form.apiKeyEnv}
@@ -210,7 +211,7 @@
 					<p id={`${uid}-env-help`} role="alert" class="text-xs text-pretty text-destructive">{shown.apiKeyEnv}</p>
 				{:else if original?.has_inline_key}
 					<p id={`${uid}-env-help`} class="text-xs text-pretty text-muted-foreground">
-						Une clé est écrite dans le fichier : la variable ne peut pas être définie ici.
+						{t('settings.aKeyIsWrittenInThe')}
 					</p>
 				{/if}
 			</div>
@@ -220,8 +221,8 @@
 			{/if}
 
 			<Dialog.Footer>
-				<Button type="button" variant="outline" onclick={onClose}>Annuler</Button>
-				<Button type="submit" disabled={saving}>Enregistrer</Button>
+				<Button type="button" variant="outline" onclick={onClose}>{t('common.cancel')}</Button>
+				<Button type="submit" disabled={saving}>{t('common.save')}</Button>
 			</Dialog.Footer>
 		</form>
 	</Dialog.Content>

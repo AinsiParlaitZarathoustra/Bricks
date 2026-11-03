@@ -81,7 +81,7 @@ describe('deletion text with unnamed models', () => {
 
 describe('conflict notice', () => {
 	it('says the changes were not saved and the values were reloaded', () => {
-		expect(CONFLICT_MESSAGE).toContain('modifié ailleurs');
-		expect(CONFLICT_MESSAGE).toContain('pas été enregistrées');
+		expect(CONFLICT_MESSAGE()).toContain('modifié ailleurs');
+		expect(CONFLICT_MESSAGE()).toContain('pas été enregistrées');
 	});
 });

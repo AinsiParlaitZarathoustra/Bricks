@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { t } from '$lib/i18n/i18n.svelte';
 	import SquarePen from '@lucide/svelte/icons/square-pen';
 	import { Button } from '$lib/components/ui/button';
 	import * as Tooltip from '$lib/components/ui/tooltip';
@@ -17,11 +18,11 @@
 	/** Why a new conversation cannot start, or null when it can. */
 	const blockedReason = $derived.by((): string | null => {
 		if (!app.hasProviders) {
-			return 'Aucun fournisseur configuré.';
+			return t('common.noProviderConfigured');
 		}
 		const chats = app.chatsProject;
-		if (!chats) return 'Conversations indisponibles.';
-		if (chats.missing) return 'Le dossier des conversations est introuvable.';
+		if (!chats) return t('navigation.conversationsUnavailable');
+		if (chats.missing) return t('navigation.theConversationsFolderCantBeFound');
 		return null;
 	});
 
@@ -52,7 +53,7 @@
 				onclick={start}
 			>
 				<SquarePen class="size-4" aria-hidden="true" />
-				Nouvelle conversation
+				{t('common.newConversation')}
 			</Button>
 		{/snippet}
 	</Tooltip.Trigger>

@@ -10,6 +10,7 @@
 //   in the sandboxed viewer; no tooltip or event handler is installed.
 // Pure parts are unit-tested (tests/unit/vega-chart.test.ts).
 
+import { t } from '$lib/i18n/i18n.svelte'
 import { sanitizeSvg } from './sanitize'
 
 /** A specification larger than this is refused (characters). */
@@ -72,24 +73,24 @@ export function textData(value: Json, path = ''): string | null {
 /** The specification of a fence, or why it cannot be drawn. */
 export function parseVegaLite(source: string): { spec: Spec } | { error: string } {
   if (source.length > MAX_VEGA_SOURCE) {
-    return { error: `Spécification trop longue (${MAX_VEGA_SOURCE} caractères au maximum)` }
+    return { error: t('conversation.specificationTooLongCharactersAtMost', { MAX_VEGA_SOURCE }) }
   }
   let value: Json
   try {
     value = JSON.parse(source) as Json
   } catch (e) {
-    return { error: `JSON invalide : ${e instanceof Error ? e.message : String(e)}` }
+    return { error: t('common.invalidJson', { e: e instanceof Error ? e.message : String(e) }) }
   }
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return { error: 'La spécification doit être un objet JSON' }
+    return { error: t('conversation.theSpecificationMustBeAJson') }
   }
   const external = externalResource(value)
   if (external) {
-    return { error: `Ressource externe refusée (${external}) : intègre les données dans « values »` }
+    return { error: t('conversation.externalResourceRefusedPutTheData', { external }) }
   }
   const text = textData(value)
   if (text) {
-    return { error: `Données texte refusées (${text}) : donne les lignes en objets JSON dans « values »` }
+    return { error: t('conversation.textDataRefusedGiveTheRows', { text }) }
   }
   return { spec: value }
 }
@@ -180,7 +181,7 @@ function drawer(): Worker {
   }
   worker.onerror = (event) => {
     event.preventDefault()
-    stopDrawer(`Vega n'a pas pu être chargé : ${event.message || 'erreur du worker'}`)
+    stopDrawer(t('conversation.vegaCouldNotBeLoaded', { value: event.message || t('conversation.workerError') }))
   }
   return worker
 }
@@ -197,7 +198,7 @@ function stopDrawer(reason: string) {
 function drawInWorker(spec: Spec, ms: number): Promise<Drawn> {
   const id = ++nextId
   return new Promise((resolve) => {
-    const timer = setTimeout(() => stopDrawer(`rendu trop long (plus de ${ms / 1000} s)`), ms)
+    const timer = setTimeout(() => stopDrawer(t('conversation.renderingTookTooLongOverS', { value: ms / 1000 })), ms)
     waiting.set(id, (drawn) => {
       clearTimeout(timer)
       resolve(drawn)
@@ -218,7 +219,7 @@ async function drawInPage(spec: Spec, ms: number): Promise<Drawn> {
 
 function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`rendu trop long (plus de ${ms / 1000} s)`)), ms)
+    const timer = setTimeout(() => reject(new Error(t('conversation.renderingTookTooLongOverS', { value: ms / 1000 }))), ms)
     work.then(
       (v) => {
         clearTimeout(timer)
@@ -234,7 +235,7 @@ function withTimeout<T>(work: Promise<T>, ms: number): Promise<T> {
 
 function message(e: unknown): string {
   const text = e instanceof Error ? e.message : String(e)
-  return (text.split('\n')[0] ?? '').trim().slice(0, 300) || 'erreur inconnue'
+  return (text.split('\n')[0] ?? '').trim().slice(0, 300) || t('conversation.unknownError')
 }
 
 /**
@@ -253,12 +254,12 @@ export async function renderVegaLite(
     if (typeof Worker !== 'undefined') drawn = await drawInWorker(spec, VEGA_TIMEOUT_MS)
     // Only the tests draw in the page: the app's bundle carries Vega once, in the worker.
     else if (import.meta.env.MODE === 'test') drawn = await drawInPage(spec, VEGA_TIMEOUT_MS)
-    else return { error: 'Graphiques indisponibles ici' }
+    else return { error: t('conversation.chartsUnavailableHere') }
     if ('error' in drawn) {
-      return { error: drawn.spec ? `Spécification invalide : ${message(drawn.error)}` : message(drawn.error) }
+      return { error: drawn.spec ? t('conversation.invalidSpecification', { error: message(drawn.error) }) : message(drawn.error) }
     }
     const clean = sanitizeSvg(drawn.svg)
-    return clean ? { svg: clean } : { error: 'Rendu vide' }
+    return clean ? { svg: clean } : { error: t('conversation.emptyRender') }
   } catch (e) {
     return { error: message(e) }
   }

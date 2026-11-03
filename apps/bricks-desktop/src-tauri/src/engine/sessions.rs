@@ -8,6 +8,7 @@
 //!   save cannot recreate it;
 //! * operations that create or retire controllers run one at a time.
 
+use crate::i18n::{msg, tr};
 use super::live::{self, OpenSession, files_dir, load_meta, session_item, spawn_consumer, stored_message_count};
 use super::{AppState, error};
 use crate::contract::{
@@ -45,7 +46,7 @@ impl AppState {
                 if entry.project_id != request.project_id {
                     return Err(error(
                         IpcErrorCode::SessionBusy,
-                        "cette conversation est ouverte dans un autre projet",
+                        tr!(msg::THIS_CONVERSATION_IS_OPEN_IN_ANOTHER),
                     ));
                 }
                 return Ok(entry.opened().await);
@@ -55,7 +56,7 @@ impl AppState {
         if project.missing {
             return Err(error(
                 IpcErrorCode::FolderMissing,
-                format!("le dossier {} n'est plus accessible", project.path),
+                tr!(msg::FOLDER_IS_NO_LONGER_ACCESSIBLE_2, path = project.path),
             ));
         }
         let registry = self.registry()?;
@@ -151,7 +152,7 @@ impl AppState {
         if entry.is_busy() && !cancel {
             return Err(error(
                 IpcErrorCode::SessionBusy,
-                "une exécution est en cours : annulez-la ou attendez sa fin",
+                tr!(msg::A_RUN_IS_IN_PROGRESS_CANCEL),
             ));
         }
         self.retire(&entry).await;
@@ -172,7 +173,7 @@ impl AppState {
         let records = Arc::clone(&self.run_records);
         let labelled = labels.exists(session_id) || records.exists(session_id);
         if !transcript.exists() && !files.exists() && !labelled {
-            return Err(not_found("conversation inconnue"));
+            return Err(not_found(tr!(msg::UNKNOWN_CONVERSATION)));
         }
         // The own folder of a conversation without a project goes with it.
         let chat_dir = load_meta(self.sessions_dir(), session_id)
@@ -182,7 +183,7 @@ impl AppState {
         JsonlMemory::new(self.sessions_dir())
             .delete(session_id)
             .await
-            .map_err(|e| io_error("suppression de la conversation", e))?;
+            .map_err(|e| io_error(&tr!(msg::DELETING_THE_CONVERSATION), e))?;
         let id = session_id.to_string();
         tauri::async_runtime::spawn_blocking(move || -> IpcResult<()> {
             labels.delete(&id)?;
@@ -207,12 +208,10 @@ impl AppState {
         check_session_id(session_id)?;
         let title = title.trim();
         if title.is_empty() {
-            return Err(invalid("le titre ne peut pas être vide"));
+            return Err(invalid(tr!(msg::THE_TITLE_CANT_BE_EMPTY)));
         }
         if title.chars().count() > TITLE_MAX_CHARS {
-            return Err(invalid(format!(
-                "le titre dépasse {TITLE_MAX_CHARS} caractères"
-            )));
+            return Err(invalid(tr!(msg::THE_TITLE_EXCEEDS_CHARACTERS, TITLE_MAX_CHARS = TITLE_MAX_CHARS)));
         }
         let _gate = self.lifecycle.lock().await;
         let item = match self.open_entry(session_id) {
@@ -220,7 +219,7 @@ impl AppState {
                 entry
                     .controller
                     .set_title(title)
-                    .map_err(|e| io_error("renommage", e))?;
+                    .map_err(|e| io_error(&tr!(msg::RENAMING), e))?;
                 session_item(&entry).await
             }
             None => {
@@ -240,9 +239,9 @@ impl AppState {
                 )
                 .await
                 .map_err(|e| error(IpcErrorCode::Internal, e.to_string()))?
-                .map_err(|e| io_error("renommage", e))?;
+                .map_err(|e| io_error(&tr!(msg::RENAMING), e))?;
                 let Some(meta) = meta else {
-                    return Err(not_found("conversation inconnue"));
+                    return Err(not_found(tr!(msg::UNKNOWN_CONVERSATION)));
                 };
                 let count = stored_message_count(self.sessions_dir(), session_id).await;
                 self.item_from_meta(&meta, count, false, false)
@@ -261,7 +260,7 @@ impl AppState {
         let stored = if project.chats {
             let mut all = list_sessions(self.sessions_dir())
                 .await
-                .map_err(|e| io_error("conversations", e))?;
+                .map_err(|e| io_error(&tr!(msg::CONVERSATIONS), e))?;
             all.retain(|s| {
                 s.working_dir
                     .as_deref()
@@ -274,14 +273,14 @@ impl AppState {
             let folder = PathBuf::from(&project.path);
             let mut all = list_sessions(self.sessions_dir())
                 .await
-                .map_err(|e| io_error("conversations", e))?;
+                .map_err(|e| io_error(&tr!(msg::CONVERSATIONS), e))?;
             all.retain(|s| s.working_dir.as_deref() == Some(folder.as_path()));
             all
         } else {
             let scope = SessionScope::Workspace(PathBuf::from(&project.path));
             list_sessions_in(self.sessions_dir(), &scope)
                 .await
-                .map_err(|e| io_error("conversations", e))?
+                .map_err(|e| io_error(&tr!(msg::CONVERSATIONS), e))?
         };
         let open = self.entries_of_project(project_id);
         let mut items = Vec::new();
@@ -322,7 +321,7 @@ impl AppState {
         }
         let stored = list_sessions(self.sessions_dir())
             .await
-            .map_err(|e| io_error("conversations", e))?;
+            .map_err(|e| io_error(&tr!(msg::CONVERSATIONS), e))?;
         let open: Vec<Arc<OpenSession>> = match project_id {
             Some(id) => self.entries_of_project(id),
             None => self.sessions.lock().values().cloned().collect(),
@@ -388,7 +387,7 @@ impl AppState {
         if open.iter().any(|e| e.is_busy()) {
             return Err(error(
                 IpcErrorCode::SessionBusy,
-                "une conversation de ce projet est en cours : annulez-la ou attendez sa fin",
+                tr!(msg::A_CONVERSATION_OF_THIS_PROJECT_IS),
             ));
         }
         for entry in &open {
@@ -410,11 +409,11 @@ impl AppState {
         check_session_id(session_id)?;
         let entry = self.require_open(session_id)?;
         let command: Command = serde_json::from_value(command)
-            .map_err(|e| invalid(format!("commande invalide : {e}")))?;
+            .map_err(|e| invalid(tr!(msg::INVALID_COMMAND, e = e)))?;
         if matches!(command, Command::Resume { .. }) {
             return Err(error(
                 IpcErrorCode::Rejected,
-                "pour changer de conversation, ouvrez-la : une session reste liée à son contrôleur",
+                tr!(msg::TO_SWITCH_CONVERSATIONS_OPEN_IT_A),
             ));
         }
         // A submit's attachment copies are checked here (an image needs a model
@@ -475,7 +474,7 @@ impl AppState {
         self.open_entry(session_id).ok_or_else(|| {
             error(
                 IpcErrorCode::NotFound,
-                "cette conversation n'est pas ouverte",
+                tr!(msg::THIS_CONVERSATION_ISNT_OPEN),
             )
         })
     }
@@ -558,15 +557,16 @@ fn check_session_id(id: &str) -> IpcResult<()> {
     if ok {
         Ok(())
     } else {
-        Err(invalid("identifiant de conversation invalide"))
+        Err(invalid(tr!(msg::INVALID_CONVERSATION_IDENTIFIER)))
     }
 }
 
 /// Engine refusals of an open, by what the person can do about them.
 fn open_error(message: String) -> crate::contract::IpcError {
-    let code = if message.contains("no stored session") {
-        IpcErrorCode::NotFound
-    } else if message.contains("no longer exists") {
+    if message.contains("no stored session") {
+        return error(IpcErrorCode::NotFound, tr!(msg::UNKNOWN_CONVERSATION));
+    }
+    let code = if message.contains("no longer exists") {
         IpcErrorCode::FolderMissing
     } else {
         IpcErrorCode::Config

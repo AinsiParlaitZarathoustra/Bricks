@@ -1,7 +1,7 @@
 {
   "name": "bricks-desktop",
   "private": true,
-  "version": "0.6.1",
+  "version": "1.0.0-alpha.1",
   "type": "module",
   "scripts": {
     "dev": "vite",

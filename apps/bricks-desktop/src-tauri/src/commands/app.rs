@@ -1,3 +1,4 @@
+use crate::i18n::{msg, tr};
 use crate::contract::*;
 use crate::engine::AppState;
 use crate::services::join_error;
@@ -18,9 +19,11 @@ pub async fn models_list(state: State<'_, AppState>) -> IpcResult<serde_json::Va
 #[tauri::command]
 pub async fn prefs_get(state: State<'_, AppState>) -> IpcResult<Preferences> {
     let prefs = Arc::clone(&state.prefs);
-    tokio::task::spawn_blocking(move || prefs.get())
+    let read = tokio::task::spawn_blocking(move || prefs.get())
         .await
-        .map_err(join_error)
+        .map_err(join_error)?;
+    crate::i18n::set_language(read.language);
+    Ok(read)
 }
 
 /// Shows the light or the dark icon in the Dock (macOS; elsewhere nothing).
@@ -54,7 +57,7 @@ pub fn app_icon_show(app: tauri::AppHandle, dark: bool) -> IpcResult<()> {
 #[tauri::command]
 pub fn keep_awake_set(keep: State<'_, crate::services::keep_awake::KeepAwake>, active: bool) -> IpcResult<()> {
     keep.set(active)
-        .map_err(|e| crate::services::io_error("maintien de l’ordinateur actif", e))
+        .map_err(|e| crate::services::io_error(&tr!(msg::KEEPING_THE_COMPUTER_AWAKE), e))
 }
 
 #[tauri::command]
@@ -64,10 +67,13 @@ pub async fn prefs_set(state: State<'_, AppState>, prefs: Preferences) -> IpcRes
 
 /// Saves the preferences. Nothing changes when the file cannot be written.
 pub(crate) async fn save_preferences(state: &AppState, prefs: Preferences) -> IpcResult<()> {
+    let language = prefs.language;
     let store = Arc::clone(&state.prefs);
     tokio::task::spawn_blocking(move || store.set(prefs))
         .await
-        .map_err(join_error)?
+        .map_err(join_error)??;
+    crate::i18n::set_language(language);
+    Ok(())
 }
 
 /// The permission policy new sessions start from.

@@ -1,5 +1,6 @@
 <script lang="ts">
 	// One provider and its models, in a single discreet container: a header row, then one line per model.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Trash from '@lucide/svelte/icons/trash';
@@ -40,7 +41,7 @@
 				{#if !provider.has_credentials}
 					<span class="inline-flex shrink-0 items-center gap-1 text-warning">
 						<TriangleAlert class="size-3.5" aria-hidden="true" />
-						Identifiants absents
+						{t('settings.credentialsMissing')}
 					</span>
 				{/if}
 			</p>
@@ -54,14 +55,14 @@
 						variant="ghost"
 						size="icon-sm"
 						class="shrink-0 text-muted-foreground"
-						aria-label={`Ajouter un modèle à ${title}`}
+						aria-label={t('settings.addAModelTo', { title })}
 						onclick={onAddModel}
 					>
 						<Plus aria-hidden="true" />
 					</Button>
 				{/snippet}
 			</Tooltip.Trigger>
-			<Tooltip.Content>Ajouter un modèle</Tooltip.Content>
+			<Tooltip.Content>{t('settings.addAModel')}</Tooltip.Content>
 		</Tooltip.Root>
 
 		<Tooltip.Root>
@@ -72,14 +73,14 @@
 						variant="ghost"
 						size="icon-sm"
 						class="shrink-0 text-muted-foreground"
-						aria-label={`Modifier le fournisseur ${title}`}
+						aria-label={t('settings.editProvider', { id: title })}
 						onclick={onEditProvider}
 					>
 						<Pencil aria-hidden="true" />
 					</Button>
 				{/snippet}
 			</Tooltip.Trigger>
-			<Tooltip.Content>Modifier le fournisseur</Tooltip.Content>
+			<Tooltip.Content>{t('settings.editTheProvider')}</Tooltip.Content>
 		</Tooltip.Root>
 
 		<Tooltip.Root>
@@ -90,21 +91,21 @@
 						variant="ghost"
 						size="icon-sm"
 						class="shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
-						aria-label={`Supprimer le fournisseur ${title}`}
+						aria-label={t('settings.deleteProvider2', { title })}
 						onclick={onDeleteProvider}
 					>
 						<Trash aria-hidden="true" />
 					</Button>
 				{/snippet}
 			</Tooltip.Trigger>
-			<Tooltip.Content>Supprimer le fournisseur</Tooltip.Content>
+			<Tooltip.Content>{t('settings.deleteTheProvider')}</Tooltip.Content>
 		</Tooltip.Root>
 	</header>
 
 	{#if provider.models.length === 0}
-		<p class="border-t border-border px-3.5 py-2.5 text-ui text-muted-foreground">Aucun modèle pour ce fournisseur.</p>
+		<p class="border-t border-border px-3.5 py-2.5 text-ui text-muted-foreground">{t('settings.noModelForThisProvider')}</p>
 	{:else}
-		<ul class="flex flex-col gap-0.5 border-t border-border py-1" aria-label={`Modèles de ${title}`}>
+		<ul class="flex flex-col gap-0.5 border-t border-border py-1" aria-label={t('settings.modelsOf', { title })}>
 			{#each provider.models as model (model.id)}
 				<ModelRow
 					{model}

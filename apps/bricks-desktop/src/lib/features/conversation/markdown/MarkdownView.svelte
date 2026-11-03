@@ -4,6 +4,7 @@
   // macros are its own); `idPrefix` must be unique per text and rendering zone.
   // The caller throttles `source` while it streams.
   import type { FileReference, MarkdownHeading } from './types'
+  import { currentLanguage } from '$lib/i18n/i18n.svelte'
   import { MarkdownDocument, markdownClicks } from '../markdown'
   import { loadKatex } from './math'
   import { createMermaidCache } from './mermaid'
@@ -43,6 +44,7 @@
 
   const blocks = $derived.by(() => {
     void mathVersion
+    doc.setLanguage(currentLanguage())
     return doc.update(source, !streaming)
   })
   $effect(() => {

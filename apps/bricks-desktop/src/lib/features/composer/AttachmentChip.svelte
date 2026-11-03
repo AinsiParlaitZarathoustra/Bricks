@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '$lib/i18n/i18n.svelte'
   import type { DraftAttachment } from '$lib/state/conversation.svelte'
   import { Button } from '$lib/components/ui/button'
   import FileIcon from '$lib/features/file-icons/FileIcon.svelte'
@@ -35,12 +36,12 @@
       {#if error}
         <p class="text-xs text-destructive" role="alert">{error}</p>
       {:else if attachment.importing}
-        <p class="text-xs text-muted-foreground">Copie…</p>
+        <p class="text-xs text-muted-foreground">{t('composer.copying')}</p>
       {/if}
     </div>
   </div>
 
-  <Button variant="ghost" size="icon-xs" aria-label={`Retirer ${attachment.name}`} onclick={onRemove}>
+  <Button variant="ghost" size="icon-xs" aria-label={t('composer.remove', { name: attachment.name })} onclick={onRemove}>
     <XIcon aria-hidden="true" />
   </Button>
 </div>

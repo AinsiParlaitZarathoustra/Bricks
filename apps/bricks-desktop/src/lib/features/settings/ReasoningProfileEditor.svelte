@@ -2,6 +2,7 @@
 	// Short editor of one effort profile, inside the model form. Nothing is written here: the whole
 	// profile list is saved with the model. These are the client checks; the engine refuses the rest
 	// (protected fields, pointers) and its refusal is shown when the model is saved.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import { untrack } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -67,12 +68,12 @@
 	class="flex flex-col gap-3 rounded-lg border border-border bg-muted/40 p-3"
 >
 	<p id={`${uid}-title`} class="text-sm font-medium text-foreground">
-		{isNew ? 'Nouveau profil d’effort' : `Profil « ${start.id} »`}
+		{isNew ? t('settings.newEffortProfile') : t('settings.profile', { id: start.id })}
 	</p>
 
 	<div class="grid gap-3 sm:grid-cols-2">
 		<div class="flex flex-col gap-1.5">
-			<Label for={`${uid}-id`}>Identifiant</Label>
+			<Label for={`${uid}-id`}>{t('common.identifier')}</Label>
 			<Input
 				id={`${uid}-id`}
 				bind:value={id}
@@ -90,7 +91,7 @@
 		</div>
 
 		<div class="flex flex-col gap-1.5">
-			<Label for={`${uid}-label`}>Libellé <span class="text-muted-foreground">(facultatif)</span></Label>
+			<Label for={`${uid}-label`}>{t('settings.label')} <span class="text-muted-foreground">{t('settings.optional')}</span></Label>
 			<Input
 				id={`${uid}-label`}
 				bind:value={label}
@@ -103,7 +104,7 @@
 	</div>
 
 	<div class="flex flex-col gap-1.5">
-		<Label for={`${uid}-parameters`}>Paramètres (objet JSON)</Label>
+		<Label for={`${uid}-parameters`}>{t('settings.parametersJsonObject')}</Label>
 		<Textarea
 			id={`${uid}-parameters`}
 			bind:value={parameters}
@@ -124,16 +125,16 @@
 			class="inline-flex items-center gap-1 self-start text-xs text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
 		>
 			<ChevronDown class={`size-3.5 transition-transform ${advancedOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
-			Chemins à retirer
+			{t('settings.pathsToRemove')}
 		</Collapsible.Trigger>
 		<Collapsible.Content class="flex flex-col gap-1.5 pt-2">
-			<Label for={`${uid}-remove`}>Un chemin JSON Pointer par ligne</Label>
+			<Label for={`${uid}-remove`}>{t('settings.oneJsonPointerPathPerLine')}</Label>
 			<Textarea
 				id={`${uid}-remove`}
 				bind:value={remove}
 				rows={2}
 				spellcheck={false}
-				placeholder="/champ/sous-champ"
+				placeholder={t('settings.fieldSubfield')}
 				class="font-mono text-xs"
 				aria-invalid={shown.remove ? 'true' : undefined}
 				aria-describedby={shown.remove ? `${uid}-remove-error` : undefined}
@@ -154,14 +155,14 @@
 				onclick={onRemove}
 			>
 				<Trash aria-hidden="true" />
-				Retirer le profil
+				{t('settings.removeTheProfile')}
 			</Button>
 		{:else}
 			<span></span>
 		{/if}
 		<div class="flex gap-2">
-			<Button type="button" variant="outline" size="sm" onclick={onCancel}>Annuler</Button>
-			<Button type="button" size="sm" onclick={commit}>{isNew ? 'Ajouter le profil' : 'Valider le profil'}</Button>
+			<Button type="button" variant="outline" size="sm" onclick={onCancel}>{t('common.cancel')}</Button>
+			<Button type="button" size="sm" onclick={commit}>{isNew ? t('settings.addTheProfile') : t('settings.confirmTheProfile')}</Button>
 		</div>
 	</div>
 </div>

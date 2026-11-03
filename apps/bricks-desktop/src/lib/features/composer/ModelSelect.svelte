@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '$lib/i18n/i18n.svelte'
   import * as Select from '$lib/components/ui/select'
   import type { ModelChoice } from '$lib/ipc/engine'
 
@@ -35,7 +36,7 @@
 
   const current = $derived(models.find((m) => m.selection === shown))
   const label = $derived(
-    models.length === 0 ? 'Aucun modèle configuré' : (current?.name ?? (shown || 'Choisir un modèle')),
+    models.length === 0 ? t('composer.noModelConfigured2') : (current?.name ?? (shown || t('composer.chooseAModel'))),
   )
 
   async function handleChange(next: string | undefined) {
@@ -56,7 +57,7 @@
   <Select.Trigger
     size="sm"
     class="max-w-56 min-w-0 text-ui border-transparent bg-transparent text-muted-foreground shadow-none hover:bg-muted hover:text-foreground data-[state=open]:bg-muted dark:bg-transparent dark:hover:bg-muted"
-    aria-label={`Modèle : ${label}`}
+    aria-label={t('composer.model', { label })}
   >
     <span class="truncate">{label}</span>
   </Select.Trigger>

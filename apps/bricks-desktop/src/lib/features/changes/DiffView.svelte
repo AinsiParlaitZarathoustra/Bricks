@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { t } from '$lib/i18n/i18n.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { cn } from '$lib/utils.js';
 	import { parsePatch, type PatchLineKind } from './patch';
@@ -44,14 +45,14 @@
 >
 	{#if truncated}
 		<p role="status" class="border-b border-border px-2 py-1 text-warning">
-			Diff tronqué : seules les premières lignes sont affichées (512 Kio au maximum).
+			{t('changes.diffTruncatedOnlyTheFirstLines')}
 		</p>
 	{/if}
 
 	{#if binary}
-		<p class="px-2 py-2 text-muted-foreground">Fichier binaire : aperçu indisponible.</p>
+		<p class="px-2 py-2 text-muted-foreground">{t('changes.binaryFileNoPreviewAvailable')}</p>
 	{:else if lines.length === 0}
-		<p class="px-2 py-2 text-muted-foreground">Aucune modification de texte.</p>
+		<p class="px-2 py-2 text-muted-foreground">{t('changes.noTextChanges')}</p>
 	{:else}
 		<!-- A named, focusable scroll container: keyboard users must be able to scroll
 			it (WCAG 2.1.1). The rule only checks the role, so it is suppressed here. -->
@@ -59,7 +60,7 @@
 		<div
 			class="max-h-96 overflow-auto rounded-sm font-mono leading-5 outline-none focus-visible:ring-2 focus-visible:ring-ring"
 			role="region"
-			aria-label="Diff"
+			aria-label={t('common.diff')}
 			tabindex="0"
 		>
 			<div class="min-w-max py-1">
@@ -75,7 +76,7 @@
 		{#if hidden > 0}
 			<div class="border-t border-border px-2 py-1">
 				<Button variant="ghost" size="xs" onclick={() => (extra += pageSize)}>
-					Afficher plus ({hidden} lignes restantes)
+					{t('changes.showMoreLinesLeft', { count: hidden })}
 				</Button>
 			</div>
 		{/if}

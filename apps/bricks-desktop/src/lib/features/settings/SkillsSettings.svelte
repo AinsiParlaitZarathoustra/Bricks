@@ -3,6 +3,7 @@
 	// the three actions on the store — write a new one, import a folder, remove an installed one.
 	// Every change goes through the engine's store (validated, published at once, nothing restarted);
 	// open conversations see it at their next request.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import { onDestroy } from 'svelte';
 	import { open as openDialog } from '@tauri-apps/plugin-dialog';
 	import { Badge } from '$lib/components/ui/badge';
@@ -114,7 +115,7 @@
 
 	let confirming = $state<string | null>(null);
 
-	const instructionsPlaceholder = '# Titre\n\n1. Première étape\n2. …';
+	const instructionsPlaceholder = $derived(t('settings.instructionsPlaceholder'));
 
 	async function change(run: () => Promise<SkillChange>, success: (name: string) => string): Promise<SkillChange | null> {
 		busy = true;
@@ -151,7 +152,7 @@
 		formError = null;
 		const result = await change(
 			() => skillsCreate(name.trim(), description, instructions),
-			(n) => `« ${n} » ajouté`
+			(n) => t('settings.added', { n })
 		);
 		if (!result) return;
 		if (result.problem) {
@@ -165,15 +166,15 @@
 	}
 
 	async function importFolder() {
-		const picked = await openDialog({ directory: true, multiple: false, title: 'Dossier du skill à importer' });
+		const picked = await openDialog({ directory: true, multiple: false, title: t('settings.skillFolderToImport') });
 		if (!picked || Array.isArray(picked)) return;
-		const result = await change(() => skillsImport(picked), (n) => `« ${n} » importé`);
+		const result = await change(() => skillsImport(picked), (n) => t('settings.imported', { n }));
 		if (result?.problem) problem = result.problem.message;
 	}
 
 	async function remove(skill: string) {
 		confirming = null;
-		const result = await change(() => skillsRemove(skill), (n) => `« ${n} » supprimé`);
+		const result = await change(() => skillsRemove(skill), (n) => t('settings.deleted', { n }));
 		if (result?.problem) problem = result.problem.message;
 	}
 
@@ -209,17 +210,17 @@
 
 <div class="flex flex-col gap-6">
 	<section class="flex flex-col gap-3" aria-labelledby={`${uid}-title`}>
-		<h3 id={`${uid}-title`} class="text-ui font-semibold text-foreground">Skills</h3>
+		<h3 id={`${uid}-title`} class="text-ui font-semibold text-foreground">{t('common.skills')}</h3>
 
 		<div class="flex flex-col gap-3 sm:flex-row sm:items-end">
 			<div class="flex min-w-0 flex-1 flex-col gap-1.5">
-				<Label for={`${uid}-search`}>Rechercher</Label>
+				<Label for={`${uid}-search`}>{t('common.search')}</Label>
 				<Input
 					id={`${uid}-search`}
 					type="search"
 					value={query}
 					oninput={(event) => onSearchInput(event.currentTarget.value)}
-					placeholder="Nom ou description"
+					placeholder={t('common.nameOrDescription')}
 					autocomplete="off"
 					spellcheck={false}
 				/>
@@ -228,15 +229,15 @@
 			<div class="flex shrink-0 flex-wrap gap-2">
 				<Button variant="outline" size="sm" onclick={startAdding} disabled={busy || adding}>
 					<Plus aria-hidden="true" />
-					Ajouter
+					{t('common.add')}
 				</Button>
 				<Button variant="outline" size="sm" onclick={importFolder} disabled={busy}>
 					<FolderInput aria-hidden="true" />
-					Importer
+					{t('settings.import')}
 				</Button>
 				<Button variant="outline" size="sm" onclick={reload} disabled={loading}>
 					<RefreshCw class={loading ? 'animate-spin' : ''} aria-hidden="true" />
-					Recharger
+					{t('common.reload')}
 				</Button>
 			</div>
 		</div>
@@ -245,11 +246,11 @@
 	{#if adding}
 		<form
 			class="flex flex-col gap-3 rounded-lg border border-border p-3"
-			aria-label="Nouveau skill"
+			aria-label={t('settings.newSkill')}
 			onsubmit={submitNew}
 		>
 			<div class="flex flex-col gap-1.5">
-				<Label for={`${uid}-name`}>Nom</Label>
+				<Label for={`${uid}-name`}>{t('settings.name')}</Label>
 				<Input
 					id={`${uid}-name`}
 					bind:value={name}
@@ -264,11 +265,11 @@
 				{@render fieldMessage('name')}
 			</div>
 			<div class="flex flex-col gap-1.5">
-				<Label for={`${uid}-description`}>Description</Label>
+				<Label for={`${uid}-description`}>{t('settings.description')}</Label>
 				<Input
 					id={`${uid}-description`}
 					bind:value={description}
-					placeholder="Ce que fait le skill et quand l'utiliser"
+					placeholder={t('settings.whatTheSkillDoesAndWhen')}
 					autocomplete="off"
 					required
 					aria-invalid={fieldError('description') ? true : undefined}
@@ -277,7 +278,7 @@
 				{@render fieldMessage('description')}
 			</div>
 			<div class="flex flex-col gap-1.5">
-				<Label for={`${uid}-instructions`}>Instructions</Label>
+				<Label for={`${uid}-instructions`}>{t('settings.instructions')}</Label>
 				<Textarea
 					id={`${uid}-instructions`}
 					bind:value={instructions}
@@ -298,8 +299,8 @@
 				</p>
 			{/if}
 			<div class="flex justify-end gap-2">
-				<Button type="button" variant="ghost" size="sm" onclick={cancelAdding} disabled={busy}>Annuler</Button>
-				<Button type="submit" size="sm" disabled={busy}>Ajouter</Button>
+				<Button type="button" variant="ghost" size="sm" onclick={cancelAdding} disabled={busy}>{t('common.cancel')}</Button>
+				<Button type="submit" size="sm" disabled={busy}>{t('common.add')}</Button>
 			</div>
 		</form>
 	{/if}
@@ -310,7 +311,7 @@
 				<TriangleAlert class="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
 				{problem}
 			</p>
-			<Button variant="ghost" size="sm" class="shrink-0" onclick={() => (problem = null)}>Fermer</Button>
+			<Button variant="ghost" size="sm" class="shrink-0" onclick={() => (problem = null)}>{t('common.close')}</Button>
 		</div>
 	{/if}
 
@@ -318,29 +319,29 @@
 		<div role="alert" class="flex flex-col items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-ui">
 			<p class="flex items-start gap-2 text-pretty">
 				<TriangleAlert class="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
-				Impossible de lire les skills : {error}
+				{t('settings.couldNotReadTheSkills', { error })}
 			</p>
 			<Button variant="outline" size="sm" onclick={reload} disabled={loading}>
 				<RefreshCw aria-hidden="true" />
-				Réessayer
+				{t('common.retry')}
 			</Button>
 		</div>
 	{:else if !catalog}
-		<p role="status" class="text-ui text-muted-foreground">Lecture des skills…</p>
+		<p role="status" class="text-ui text-muted-foreground">{t('settings.readingSkills')}</p>
 	{:else}
 		<div class="flex flex-wrap items-center justify-between gap-3 text-ui">
 			<span class="tabular-nums text-muted-foreground" aria-live="polite">
-				{skillCountLabel(total)}{applied ? ` pour « ${applied} »` : ''}{done ? ` · ${done}` : ''}
+				{skillCountLabel(total)}{applied ? t('settings.for', { applied }) : ''}{done ? ` · ${done}` : ''}
 			</span>
 			{#if pages > 1}
-				<nav aria-label="Pages des skills" class="flex items-center gap-2">
+				<nav aria-label={t('settings.skillPages')} class="flex items-center gap-2">
 					<Button variant="ghost" size="sm" disabled={loading || page === 0} onclick={() => (page -= 1)}>
 						<ChevronLeft aria-hidden="true" />
-						Précédent
+						{t('common.previous')}
 					</Button>
-					<span class="tabular-nums text-muted-foreground">Page {page + 1} sur {pages}</span>
+					<span class="tabular-nums text-muted-foreground">{t('common.pageOf', { value: page + 1, pages })}</span>
 					<Button variant="ghost" size="sm" disabled={loading || page + 1 >= pages} onclick={() => (page += 1)}>
-						Suivant
+						{t('common.next')}
 						<ChevronRight aria-hidden="true" />
 					</Button>
 				</nav>
@@ -349,12 +350,12 @@
 
 		{#if entries.length === 0}
 			<p class="text-ui text-muted-foreground">
-				{applied ? `Aucun skill ne correspond à « ${applied} ».` : 'Aucun skill.'}
+				{applied ? t('common.noSkillMatches', { query: applied }) : t('settings.noSkills')}
 			</p>
 		{:else}
 			<ul
 				class="flex flex-col divide-y divide-border rounded-lg border border-border"
-				aria-label="Skills"
+				aria-label={t('common.skills')}
 				aria-busy={loading}
 			>
 				{#each entries as entry (`${entry.source}:${entry.name}`)}
@@ -371,15 +372,15 @@
 								<div class="ml-auto flex items-center gap-1">
 									{#if confirming === entry.name}
 										<Button variant="destructive" size="sm" onclick={() => remove(entry.name)} disabled={busy}>
-											Supprimer
+											{t('common.delete')}
 										</Button>
-										<Button variant="ghost" size="sm" onclick={() => (confirming = null)} disabled={busy}>Annuler</Button>
+										<Button variant="ghost" size="sm" onclick={() => (confirming = null)} disabled={busy}>{t('common.cancel')}</Button>
 									{:else}
 										<Button
 											variant="ghost"
 											size="icon-sm"
-											aria-label={`Supprimer ${entry.name}`}
-											title="Supprimer"
+											aria-label={t('settings.delete', { name: entry.name })}
+											title={t('common.delete')}
 											onclick={() => (confirming = entry.name)}
 											disabled={busy}
 										>
@@ -395,7 +396,7 @@
 						{/if}
 						{#if details.length > 0}
 							<details class="text-xs text-muted-foreground">
-								<summary class="cursor-pointer hover:text-foreground">Détails ({details.length})</summary>
+								<summary class="cursor-pointer hover:text-foreground">{t('settings.details', { details: details.length })}</summary>
 								<ul class="mt-1 flex list-disc flex-col gap-0.5 pl-4">
 									{#each details as detail, i (i)}
 										<li class="break-words">{detail}</li>
@@ -409,7 +410,7 @@
 		{/if}
 
 		{#if catalog.sources.length > 0}
-			<SettingsGroup title="Sources lues">
+			<SettingsGroup title={t('settings.sourcesRead')}>
 				<ul class="flex flex-col">
 					{#each catalog.sources as source (`${source.source}:${source.path}`)}
 						<li class="flex items-start justify-between gap-3 p-3 text-ui">
@@ -429,14 +430,14 @@
 		{#if diagnostics.length > 0 || omitted > 0}
 			<details class="text-ui">
 				<summary class="cursor-pointer text-muted-foreground hover:text-foreground">
-					Diagnostics ({diagnostics.length + (omitted > 0 ? 1 : 0)})
+					{t('settings.diagnostics', { value: diagnostics.length + (omitted > 0 ? 1 : 0) })}
 				</summary>
 				<ul class="mt-2 flex list-disc flex-col gap-1 pl-5 text-xs text-muted-foreground">
 					{#each diagnostics as line, i (i)}
 						<li class="break-words">{line}</li>
 					{/each}
 					{#if omitted > 0}
-						<li>{omitted} skill(s) activable(s) ne figurent pas dans le catalogue du modèle, à cause des limites du moteur.</li>
+						<li>{t('settings.activatableSkillIsMissingFromThe', { count: omitted })}</li>
 					{/if}
 				</ul>
 			</details>

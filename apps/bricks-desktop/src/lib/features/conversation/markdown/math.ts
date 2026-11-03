@@ -13,6 +13,7 @@
 // Errors are returned, never thrown (throwOnError), and strict warnings are
 // silenced: a formula that KaTeX only finds unusual still renders.
 
+import { t } from '$lib/i18n/i18n.svelte'
 import { sanitizeKatex } from './sanitize'
 import type { MathRenderer } from './types'
 
@@ -45,7 +46,7 @@ export function loadKatex(): Promise<MathRenderer> {
 function renderer(katex: KatexModule): MathRenderer {
   return (tex, display, macros) => {
     if (tex.length > MAX_TEX_LENGTH) {
-      return { error: `Formule trop longue (${MAX_TEX_LENGTH} caractères au maximum)` }
+      return { error: t('conversation.formulaTooLongCharactersAtMost', { MAX_TEX_LENGTH }) }
     }
     try {
       const html = katex.renderToString(tex, {
@@ -60,7 +61,7 @@ function renderer(katex: KatexModule): MathRenderer {
         globalGroup: false,
       })
       const clean = sanitizeKatex(html)
-      return clean === '' ? { error: 'Formule non affichable' } : { html: clean }
+      return clean === '' ? { error: t('conversation.formulaCantBeDisplayed') } : { html: clean }
     } catch (error) {
       return { error: shortMessage(error) }
     }
@@ -70,5 +71,5 @@ function renderer(katex: KatexModule): MathRenderer {
 function shortMessage(error: unknown): string {
   const text = error instanceof Error ? error.message : String(error)
   const first = text.split('\n')[0]?.trim() ?? ''
-  return (first || 'Formule invalide').slice(0, MAX_ERROR_LENGTH)
+  return (first || t('conversation.invalidFormula')).slice(0, MAX_ERROR_LENGTH)
 }

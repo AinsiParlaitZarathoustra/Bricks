@@ -50,13 +50,16 @@ describe('protocol and auth labels', () => {
 		expect(protocolLabel('anthropic_messages')).toBe('Anthropic Messages');
 		expect(protocolLabel('exotic')).toBe('exotic');
 		expect(authLabel('api_key_header')).toBe('Clé dans un en-tête');
+	});
+
+	it('the auth label none agrees with « authentification » (feminine)', () => {
 		expect(authLabel('none')).toBe('Aucune');
 	});
 });
 
 describe('modelCountLabel', () => {
-	it('uses the singular for one model only', () => {
-		expect(modelCountLabel(0)).toBe('0 modèles');
+	it('uses the singular for 0 and 1 (French plural rule), the plural from 2', () => {
+		expect(modelCountLabel(0)).toBe('0 modèle');
 		expect(modelCountLabel(1)).toBe('1 modèle');
 		expect(modelCountLabel(2)).toBe('2 modèles');
 	});
@@ -77,7 +80,7 @@ describe('providerDeletionDetail', () => {
 describe('writeFailure', () => {
 	it('explains a stale revision and flags it as a conflict', () => {
 		const error = Object.assign(new Error('revision périmée'), { code: 'conflict' });
-		expect(writeFailure(error)).toEqual({ ok: false, message: CONFLICT_MESSAGE, conflict: true });
+		expect(writeFailure(error)).toEqual({ ok: false, message: CONFLICT_MESSAGE(), conflict: true });
 	});
 
 	it('shows the engine message for any other failure', () => {

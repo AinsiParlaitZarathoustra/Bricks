@@ -7,6 +7,7 @@ pub mod contract;
 pub mod engine;
 pub mod external_links;
 pub mod git;
+pub mod i18n;
 pub mod paths;
 pub mod pty;
 pub mod services;

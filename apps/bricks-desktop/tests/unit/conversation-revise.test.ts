@@ -246,6 +246,9 @@ describe('app.reviseMessage', () => {
 	beforeEach(async () => {
 		vi.useFakeTimers();
 		vi.resetModules();
+		// A reset reloads the i18n module in its default language: French again, as in setup-language.ts.
+		const i18n = await import('../../src/lib/i18n/i18n.svelte');
+		i18n.setLanguage('fr');
 		({ app } = await import('../../src/lib/state/app.svelte'));
 		ipc.invoke.mockReset();
 		ipc.invoke.mockImplementation(async (cmd: string) => {

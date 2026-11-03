@@ -12,6 +12,7 @@
 
 use crate::contract::*;
 use crate::engine::AppState;
+use crate::i18n::{msg, tr};
 use crate::services::join_error;
 use nucleo_matcher::pattern::{CaseMatching, Normalization, Pattern};
 use nucleo_matcher::{Config, Matcher};
@@ -203,8 +204,8 @@ pub fn check_entry(root: &Path, path: &str, is_dir: bool) -> Result<PathBuf, Str
     let p = root.join(path);
     match std::fs::metadata(&p) {
         Ok(m) if m.is_dir() == is_dir => Ok(p),
-        Ok(_) => Err(format!("`{path}` a changé de type depuis la liste")),
-        Err(_) => Err(format!("`{path}` n'existe plus")),
+        Ok(_) => Err(tr!(msg::CHANGED_TYPE_SINCE_THE_LISTING, path = path)),
+        Err(_) => Err(tr!(msg::NO_LONGER_EXISTS, path = path)),
     }
 }
 
@@ -276,7 +277,7 @@ mod tests {
         assert!(
             check_entry(root, &new.path, new.is_dir)
                 .unwrap_err()
-                .contains("n'existe plus")
+                .contains("no longer exists")
         );
     }
 
@@ -384,12 +385,12 @@ mod tests {
         assert!(
             check_entry(root, "src/main.rs", true)
                 .unwrap_err()
-                .contains("a changé de type")
+                .contains("changed type")
         );
         assert!(
             check_entry(root, "src/absent.rs", false)
                 .unwrap_err()
-                .contains("n'existe plus")
+                .contains("no longer exists")
         );
     }
 

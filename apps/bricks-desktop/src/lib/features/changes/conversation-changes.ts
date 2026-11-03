@@ -7,6 +7,7 @@
 // by their full path, so two files of one name in two folders are two files.
 // Counts are sums of edit operations, not a net diff.
 
+import { localeTag } from '$lib/i18n/i18n.svelte'
 import type { ChangeRecord } from '$lib/ipc/client'
 import type { TimelineItem } from '$lib/state/conversation.svelte'
 import { operationKey } from '$lib/features/conversation/operations'
@@ -170,7 +171,7 @@ function fileViews(list: readonly OperationView[]): FileView[] {
     const last = file.operations[file.operations.length - 1].kind
     file.kind = first === 'create' && last !== 'delete' ? 'create' : last
   }
-  return [...byPath.values()].sort((a, b) => a.path.localeCompare(b.path, 'fr'))
+  return [...byPath.values()].sort((a, b) => a.path.localeCompare(b.path, localeTag()))
 }
 
 function basename(path: string): string {

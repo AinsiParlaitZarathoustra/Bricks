@@ -1,6 +1,7 @@
 // Sub-agent presentation: state mapping, durations and French labels.
 // Pure helpers, no component state.
 
+import { t, numberFormat, dateTimeFormat } from '$lib/i18n/i18n.svelte';
 import type { ChangeSetState, InstanceState, Termination } from '$lib/ipc/engine';
 import { TERMINAL_AGENT_STATES } from '$lib/ipc/engine';
 import type { AgentInfo } from '$lib/state/conversation.svelte';
@@ -13,17 +14,17 @@ export interface AgentStateView {
 }
 
 const STATE_VIEW: Record<InstanceState, AgentStateView> = {
-	created: { dot: 'waiting', label: 'Créé' },
-	queued: { dot: 'waiting', label: 'En file d’attente' },
-	waiting_admission: { dot: 'waiting', label: 'En attente d’admission' },
-	starting: { dot: 'running', label: 'Démarrage' },
-	running: { dot: 'running', label: 'En cours' },
-	cancelling: { dot: 'running', label: 'Annulation en cours' },
-	completed: { dot: 'success', label: 'Terminé' },
-	incomplete: { dot: 'waiting', label: 'Incomplet' },
-	failed: { dot: 'error', label: 'Échec' },
-	interrupted: { dot: 'error', label: 'Interrompu' },
-	cancelled: { dot: 'cancelled', label: 'Annulé' }
+	created: { dot: 'waiting', get label() { return t('common.created') } },
+	queued: { dot: 'waiting', get label() { return t('agents.queued') } },
+	waiting_admission: { dot: 'waiting', get label() { return t('agents.waitingForAdmission') } },
+	starting: { dot: 'running', get label() { return t('agents.starting') } },
+	running: { dot: 'running', get label() { return t('common.running') } },
+	cancelling: { dot: 'running', get label() { return t('agents.cancelling') } },
+	completed: { dot: 'success', get label() { return t('common.finished') } },
+	incomplete: { dot: 'waiting', get label() { return t('common.incomplete') } },
+	failed: { dot: 'error', get label() { return t('common.failed') } },
+	interrupted: { dot: 'error', get label() { return t('common.interrupted') } },
+	cancelled: { dot: 'cancelled', get label() { return t('common.cancelled') } }
 };
 
 export function agentStateView(state: InstanceState): AgentStateView {
@@ -63,28 +64,28 @@ function toolAction(name: string, input: unknown): string {
 	const file = baseName(field(input, 'file_path', 'path'));
 	switch (name) {
 		case 'Read':
-			return file ? `Lecture de ${file}` : 'Lecture';
+			return file ? t('agents.reading', { file }) : t('common.reading');
 		case 'Write':
 		case 'Edit':
 		case 'ApplyPatch':
-			return file ? `Modification de ${file}` : 'Modification';
+			return file ? t('agents.editing', { file }) : t('agents.editing2');
 		case 'Glob':
 		case 'Grep':
 		case 'Search':
-			return 'Recherche dans le code';
+			return t('common.codeSearch');
 		case 'Bash': {
 			const command = field(input, 'command');
-			return typeof command === 'string' && command.trim() !== '' ? `Commande : ${command.trim()}` : 'Commande';
+			return typeof command === 'string' && command.trim() !== '' ? t('agents.command', { command: command.trim() }) : t('agents.command2');
 		}
 		case 'WebFetch':
 		case 'WebSearch':
-			return 'Recherche sur le web';
+			return t('agents.webSearch');
 		case 'Agent':
-			return 'Délégation à un sous-agent';
+			return t('agents.delegatingToASubAgent');
 		case 'Messagent':
-			return 'Message à l’équipe';
+			return t('agents.messageToTheTeam');
 		case 'AgentControl':
-			return 'Suivi de ses sous-agents';
+			return t('agents.followingItsSubAgents');
 		default:
 			return name;
 	}
@@ -97,22 +98,22 @@ function toolAction(name: string, input: unknown): string {
  */
 export function agentAction(agent: AgentInfo, awaitingApproval: boolean): string | null {
 	if (!isLive(agent.state)) return null;
-	if (awaitingApproval) return 'En attente d’autorisation';
+	if (awaitingApproval) return t('common.waitingForApproval');
 	if (agent.state === 'queued' || agent.state === 'waiting_admission' || agent.state === 'created') {
-		return agent.reason === 'preparing its worktree' ? 'Préparation de son espace de travail…' : null;
+		return agent.reason === 'preparing its worktree' ? t('agents.preparingItsWorkspace') : null;
 	}
 	const running = agent.tools.filter((t) => t.status === 'running');
 	if (running.length === 0) return null;
 	if (running.length === 1) return `${toolAction(running[0].name, running[0].input)}…`;
 	const names = new Set(running.map((t) => t.name));
 	if (names.size === 1 && (names.has('Read') || names.has('Edit') || names.has('Write'))) {
-		const verb = names.has('Read') ? 'Lecture' : 'Modification';
-		return `${verb} de ${running.length} fichiers…`;
+		const verb = names.has('Read') ? t('common.reading') : t('agents.editing2');
+		return t('agents.files', { verb, running: running.length });
 	}
-	return `${running.length} outils en cours…`;
+	return t('agents.toolsRunning', { running: running.length });
 }
 
-const TIME = new Intl.DateTimeFormat('fr-FR', {
+const TIME = dateTimeFormat({
 	hour: '2-digit',
 	minute: '2-digit',
 	second: '2-digit'
@@ -122,8 +123,8 @@ export function formatTime(ms: number): string {
 	return TIME.format(new Date(ms));
 }
 
-const COUNT = new Intl.NumberFormat('fr-FR');
-const USD = new Intl.NumberFormat('fr-FR', {
+const COUNT = numberFormat();
+const USD = numberFormat({
 	style: 'currency',
 	currency: 'USD',
 	maximumFractionDigits: 4
@@ -137,22 +138,17 @@ export function formatCount(n: number): string {
 	return COUNT.format(n);
 }
 
-/** `12 jetons` / `1 jeton`: French uses the singular for 0 and 1. */
-export function plural(n: number, one: string, many: string): string {
-	return `${formatCount(n)} ${n > 1 ? many : one}`;
-}
-
 /** Heading of a successful engine answer to a control action. */
 export function controlDoneLabel(action: string): string {
 	switch (action) {
 		case 'cancel':
-			return 'Arrêt demandé.';
+			return t('agents.stopRequested');
 		case 'apply_changes':
-			return 'Modifications appliquées.';
+			return t('agents.changesApplied');
 		case 'discard_changes':
-			return 'Modifications abandonnées.';
+			return t('agents.changesDiscarded');
 		default:
-			return 'Action effectuée.';
+			return t('agents.actionCompleted');
 	}
 }
 
@@ -160,32 +156,32 @@ export function controlDoneLabel(action: string): string {
 export function controlFailedLabel(action: string): string {
 	switch (action) {
 		case 'cancel':
-			return 'Arrêt impossible';
+			return t('agents.couldNotStop');
 		case 'apply_changes':
-			return 'Application impossible';
+			return t('common.couldNotApply');
 		case 'discard_changes':
-			return 'Abandon impossible';
+			return t('common.couldNotDiscard');
 		default:
-			return 'Action impossible';
+			return t('agents.actionFailed');
 	}
 }
 
 export function isolationLabel(isolation: string): string {
-	return isolation === 'worktree' ? 'worktree isolé' : 'workspace partagé';
+	return isolation === 'worktree' ? t('agents.isolatedWorktree') : t('agents.sharedWorkspace');
 }
 
-export function terminationLabel(t: Termination | undefined): string | null {
-	if (!t) return null;
-	switch (t.kind) {
+export function terminationLabel(end: Termination | undefined): string | null {
+	if (!end) return null;
+	switch (end.kind) {
 		case 'completed':
-			return 'Terminé normalement';
+			return t('agents.finishedNormally');
 		case 'output_truncated':
-			return `Sortie tronquée (${String(t.continuations)} continuation(s))`;
+			return t('agents.outputTruncatedContinuation', { count: String(end.continuations) });
 		case 'no_progress':
-			return `Aucun progrès (${String(t.repeats)} répétitions)`;
+			return t('agents.noProgressRepetition', { count: String(end.repeats) });
 		default:
 			// A kind of an earlier version: interrupted, never a success.
-			return 'fin interrompue (ancienne session)';
+			return t('common.interruptedEndOldSession');
 	}
 }
 
@@ -193,15 +189,15 @@ export function terminationLabel(t: Termination | undefined): string | null {
 export function changeStatusLabel(code: string): string {
 	switch (code) {
 		case 'A':
-			return 'Ajouté';
+			return t('common.added');
 		case 'M':
-			return 'Modifié';
+			return t('common.modified');
 		case 'D':
-			return 'Supprimé';
+			return t('common.deleted');
 		case 'R':
-			return 'Renommé';
+			return t('common.renamed');
 		case 'C':
-			return 'Copié';
+			return t('common.copied');
 		default:
 			return code;
 	}
@@ -210,13 +206,13 @@ export function changeStatusLabel(code: string): string {
 export function changesetLabel(state: ChangeSetState): string {
 	switch (state) {
 		case 'ready':
-			return 'Prêt à appliquer';
+			return t('agents.readyToApply');
 		case 'applied':
-			return 'Appliqué';
+			return t('agents.applied');
 		case 'conflict':
-			return 'Conflit';
+			return t('common.conflict');
 		case 'discarded':
-			return 'Abandonné';
+			return t('agents.discarded');
 	}
 }
 

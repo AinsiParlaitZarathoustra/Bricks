@@ -1,6 +1,7 @@
 <script lang="ts">
 	// Confirmation of a deletion in the models settings. The write is passed in; a failure stays
 	// in the dialog so the user can read it. Mounted only while it is open.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import { Button } from '$lib/components/ui/button';
 	import type { WriteOutcome } from './models';
@@ -49,8 +50,8 @@
 			<p role="alert" class="text-sm text-pretty text-destructive">{error}</p>
 		{/if}
 		<AlertDialog.Footer>
-			<AlertDialog.Cancel disabled={busy}>Annuler</AlertDialog.Cancel>
-			<Button variant="destructive" disabled={busy} onclick={confirm}>Supprimer</Button>
+			<AlertDialog.Cancel disabled={busy}>{t('common.cancel')}</AlertDialog.Cancel>
+			<Button variant="destructive" disabled={busy} onclick={confirm}>{t('common.delete')}</Button>
 		</AlertDialog.Footer>
 	</AlertDialog.Content>
 </AlertDialog.Root>

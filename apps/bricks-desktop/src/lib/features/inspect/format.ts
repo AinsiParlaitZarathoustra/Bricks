@@ -2,22 +2,23 @@
 // money and times, the cost reading rules, and readers for engine values
 // that the typed IPC keeps loose (`unknown`). Pure functions only.
 
+import { t, numberFormat, dateTimeFormat } from '$lib/i18n/i18n.svelte';
 import type { Usage } from '$lib/ipc/engine';
 
-const INTEGER = new Intl.NumberFormat('fr-FR');
-const USD = new Intl.NumberFormat('fr-FR', {
+const INTEGER = numberFormat();
+const USD = numberFormat({
 	style: 'currency',
 	currency: 'USD',
 	minimumFractionDigits: 2,
 	maximumFractionDigits: 2
 });
-const USD_FINE = new Intl.NumberFormat('fr-FR', {
+const USD_FINE = numberFormat({
 	style: 'currency',
 	currency: 'USD',
 	minimumFractionDigits: 4,
 	maximumFractionDigits: 4
 });
-const CLOCK = new Intl.DateTimeFormat('fr-FR', {
+const CLOCK = dateTimeFormat({
 	hour: '2-digit',
 	minute: '2-digit',
 	second: '2-digit'
@@ -27,17 +28,12 @@ export function formatInt(n: number): string {
 	return INTEGER.format(Math.round(n));
 }
 
-/** `1 résultat`, `3 résultats`: the count and the right noun. */
-export function plural(n: number, one: string, many: string): string {
-	return `${formatInt(n)} ${n === 1 ? one : many}`;
-}
-
 export function formatTokens(n: number): string {
-	return `${formatInt(n)} tokens`;
+	return t('common.tokens', { tokens: formatInt(n) });
 }
 
 export function formatMs(ms: number): string {
-	return `${formatInt(ms)} ms`;
+	return t('inspect.ms', { ms: formatInt(ms) });
 }
 
 export function formatClock(at: number): string {
@@ -89,11 +85,11 @@ export function costOf(usage: Usage | null | undefined): CostReading {
 export function costCell(c: CostReading): string {
 	switch (c.kind) {
 		case 'unknown':
-			return 'inconnu';
+			return t('common.unknownValue');
 		case 'exact':
 			return formatUsd(c.usd);
 		case 'partial':
-			return `≥ ${formatUsd(c.usd)} (partiel)`;
+			return t('inspect.partial', { usd: formatUsd(c.usd) });
 	}
 }
 

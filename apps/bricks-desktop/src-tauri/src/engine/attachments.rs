@@ -10,6 +10,7 @@ use crate::contract::{
     AttachmentPreview, AttachmentRef, AttachmentScope, ImportedAttachment, IpcErrorCode, IpcResult,
     ResolvedAttachment, SavedAttachment,
 };
+use crate::i18n::{msg, tr};
 use crate::services::attachment_runs;
 use crate::services::attachments as store;
 use crate::services::join_error;
@@ -22,7 +23,6 @@ use std::path::Path;
 
 /// The refusal of an image sent to a model without image input. The composer
 /// shows the same text.
-pub const NO_IMAGE_INPUT: &str = "Ce modèle n’accepte pas les images : retirez cette pièce jointe.";
 
 /// Whether the model `selection` takes images. A model the catalog does not
 /// know is left to the engine, which refuses it on its own.
@@ -46,7 +46,7 @@ fn check_owner(id: &str, what: &str) -> IpcResult<()> {
     if store::valid_id(id) {
         Ok(())
     } else {
-        Err(invalid(format!("identifiant de {what} invalide")))
+        Err(invalid(tr!(msg::INVALID_IDENTIFIER, what = what)))
     }
 }
 
@@ -99,7 +99,7 @@ impl AppState {
         attachment_id: String,
     ) -> IpcResult<()> {
         check_owner(&draft_id, "brouillon")?;
-        check_owner(&attachment_id, "pièce jointe")?;
+        check_owner(&attachment_id, &tr!(msg::ATTACHMENT))?;
         let drafts = self.drafts_dir().to_path_buf();
         blocking(move || store::discard_draft_attachment(&drafts, &draft_id, &attachment_id)).await
     }
@@ -111,14 +111,14 @@ impl AppState {
         attachment_id: String,
     ) -> IpcResult<()> {
         check_session_id(&session_id)?;
-        check_owner(&attachment_id, "pièce jointe")?;
+        check_owner(&attachment_id, &tr!(msg::ATTACHMENT))?;
         let _gate = self.lifecycle.lock().await;
         let files = files_dir(self.sessions_dir(), &session_id);
         blocking(move || {
             if attachment_runs::referenced(&files).contains(&attachment_id) {
                 return Err(error(
                     IpcErrorCode::Rejected,
-                    "cette pièce jointe fait partie d'un message envoyé",
+                    tr!(msg::THIS_ATTACHMENT_BELONGS_TO_A_SENT),
                 ));
             }
             store::remove_copy(&store::session_attachments(&files), &attachment_id)
@@ -198,7 +198,7 @@ impl AppState {
             let model = entry.controller.snapshot().model;
             let choices = ModelCatalog::models(self.catalog.as_ref());
             if !model_accepts_images(&choices, &model) {
-                return Err(error(IpcErrorCode::Rejected, NO_IMAGE_INPUT));
+                return Err(error(IpcErrorCode::Rejected, tr!(msg::NO_IMAGE_INPUT)));
             }
         }
         let files = files_dir(self.sessions_dir(), &entry.session_id);
@@ -213,7 +213,7 @@ impl AppState {
                 continue;
             }
             let attachment = store::attachment_of_copy(path)
-                .ok_or_else(|| crate::services::not_found("pièce jointe introuvable"))?;
+                .ok_or_else(|| crate::services::not_found(tr!(msg::ATTACHMENT_NOT_FOUND)))?;
             copies.push(attachment);
         }
         Ok(copies)

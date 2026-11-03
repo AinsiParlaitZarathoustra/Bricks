@@ -119,23 +119,23 @@ describe('validateNewId', () => {
 	const taken = ['acme', 'fast'];
 
 	it('refuses an empty id', () => {
-		expect(validateNewId('', taken)).toBe(REQUIRED_MESSAGE);
-		expect(validateNewId('   ', taken)).toBe(REQUIRED_MESSAGE);
+		expect(validateNewId('', taken)).toBe(REQUIRED_MESSAGE());
+		expect(validateNewId('   ', taken)).toBe(REQUIRED_MESSAGE());
 	});
 
 	it('refuses characters outside letters, digits, dot, underscore and dash', () => {
-		expect(validateNewId('mon modèle', taken)).toBe(ID_ERROR);
-		expect(validateNewId('a/b', taken)).toBe(ID_ERROR);
+		expect(validateNewId('mon modèle', taken)).toBe(ID_ERROR());
+		expect(validateNewId('a/b', taken)).toBe(ID_ERROR());
 	});
 
 	it('refuses an id that starts with a dash or a dot', () => {
-		expect(validateNewId('-fast', taken)).toBe(ID_ERROR);
-		expect(validateNewId('.fast', taken)).toBe(ID_ERROR);
+		expect(validateNewId('-fast', taken)).toBe(ID_ERROR());
+		expect(validateNewId('.fast', taken)).toBe(ID_ERROR());
 	});
 
 	it('refuses an id already taken', () => {
-		expect(validateNewId('fast', taken)).toBe(ID_DUPLICATE);
-		expect(validateNewId(' acme ', taken)).toBe(ID_DUPLICATE);
+		expect(validateNewId('fast', taken)).toBe(ID_DUPLICATE());
+		expect(validateNewId(' acme ', taken)).toBe(ID_DUPLICATE());
 	});
 
 	it('accepts a free id', () => {
@@ -147,14 +147,14 @@ describe('validateNewId', () => {
 describe('validateModelForm for a new model', () => {
 	it('requires the three prices', () => {
 		const errors = validateModelForm(filledForm({ priceInput: '', priceOutput: '', priceCache: '' }));
-		expect(errors.priceInput).toBe(PRICE_ERROR);
-		expect(errors.priceOutput).toBe(PRICE_ERROR);
-		expect(errors.priceCache).toBe(PRICE_ERROR);
+		expect(errors.priceInput).toBe(PRICE_ERROR());
+		expect(errors.priceOutput).toBe(PRICE_ERROR());
+		expect(errors.priceCache).toBe(PRICE_ERROR());
 	});
 
 	it('refuses a negative or text price', () => {
-		expect(validateModelForm(filledForm({ priceInput: '-1' })).priceInput).toBe(PRICE_ERROR);
-		expect(validateModelForm(filledForm({ priceOutput: 'gratuit' })).priceOutput).toBe(PRICE_ERROR);
+		expect(validateModelForm(filledForm({ priceInput: '-1' })).priceInput).toBe(PRICE_ERROR());
+		expect(validateModelForm(filledForm({ priceOutput: 'gratuit' })).priceOutput).toBe(PRICE_ERROR());
 	});
 
 	it('accepts a free model priced at zero', () => {
@@ -165,12 +165,12 @@ describe('validateModelForm for a new model', () => {
 
 	it('requires document types when the document input is checked', () => {
 		const errors = validateModelForm(filledForm({ modalities: ['text', 'document'], documentTypes: ' ' }));
-		expect(errors.documentTypes).toBe(DOCUMENT_TYPES_REQUIRED);
+		expect(errors.documentTypes).toBe(DOCUMENT_TYPES_REQUIRED());
 	});
 
 	it('refuses a type that is not type/subtype, such as pdf', () => {
 		const errors = validateModelForm(filledForm({ modalities: ['document'], documentTypes: 'pdf' }));
-		expect(errors.documentTypes).toBe(DOCUMENT_TYPE_INVALID);
+		expect(errors.documentTypes).toBe(DOCUMENT_TYPE_INVALID());
 	});
 
 	it('accepts application/pdf and */* as document types', () => {

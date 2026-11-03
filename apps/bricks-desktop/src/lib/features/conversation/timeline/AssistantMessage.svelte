@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '$lib/i18n/i18n.svelte'
   import Brain from '@lucide/svelte/icons/brain'
   import ChevronDown from '@lucide/svelte/icons/chevron-down'
   import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '$lib/components/ui/collapsible'
@@ -47,7 +48,7 @@
   function openFile(ref: FileReference) {
     const projectId = conversation?.projectId
     if (!projectId) {
-      linkError = 'cette conversation n’est rattachée à aucun projet.'
+      linkError = t('conversation.thisConversationIsntAttachedToAny')
       return
     }
     linkError = null
@@ -75,7 +76,7 @@
         class="group inline-flex w-fit items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
       >
         <Brain class="size-3.5" aria-hidden="true" />
-        Réfléchit
+        {t('conversation.thinking')}
         <ChevronDown class="size-3.5 transition-transform group-data-[state=open]:rotate-180" aria-hidden="true" />
       </CollapsibleTrigger>
       <CollapsibleContent>
@@ -91,11 +92,11 @@
       <CollapsibleTrigger
         class="group inline-flex w-fit items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
       >
-        Sommaire
+        {t('conversation.summary')}
         <ChevronDown class="size-3.5 transition-transform group-data-[state=open]:rotate-180" aria-hidden="true" />
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <nav aria-label="Sommaire de la réponse" class="mt-1 text-xs">
+        <nav aria-label={t('conversation.answerSummary')} class="mt-1 text-xs">
           <ul class="flex flex-col gap-0.5">
             {#each headings as heading (heading.id)}
               <li style:padding-left="{(heading.level - 1) * 0.75}rem">
@@ -127,7 +128,7 @@
     />
     {#if linkError}
       <p class="text-xs break-words text-destructive" role="alert">
-        Le lien n’a pas pu être ouvert : {linkError}
+        {t('conversation.theLinkCouldNotBeOpened', { linkError })}
       </p>
     {/if}
   {:else if item.streaming}

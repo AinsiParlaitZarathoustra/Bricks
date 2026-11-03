@@ -2,6 +2,7 @@
 // pure functions). The engine decides; these helpers only build the policy
 // a person chose.
 
+import { t, localeTag } from '$lib/i18n/i18n.svelte'
 import type {
 	CustomRules,
 	PermissionEffect,
@@ -10,23 +11,23 @@ import type {
 } from '$lib/ipc/engine';
 
 export const PROFILE_OPTIONS: ReadonlyArray<{ value: PermissionProfile; label: string; detail: string }> = [
-	{ value: 'ask', label: 'ASK', detail: 'Lecture libre, le reste demandé' },
-	{ value: 'execute', label: 'EXECUTE', detail: 'Tout autorisé' },
-	{ value: 'custom', label: 'CUSTOM', detail: 'Règles par action et par outil' }
+	{ value: 'ask', label: 'ASK', get detail() { return t('permissions.readsAllowedTheRestAsked') } },
+	{ value: 'execute', label: 'EXECUTE', get detail() { return t('permissions.everythingAllowed') } },
+	{ value: 'custom', label: 'CUSTOM', get detail() { return t('permissions.rulesPerActionAndPerTool') } }
 ];
 
 export const EFFECT_OPTIONS: ReadonlyArray<{ value: PermissionEffect; label: string }> = [
-	{ value: 'allow', label: 'Autoriser' },
-	{ value: 'ask', label: 'Demander' },
-	{ value: 'deny', label: 'Refuser' }
+	{ value: 'allow', get label() { return t('common.allow') } },
+	{ value: 'ask', get label() { return t('permissions.ask') } },
+	{ value: 'deny', get label() { return t('common.refuse') } }
 ];
 
 /** The classes of action of the CUSTOM profile, in the order shown. */
 export const CLASS_ROWS: ReadonlyArray<{ key: Exclude<keyof CustomRules, 'tools'>; label: string }> = [
-	{ key: 'read', label: 'Lecture et recherche' },
-	{ key: 'write', label: 'Écriture' },
-	{ key: 'execute', label: 'Commandes et sous-agents' },
-	{ key: 'network', label: 'Réseau' }
+	{ key: 'read', get label() { return t('permissions.readAndSearch') } },
+	{ key: 'write', get label() { return t('common.write') } },
+	{ key: 'execute', get label() { return t('permissions.commandsAndSubAgents') } },
+	{ key: 'network', get label() { return t('permissions.network') } }
 ];
 
 /** The CUSTOM rules a policy starts from: the ASK profile's effects. */
@@ -48,7 +49,7 @@ export function isPermissionEffect(value: unknown): value is PermissionEffect {
 }
 
 export function profileLabel(policy: SessionPolicy | null | undefined): string {
-	if (!policy || !policy.chosen) return 'Non choisi';
+	if (!policy || !policy.chosen) return t('permissions.notChosen');
 	return PROFILE_OPTIONS.find((o) => o.value === policy.profile)?.label ?? policy.profile;
 }
 
@@ -84,7 +85,7 @@ export function withTool(policy: SessionPolicy, tool: string, effect: Permission
 export function toolRules(policy: SessionPolicy): Array<{ name: string; effect: PermissionEffect }> {
 	return Object.entries(policy.custom.tools)
 		.map(([name, effect]) => ({ name, effect }))
-		.sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+		.sort((a, b) => a.name.localeCompare(b.name, localeTag()));
 }
 
 function cloneRules(rules: CustomRules): CustomRules {

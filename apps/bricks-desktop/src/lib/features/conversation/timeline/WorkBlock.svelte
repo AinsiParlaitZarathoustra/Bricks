@@ -3,6 +3,7 @@
   // its time and the steps are shown; folded, the bar names the current step.
   // Once the run has ended the bar reads « A travaillé … » and folds by itself:
   // the answer follows it. What asks the person something stays shown folded.
+  import { t } from '$lib/i18n/i18n.svelte'
   import ChevronRight from '@lucide/svelte/icons/chevron-right'
   import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '$lib/components/ui/collapsible'
   import type { AssistantItem, Conversation, TimelineItem } from '$lib/state/conversation.svelte'
@@ -46,7 +47,7 @@
   {#if running}
     <WorkingLine {conversation} />
   {:else}
-    <span class="tabular-nums">A travaillé{worked ? ` ${worked}` : ''}</span>
+    <span class="tabular-nums">{t('conversation.worked', { value: worked ? ` ${worked}` : '' })}</span>
     {#if outcome && outcome !== 'succeeded'}
       <span aria-hidden="true">·</span>
       <span class={TONE[outcome]}>{OUTCOME_LABEL[outcome]}</span>

@@ -1,5 +1,6 @@
 // Labels and pure helpers of the catalog views (French, no state).
 
+import { t, type MessageKey, numberFormat } from '$lib/i18n/i18n.svelte';
 import type { BadgeVariant } from '$lib/components/ui/badge';
 import type { StatusState } from '$lib/layout/StatusDot.svelte';
 import type { InspectorState } from '$lib/state/ui.svelte';
@@ -24,26 +25,26 @@ export function pageCount(total: number, perPage: number): number {
 export function scopeLabel(scope: string): string {
 	switch (scope) {
 		case 'project':
-			return 'Projet';
+			return t('common.project');
 		case 'user':
-			return 'Utilisateur';
+			return t('catalog.user');
 		case 'built_in':
 		case 'builtin':
-			return 'Intégré';
+			return t('common.builtIn');
 		default:
 			return scope;
 	}
 }
 
 const SKILL_STATES: Record<string, { label: string; variant: BadgeVariant }> = {
-	available: { label: 'Disponible', variant: 'secondary' },
-	active: { label: 'Active', variant: 'default' },
-	shadowed: { label: 'Masquée', variant: 'outline' },
-	invalid: { label: 'Invalide', variant: 'destructive' },
-	incompatible: { label: 'Incompatible', variant: 'destructive' },
-	pending_approval: { label: 'En attente d’approbation', variant: 'outline' },
-	refused: { label: 'Refusée', variant: 'destructive' },
-	disabled: { label: 'Désactivée', variant: 'outline' }
+	available: { get label() { return t('common.available') }, variant: 'secondary' },
+	active: { get label() { return t('common.active') }, variant: 'default' },
+	shadowed: { get label() { return t('common.hidden') }, variant: 'outline' },
+	invalid: { get label() { return t('common.invalid') }, variant: 'destructive' },
+	incompatible: { get label() { return t('common.incompatible') }, variant: 'destructive' },
+	pending_approval: { get label() { return t('catalog.awaitingApproval') }, variant: 'outline' },
+	refused: { get label() { return t('common.refused') }, variant: 'destructive' },
+	disabled: { get label() { return t('common.disabled') }, variant: 'outline' }
 };
 
 /** Label and badge of a skill's `state` (see `SkillListing` in the engine). */
@@ -55,33 +56,33 @@ export function skillStateView(state: string): { label: string; variant: BadgeVa
 export function jobStatus(state: string): { dot: StatusState; label: string } {
 	switch (state) {
 		case 'running':
-			return { dot: 'running', label: 'En cours' };
+			return { dot: 'running', label: t('common.running') };
 		case 'completed':
-			return { dot: 'success', label: 'Terminée' };
+			return { dot: 'success', label: t('catalog.finished') };
 		case 'failed':
-			return { dot: 'error', label: 'Échec' };
+			return { dot: 'error', label: t('common.failed') };
 		case 'stopped':
-			return { dot: 'cancelled', label: 'Arrêtée' };
+			return { dot: 'cancelled', label: t('catalog.stopped') };
 		default:
 			return { dot: 'idle', label: state };
 	}
 }
 
-/** The jobs in one line, by state in a fixed order: `1 en cours · 2 terminées`. */
+/** The jobs in one line, by state in a fixed order. */
 export function jobsSummary(jobs: readonly Pick<JobInfo, 'state'>[]): string {
-	if (jobs.length === 0) return 'Aucune tâche';
+	if (jobs.length === 0) return t('catalog.noJobs');
 	const counts = new Map<string, number>();
 	for (const job of jobs) counts.set(job.state, (counts.get(job.state) ?? 0) + 1);
-	const words: [string, string, string][] = [
-		['running', 'en cours', 'en cours'],
-		['completed', 'terminée', 'terminées'],
-		['failed', 'en échec', 'en échec'],
-		['stopped', 'arrêtée', 'arrêtées']
+	const words: [string, MessageKey][] = [
+		['running', 'catalog.jobsRunning'],
+		['completed', 'catalog.jobsFinished'],
+		['failed', 'catalog.jobsFailed'],
+		['stopped', 'catalog.jobsStopped']
 	];
-	const parts = words.flatMap(([state, one, many]) => {
-		const n = counts.get(state) ?? 0;
+	const parts = words.flatMap(([state, key]) => {
+		const count = counts.get(state) ?? 0;
 		counts.delete(state);
-		return n > 0 ? [`${n} ${n > 1 ? many : one}`] : [];
+		return count > 0 ? [t(key, { count })] : [];
 	});
 	for (const [state, n] of counts) parts.push(`${n} ${state}`);
 	return parts.join(' · ');
@@ -100,12 +101,12 @@ export function jobDurationMs(job: JobInfo, now: number): number {
 	return job.durationMs ?? Math.max(0, now - job.startedAt);
 }
 
-const BYTES = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 });
+const BYTES = numberFormat({ maximumFractionDigits: 1 });
 
 export function formatBytes(n: number): string {
-	if (n < 1024) return `${BYTES.format(n)} o`;
-	if (n < 1024 * 1024) return `${BYTES.format(n / 1024)} Kio`;
-	return `${BYTES.format(n / (1024 * 1024))} Mio`;
+	if (n < 1024) return t('catalog.b', { n: BYTES.format(n) });
+	if (n < 1024 * 1024) return t('catalog.kib', { value: BYTES.format(n / 1024) });
+	return t('catalog.mib', { value: BYTES.format(n / (1024 * 1024)) });
 }
 
 /** Splits an inspected patch from the engine's cut marker. */

@@ -6,6 +6,7 @@
 // Bounds: MAX_SOURCE_LENGTH characters (checked before Mermaid sees the text),
 // MAX_EDGES edges per diagram (Mermaid's own limit).
 
+import { t } from '$lib/i18n/i18n.svelte'
 import { mermaidSvg } from './svg-viewer'
 import type { MermaidLook, MermaidSecurityLevel, MermaidTheme } from '$lib/features/diagrams/settings'
 
@@ -74,7 +75,7 @@ export function createMermaidCache(limit = 32): MermaidCache {
 /** Why a source cannot be rendered at all (size, emptiness), or `null`. */
 export function mermaidSourceError(source: string): string | null {
   if (source.length > MAX_SOURCE_LENGTH) {
-    return `Diagramme trop long (${MAX_SOURCE_LENGTH} caractères au maximum)`
+    return t('conversation.diagramTooLongCharactersAtMost', { MAX_SOURCE_LENGTH })
   }
   return null
 }
@@ -392,7 +393,7 @@ function shortMessage(error: unknown): string {
   const text =
     error instanceof Error ? error.message : typeof error === 'string' ? error : String(error)
   const first = text.split('\n')[0]?.trim() ?? ''
-  return (first || 'Diagramme invalide').slice(0, MAX_ERROR_LENGTH)
+  return (first || t('conversation.invalidDiagram')).slice(0, MAX_ERROR_LENGTH)
 }
 
 /** Mermaid leaves its working nodes in the document after a failed render; they go. */
@@ -408,16 +409,16 @@ async function renderOnce(source: string, options: RenderSettings & { id: string
   try {
     mermaid = await loadMermaid()
   } catch (error) {
-    return { error: `Mermaid n'a pas pu être chargé : ${shortMessage(error)}` }
+    return { error: t('conversation.mermaidCouldNotBeLoaded', { error: shortMessage(error) }) }
   }
   const prepared = neutralizeMermaid(source)
-  if (prepared.trim() === '') return { error: 'Diagramme vide' }
+  if (prepared.trim() === '') return { error: t('conversation.emptyDiagram') }
   try {
     const { theme, mode, look, securityLevel, fontFamily, colors } = options
     applyTheme(mermaid, { theme, mode, look, securityLevel, fontFamily, colors })
     const { svg } = await mermaid.render(options.id, prepared)
     const clean = mermaidSvg(svg)
-    return clean === '' ? { error: 'Rendu vide' } : { svg: clean }
+    return clean === '' ? { error: t('conversation.emptyRender') } : { svg: clean }
   } catch (error) {
     return { error: shortMessage(error) }
   } finally {
@@ -434,7 +435,7 @@ export function renderMermaid(source: string, opts: MermaidRenderOptions): Promi
   const sizeError = mermaidSourceError(source)
   if (sizeError) return Promise.resolve({ error: sizeError })
   if (!ID_PATTERN.test(opts.id)) {
-    return Promise.resolve({ error: 'Identifiant de diagramme invalide' })
+    return Promise.resolve({ error: t('conversation.invalidDiagramIdentifier') })
   }
   const settings = {
     id: opts.id,

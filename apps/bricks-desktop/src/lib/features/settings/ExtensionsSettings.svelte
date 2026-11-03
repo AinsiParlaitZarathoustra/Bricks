@@ -2,6 +2,7 @@
 	// Extensions: the MCP servers of Bricks. Computer Use (Cua Driver) is built in: it can be
 	// turned on and off, never removed. Its macOS permissions are those of the driver's own
 	// process, read again when the window comes back to the front.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import { onMount } from 'svelte';
 	import * as ipc from '$lib/ipc/client';
 	import type { ComputerUseStatus } from '$lib/ipc/bindings/ComputerUseStatus';
@@ -24,8 +25,8 @@
 	let actionError = $state<string | null>(null);
 
 	const PERMISSIONS: { id: ComputerUsePermission; label: string; key: 'accessibility' | 'screen_recording' }[] = [
-		{ id: 'accessibility', label: 'Accessibilité', key: 'accessibility' },
-		{ id: 'screen_recording', label: 'Capture d’écran', key: 'screen_recording' }
+		{ id: 'accessibility', get label() { return t('settings.accessibility') }, key: 'accessibility' },
+		{ id: 'screen_recording', get label() { return t('settings.screenCapture') }, key: 'screen_recording' }
 	];
 
 	const available = $derived(status !== null && status.state !== 'unsupported' && status.state !== 'missing');
@@ -95,13 +96,13 @@
 </script>
 
 <div class="flex flex-col gap-6">
-	<SettingsGroup title="Serveurs MCP">
+	<SettingsGroup title={t('common.mcpServers')}>
 		<div class="flex items-center gap-3 p-3">
 			<MousePointerClick class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
 			<div class="flex min-w-0 flex-1 flex-col gap-0.5">
 				<div class="flex flex-wrap items-center gap-2">
 					<span id="computer-use-label" class="text-ui font-medium text-foreground">Computer Use</span>
-					<Badge variant="outline">Intégré</Badge>
+					<Badge variant="outline">{t('common.builtIn')}</Badge>
 				</div>
 				{#if status}
 					<span class="text-caption text-muted-foreground" data-testid="computer-use-state">
@@ -133,7 +134,7 @@
 	</SettingsGroup>
 
 	{#if available && status}
-		<SettingsGroup title="Autorisations de Computer Use">
+		<SettingsGroup title={t('settings.computerUsePermissions')}>
 			{#each PERMISSIONS as permission (permission.id)}
 				{@const state = status[permission.key]}
 				<div class="flex items-center gap-3 p-3" data-testid="permission-{permission.id}">
@@ -142,7 +143,7 @@
 					{#if state === 'missing'}
 						<Button size="sm" variant="secondary" onclick={() => void request(permission.id)}>
 							<ExternalLink class="size-3.5" aria-hidden="true" />
-							Ouvrir les Réglages
+							{t('settings.openSettings')}
 						</Button>
 					{/if}
 				</div>
@@ -150,7 +151,7 @@
 			<div class="flex justify-end p-3">
 				<Button size="sm" variant="ghost" disabled={checking} onclick={() => void refresh()}>
 					<RefreshCw class={['size-3.5', checking && 'animate-spin']} aria-hidden="true" />
-					Revérifier
+					{t('settings.checkAgain')}
 				</Button>
 			</div>
 		</SettingsGroup>

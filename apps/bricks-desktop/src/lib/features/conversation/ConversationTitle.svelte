@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '$lib/i18n/i18n.svelte'
   import { Pencil } from '@lucide/svelte'
   import { Button } from '$lib/components/ui/button'
   import { Input } from '$lib/components/ui/input'
@@ -19,7 +20,7 @@
     (conversation && app.projects.find((p) => p.id === conversation.projectId)) ?? app.currentProject,
   )
   const projectName = $derived(project && !project.chats ? project.name : null)
-  const title = $derived(conversation ? conversation.title.trim() || 'Nouvelle conversation' : 'Bricks')
+  const title = $derived(conversation ? conversation.title.trim() || t('common.newConversation') : 'Bricks')
   /** The sub-agent whose branch is shown, after the conversation's title. */
   const branch = $derived(ui.agentId ? (conversation?.agents.get(ui.agentId) ?? null) : null)
 
@@ -68,7 +69,7 @@
         bind:ref={inputEl}
         bind:value={draft}
         class="h-7 w-64 max-w-full text-ui"
-        aria-label="Titre de la conversation"
+        aria-label={t('conversation.conversationTitle')}
         maxlength={200}
         onkeydown={onKeydown}
         onblur={commit}
@@ -89,7 +90,7 @@
   </h2>
 
   {#if conversation && !editing && !branch}
-    <Button variant="ghost" size="icon-xs" aria-label="Modifier le titre" onclick={startEdit}>
+    <Button variant="ghost" size="icon-xs" aria-label={t('conversation.editTheTitle')} onclick={startEdit}>
       <Pencil aria-hidden="true" />
     </Button>
   {/if}
@@ -99,6 +100,6 @@
   {/if}
 
   {#if branch ? !branch.endedAt : conversation?.running}
-    <StatusDot status="running" label="En cours" />
+    <StatusDot status="running" label={t('common.running')} />
   {/if}
 </div>

@@ -71,10 +71,10 @@ describe('parseProfileDraft', () => {
 	});
 
 	it('refuses an empty id and an id already taken by another profile', () => {
-		expect(parseProfileDraft(draft({ id: ' ' }), [])).toMatchObject({ ok: false, errors: { id: PROFILE_ID_REQUIRED } });
+		expect(parseProfileDraft(draft({ id: ' ' }), [])).toMatchObject({ ok: false, errors: { id: PROFILE_ID_REQUIRED() } });
 		expect(parseProfileDraft(draft({ id: 'low' }), ['low'])).toMatchObject({
 			ok: false,
-			errors: { id: PROFILE_ID_DUPLICATE }
+			errors: { id: PROFILE_ID_DUPLICATE() }
 		});
 	});
 
@@ -88,7 +88,7 @@ describe('parseProfileDraft', () => {
 		for (const text of ['[1, 2]', '3', 'null', '"x"']) {
 			expect(parseProfileDraft(draft({ parameters: text }), [])).toMatchObject({
 				ok: false,
-				errors: { parameters: PROFILE_PARAMETERS_OBJECT }
+				errors: { parameters: PROFILE_PARAMETERS_OBJECT() }
 			});
 		}
 	});
@@ -142,7 +142,7 @@ describe('profilesPatch', () => {
 		const drafts = [draft({ id: 'same' }), draft({ id: 'same', label: 'Autre' })];
 		const result = profilesPatch([], drafts);
 		expect(result.ok).toBe(false);
-		if (!result.ok) expect(result.message).toContain(PROFILE_ID_DUPLICATE);
+		if (!result.ok) expect(result.message).toContain(PROFILE_ID_DUPLICATE());
 	});
 });
 
@@ -158,11 +158,11 @@ describe('default profile', () => {
 
 	it('refuses a default that is no longer among the profiles', () => {
 		const errors = validateModelForm(formWith({ profiles: [profileDraft(model.profiles[1])] }));
-		expect(errors.defaultProfile).toBe(DEFAULT_PROFILE_PENDING);
+		expect(errors.defaultProfile).toBe(DEFAULT_PROFILE_PENDING());
 	});
 
 	it('refuses the form while the removed or renamed default has no new choice', () => {
-		expect(validateModelForm(formWith({ defaultPending: true })).defaultProfile).toBe(DEFAULT_PROFILE_PENDING);
+		expect(validateModelForm(formWith({ defaultPending: true })).defaultProfile).toBe(DEFAULT_PROFILE_PENDING());
 	});
 
 	it('clears the default in the same patch when the profile list loses it', () => {

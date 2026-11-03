@@ -1,6 +1,7 @@
 <script lang="ts">
   // The one copy action of a complete response: the Markdown of all its
   // assistant segments (no reasoning, tools, notices or summary).
+  import { t } from '$lib/i18n/i18n.svelte'
   import Check from '@lucide/svelte/icons/check'
   import Copy from '@lucide/svelte/icons/copy'
 
@@ -29,8 +30,8 @@
   <button
     type="button"
     class="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-    title="Copier"
-    aria-label="Copier"
+    title={t('common.copy')}
+    aria-label={t('common.copy')}
     onclick={copy}
   >
     {#if copied}
@@ -40,6 +41,6 @@
     {/if}
   </button>
   {#if copyError}
-    <p class="text-xs text-destructive" role="alert">Copie impossible : {copyError}</p>
+    <p class="text-xs text-destructive" role="alert">{t('conversation.couldNotCopy', { copyError })}</p>
   {/if}
 </div>

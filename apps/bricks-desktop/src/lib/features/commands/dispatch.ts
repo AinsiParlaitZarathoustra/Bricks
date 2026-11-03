@@ -3,6 +3,7 @@
 // desktop side effects go through a `SlashHost`, so the mapping is unit-tested
 // with a fake host.
 
+import { t } from '$lib/i18n/i18n.svelte'
 import type { SlashAction } from '$lib/ipc/bindings/SlashAction'
 import type { SlashPresent } from '$lib/ipc/bindings/SlashPresent'
 import type { Command, PromptBlock } from '$lib/ipc/engine'
@@ -67,7 +68,6 @@ export interface SlashHost {
 
 const DONE: SlashOutcome = { kind: 'done' }
 const NO_WATCH: SlashWatch = { kind: 'none' }
-const NO_CONVERSATION = 'Aucune conversation ouverte.'
 
 function refused(message: string): SlashOutcome {
   return { kind: 'refused', message }
@@ -89,7 +89,7 @@ export async function runSlashLine(line: string, host: SlashHost): Promise<Slash
   try {
     action = await host.parse(line)
   } catch (e) {
-    return refused(e instanceof Error ? e.message : 'Commande invalide.')
+    return refused(e instanceof Error ? e.message : t('commands.invalidCommand'))
   }
   return action.kind === 'present'
     ? runPresent(action.present, host)
@@ -149,12 +149,12 @@ async function runPresent(p: SlashPresent, host: SlashHost): Promise<SlashOutcom
       return fromError(await host.quit())
     case 'attach': {
       const kind = p.kind === 'file' || p.kind === 'folder' || p.kind === 'image' ? p.kind : null
-      if (kind === null) return refused(`Type de pièce jointe inconnu : ${p.kind}.`)
+      if (kind === null) return refused(t('commands.unknownAttachmentType', { kind: p.kind }))
       return fromError(await host.attach(kind, p.path))
     }
     default: {
       const unknown: never = p
-      return refused(`Commande inconnue : ${JSON.stringify(unknown)}`)
+      return refused(t('commands.unknownCommand', { unknown: JSON.stringify(unknown) }))
     }
   }
 }
@@ -184,7 +184,7 @@ async function openAndSend(
   command: Command,
 ): Promise<SlashOutcome> {
   const sid = host.currentSession()
-  if (sid === null) return refused(NO_CONVERSATION)
+  if (sid === null) return refused(t('common.noOpenConversation'))
   host.open(view, args)
   return sendTo(host, sid, command, NO_WATCH)
 }
@@ -231,17 +231,17 @@ async function runEngine(command: Command, host: SlashHost, line: string): Promi
     }
     case 'cancel': {
       const sid = host.currentSession()
-      if (sid === null) return refused('Aucune génération en cours.')
+      if (sid === null) return refused(t('commands.noGenerationRunning'))
       return sendTo(host, sid, command, NO_WATCH)
     }
     case 'compact': {
       const sid = host.currentSession()
-      if (sid === null) return refused('Ouvrez une conversation pour compacter son contexte.')
+      if (sid === null) return refused(t('commands.openAConversationToCompactIts'))
       return sendTo(host, sid, command, { kind: 'compact' })
     }
     case 'clear_context': {
       if (host.currentSession() === null) {
-        return refused('Ouvrez une conversation pour vider son contexte.')
+        return refused(t('commands.openAConversationToClearIts'))
       }
       // The view explains the scope and asks for the confirmation; nothing is sent here.
       host.open('clear')
@@ -269,18 +269,18 @@ async function runEngine(command: Command, host: SlashHost, line: string): Promi
       return fromError(await host.resume(command.session_id))
     case 'set_permission_policy': {
       const sid = host.currentSession()
-      if (sid === null) return refused('Ouvrez une conversation pour choisir ses permissions.')
+      if (sid === null) return refused(t('commands.openAConversationToChooseIts'))
       return sendTo(host, sid, command, NO_WATCH)
     }
     case 'approve':
-      return refused('Les demandes d’approbation se traitent dans la conversation.')
+      return refused(t('commands.approvalRequestsAreHandledInThe'))
     case 'revise':
-      return refused('Un message se modifie depuis la conversation (crayon du message).')
+      return refused(t('commands.aMessageIsEditedFromThe'))
     case 'answer_question':
-      return refused('Une question se règle depuis sa carte dans la conversation.')
+      return refused(t('commands.aQuestionIsAnsweredFromIts'))
     default: {
       const unknown: never = command
-      return refused(`Commande inconnue : ${JSON.stringify(unknown)}`)
+      return refused(t('commands.unknownCommand', { unknown: JSON.stringify(unknown) }))
     }
   }
 }
@@ -293,12 +293,12 @@ async function agentControl(
   const sid = host.currentSession()
   const changeAction = CHANGESET_ACTIONS[action]
   if (changeAction) {
-    if (sid === null) return refused('Ouvrez une conversation pour voir ses modifications isolées.')
+    if (sid === null) return refused(t('commands.openAConversationToSeeIts'))
     // Inspect, apply and discard are confirmed in the view: nothing is sent here.
     host.open('changeset', { changesetId: command.changeset_id, action: changeAction })
     return DONE
   }
-  if (sid === null) return refused('Ouvrez une conversation pour utiliser cette commande.')
+  if (sid === null) return refused(t('commands.openAConversationToUseThis'))
   if (action === 'jobs' || action === 'stop_job') {
     host.open('jobs', { action, jobId: command.job_id })
   } else if (command.agent_id) {

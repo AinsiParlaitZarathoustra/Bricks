@@ -15,6 +15,7 @@
 use crate::contract::{
     ComputerUseDriver, ComputerUsePermission, ComputerUseState, ComputerUseStatus, PermissionState,
 };
+use crate::i18n::{msg, tr};
 use crate::services::prefs::PrefsStore;
 use bricks_agent::ToolLender;
 use bricks_mcp::{McpManager, McpServerConfig, McpServerStatus};
@@ -246,9 +247,9 @@ impl ComputerUse {
             .arg(url)
             .output()
             .await
-            .map_err(|e| format!("Réglages Système n’ont pas pu s’ouvrir : {e}"))?;
+            .map_err(|e| tr!(msg::SYSTEM_SETTINGS_COULD_NOT_OPEN, e = e))?;
         if !out.status.success() {
-            return Err("Réglages Système n’ont pas pu s’ouvrir".into());
+            return Err(tr!(msg::SYSTEM_SETTINGS_COULD_NOT_OPEN_2).into());
         }
         Ok(())
     }
@@ -256,7 +257,7 @@ impl ComputerUse {
 
 /// Launches the daemon if none answers, then connects the MCP server.
 async fn connect() -> Result<Running, String> {
-    let driver = locate().ok_or_else(|| "Cua Driver est introuvable".to_string())?;
+    let driver = locate().ok_or_else(|| tr!(msg::CUA_DRIVER_CANT_BE_FOUND).to_string())?;
     let launched_daemon = if daemon_running(&driver.exe).await {
         false
     } else {
@@ -270,9 +271,7 @@ async fn connect() -> Result<Running, String> {
         if launched_daemon {
             let _ = driver_command(&driver.exe, &["stop"]).await;
         }
-        return Err(format!(
-            "le serveur MCP de Cua Driver n’a pas démarré : {e}"
-        ));
+        return Err(tr!(msg::CUA_DRIVERS_MCP_SERVER_DIDNT_START, e = e));
     }
     Ok(Running {
         driver,
@@ -291,11 +290,11 @@ async fn launch_daemon(driver: &Driver) -> Result<(), String> {
         .args(["--args", "serve", "--no-permissions-gate"])
         .output()
         .await
-        .map_err(|e| format!("Cua Driver n’a pas pu être lancé : {e}"))?;
+        .map_err(|e| tr!(msg::CUA_DRIVER_COULD_NOT_BE_LAUNCHED, e = e))?;
     if !out.status.success() {
-        return Err(format!(
-            "Cua Driver n’a pas pu être lancé : {}",
-            String::from_utf8_lossy(&out.stderr).trim()
+        return Err(tr!(
+            msg::CUA_DRIVER_COULD_NOT_BE_LAUNCHED_2,
+            detail = String::from_utf8_lossy(&out.stderr).trim()
         ));
     }
     let deadline = tokio::time::Instant::now() + DAEMON_START;
@@ -305,7 +304,7 @@ async fn launch_daemon(driver: &Driver) -> Result<(), String> {
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
-    Err("Cua Driver ne répond pas après son lancement".into())
+    Err(tr!(msg::CUA_DRIVER_DOESNT_ANSWER_AFTER_ITS).into())
 }
 
 async fn daemon_running(exe: &Path) -> bool {
@@ -321,7 +320,7 @@ async fn driver_command(exe: &Path, args: &[&str]) -> Result<(bool, String), Str
             String::from_utf8_lossy(&out.stdout).into_owned(),
         )),
         Ok(Err(e)) => Err(e.to_string()),
-        Err(_) => Err("no answer".into()),
+        Err(_) => Err(tr!(msg::NO_ANSWER)),
     }
 }
 

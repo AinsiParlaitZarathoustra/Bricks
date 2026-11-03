@@ -10,6 +10,7 @@
 use crate::contract::{IpcError, IpcErrorCode, IpcResult, ProjectFileWindow};
 use crate::engine::AppState;
 use crate::git::{is_binary_content, validate_relative_path};
+use crate::i18n::{msg, tr};
 use crate::services::{invalid, io_error, join_error, not_found};
 use std::fs::File;
 use std::io::Read;
@@ -36,12 +37,13 @@ pub fn read_window(
     end_line: Option<u32>,
 ) -> IpcResult<ProjectFileWindow> {
     validate_relative_path(rel)?;
-    let root = canonical_root(root, "le dossier du projet")?;
+    let root = canonical_root(root, &tr!(msg::THE_PROJECT_FOLDER))?;
     let target = canonical_or_missing(&root.join(rel), rel)?
-        .ok_or_else(|| not_found(format!("`{rel}` n'existe pas dans le projet")))?;
+        .ok_or_else(|| not_found(tr!(msg::DOESNT_EXIST_IN_THE_PROJECT, rel = rel)))?;
     if !target.starts_with(&root) {
-        return Err(invalid(format!(
-            "`{rel}` sort du projet : le lien symbolique est refusé"
+        return Err(invalid(tr!(
+            msg::LEAVES_THE_PROJECT_THE_SYMBOLIC_LINK,
+            rel = rel
         )));
     }
     read_target(&target, rel, line, end_line)
@@ -52,7 +54,7 @@ pub fn read_window(
 pub(crate) fn canonical_root(root: &Path, what: &str) -> IpcResult<PathBuf> {
     std::fs::canonicalize(root).map_err(|e| IpcError {
         code: IpcErrorCode::FolderMissing,
-        message: format!("{what} n'est plus accessible : {e}"),
+        message: tr!(msg::IS_NO_LONGER_ACCESSIBLE, what = what, e = e),
     })
 }
 
@@ -63,7 +65,7 @@ pub(crate) fn canonical_or_missing(candidate: &Path, shown: &str) -> IpcResult<O
     match std::fs::canonicalize(candidate) {
         Ok(path) => Ok(Some(path)),
         Err(e) if is_missing_entry(&e) => Ok(None),
-        Err(e) => Err(io_error(&format!("lecture de `{shown}`"), e)),
+        Err(e) => Err(io_error(&tr!(msg::READING_2, shown = shown), e)),
     }
 }
 
@@ -86,15 +88,15 @@ pub(crate) fn read_target(
     end_line: Option<u32>,
 ) -> IpcResult<ProjectFileWindow> {
     let meta =
-        std::fs::metadata(target).map_err(|e| io_error(&format!("lecture de `{shown}`"), e))?;
+        std::fs::metadata(target).map_err(|e| io_error(&tr!(msg::READING_2, shown = shown), e))?;
     if !meta.is_file() {
-        return Err(invalid(format!("`{shown}` n'est pas un fichier")));
+        return Err(invalid(tr!(msg::ISNT_A_FILE, shown = shown)));
     }
 
     let mut bytes = Vec::new();
     File::open(target)
         .and_then(|file| file.take(READ_LIMIT + 1).read_to_end(&mut bytes))
-        .map_err(|e| io_error(&format!("lecture de `{shown}`"), e))?;
+        .map_err(|e| io_error(&tr!(msg::READING_2, shown = shown), e))?;
     let mut truncated = bytes.len() as u64 > READ_LIMIT;
     if truncated {
         // Cut after the last newline: no half line, no half UTF-8 character.
@@ -105,12 +107,13 @@ pub(crate) fn read_target(
         }
     }
     if is_binary_content(&bytes) {
-        return Err(invalid(format!(
-            "`{shown}` est un fichier binaire : aperçu indisponible"
+        return Err(invalid(tr!(
+            msg::IS_A_BINARY_FILE_NO_PREVIEW,
+            shown = shown
         )));
     }
     let text = std::str::from_utf8(&bytes)
-        .map_err(|_| invalid(format!("`{shown}` n'est pas du texte UTF-8")))?;
+        .map_err(|_| invalid(tr!(msg::ISNT_UTF_8_TEXT, shown = shown)))?;
 
     let mut lines: Vec<String> = text
         .split('\n')
@@ -144,9 +147,9 @@ pub(crate) fn read_target(
 /// `total` lines. An empty file gives `(1, 0)`.
 fn window_bounds(total: u32, line: Option<u32>, end_line: Option<u32>) -> IpcResult<(u32, u32)> {
     match (line, end_line) {
-        (None, Some(_)) => Err(invalid("une fin de plage sans ligne de début")),
+        (None, Some(_)) => Err(invalid(tr!(msg::A_RANGE_END_WITH_NO_START))),
         (None, None) => Ok((1, total.min(WINDOW_LINES))),
-        (Some(0), _) => Err(invalid("les lignes commencent à 1")),
+        (Some(0), _) => Err(invalid(tr!(msg::LINES_START_AT_1))),
         (Some(line), end) => {
             if line > total {
                 return Err(beyond_end(line, total));
@@ -155,8 +158,10 @@ fn window_bounds(total: u32, line: Option<u32>, end_line: Option<u32>) -> IpcRes
                 None => line,
                 Some(end) => {
                     if end < line {
-                        return Err(invalid(format!(
-                            "plage invalide : la fin ({end}) précède le début ({line})"
+                        return Err(invalid(tr!(
+                            msg::INVALID_RANGE_THE_END_COMES_BEFORE,
+                            end = end,
+                            line = line
                         )));
                     }
                     end.min(total)
@@ -190,8 +195,10 @@ fn centred_window(total: u32, line: u32, last: u32) -> (u32, u32) {
 }
 
 fn beyond_end(line: u32, total: u32) -> IpcError {
-    invalid(format!(
-        "ligne {line} au-delà de la fin du fichier ({total} lignes)"
+    invalid(tr!(
+        msg::LINE_IS_PAST_THE_END_OF,
+        line = line,
+        total = total
     ))
 }
 
@@ -254,13 +261,11 @@ pub async fn project_file_read(
 /// What `save_svg_file` accepts: an SVG document of at most `SVG_LIMIT` bytes.
 pub fn check_svg(contents: &str) -> IpcResult<()> {
     if contents.len() > SVG_LIMIT {
-        return Err(invalid(
-            "diagramme trop volumineux pour être enregistré (5 Mio au maximum)",
-        ));
+        return Err(invalid(tr!(msg::DIAGRAM_TOO_LARGE_TO_SAVE_5)));
     }
     let head = contents.trim_start();
     if !(head.starts_with("<?xml") || head.starts_with("<svg")) {
-        return Err(invalid("le contenu n'est pas un document SVG"));
+        return Err(invalid(tr!(msg::THE_CONTENT_ISNT_AN_SVG_DOCUMENT)));
     }
     Ok(())
 }
@@ -300,19 +305,19 @@ pub async fn save_svg_file(
         });
     let picked = rx.await.map_err(|_| IpcError {
         code: IpcErrorCode::Internal,
-        message: "le dialogue d'enregistrement s'est fermé sans réponse".into(),
+        message: tr!(msg::THE_SAVE_DIALOG_CLOSED_WITHOUT_AN).into(),
     })?;
     let Some(picked) = picked else {
         return Ok(None);
     };
     let path = picked
         .into_path()
-        .map_err(|e| io_error("chemin d'enregistrement", e))?;
+        .map_err(|e| io_error(&tr!(msg::SAVE_PATH), e))?;
     let shown = path.display().to_string();
     tokio::task::spawn_blocking(move || std::fs::write(&path, contents.as_bytes()))
         .await
         .map_err(join_error)?
-        .map_err(|e| io_error("écriture du diagramme", e))?;
+        .map_err(|e| io_error(&tr!(msg::WRITING_THE_DIAGRAM), e))?;
     Ok(Some(shown))
 }
 
@@ -322,12 +327,10 @@ const PNG_LIMIT: usize = 32 * 1024 * 1024;
 /// A PNG to write: its signature, within the limit.
 pub fn check_png(contents: &[u8]) -> IpcResult<()> {
     if contents.len() > PNG_LIMIT {
-        return Err(invalid(
-            "image trop volumineuse pour être enregistrée (32 Mio au maximum)",
-        ));
+        return Err(invalid(tr!(msg::IMAGE_TOO_LARGE_TO_SAVE_32)));
     }
     if !contents.starts_with(b"\x89PNG\r\n\x1a\n") {
-        return Err(invalid("le contenu n'est pas une image PNG"));
+        return Err(invalid(tr!(msg::THE_CONTENT_ISNT_A_PNG_IMAGE)));
     }
     Ok(())
 }
@@ -365,19 +368,19 @@ pub async fn save_png_file(
         });
     let picked = rx.await.map_err(|_| IpcError {
         code: IpcErrorCode::Internal,
-        message: "le dialogue d'enregistrement s'est fermé sans réponse".into(),
+        message: tr!(msg::THE_SAVE_DIALOG_CLOSED_WITHOUT_AN).into(),
     })?;
     let Some(picked) = picked else {
         return Ok(None);
     };
     let path = picked
         .into_path()
-        .map_err(|e| io_error("chemin d'enregistrement", e))?;
+        .map_err(|e| io_error(&tr!(msg::SAVE_PATH), e))?;
     let shown = path.display().to_string();
     tokio::task::spawn_blocking(move || std::fs::write(&path, contents))
         .await
         .map_err(join_error)?
-        .map_err(|e| io_error("écriture de l'image", e))?;
+        .map_err(|e| io_error(&tr!(msg::WRITING_THE_IMAGE), e))?;
     Ok(Some(shown))
 }
 
@@ -421,14 +424,14 @@ mod tests {
         at_limit.push(0);
         let err = check_png(&at_limit).unwrap_err();
         assert_eq!(err.code, IpcErrorCode::Invalid);
-        assert!(err.message.contains("32 Mio"), "{}", err.message);
+        assert!(err.message.contains("32 MiB"), "{}", err.message);
     }
 
     #[test]
     fn the_size_is_checked_before_the_signature() {
         let oversized = vec![0u8; PNG_LIMIT + 1];
         let err = check_png(&oversized).unwrap_err();
-        assert!(err.message.contains("32 Mio"), "{}", err.message);
+        assert!(err.message.contains("32 MiB"), "{}", err.message);
     }
 
     #[test]

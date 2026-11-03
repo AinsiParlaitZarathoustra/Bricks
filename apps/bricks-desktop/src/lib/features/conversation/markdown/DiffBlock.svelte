@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '$lib/i18n/i18n.svelte'
   import FileIcon from '$lib/features/file-icons/FileIcon.svelte'
   // A top-level ```diff / ```patch fence: a proposal written in the answer,
   // shown read-only with the change views' DiffView. Its counts are the
@@ -27,9 +28,9 @@
   async function copyPatch() {
     try {
       await navigator.clipboard.writeText(source)
-      copied = 'Copié'
+      copied = t('common.copied')
     } catch {
-      copied = 'Copie impossible'
+      copied = t('common.couldNotCopy')
     }
     clearTimeout(timer)
     timer = setTimeout(() => (copied = null), 1500)
@@ -44,7 +45,7 @@
       class="rounded px-1.5 py-0.5 hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
       onclick={copyPatch}
     >
-      {copied ?? 'Copier'}
+      {copied ?? t('common.copy')}
     </button>
   </div>
   {#each files as file, i (i)}
@@ -52,7 +53,7 @@
       <div class="flex items-center gap-1.5 px-1.5 py-0.5">
         <CollapsibleTrigger
           class="group inline-flex items-center gap-1 rounded px-1 py-0.5 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-          aria-label={file.path ? `Afficher ou masquer ${file.path}` : 'Afficher ou masquer le diff'}
+          aria-label={file.path ? t('conversation.showOrHide', { path: file.path }) : t('conversation.showOrHideTheDiff')}
         >
           <ChevronRight class="size-3.5 transition-transform group-data-[state=open]:rotate-90" aria-hidden="true" />
         </CollapsibleTrigger>

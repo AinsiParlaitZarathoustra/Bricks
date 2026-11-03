@@ -2,8 +2,9 @@
   // The `/` palette above the composer: an ARIA listbox. The keyboard stays in
   // the composer's editor (combobox pattern: aria-activedescendant), so this
   // component only renders the options and reports clicks and hovers.
+  import { t } from '$lib/i18n/i18n.svelte'
   import type { SlashCommandInfo } from '$lib/ipc/bindings/SlashCommandInfo'
-  import type { SlashRegistryState } from './slash-registry.svelte'
+  import { commandDescription, type SlashRegistryState } from './slash-registry.svelte'
   import { usageLine } from './palette'
 
   let {
@@ -39,15 +40,15 @@
   class="absolute inset-x-0 bottom-full z-20 mb-2 overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-md"
 >
   {#if status === 'loading'}
-    <p role="status" class="px-3 py-2 text-sm text-muted-foreground">Chargement des commandes…</p>
+    <p role="status" class="px-3 py-2 text-sm text-muted-foreground">{t('commands.loadingCommands')}</p>
   {:else if status === 'error'}
-    <p role="alert" class="px-3 py-2 text-sm text-destructive">Commandes indisponibles : {error}</p>
+    <p role="alert" class="px-3 py-2 text-sm text-destructive">{t('commands.commandsUnavailable', { error })}</p>
   {:else if items.length === 0}
     <p role="status" class="px-3 py-2 text-sm text-muted-foreground">
-      Aucune commande ne correspond à « /{query} ».
+      {t('commands.noCommandMatches', { query })}
     </p>
   {:else}
-    <div role="listbox" {id} aria-label="Commandes" class="max-h-64 overflow-y-auto p-1">
+    <div role="listbox" {id} aria-label={t('commands.commands')} class="max-h-64 overflow-y-auto p-1">
       {#each items as cmd, i (cmd.name)}
         <div
           role="option"
@@ -71,11 +72,11 @@
             <span class="font-mono font-medium">{usageLine(cmd)}</span>
             {#if cmd.aliases.length > 0}
               <span class="text-xs text-muted-foreground">
-                alias : {cmd.aliases.map((a) => `/${a}`).join(', ')}
+                {t('commands.alias', { value: cmd.aliases.map((a) => `/${a}`).join(', ') })}
               </span>
             {/if}
           </span>
-          <span class="text-xs text-muted-foreground">{cmd.description}</span>
+          <span class="text-xs text-muted-foreground">{commandDescription(cmd)}</span>
         </div>
       {/each}
     </div>

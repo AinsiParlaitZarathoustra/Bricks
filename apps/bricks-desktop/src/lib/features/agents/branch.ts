@@ -2,6 +2,7 @@
 // (its mission, its steps and tool calls, its answer), so it reads exactly like
 // the main conversation with the same components. Built from the steps the
 // parent conversation keeps for it (`AgentInfo.log`); nothing is sent from it.
+import { t } from '$lib/i18n/i18n.svelte'
 import type { Envelope, Snapshot } from '$lib/ipc/engine'
 import { Conversation, type AgentInfo } from '$lib/state/conversation.svelte'
 import { SCHEMA_VERSION } from '$lib/ipc/engine'
@@ -14,7 +15,7 @@ export function branchRunId(agentId: string, execution: number): string {
 /** The name a sub-agent goes by: its label, else its profile. */
 export function agentName(agent: Pick<AgentInfo, 'spawn'>): string {
   const label = agent.spawn.description?.trim()
-  return label ? label : `Agent ${agent.spawn.profile}`
+  return label ? label : t('common.agent', { profile: agent.spawn.profile })
 }
 
 /** The branch of `agent`, as it stands now. */

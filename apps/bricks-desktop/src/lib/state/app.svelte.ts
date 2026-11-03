@@ -3,6 +3,7 @@
 // Owner: orchestrator. Components read `app` and call its methods; they
 // never call the provider or recompute engine state themselves.
 
+import { currentLanguage, setLanguage, t } from '$lib/i18n/i18n.svelte'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
 import { SvelteMap, SvelteSet } from 'svelte/reactivity'
 import * as ipc from '$lib/ipc/client'
@@ -45,6 +46,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   memory_enabled: false,
   computer_use_enabled: false,
   keep_awake: false,
+  language: 'en',
 }
 
 /** An IPC refusal because a project's folder is missing. */
@@ -164,11 +166,12 @@ class AppStore {
       this.unsubscribe = await ipc.subscribeEvents((e) => this.onEvent(e))
       const [info, prefs, projects] = await Promise.all([
         ipc.appInfo(),
-        ipc.prefsGet().catch(() => ({ ...DEFAULT_PREFERENCES })),
+        ipc.prefsGet().catch(() => ({ ...DEFAULT_PREFERENCES, language: currentLanguage() })),
         ipc.projectsList(),
       ])
       this.info = info
       this.prefs = prefs
+      setLanguage(prefs.language)
       this.projects = projects
       // Drafts are created here, not while rendering (a state write in a derived is refused).
       for (const p of projects) this.draftFor(p.id)
@@ -237,7 +240,7 @@ class AppStore {
 
   /** Native folder picker, then registers the folder. */
   async addProject(): Promise<Project | null> {
-    const picked = await openDialog({ directory: true, multiple: false, title: 'Choisir le dossier du projet' })
+    const picked = await openDialog({ directory: true, multiple: false, title: t('app.chooseTheProjectFolder') })
     if (!picked || Array.isArray(picked)) return null
     try {
       const project = await ipc.projectAdd(picked)
@@ -299,7 +302,7 @@ class AppStore {
   async chooseFolder(): Promise<boolean> {
     const request = this.folderRequest
     if (!request) return false
-    const picked = await openDialog({ directory: true, multiple: false, title: 'Choisir le dossier du projet' })
+    const picked = await openDialog({ directory: true, multiple: false, title: t('app.chooseTheProjectFolder') })
     if (!picked || Array.isArray(picked)) return false
     try {
       const project = await ipc.projectRelocate(request.projectId, picked)
@@ -419,7 +422,7 @@ class AppStore {
   startConversation(model?: string, reasoning?: string): Promise<Conversation | null> {
     const projectId = this.currentProjectId
     if (!projectId) {
-      this.fail('Choisissez un projet pour démarrer une conversation.')
+      this.fail(t('app.chooseAProjectToStartA'))
       return Promise.resolve(null)
     }
     // The draft is kept; once the folder is found, the composer gets the focus back to send it.
@@ -449,11 +452,11 @@ class AppStore {
     try {
       const item = await ipc.sessionLocate(sessionId)
       if (!item.project_id)
-        return `La session ${sessionId} appartient à un dossier qui n’est pas un projet Bricks (${item.working_dir ?? 'dossier inconnu'}). Ajoutez ce dossier avec « Nouveau projet ».`
+        return t('app.sessionBelongsToAFolderThat', { sessionId, value: item.working_dir ?? t('common.unknownFolder') })
       if (this.currentProjectId !== item.project_id) await this.selectProject(item.project_id)
       if (this.requireFolder(item.project_id, () => this.open(item.project_id!, sessionId))) return null
       const conv = await this.open(item.project_id, sessionId)
-      return conv ? null : (this.lastError?.message ?? 'Reprise impossible.')
+      return conv ? null : (this.lastError?.message ?? t('app.couldNotResume'))
     } catch (e) {
       return ipc.errorMessage(e)
     }
@@ -585,7 +588,7 @@ class AppStore {
    * refusal message, or null once the engine accepted it.
    */
   async reviseMessage(conv: Conversation, item: UserItem, text: string): Promise<string | null> {
-    if (conv.running) return 'Une exécution est en cours : attendez sa fin ou annulez-la.'
+    if (conv.running) return t('app.aRunIsInProgressWait')
     let index: number | null
     let blocks: PromptBlock[]
     try {
@@ -594,8 +597,8 @@ class AppStore {
     } catch (e) {
       return ipc.errorMessage(e)
     }
-    if (index === null) return 'Ce message ne peut pas être modifié : rouvrez la conversation.'
-    if (blocks.length === 0) return 'Le message est vide.'
+    if (index === null) return t('app.thisMessageCantBeEditedReopen')
+    if (blocks.length === 0) return t('app.theMessageIsEmpty')
     conv.revisingItemId = item.id
     const error = await this.command(conv.sessionId, {
       type: 'revise',

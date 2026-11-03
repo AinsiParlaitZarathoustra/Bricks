@@ -2,6 +2,7 @@
 	// Resume picker (`/resume`, `/sessions`): the conversations of the current
 	// project, and a search across every project. Choosing one reopens it in its
 	// own project, through the desktop registry.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import { onMount } from 'svelte';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import { Badge } from '$lib/components/ui/badge';
@@ -78,8 +79,8 @@
 	});
 
 	function projectName(projectId: string | null): string {
-		if (!projectId) return 'Sans projet';
-		return app.projects.find((p) => p.id === projectId)?.name ?? 'Projet inconnu';
+		if (!projectId) return t('sessionInfo.noProject');
+		return app.projects.find((p) => p.id === projectId)?.name ?? t('common.unknownProject');
 	}
 
 	/** The title as text parts; a search hit marks the words it matched. */
@@ -90,9 +91,9 @@
 
 	/** One line under a title: when, size, model, folder. */
 	function meta(item: SessionItem): string {
-		const count = item.message_count === 1 ? '1 message' : `${item.message_count} messages`;
-		const folder = item.working_dir ? shortPath(item.working_dir) : 'dossier inconnu';
-		return [relativeDate(item.updated_at), count, item.model ?? 'modèle inconnu', folder].join(' · ');
+		const count = t('sessionInfo.messageCount', { count: item.message_count });
+		const folder = item.working_dir ? shortPath(item.working_dir) : t('common.unknownFolder');
+		return [relativeDate(item.updated_at), count, item.model ?? t('sessionInfo.unknownModel'), folder].join(' · ');
 	}
 
 	async function resume(sessionId: string) {
@@ -125,8 +126,8 @@
 		<Input
 			type="search"
 			bind:value={draft}
-			placeholder="Titre ou texte d’un message"
-			aria-label="Rechercher une conversation dans tous les projets"
+			placeholder={t('sessionInfo.titleOrMessageText')}
+			aria-label={t('sessionInfo.searchAConversationAcrossAllProjects')}
 			class="pl-8"
 			autocomplete="off"
 		/>
@@ -137,9 +138,9 @@
 	{/if}
 
 	{#if query && searchError}
-		<p role="alert" class="text-sm text-destructive">Recherche impossible : {searchError}</p>
+		<p role="alert" class="text-sm text-destructive">{t('common.searchFailed', { failure: searchError })}</p>
 	{:else if query && searching && hits.length === 0}
-		<p class="text-sm text-muted-foreground" aria-live="polite">Recherche en cours…</p>
+		<p class="text-sm text-muted-foreground" aria-live="polite">{t('common.searching')}</p>
 	{/if}
 
 	{#if rows.length > 0}
@@ -161,12 +162,12 @@
 								{/each}
 							</span>
 							{#if item.id === currentId}
-								<Badge variant="default">Actuelle</Badge>
+								<Badge variant="default">{t('sessionInfo.current')}</Badge>
 							{:else if item.open}
-								<Badge variant="secondary">Ouverte</Badge>
+								<Badge variant="secondary">{t('sessionInfo.open')}</Badge>
 							{/if}
 							{#if item.running}
-								<Badge variant="outline">En cours</Badge>
+								<Badge variant="outline">{t('common.running')}</Badge>
 							{/if}
 						</span>
 						{#if row.hit?.snippet}
@@ -185,15 +186,15 @@
 		</ul>
 	{:else if query}
 		{#if !searching && !searchError}
-			<EmptyState title="Aucune conversation trouvée" />
+			<EmptyState title={t('sessionInfo.noConversationFound')} />
 		{/if}
 	{:else if !app.currentProject}
 		<EmptyState
-			title="Aucun projet sélectionné"
+			title={t('sessionInfo.noProjectSelected')}
 		/>
 	{:else}
 		<EmptyState
-			title="Aucune conversation dans ce projet"
+			title={t('sessionInfo.noConversationInThisProject')}
 		/>
 	{/if}
 </div>

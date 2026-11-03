@@ -13,6 +13,7 @@
 //! to. Records of an older session do not exist: its messages show no
 //! attachment, as before.
 
+use crate::i18n::{msg, tr};
 use super::attachments::{copy_path, session_attachments};
 use super::conversations::message_text;
 use super::io_error;
@@ -54,10 +55,10 @@ pub fn append(files: &Path, record: &RunAttachments) -> IpcResult<()> {
         .create(true)
         .append(true)
         .open(files.join(RUNS_FILE))
-        .map_err(|e| io_error("pièces jointes des messages", e))?;
+        .map_err(|e| io_error(&tr!(msg::MESSAGE_ATTACHMENTS), e))?;
     file.write_all(format!("{line}\n").as_bytes())
         .and_then(|()| file.sync_data())
-        .map_err(|e| io_error("pièces jointes des messages", e))
+        .map_err(|e| io_error(&tr!(msg::MESSAGE_ATTACHMENTS), e))
 }
 
 /// Sets aside the records of the runs of the messages from `user_index` on (a
@@ -68,7 +69,7 @@ pub fn set_aside_from(files: &Path, user_index: u32) -> IpcResult<usize> {
         &files.join("attachments.revised.jsonl"),
         |line| serde_json::from_str::<RunAttachments>(line).is_ok_and(|r| r.base >= user_index),
     )
-    .map_err(|e| io_error("pièces jointes des messages", e))
+    .map_err(|e| io_error(&tr!(msg::MESSAGE_ATTACHMENTS), e))
 }
 
 /// The records of a session, oldest first. A missing file gives none; a damaged

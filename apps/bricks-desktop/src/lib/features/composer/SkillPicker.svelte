@@ -3,6 +3,7 @@
   // context, filtered by the engine (list_skills in a conversation, the catalogue
   // without one). Choosing a skill only adds it to the draft: no trust is granted
   // here, and the project skills that await the trust decision are not offered.
+  import { t } from '$lib/i18n/i18n.svelte'
   import { onMount } from 'svelte'
   import * as Command from '$lib/components/ui/command'
   import { Button } from '$lib/components/ui/button'
@@ -103,29 +104,29 @@
 
 <div
   role="group"
-  aria-label="Skills pour le prochain message"
+  aria-label={t('composer.skillsForTheNextMessage')}
   class="absolute inset-x-0 bottom-full z-20 mb-2 overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-md"
 >
   <Command.Root shouldFilter={false} class="bg-transparent p-0">
     <Command.Input
       bind:ref={inputEl}
       bind:value={query}
-      placeholder="Rechercher un skill"
-      aria-label="Rechercher un skill"
+      placeholder={t('common.searchForASkill')}
+      aria-label={t('common.searchForASkill')}
       oninput={onQueryInput}
       onkeydown={onEscape}
     />
     <Command.List class="p-1">
       {#if pending}
-        <p role="status" class="px-2 py-3 text-sm text-muted-foreground">Chargement des skills…</p>
+        <p role="status" class="px-2 py-3 text-sm text-muted-foreground">{t('composer.loadingSkills')}</p>
       {:else if failure}
         <div role="alert" class="flex flex-col items-start gap-2 px-2 py-3 text-sm text-destructive">
-          <p class="break-words">Skills indisponibles : {failure}</p>
-          <Button variant="outline" size="sm" onclick={() => void request(query.trim())}>Réessayer</Button>
+          <p class="break-words">{t('composer.skillsUnavailable', { failure })}</p>
+          <Button variant="outline" size="sm" onclick={() => void request(query.trim())}>{t('common.retry')}</Button>
         </div>
       {:else if choices.length === 0}
         <p role="status" class="px-2 py-3 text-sm text-muted-foreground">
-          {query.trim() ? `Aucun skill utilisable ne correspond à « ${query.trim()} ».` : 'Aucun skill utilisable ici.'}
+          {query.trim() ? t('composer.noUsableSkillMatches', { query: query.trim() }) : t('composer.noUsableSkillsHere')}
         </p>
       {:else}
         {#each choices as skill (skill.name)}
@@ -142,7 +143,7 @@
               {/if}
             </span>
             {#if skill.active}
-              <span class="shrink-0 text-xs text-muted-foreground">Actif</span>
+              <span class="shrink-0 text-xs text-muted-foreground">{t('composer.active')}</span>
             {/if}
           </Command.Item>
         {/each}
@@ -153,15 +154,15 @@
   <div class="flex flex-wrap items-center justify-between gap-2 border-t px-2 py-1.5 text-xs text-muted-foreground">
     <div class="flex min-w-0 flex-col">
       {#if awaitingTrust}
-        <span class="break-words">Skills du projet en attente d’autorisation : non proposés.</span>
+        <span class="break-words">{t('composer.projectSkillsAwaitingApprovalNotOffered')}</span>
       {/if}
       {#if truncated}
-        <span class="break-words">Seuls les premiers résultats sont affichés : affinez la recherche.</span>
+        <span class="break-words">{t('composer.onlyTheFirstResultsAreShown')}</span>
       {/if}
     </div>
     <Button variant="ghost" size="sm" onclick={onClose} onkeydown={onEscape}>
       <XIcon aria-hidden="true" />
-      Fermer
+      {t('common.close')}
     </Button>
   </div>
 </div>

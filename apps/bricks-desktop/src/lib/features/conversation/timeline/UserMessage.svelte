@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '$lib/i18n/i18n.svelte'
   import Check from '@lucide/svelte/icons/check'
   import Copy from '@lucide/svelte/icons/copy'
   import Pencil from '@lucide/svelte/icons/pencil'
@@ -136,7 +137,7 @@
       <Textarea
         {@attach focusField}
         bind:value={draft}
-        aria-label="Message modifié"
+        aria-label={t('conversation.messageEdited')}
         class="max-h-[40vh] min-h-20 text-sm"
         onkeydown={onEditKeydown}
       />
@@ -144,8 +145,8 @@
         <p class="text-xs break-words text-destructive" role="alert">{editError}</p>
       {/if}
       <div class="flex justify-end gap-2">
-        <Button variant="outline" size="sm" onclick={cancelEdit}>Annuler</Button>
-        <Button size="sm" disabled={!canSave} onclick={save}>Enregistrer et relancer</Button>
+        <Button variant="outline" size="sm" onclick={cancelEdit}>{t('common.cancel')}</Button>
+        <Button size="sm" disabled={!canSave} onclick={save}>{t('conversation.saveAndRerun')}</Button>
       </div>
     </div>
   {:else if item.text}
@@ -160,15 +161,15 @@
             bind:this={editButton}
             type="button"
             class={action}
-            title="Modifier"
-            aria-label="Modifier le message"
+            title={t('conversation.edit')}
+            aria-label={t('conversation.editTheMessage')}
             disabled={running}
             onclick={startEdit}
           >
             <Pencil class="size-3.5" aria-hidden="true" />
           </button>
         {/if}
-        <button type="button" class={action} title="Copier" aria-label="Copier le message" onclick={copy}>
+        <button type="button" class={action} title={t('common.copy')} aria-label={t('conversation.copyTheMessage')} onclick={copy}>
           {#if copied}
             <Check class="size-3.5" aria-hidden="true" />
           {:else}
@@ -190,16 +191,16 @@
             onauxclick={(event) => event.preventDefault()}>{part.text}</a>{:else}{part.text}{/if}{/each}</div>
     </div>
     {#if copyError}
-      <p class="max-w-[85%] text-xs break-words text-destructive" role="alert">Copie impossible : {copyError}</p>
+      <p class="max-w-[85%] text-xs break-words text-destructive" role="alert">{t('conversation.couldNotCopy', { copyError })}</p>
     {/if}
     {#if linkError}
       <p class="max-w-[85%] text-xs break-words text-destructive" role="alert">
-        Le lien n’a pas pu être ouvert : {linkError}
+        {t('conversation.theLinkCouldNotBeOpened', { linkError })}
       </p>
     {/if}
   {/if}
   {#if item.attachments.length > 0}
-    <ul class="flex max-w-[85%] flex-wrap justify-end gap-1.5" aria-label="Pièces jointes">
+    <ul class="flex max-w-[85%] flex-wrap justify-end gap-1.5" aria-label={t('common.attachments')}>
       {#each item.attachments as attachment, i (`${i}:${attachment.path}`)}
         {@const size = formatBytes(attachment.bytes)}
         {@const id = copyId(attachment)}

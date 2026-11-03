@@ -3,6 +3,7 @@
   // loaded on demand, only once the fence is closed; the source stays visible
   // until then and when rendering fails. The SVG comes from `renderMermaid`,
   // already validated by `sanitizeSvg`.
+  import { t } from '$lib/i18n/i18n.svelte'
   import { fontsReady, theme } from '$lib/theme/theme.svelte'
   import { app } from '$lib/state/app.svelte'
   import { diagramSettings, diagramTheme } from '$lib/features/diagrams/settings'
@@ -77,7 +78,7 @@
   <SvgViewer {svg} {source} title="Mermaid" />
 {:else}
   <figure class="my-2 overflow-hidden rounded-md bg-code-bg text-code-foreground" aria-busy={!error && complete}>
-    {#if error}<p class="px-2.5 pt-2 text-xs text-destructive" role="alert">Diagramme non rendu : {error}</p>{/if}
+    {#if error}<p class="px-2.5 pt-2 text-xs text-destructive" role="alert">{t('conversation.diagramNotRendered', { error })}</p>{/if}
     <pre class="overflow-x-auto p-2.5 text-xs leading-relaxed"><code class="font-mono">{source}</code></pre>
   </figure>
 {/if}

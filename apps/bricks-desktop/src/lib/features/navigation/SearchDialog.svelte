@@ -1,6 +1,7 @@
 <script lang="ts">
 	// The magnifier next to « Nouvelle conversation », and the search it opens: titles and
 	// messages of every project. Escape closes it and gives focus back to the magnifier.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import Search from '@lucide/svelte/icons/search';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
@@ -8,7 +9,7 @@
 	import * as Tooltip from '$lib/components/ui/tooltip';
 	import SearchResults from './SearchResults.svelte';
 
-	const LABEL = 'Rechercher dans les conversations';
+	const LABEL = $derived(t('navigation.searchConversations'));
 
 	let open = $state(false);
 	let query = $state('');
@@ -70,8 +71,8 @@
 			<Input
 				type="search"
 				bind:value={query}
-				placeholder="Rechercher…"
-				aria-label={`${LABEL} (titres et messages)`}
+				placeholder={t('navigation.search')}
+				aria-label={t('navigation.titlesAndMessages', { LABEL })}
 				autocomplete="off"
 				spellcheck={false}
 				class="h-11 rounded-none border-0 pl-10 text-ui shadow-none focus-visible:ring-0 dark:bg-transparent"

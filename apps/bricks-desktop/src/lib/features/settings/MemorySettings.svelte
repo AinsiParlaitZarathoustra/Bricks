@@ -2,6 +2,7 @@
 	// The long-term memory: on or off (from the next run), the global memory and the open
 	// project's, viewed and cleared, and the memories of projects removed from the list.
 	// Turning it off deletes nothing; viewing and clearing work either way.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import { onMount } from 'svelte';
 	import type { MemoryCounts, MemoryOverview, MemoryScope } from '$lib/ipc/client';
 	import * as ipc from '$lib/ipc/client';
@@ -12,7 +13,6 @@
 	import SettingsGroup from './SettingsGroup.svelte';
 	import DeleteDialog from './DeleteDialog.svelte';
 	import type { WriteOutcome } from './models';
-	import { plural } from '$lib/features/inspect/format';
 
 	const project = $derived(app.currentProject && !app.currentProject.chats ? app.currentProject : null);
 
@@ -47,9 +47,9 @@
 
 	function total(c: MemoryCounts): string {
 		return [
-			plural(c.notes, 'note', 'notes'),
-			plural(c.exchanges, 'échange', 'échanges'),
-			plural(c.facts, 'fait', 'faits')
+			t('settings.noteCount', { count: c.notes }),
+			t('settings.exchangeCount', { count: c.exchanges }),
+			t('settings.factCount', { count: c.facts })
 		].join(' · ');
 	}
 
@@ -69,53 +69,53 @@
 
 	function askGlobal(c: MemoryCounts) {
 		pending = {
-			title: 'Supprimer la mémoire globale',
-			description: `${total(c)}. Tous les projets perdent l’accès à cette mémoire partagée. L’historique des conversations est conservé.`,
+			title: t('settings.deleteTheGlobalMemory'),
+			description: t('settings.everyProjectLosesAccessToThis', { c: total(c) }),
 			run: () => ipc.memoryDelete('global', null)
 		};
 	}
 
 	function askProject(c: MemoryCounts, id: string, name: string) {
 		pending = {
-			title: 'Supprimer la mémoire de ce projet',
-			description: `${name} : ${total(c)}. L’historique des conversations est conservé.`,
+			title: t('settings.deleteThisProjectsMemory'),
+			description: t('settings.theConversationHistoryIsKept', { name, c: total(c) }),
 			run: () => ipc.memoryDelete('project', id)
 		};
 	}
 
 	function askRetired(id: string, name: string | null) {
 		pending = {
-			title: 'Supprimer la mémoire de ce projet retiré',
-			description: `${name ?? id}. L’historique des conversations est conservé.`,
+			title: t('settings.deleteThisRemovedProjectsMemory'),
+			description: t('settings.theConversationHistoryIsKept2', { id: name ?? id }),
 			run: () => ipc.memoryDeleteRetired(id)
 		};
 	}
 </script>
 
 <div class="flex flex-col gap-6">
-	<SettingsGroup title="Mémoire">
+	<SettingsGroup title={t('common.memory')}>
 		<label class="flex items-center justify-between gap-3 p-3 text-ui">
-			Mémoire
+			{t('common.memory')}
 			<Switch bind:checked={() => app.prefs.memory_enabled, (on) => toggle(on)} disabled={toggling} />
 		</label>
 		{#if toggleError}
 			<p role="alert" class="p-3 text-ui text-pretty text-destructive">
-				Le réglage n’a pas été enregistré : {toggleError}
+				{t('settings.theSettingWasntSaved', { saveError: toggleError })}
 			</p>
 		{/if}
 	</SettingsGroup>
 
 	{#if loadError}
-		<p role="alert" class="text-ui text-pretty text-destructive">Lecture impossible : {loadError}</p>
+		<p role="alert" class="text-ui text-pretty text-destructive">{t('settings.couldNotRead', { loadError })}</p>
 	{/if}
 
-	<SettingsGroup title="Mémoire globale">
+	<SettingsGroup title={t('settings.globalMemory')}>
 		<div class="flex flex-wrap items-center gap-2 p-3">
 			<span class="text-ui tabular-nums text-muted-foreground">
 				{overview ? total(overview.global) : '—'}
 			</span>
 			<div class="ml-auto flex gap-2">
-				<Button variant="secondary" size="sm" onclick={() => view('global')}>Voir</Button>
+				<Button variant="secondary" size="sm" onclick={() => view('global')}>{t('settings.view')}</Button>
 				<Button
 					variant="ghost"
 					size="sm"
@@ -123,13 +123,13 @@
 					disabled={!overview}
 					onclick={() => overview && askGlobal(overview.global)}
 				>
-					Supprimer
+					{t('common.delete')}
 				</Button>
 			</div>
 		</div>
 	</SettingsGroup>
 
-	<SettingsGroup title="Mémoire par projet">
+	<SettingsGroup title={t('settings.memoryPerProject')}>
 		<div class="flex flex-wrap items-center gap-2 p-3">
 			{#if project}
 				<span class="text-ui font-medium">{project.name}</span>
@@ -137,10 +137,10 @@
 					{overview?.project ? total(overview.project) : '—'}
 				</span>
 			{:else}
-				<span class="text-ui text-muted-foreground">Aucun projet ouvert</span>
+				<span class="text-ui text-muted-foreground">{t('common.noOpenProject')}</span>
 			{/if}
 			<div class="ml-auto flex gap-2">
-				<Button variant="secondary" size="sm" disabled={!project} onclick={() => view('project')}>Voir</Button>
+				<Button variant="secondary" size="sm" disabled={!project} onclick={() => view('project')}>{t('settings.view')}</Button>
 				<Button
 					variant="ghost"
 					size="sm"
@@ -149,22 +149,22 @@
 					onclick={() =>
 						project && overview?.project && askProject(overview.project, project.id, project.name)}
 				>
-					Supprimer
+					{t('common.delete')}
 				</Button>
 			</div>
 		</div>
 		{#if overview?.toml_section_ignored}
 			<p class="p-3 text-caption text-muted-foreground">
-				La section [memory] de bricks.toml n’est pas utilisée par l’app.
+				{t('settings.theMemorySectionOfBricksToml')}
 			</p>
 		{/if}
 	</SettingsGroup>
 
 	{#if overview && overview.retired.length > 0}
-		<SettingsGroup title="Mémoires de projets retirés">
+		<SettingsGroup title={t('settings.memoriesOfRemovedProjects')}>
 			{#each overview.retired as r (r.project_id)}
 				<div class="flex items-center gap-2 p-3">
-					<span class="min-w-0 truncate text-ui">{r.name ?? 'Projet sans nom'}</span>
+					<span class="min-w-0 truncate text-ui">{r.name ?? t('settings.unnamedProject')}</span>
 					<span class="min-w-0 truncate font-mono text-caption text-muted-foreground">{r.project_id}</span>
 					<Button
 						variant="ghost"
@@ -172,7 +172,7 @@
 						class="ml-auto text-destructive"
 						onclick={() => askRetired(r.project_id, r.name)}
 					>
-						Supprimer
+						{t('common.delete')}
 					</Button>
 				</div>
 			{/each}

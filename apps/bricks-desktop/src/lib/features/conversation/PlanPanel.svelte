@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '$lib/i18n/i18n.svelte'
   import ChevronRight from '@lucide/svelte/icons/chevron-right'
   import Circle from '@lucide/svelte/icons/circle'
   import CircleCheck from '@lucide/svelte/icons/circle-check'
@@ -14,13 +15,13 @@
   let current = $derived(plan.todos.find((t) => t.status === 'in_progress'))
 
   const STATUS_LABEL: Record<PlanStatus, string> = {
-    pending: 'à faire',
-    in_progress: 'en cours',
-    completed: 'terminée',
+    get pending() { return t('conversation.toDo') },
+    get in_progress() { return t('conversation.planInProgress') },
+    get completed() { return t('conversation.planCompleted') },
   }
 </script>
 
-<section aria-label="Plan" class="rounded-lg border border-border bg-card text-sm text-card-foreground">
+<section aria-label={t('conversation.plan')} class="rounded-lg border border-border bg-card text-sm text-card-foreground">
   <button
     type="button"
     class="flex w-full min-w-0 items-center gap-2 rounded-lg px-3 py-1.5 text-left hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
@@ -32,8 +33,8 @@
       class="size-3.5 shrink-0 text-muted-foreground transition-transform {open ? 'rotate-90' : ''}"
       aria-hidden="true"
     />
-    <span class="font-medium">Plan</span>
-    <span class="text-xs text-muted-foreground tabular-nums" aria-label="{done} étapes terminées sur {plan.todos.length}">
+    <span class="font-medium">{t('conversation.plan')}</span>
+    <span class="text-xs text-muted-foreground tabular-nums" aria-label={t('conversation.ofStepsDone', { done, todos: plan.todos.length })}>
       {done}/{plan.todos.length}
     </span>
     {#if current && !open}

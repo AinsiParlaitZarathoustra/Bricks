@@ -4,7 +4,8 @@
 // Same approach as context-card-structure.test.ts.
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { plural } from '../../src/lib/features/inspect/format';
+import { t } from '../../src/lib/i18n/i18n.svelte';
+import { bound, call, tkey } from './french-keys';
 
 const src = (path: string) => readFileSync(new URL(`../../src/${path}`, import.meta.url), 'utf8');
 
@@ -17,7 +18,7 @@ describe('the settings section', () => {
 	const dialog = src(DIALOG);
 
 	it('is one section of the settings, named Mémoire, showing MemorySettings', () => {
-		expect(dialog).toContain("{ id: 'memory', label: 'Mémoire', icon: Brain }");
+		expect(dialog).toContain(`{ id: 'memory', get label() { return ${call('Mémoire')} }, icon: Brain }`);
 		expect(dialog).toContain('<Tabs.Content value="memory"');
 		expect(dialog).toMatch(/MemorySettings/);
 	});
@@ -33,7 +34,7 @@ describe('the switch', () => {
 	const settings = src(SETTINGS);
 
 	it('shows the saved state on one switch, labelled Mémoire', () => {
-		expect(settings).toContain('Mémoire\n\t\t\t<Switch bind:checked={() => app.prefs.memory_enabled, (on) => toggle(on)} disabled={toggling} />');
+		expect(settings).toContain(`{${call('Mémoire')}}\n\t\t\t<Switch bind:checked={() => app.prefs.memory_enabled, (on) => toggle(on)} disabled={toggling} />`);
 		expect(settings).not.toContain('<Badge');
 		expect(settings).not.toContain('Désactiver');
 		expect(settings).not.toContain('Activer la mémoire');
@@ -46,25 +47,25 @@ describe('the switch', () => {
 	});
 
 	it('shows a refused save as an alert with its reason', () => {
-		expect(settings).toContain('Le réglage n’a pas été enregistré : {toggleError}');
-		expect(settings).toMatch(/role="alert"[^>]*>\s*Le réglage n’a pas été enregistré/);
+		expect(settings).toContain(`${tkey('Le réglage n’a pas été enregistré : {saveError}')}, { saveError: toggleError })`);
+		expect(settings).toMatch(/role="alert"[^>]*>\s*\{t\('settings\.theSettingWasntSaved'/);
 	});
 });
 
 describe('the counts', () => {
 	it('names each count in French with its singular and plural', () => {
-		expect(plural(1, 'note', 'notes')).toBe('1 note');
-		expect(plural(0, 'note', 'notes')).toBe('0 notes');
-		expect(plural(2, 'échange', 'échanges')).toBe('2 échanges');
-		expect(plural(1, 'fait', 'faits')).toBe('1 fait');
+		expect(t('settings.noteCount', { count: 1 })).toBe('1 note');
+		expect(t('settings.noteCount', { count: 0 })).toBe('0 note');
+		expect(t('settings.exchangeCount', { count: 2 })).toBe('2 échanges');
+		expect(t('settings.factCount', { count: 1 })).toBe('1 fait');
 	});
 
 	it('lists notes, exchanges and facts in that order', () => {
 		const settings = src(SETTINGS);
 		const body = settings.slice(settings.indexOf('function total('), settings.indexOf('function view('));
-		const notes = body.indexOf("plural(c.notes, 'note', 'notes')");
-		const exchanges = body.indexOf("plural(c.exchanges, 'échange', 'échanges')");
-		const facts = body.indexOf("plural(c.facts, 'fait', 'faits')");
+		const notes = body.indexOf("t('settings.noteCount', { count: c.notes })");
+		const exchanges = body.indexOf("t('settings.exchangeCount', { count: c.exchanges })");
+		const facts = body.indexOf("t('settings.factCount', { count: c.facts })");
 		expect(notes).toBeGreaterThan(-1);
 		expect(exchanges).toBeGreaterThan(notes);
 		expect(facts).toBeGreaterThan(exchanges);
@@ -75,14 +76,14 @@ describe('the global and project memories', () => {
 	const settings = src(SETTINGS);
 
 	it('shows each memory under its title, with a dash until its counts are read', () => {
-		expect(settings).toContain('title="Mémoire globale"');
-		expect(settings).toContain('title="Mémoire par projet"');
+		expect(settings).toContain(bound('title', 'Mémoire globale'));
+		expect(settings).toContain(bound('title', 'Mémoire par projet'));
 		expect(settings).toContain("{overview ? total(overview.global) : '—'}");
 		expect(settings).toContain("{overview?.project ? total(overview.project) : '—'}");
 	});
 
 	it('names the missing project, and disables the project actions without one', () => {
-		expect(settings).toContain('Aucun projet ouvert');
+		expect(settings).toContain(call('Aucun projet ouvert'));
 		expect(settings).toContain("disabled={!project} onclick={() => view('project')}");
 		expect(settings).toContain('disabled={!project || !overview?.project}');
 	});
@@ -94,7 +95,7 @@ describe('the global and project memories', () => {
 
 	it('says the bricks.toml [memory] section is not used, when it is present', () => {
 		expect(settings).toContain('{#if overview?.toml_section_ignored}');
-		expect(settings).toContain('La section [memory] de bricks.toml n’est pas utilisée par l’app.');
+		expect(settings).toContain(call('La section [memory] de bricks.toml n’est pas utilisée par l’app.'));
 	});
 });
 
@@ -102,14 +103,22 @@ describe('deletions ask first', () => {
 	const settings = src(SETTINGS);
 
 	it('gives each deletion its title and says the conversations are kept', () => {
-		expect(settings).toContain("title: 'Supprimer la mémoire globale'");
-		expect(settings).toContain("title: 'Supprimer la mémoire de ce projet'");
-		expect(settings).toContain("title: 'Supprimer la mémoire de ce projet retiré'");
-		expect(settings.split(KEPT).length - 1).toBe(3);
+		expect(settings).toContain(`title: ${call('Supprimer la mémoire globale')}`);
+		expect(settings).toContain(`title: ${call('Supprimer la mémoire de ce projet')}`);
+		expect(settings).toContain(`title: ${call('Supprimer la mémoire de ce projet retiré')}`);
+		// The sentence that the conversations are kept lives in the three texts of the catalogue.
+		for (const text of [
+			'{c}. Tous les projets perdent l’accès à cette mémoire partagée. L’historique des conversations est conservé.',
+			'{name} : {c}. L’historique des conversations est conservé.',
+			'{id}. L’historique des conversations est conservé.'
+		]) {
+			expect(settings).toContain(tkey(text));
+		}
+		expect(KEPT).toBe('L’historique des conversations est conservé.');
 	});
 
 	it('says the global memory is shared by every project', () => {
-		expect(settings).toContain('Tous les projets perdent l’accès à cette mémoire partagée.');
+		expect(settings).toContain(tkey('{c}. Tous les projets perdent l’accès à cette mémoire partagée. L’historique des conversations est conservé.'));
 	});
 
 	it('runs the matching deletion, and never runs one before confirmation', () => {
@@ -139,11 +148,11 @@ describe('the retired memories', () => {
 
 	it('lists them only when there are some', () => {
 		expect(settings).toContain('{#if overview && overview.retired.length > 0}');
-		expect(settings).toContain('title="Mémoires de projets retirés"');
+		expect(settings).toContain(bound('title', 'Mémoires de projets retirés'));
 	});
 
 	it('names a retired project without a name, and keys each row by its id', () => {
-		expect(settings).toContain("{r.name ?? 'Projet sans nom'}");
+		expect(settings).toContain(`{r.name ?? ${call('Projet sans nom')}}`);
 		expect(settings).toContain('{#each overview.retired as r (r.project_id)}');
 	});
 
@@ -157,7 +166,7 @@ describe('the retired memories', () => {
 describe('read errors', () => {
 	it('shows a failed read as an alert, and keeps the empty dashes', () => {
 		const settings = src(SETTINGS);
-		expect(settings).toContain('Lecture impossible : {loadError}');
-		expect(settings).toMatch(/role="alert"[^>]*>\s*Lecture impossible/);
+		expect(settings).toContain(`${tkey('Lecture impossible : {loadError}')}, { loadError })`);
+		expect(settings).toMatch(/role="alert"[^>]*>\s*\{t\('settings\.couldNotRead'/);
 	});
 });

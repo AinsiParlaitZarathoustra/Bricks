@@ -3,6 +3,7 @@
 	// Cancel discards.
 	// Only counts above zero are checked here; the engine checks the rest. The effort profiles are
 	// edited as a whole list and saved with the model.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import { untrack } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Select from '$lib/components/ui/select';
@@ -82,8 +83,8 @@
 
 	const defaultValue = $derived(form.defaultPending ? PENDING : (form.reasoningDefault ?? NO_PROFILE));
 	const defaultText = $derived.by(() => {
-		if (form.defaultPending) return 'Choisir un profil';
-		if (form.reasoningDefault === null) return 'Aucun';
+		if (form.defaultPending) return t('settings.chooseAProfile');
+		if (form.reasoningDefault === null) return t('settings.none');
 		const profile = form.profiles.find((p) => p.id === form.reasoningDefault);
 		return profile ? draftLabel(profile) : (form.reasoningDefault ?? '');
 	});
@@ -139,7 +140,7 @@
 		if (saving) return;
 		attempted = true;
 		if (editing) {
-			error = 'Validez ou annulez le profil en cours d’édition avant d’enregistrer.';
+			error = t('settings.confirmOrCancelTheProfileBeing');
 			return;
 		}
 		if (hasFormErrors(errors) || idError) return;
@@ -169,7 +170,7 @@
 		<form onsubmit={submit} class="flex flex-col gap-5" novalidate>
 			<Dialog.Header>
 				<Dialog.Title>
-					{original ? `Modifier le modèle ${displayName(original.name, original.id)}` : 'Ajouter un modèle'}
+					{original ? t('settings.editModel', { id: displayName(original.name, original.id) }) : t('settings.addAModel')}
 				</Dialog.Title>
 			</Dialog.Header>
 
@@ -179,7 +180,7 @@
 
 			{#if !original}
 				<div class="flex flex-col gap-2">
-					<Label for={`${uid}-id`}>Identifiant</Label>
+					<Label for={`${uid}-id`}>{t('common.identifier')}</Label>
 					<Input
 						id={`${uid}-id`}
 						bind:value={id}
@@ -197,7 +198,7 @@
 			{/if}
 
 			<div class="flex flex-col gap-2">
-				<Label for={`${uid}-name`}>Nom</Label>
+				<Label for={`${uid}-name`}>{t('settings.name')}</Label>
 				<Input
 					id={`${uid}-name`}
 					bind:value={form.name}
@@ -212,7 +213,7 @@
 			</div>
 
 			<div class="flex flex-col gap-2">
-				<Label for={`${uid}-api-model`}>Nom API</Label>
+				<Label for={`${uid}-api-model`}>{t('settings.apiName')}</Label>
 				<Input
 					id={`${uid}-api-model`}
 					bind:value={form.apiModel}
@@ -229,7 +230,7 @@
 
 			<div class="grid gap-4 sm:grid-cols-2">
 				<div class="flex flex-col gap-2">
-					<Label for={`${uid}-max-input`}>Entrée maximale (tokens)</Label>
+					<Label for={`${uid}-max-input`}>{t('settings.maximumInputTokens')}</Label>
 					<Input
 						id={`${uid}-max-input`}
 						bind:value={form.maxInput}
@@ -244,7 +245,7 @@
 				</div>
 
 				<div class="flex flex-col gap-2">
-					<Label for={`${uid}-max-output`}>Sortie maximale (tokens)</Label>
+					<Label for={`${uid}-max-output`}>{t('settings.maximumOutputTokens')}</Label>
 					<Input
 						id={`${uid}-max-output`}
 						bind:value={form.maxOutput}
@@ -260,7 +261,7 @@
 			</div>
 
 			<fieldset class="flex flex-col gap-2">
-				<legend class="mb-2 text-sm leading-none font-medium">Entrées acceptées</legend>
+				<legend class="mb-2 text-sm leading-none font-medium">{t('settings.acceptedInputs')}</legend>
 				<div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
 					{#each MODALITY_OPTIONS as modality (modality)}
 						<label class="flex items-center gap-2 text-sm">
@@ -281,7 +282,7 @@
 
 			{#if form.modalities.includes('document')}
 				<div class="flex flex-col gap-2">
-					<Label for={`${uid}-documents`}>Types de fichiers acceptés</Label>
+					<Label for={`${uid}-documents`}>{t('settings.acceptedFileTypes')}</Label>
 					<div class="flex flex-wrap items-center gap-1.5">
 						{#each DOCUMENT_TYPE_PRESETS as preset (preset.value)}
 							{@const active = documentTypes(form.documentTypes).includes(preset.value)}
@@ -312,9 +313,9 @@
 			{/if}
 
 			<fieldset class="flex flex-col gap-2">
-				<legend class="mb-2 text-sm leading-none font-medium">Coûts (USD par million de tokens)</legend>
+				<legend class="mb-2 text-sm leading-none font-medium">{t('settings.costsUsdPerMillionTokens')}</legend>
 				<div class="grid gap-4 sm:grid-cols-3">
-					{#each [{ key: 'priceInput', label: 'Entrée' }, { key: 'priceOutput', label: 'Sortie' }, { key: 'priceCache', label: 'Cache' }] as const as field (field.key)}
+					{#each [{ key: 'priceInput', label: t('common.enter') }, { key: 'priceOutput', label: t('common.output') }, { key: 'priceCache', label: t('settings.cache') }] as const as field (field.key)}
 						<div class="flex flex-col gap-2">
 							<Label for={`${uid}-${field.key}`}>{field.label}</Label>
 							<Input
@@ -335,7 +336,7 @@
 			</fieldset>
 
 			<div class="flex flex-col gap-2">
-				<span id={`${uid}-profiles-label`} class="text-sm leading-none font-medium">Profils d’effort</span>
+				<span id={`${uid}-profiles-label`} class="text-sm leading-none font-medium">{t('settings.effortProfiles')}</span>
 				<div class="flex flex-wrap items-center gap-1.5" role="group" aria-labelledby={`${uid}-profiles-label`}>
 					{#each form.profiles as profile, index (profile.id)}
 						<button
@@ -345,7 +346,7 @@
 						>
 							<span class="truncate">{draftLabel(profile)}</span>
 							{#if form.reasoningDefault === profile.id}
-								<span class="shrink-0 text-muted-foreground">(défaut)</span>
+								<span class="shrink-0 text-muted-foreground">{t('settings.default')}</span>
 							{/if}
 						</button>
 					{/each}
@@ -354,7 +355,7 @@
 						variant="outline"
 						size="icon-xs"
 						class="rounded-full"
-						aria-label="Ajouter un profil d’effort"
+						aria-label={t('settings.addAnEffortProfile')}
 						onclick={openNew}
 					>
 						<Plus aria-hidden="true" />
@@ -378,7 +379,7 @@
 			{/if}
 
 			<div class="flex flex-col gap-2">
-				<Label for={`${uid}-profile`}>Profil d’effort par défaut</Label>
+				<Label for={`${uid}-profile`}>{t('settings.defaultEffortProfile')}</Label>
 				<Select.Root type="single" value={defaultValue} onValueChange={chooseDefault}>
 					<Select.Trigger
 						id={`${uid}-profile`}
@@ -390,9 +391,9 @@
 					</Select.Trigger>
 					<Select.Content>
 						{#if form.defaultPending}
-							<Select.Item value={PENDING} label="Choisir un profil" disabled>Choisir un profil</Select.Item>
+							<Select.Item value={PENDING} label={t('settings.chooseAProfile')} disabled>{t('settings.chooseAProfile')}</Select.Item>
 						{/if}
-						<Select.Item value={NO_PROFILE} label="Aucun">Aucun</Select.Item>
+						<Select.Item value={NO_PROFILE} label={t('settings.none')}>{t('settings.none')}</Select.Item>
 						{#each form.profiles as profile (profile.id)}
 							<Select.Item value={profile.id} label={draftLabel(profile)}>{draftLabel(profile)}</Select.Item>
 						{/each}
@@ -404,7 +405,7 @@
 			</div>
 
 			<label class="flex items-center justify-between gap-3 text-sm">
-				Appels d’outils asynchrones
+				{t('settings.asynchronousToolCalls')}
 				<Switch bind:checked={form.asyncToolCalls} />
 			</label>
 
@@ -413,8 +414,8 @@
 			{/if}
 
 			<Dialog.Footer>
-				<Button type="button" variant="outline" onclick={onClose}>Annuler</Button>
-				<Button type="submit" disabled={saving}>Enregistrer</Button>
+				<Button type="button" variant="outline" onclick={onClose}>{t('common.cancel')}</Button>
+				<Button type="submit" disabled={saving}>{t('common.save')}</Button>
 			</Dialog.Footer>
 		</form>
 	</Dialog.Content>

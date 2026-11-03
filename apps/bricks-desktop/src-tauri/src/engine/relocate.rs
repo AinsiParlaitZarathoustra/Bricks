@@ -10,6 +10,7 @@
 use super::live::files_dir;
 use super::{AppState, error};
 use crate::contract::{IpcErrorCode, IpcResult, Project};
+use crate::i18n::{msg, tr};
 use crate::services::paths::write_atomic;
 use crate::services::{invalid, io_error, join_error};
 use bricks_agent::control::{SessionMeta, list_sessions, same_workspace};
@@ -45,9 +46,7 @@ impl AppState {
         let _gate = self.lifecycle.lock().await;
         let project = self.projects.get(project_id)?;
         if project.chats {
-            return Err(invalid(
-                "les conversations sans projet n'ont pas de dossier à déplacer",
-            ));
+            return Err(invalid(tr!(msg::CONVERSATIONS_WITHOUT_A_PROJECT_HAVE_NO)));
         }
         let to = self.projects.relocation_target(project_id, path)?;
         let from = PathBuf::from(&project.path);
@@ -58,7 +57,7 @@ impl AppState {
         if open.iter().any(|e| e.is_busy()) {
             return Err(error(
                 IpcErrorCode::SessionBusy,
-                "une conversation de ce projet est en cours : annulez-la ou attendez sa fin",
+                tr!(msg::A_CONVERSATION_OF_THIS_PROJECT_IS),
             ));
         }
         for entry in &open {
@@ -66,7 +65,7 @@ impl AppState {
         }
         let sessions: Vec<String> = list_sessions(self.sessions_dir())
             .await
-            .map_err(|e| io_error("conversations", e))?
+            .map_err(|e| io_error(&tr!(msg::CONVERSATIONS), e))?
             .into_iter()
             .filter(|s| {
                 s.working_dir
@@ -89,7 +88,7 @@ impl AppState {
             let bytes = serde_json::to_vec_pretty(&journal)
                 .map_err(|e| error(IpcErrorCode::Internal, e.to_string()))?;
             write_atomic(&journal_file, &bytes)
-                .map_err(|e| io_error("journal du déplacement", e))?;
+                .map_err(|e| io_error(&tr!(msg::MOVE_LOG), e))?;
             let moved = rewrite(&sessions_dir, &journal.sessions, &journal.from, &journal.to)
                 .and_then(|()| projects.relocate(&journal.project_id, &journal.to));
             match moved {
@@ -187,7 +186,8 @@ fn journal_path(dir: &Path, project_id: &str) -> PathBuf {
 fn rewrite(sessions_dir: &Path, sessions: &[String], from: &Path, to: &Path) -> IpcResult<()> {
     for id in sessions {
         let dir = files_dir(sessions_dir, id);
-        let Some(mut meta) = SessionMeta::load(&dir).map_err(|e| io_error("conversation", e))?
+        let Some(mut meta) =
+            SessionMeta::load(&dir).map_err(|e| io_error(&tr!(msg::CONVERSATION), e))?
         else {
             continue;
         };
@@ -195,7 +195,8 @@ fn rewrite(sessions_dir: &Path, sessions: &[String], from: &Path, to: &Path) -> 
             continue;
         }
         meta.working_dir = to.to_path_buf();
-        meta.save(&dir).map_err(|e| io_error("conversation", e))?;
+        meta.save(&dir)
+            .map_err(|e| io_error(&tr!(msg::CONVERSATION), e))?;
     }
     Ok(())
 }

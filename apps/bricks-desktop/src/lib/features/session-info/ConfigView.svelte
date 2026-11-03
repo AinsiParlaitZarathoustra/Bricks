@@ -2,6 +2,7 @@
 	// Effective configuration of the session (`/config`): model, permissions
 	// (edited here), memory, sub-agents, configuration files read, other settings. Shows no key
 	// and no authentication header: the engine never sends them.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import { untrack } from 'svelte';
 	import PolicyEditor from '$lib/features/permissions/PolicyEditor.svelte';
 	import {
@@ -78,27 +79,27 @@
 
 {#if !conv || !sessionId}
 	<EmptyState
-		title="Aucune conversation ouverte"
+		title={t('common.noOpenConversation2')}
 	/>
 {:else if loadError}
-	<p role="alert" class="text-sm text-destructive">Lecture de la configuration impossible : {loadError}</p>
+	<p role="alert" class="text-sm text-destructive">{t('sessionInfo.couldNotReadTheConfiguration', { loadError })}</p>
 {:else if !config}
-	<p class="text-sm text-muted-foreground" aria-live="polite">Chargement de la configuration…</p>
+	<p class="text-sm text-muted-foreground" aria-live="polite">{t('sessionInfo.loadingTheConfiguration')}</p>
 {:else}
 	<div class="flex flex-col gap-3">
-		<SectionCard title="Modèle">
+		<SectionCard title={t('common.model')}>
 			<dl class="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-6 gap-y-2 px-3 pb-3 text-sm">
-				{@render field('Fournisseur', config.provider || 'inconnu')}
-				{@render field('Modèle', config.model || 'inconnu')}
-				{@render field('Effort', config.effective_reasoning ?? 'aucun')}
-				{@render field('Dossier de travail', config.working_dir)}
+				{@render field(t('sessionInfo.provider'), config.provider || t('common.unknownValue'))}
+				{@render field(t('common.model'), config.model || t('common.unknownValue'))}
+				{@render field(t('sessionInfo.effort'), config.effective_reasoning ?? t('common.noValue'))}
+				{@render field(t('sessionInfo.workingFolder'), config.working_dir)}
 			</dl>
 		</SectionCard>
 
-		<SectionCard title="Permissions">
+		<SectionCard title={t('common.permissions')}>
 			<div class="flex flex-col gap-4 px-3 pb-3 text-sm">
 				<dl class="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-6 gap-y-2">
-					{@render field('Approbations', config.interactive ? 'demandées' : 'refusées')}
+					{@render field(t('sessionInfo.approvals'), config.interactive ? t('sessionInfo.asked') : t('sessionInfo.refused'))}
 				</dl>
 
 				{#if policy}
@@ -110,19 +111,19 @@
 			</div>
 		</SectionCard>
 
-		<SectionCard title="Mémoire">
+		<SectionCard title={t('common.memory')}>
 			<dl class="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-6 gap-y-2 px-3 pb-3 text-sm">
-				{@render field('Espace', config.memory_space ?? 'désactivée')}
+				{@render field(t('sessionInfo.workspace'), config.memory_space ?? t('sessionInfo.disabled'))}
 			</dl>
 		</SectionCard>
 
-		<SectionCard title="Agents">
+		<SectionCard title={t('common.agents')}>
 			<dl class="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-6 gap-y-2 px-3 pb-3 text-sm">
-				{@render field('Sous-agents', config.agents_enabled ? 'activés' : 'désactivés')}
+				{@render field(t('common.subAgents'), config.agents_enabled ? t('sessionInfo.enabled') : t('sessionInfo.disabled2'))}
 			</dl>
 		</SectionCard>
 
-		<SectionCard title="Sources" count={config.sources.length}>
+		<SectionCard title={t('sessionInfo.sources')} count={config.sources.length}>
 			<div class="flex flex-col gap-2 px-3 pb-3 text-sm">
 				{#if config.sources.length > 0}
 					<ul class="flex flex-col gap-1">
@@ -131,12 +132,12 @@
 						{/each}
 					</ul>
 				{:else}
-					<p class="text-muted-foreground">Aucun fichier lu</p>
+					<p class="text-muted-foreground">{t('sessionInfo.noFileRead')}</p>
 				{/if}
 			</div>
 		</SectionCard>
 
-		<SectionCard title="Autres réglages" count={config.settings.length}>
+		<SectionCard title={t('sessionInfo.otherSettings')} count={config.settings.length}>
 			<dl class="grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-6 gap-y-2 px-3 pb-3 text-sm">
 				{#each config.settings as entry, i (i)}
 					<dt class="text-muted-foreground">{entry.label}</dt>

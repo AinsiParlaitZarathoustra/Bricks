@@ -6,6 +6,7 @@
 //! `changes/<project_id>/<record_id>.json`. Records are deduplicated by
 //! (session, sub-agent, tool call), so a change reported twice is kept once.
 
+use crate::i18n::{msg, tr};
 use super::paths::{desktop_dir, write_atomic};
 use super::{error, io_error, invalid, not_found};
 use crate::contract::{ChangeJournalInfo, ChangeRecord, FileDiff, IpcErrorCode, IpcResult};
@@ -16,12 +17,6 @@ use std::path::{Path, PathBuf};
 
 /// Largest patch kept for one file (the rest is cut, and marked truncated).
 pub const MAX_PATCH_BYTES: usize = 512 * 1024;
-
-/// What the journal does not attribute, shown with the list.
-pub const COVERAGE_NOTE: &str = "Enregistrées : les modifications de fichiers appliquées par \
-    Bricks (outils d'écriture et d'édition, changements de sous-agents appliqués). Non \
-    attribuées : les effets des commandes shell, des outils MCP et des modifications faites \
-    hors de Bricks.";
 
 /// A patch stored with a record.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,13 +85,13 @@ impl ChangeJournal {
             let bytes = serde_json::to_vec(&file)
                 .map_err(|e| error(IpcErrorCode::Internal, e.to_string()))?;
             write_atomic(&self.patch_path(&project, &change.record.id), &bytes).map_err(|e| {
-                io_error("journal des modifications (correctifs)", e)
+                io_error(&tr!(msg::CHANGE_LOG_PATCHES), e)
             })?;
         }
         let line = serde_json::to_string(&change.record)
             .map_err(|e| error(IpcErrorCode::Internal, e.to_string()))?;
         append_line(&self.journal_path(&project), &line)
-            .map_err(|e| io_error("journal des modifications", e))?;
+            .map_err(|e| io_error(&tr!(msg::CHANGE_LOG), e))?;
         set.insert(key);
         Ok(true)
     }
@@ -123,17 +118,17 @@ impl ChangeJournal {
         let text = match std::fs::read_to_string(self.patch_path(project, record_id)) {
             Ok(t) => t,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                return Err(not_found("aucun correctif enregistré pour cette modification"));
+                return Err(not_found(tr!(msg::NO_PATCH_SAVED_FOR_THIS_CHANGE)));
             }
-            Err(e) => return Err(io_error("correctif", e)),
+            Err(e) => return Err(io_error(&tr!(msg::PATCH), e)),
         };
         let file: PatchFile = serde_json::from_str(&text)
-            .map_err(|e| io_error("correctif illisible", e))?;
+            .map_err(|e| io_error(&tr!(msg::UNREADABLE_PATCH), e))?;
         let found = file
             .files
             .into_iter()
             .find(|f| f.path == path)
-            .ok_or_else(|| not_found("ce fichier n'a pas de correctif enregistré"))?;
+            .ok_or_else(|| not_found(tr!(msg::THIS_FILE_HAS_NO_SAVED_PATCH)))?;
         Ok(FileDiff {
             path: found.path,
             patch: found.patch,
@@ -151,7 +146,7 @@ impl ChangeJournal {
             .min();
         Ok(ChangeJournalInfo {
             since,
-            coverage_note: COVERAGE_NOTE.to_string(),
+            coverage_note: tr!(msg::COVERAGE_NOTE),
         })
     }
 
@@ -169,7 +164,7 @@ impl ChangeJournal {
         let text = match std::fs::read_to_string(self.journal_path(project_id)) {
             Ok(t) => t,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(e) => return Err(io_error("journal des modifications", e)),
+            Err(e) => return Err(io_error(&tr!(msg::CHANGE_LOG), e)),
         };
         let mut skipped = 0usize;
         let records: Vec<ChangeRecord> = text
@@ -203,7 +198,7 @@ pub fn new_record_id(project_id: &str) -> String {
 fn project_of(record_id: &str) -> IpcResult<&str> {
     let (project, _) = record_id
         .split_once('_')
-        .ok_or_else(|| not_found("modification inconnue"))?;
+        .ok_or_else(|| not_found(tr!(msg::UNKNOWN_CHANGE)))?;
     check_id(project)?;
     check_id(record_id)?;
     Ok(project)
@@ -217,7 +212,7 @@ fn check_id(id: &str) -> IpcResult<()> {
     if ok {
         Ok(())
     } else {
-        Err(invalid("identifiant invalide"))
+        Err(invalid(tr!(msg::INVALID_ID)))
     }
 }
 

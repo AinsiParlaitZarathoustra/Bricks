@@ -1,8 +1,9 @@
 // Display helpers for the conversation timeline. Pure functions only.
+import { t, numberFormat } from '$lib/i18n/i18n.svelte'
 import type { ChangeKind, Decision, DecidedBy, RunOutcome, Termination } from '$lib/ipc/engine'
 
-const numberFormat = new Intl.NumberFormat('fr-FR', { maximumFractionDigits: 1 })
-const integerFormat = new Intl.NumberFormat('fr-FR')
+const decimalFormat = numberFormat({ maximumFractionDigits: 1 })
+const integerFormat = numberFormat()
 
 const SHELL_TOOLS = new Set(['Bash', 'bash', 'Shell', 'PowerShell'])
 // `Edit` may carry `edits` (several replacements in one call): its summary is still the path.
@@ -12,27 +13,27 @@ const PATH_TOOLS = new Set(['Read', 'ViewImage', 'Write', 'Edit', 'MultiEdit', '
 const SEARCH_TOOLS = new Set(['Grep', 'Glob'])
 
 export const OUTCOME_LABEL: Record<RunOutcome, string> = {
-  succeeded: 'Terminé',
-  incomplete: 'Incomplet',
-  failed: 'Échec',
-  cancelled: 'Annulé',
+  get succeeded() { return t('common.finished') },
+  get incomplete() { return t('common.incomplete') },
+  get failed() { return t('common.failed') },
+  get cancelled() { return t('common.cancelled') },
 }
 
 export const DECISION_LABEL: Record<Decision, string> = {
-  allow: 'Autorisé',
-  deny: 'Refusé',
+  get allow() { return t('common.allowed') },
+  get deny() { return t('common.refused2') },
 }
 
 export const DECIDED_BY_LABEL: Record<DecidedBy, string> = {
-  user: 'par vous',
-  non_interactive: 'mode non interactif',
-  cancelled: 'annulée',
+  get user() { return t('conversation.byYou') },
+  get non_interactive() { return t('conversation.nonInteractiveMode') },
+  get cancelled() { return t('conversation.cancelled') },
 }
 
 export const CHANGE_KIND_LABEL: Record<ChangeKind, string> = {
-  create: 'Créé',
-  modify: 'Modifié',
-  delete: 'Supprimé',
+  get create() { return t('common.created') },
+  get modify() { return t('common.modified') },
+  get delete() { return t('common.deleted') },
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -86,7 +87,7 @@ export function summarizeInput(name: string, input: unknown): string {
   }
   if (SEARCH_TOOLS.has(name) && typeof input.pattern === 'string') {
     const path = firstString(input, ['path'])
-    return truncate(oneLine(input.pattern) + (path ? ` dans ${path}` : ''), 160)
+    return truncate(oneLine(input.pattern) + (path ? t('conversation.in', { path }) : ''), 160)
   }
   const parts = Object.entries(input)
     .slice(0, 3)
@@ -107,14 +108,14 @@ export function formatDuration(ms: number | undefined): string {
 
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return ''
-  const units = ['o', 'Ko', 'Mo', 'Go']
+  const units = [t('conversation.byte'), t('conversation.kb'), t('conversation.mb'), t('conversation.gb')]
   let value = bytes
   let unit = 0
   while (value >= 1024 && unit < units.length - 1) {
     value /= 1024
     unit += 1
   }
-  const digits = unit === 0 ? integerFormat : numberFormat
+  const digits = unit === 0 ? integerFormat : decimalFormat
   return `${digits.format(value)} ${units[unit]}`
 }
 
@@ -136,15 +137,15 @@ export function terminationLabel(termination: Termination | undefined): string |
       return null
     case 'output_truncated': {
       const n = numberField(termination, 'continuations')
-      return n === null ? 'sortie tronquée' : `sortie tronquée après ${n} continuation${n > 1 ? 's' : ''}`
+      return n === null ? t('conversation.outputTruncated') : t('conversation.outputTruncatedAfterContinuation', { count: n })
     }
     case 'no_progress': {
       const n = numberField(termination, 'repeats')
-      return n === null ? 'aucun progrès détecté' : `aucun progrès détecté (${n} répétitions)`
+      return n === null ? t('conversation.noProgressDetected') : t('conversation.noProgressDetectedRepetitions', { n })
     }
     default:
       // A kind of an earlier version: interrupted, never a success.
-      return 'fin interrompue (ancienne session)'
+      return t('common.interruptedEndOldSession')
   }
 }
 
@@ -196,7 +197,3 @@ export function parseTestCounts(output: string): TestCounts | null {
   return null
 }
 
-/** French count: the singular is used for 0 and 1. */
-export function plural(n: number, singular: string, pluralForm = `${singular}s`): string {
-  return `${n} ${n > 1 ? pluralForm : singular}`
-}

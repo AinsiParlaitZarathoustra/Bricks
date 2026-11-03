@@ -1,12 +1,12 @@
 <script lang="ts">
 	// Clearing the active context (`/clear`). Says what it does and does not do,
 	// asks for the confirmation, then shows the engine's answer.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import type { InspectorState } from '$lib/state/ui.svelte';
 	import { app } from '$lib/state/app.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import LoaderIcon from '@lucide/svelte/icons/loader';
-	import { plural } from './format';
 
 	let { args }: { args: InspectorState['args'] } = $props();
 
@@ -51,37 +51,37 @@
 
 <div class="flex min-w-0 flex-col gap-4">
 	{#if !conv}
-		<p class="text-sm text-muted-foreground">Aucune conversation ouverte.</p>
+		<p class="text-sm text-muted-foreground">{t('common.noOpenConversation')}</p>
 	{:else}
 		{#if conv.running}
 			<p role="alert" class="rounded-md border border-border bg-muted p-3 text-sm text-pretty">
-				Impossible pendant une exécution
+				{t('inspect.notPossibleDuringARun')}
 			</p>
 		{:else if conv.busy !== null}
 			<p role="alert" class="rounded-md border border-border bg-muted p-3 text-sm text-pretty">
-				Une opération est en cours
+				{t('inspect.anOperationIsInProgress')}
 			</p>
 		{/if}
 
 		<div class="flex flex-wrap items-center gap-2" role="status" aria-live="polite">
 			{#if cleared !== null}
 				<p class="text-sm text-pretty">
-					Contexte vidé : {plural(cleared.messagesRemoved, 'message retiré', 'messages retirés')} du contexte actif.
+					{t('inspect.contextCleared', { count: cleared.messagesRemoved })}
 				</p>
-				<Button variant="outline" onclick={() => ui.close()}>Fermer</Button>
+				<Button variant="outline" onclick={() => ui.close()}>{t('common.close')}</Button>
 			{:else if pending}
 				<p class="flex items-center gap-2 text-sm text-muted-foreground">
 					<LoaderIcon class="size-4 animate-spin" aria-hidden="true" />
-					Vidage demandé, en attente de la réponse du moteur…
+					{t('inspect.clearRequestedWaitingForTheEngines')}
 				</p>
 			{:else}
-				<Button onclick={clear} disabled={busy}>Vider le contexte</Button>
-				<Button variant="ghost" onclick={() => ui.close()}>Annuler</Button>
+				<Button onclick={clear} disabled={busy}>{t('common.clearContext')}</Button>
+				<Button variant="ghost" onclick={() => ui.close()}>{t('common.cancel')}</Button>
 			{/if}
 		</div>
 
 		{#if refusal !== null}
-			<p role="alert" class="text-sm text-destructive">Vidage refusé : {refusal}</p>
+			<p role="alert" class="text-sm text-destructive">{t('inspect.clearRefused', { refusal })}</p>
 		{/if}
 		{#if actionError}
 			<p role="alert" class="text-sm text-destructive">{actionError}</p>

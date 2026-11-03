@@ -79,8 +79,8 @@ fn matrix() -> Vec<Case> {
         ),
         // Quirk kept from the TUI: an empty regex is passed to the engine.
         case("search", "/search re:", Engine(json!({"type": "search", "text": "", "regex": true}))),
-        case("search", "/search", Invalid("donnez un texte à rechercher")),
-        case("s", "/s   ", Invalid("donnez un texte à rechercher")),
+        case("search", "/search", Invalid("give a text to search for")),
+        case("s", "/s   ", Invalid("give a text to search for")),
         // /agents: profiles, then the instance sub-commands
         case(
             "agents",
@@ -143,9 +143,9 @@ fn matrix() -> Vec<Case> {
         case(
             "skill",
             "/skill pdf",
-            Invalid("donnez la demande après la compétence : /skill pdf <demande>"),
+            Invalid("give the request after the skill: /skill pdf <request>"),
         ),
-        case("skill", "/skill", Invalid("donnez le nom d'une compétence (voir /skills)")),
+        case("skill", "/skill", Invalid("give a skill name (see /skills)")),
         // /changes <id> [inspect|apply|discard]
         case(
             "changes",
@@ -170,12 +170,12 @@ fn matrix() -> Vec<Case> {
         case(
             "changes",
             "/changes cs-1 merge",
-            Invalid("action inconnue `merge` : inspect, apply, discard"),
+            Invalid("unknown action `merge`: inspect, apply, discard"),
         ),
         case(
             "changes",
             "/changes",
-            Invalid("donnez l'identifiant d'un ChangeSet (voir `changes ready`)"),
+            Invalid("give a ChangeSet id (from `changes ready`)"),
         ),
         // /jobs: engine jobs of the session, graceful stop by id
         case("jobs", "/jobs", Engine(json!({"type": "agent_control", "action": "jobs"}))),
@@ -184,20 +184,20 @@ fn matrix() -> Vec<Case> {
             "/jobs stop job-7",
             Engine(json!({"type": "agent_control", "action": "stop_job", "job_id": "job-7"})),
         ),
-        case("jobs", "/jobs stop", Invalid("`/jobs` ou `/jobs stop <identifiant de tâche>`")),
-        case("jobs", "/jobs kill job-7", Invalid("`/jobs` ou `/jobs stop <identifiant de tâche>`")),
+        case("jobs", "/jobs stop", Invalid("`/jobs` or `/jobs stop <job id>`")),
+        case("jobs", "/jobs kill job-7", Invalid("`/jobs` or `/jobs stop <job id>`")),
         // Inspectors (presentations only, no engine call)
         case("memory", "/memory", Pres(json!({"view": "memory"}))),
         case("context", "/context", Pres(json!({"view": "context"}))),
         case("ctx", "/ctx", Pres(json!({"view": "context"}))),
         case("context", "/context details", Pres(json!({"view": "context_details"}))),
         case("ctx", "/ctx details", Pres(json!({"view": "context_details"}))),
-        case("context", "/context all", Invalid("argument inconnu `all` : /context ou /context details")),
+        case("context", "/context all", Invalid("unknown argument `all`: /context or /context details")),
         case("cost", "/cost", Pres(json!({"view": "cost"}))),
         case("usage", "/usage", Pres(json!({"view": "cost"}))),
         case("cost", "/cost details", Pres(json!({"view": "cost_details"}))),
         case("usage", "/usage details", Pres(json!({"view": "cost_details"}))),
-        case("cost", "/cost all", Invalid("argument inconnu `all` : /cost ou /cost details")),
+        case("cost", "/cost all", Invalid("unknown argument `all`: /cost or /cost details")),
         case("session", "/session", Pres(json!({"view": "session"}))),
         case("diff", "/diff", Pres(json!({"view": "diff"}))),
         case("tools", "/tools", Pres(json!({"view": "tools"}))),
@@ -236,8 +236,8 @@ fn matrix() -> Vec<Case> {
             "/file \"Mon dossier/e\u{301}.txt\"",
             Pres(json!({"view": "attach", "kind": "file", "path": "Mon dossier/e\u{301}.txt"})),
         ),
-        case("file", "/file \"\"", Invalid("donnez un chemin")),
-        case("file", "/file", Invalid("donnez un chemin")),
+        case("file", "/file \"\"", Invalid("give a path")),
+        case("file", "/file", Invalid("give a path")),
         case(
             "folder",
             "/folder Projets/2026",
@@ -248,7 +248,7 @@ fn matrix() -> Vec<Case> {
             "/folder \"Données clients/2026 final\"",
             Pres(json!({"view": "attach", "kind": "folder", "path": "Données clients/2026 final"})),
         ),
-        case("folder", "/folder", Invalid("donnez un chemin")),
+        case("folder", "/folder", Invalid("give a path")),
         case(
             "image",
             "/image \"capture écran.png\"",
@@ -392,7 +392,7 @@ async fn skill_without_a_request_is_an_error_and_sends_nothing() {
     for line in ["/skill x", "/skill x   ", "/skill x \t "] {
         let (code, message) = parse_err(line).await;
         assert_eq!(code, IpcErrorCode::Invalid, "{line}");
-        assert!(message.contains("donnez la demande"), "{line}: {message}");
+        assert!(message.contains("give the request"), "{line}: {message}");
     }
     let (code, _) = parse_err("/skill").await;
     assert_eq!(code, IpcErrorCode::Invalid);
@@ -449,19 +449,19 @@ async fn attachment_paths_keep_spaces_and_unicode_as_typed() {
 }
 
 #[tokio::test]
-async fn unknown_commands_and_bad_lines_are_invalid_in_french() {
+async fn unknown_commands_and_bad_lines_are_invalid_in_english() {
     let (code, message) = parse_err("/nope").await;
     assert_eq!(code, IpcErrorCode::Invalid);
-    assert_eq!(message, "commande inconnue /nope (essayez /help)");
+    assert_eq!(message, "unknown command /nope (try /help)");
 
     // Commands are case-sensitive, as in the terminal.
     let (code, message) = parse_err("/Model").await;
     assert_eq!(code, IpcErrorCode::Invalid);
-    assert_eq!(message, "commande inconnue /Model (essayez /help)");
+    assert_eq!(message, "unknown command /Model (try /help)");
 
     let (code, message) = parse_err("model").await;
     assert_eq!(code, IpcErrorCode::Invalid);
-    assert_eq!(message, "ce n'est pas une commande");
+    assert_eq!(message, "not a command");
 
     let (code, _) = parse_err("/").await;
     assert_eq!(code, IpcErrorCode::Invalid);
@@ -481,7 +481,8 @@ async fn the_palette_lists_every_registry_entry_in_order() {
         assert_eq!(info.name, c.name);
         assert_eq!(info.aliases, c.aliases.iter().map(|a| a.to_string()).collect::<Vec<_>>());
         assert_eq!(info.args, c.args);
-        assert_eq!(info.description, c.description_fr);
+        assert_eq!(info.description, c.description);
+        assert_eq!(info.description_fr, c.description_fr);
         assert!(!info.description.is_empty(), "/{}", c.name);
     }
 }

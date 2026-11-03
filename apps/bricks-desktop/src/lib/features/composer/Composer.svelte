@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '$lib/i18n/i18n.svelte'
   import { onMount, tick, untrack } from 'svelte'
   import { getCurrentWebview } from '@tauri-apps/api/webview'
   import type { DragDropEvent } from '@tauri-apps/api/webview'
@@ -64,7 +65,7 @@
 
   let { conversation }: { conversation: Conversation | null } = $props()
 
-  const NO_IMAGE_MESSAGE = 'Ce modèle n’accepte pas les images : retirez cette pièce jointe.'
+  const NO_IMAGE_MESSAGE = $derived(t('composer.thisModelDoesntAcceptImagesRemove'))
   // Browsers without CSS field-sizing get the manual height fallback below.
   const HAS_FIELD_SIZING = typeof CSS !== 'undefined' && CSS.supports('field-sizing', 'content')
   const uid = $props.id()
@@ -148,17 +149,17 @@
   const pendingText = $derived.by(() => {
     const p = conversation?.pendingChange
     if (!p) return null
-    const what = p.what === 'model' ? 'Changement de modèle' : 'Changement d’effort'
-    const when = p.applies === 'next_turn' ? 'au prochain tour' : 'au prochain run'
-    return `${what} : s’applique ${when}.`
+    const what = p.what === 'model' ? t('composer.modelChange') : t('composer.effortChange')
+    const when = p.applies === 'next_turn' ? t('common.onTheNextTurn') : t('composer.onTheNextRun')
+    return t('composer.applies', { what, when })
   })
 
   const placeholder = $derived.by(() => {
-    if (!project) return 'Créez un projet pour écrire.'
-    if (project.missing) return 'Le dossier du projet est introuvable.'
-    if (!hasModels) return 'Aucun modèle configuré.'
-    if (running) return 'Préparez le message suivant…'
-    return 'Quelque chose à dire ?'
+    if (!project) return t('composer.createAProjectToWrite')
+    if (project.missing) return t('composer.theProjectFolderCantBeFound')
+    if (!hasModels) return t('composer.noModelConfigured')
+    if (running) return t('composer.prepareTheNextMessage')
+    return t('composer.anythingToSay')
   })
 
   // ─── Attachments ──────────────────────────────────────────────────────────
@@ -261,7 +262,7 @@
         continue
       }
       if (found === 'missing') {
-        target.attachments.push({ id: crypto.randomUUID(), kind: 'file', path, name: basename(path), error: 'Élément introuvable.' })
+        target.attachments.push({ id: crypto.randomUUID(), kind: 'file', path, name: basename(path), error: t('composer.itemNotFound') })
         continue
       }
       addPath(target, path, found)
@@ -270,18 +271,18 @@
 
   /** Attaches a path named by `/file`, `/folder` or `/image` (the path is checked first). */
   async function attachByPath(kind: AttachKind, path: string): Promise<string | null> {
-    if (!editable) return 'Ouvrez un projet et configurez un modèle pour joindre un élément.'
+    if (!editable) return t('composer.openAProjectAndConfigureA')
     let found: 'file' | 'folder' | 'missing'
     try {
       found = await pathKind(path)
     } catch (e) {
       return errorMessage(e)
     }
-    if (found === 'missing') return `Élément introuvable : ${path}`
-    if (kind === 'folder' && found !== 'folder') return `« ${path} » n’est pas un dossier.`
-    if (kind !== 'folder' && found === 'folder') return `« ${path} » est un dossier : utilisez /folder.`
+    if (found === 'missing') return t('composer.itemNotFound2', { path })
+    if (kind === 'folder' && found !== 'folder') return t('composer.isntAFolder', { path })
+    if (kind !== 'folder' && found === 'folder') return t('composer.isAFolderUseFolder', { path })
     if (kind === 'image' && !isImagePath(path)) {
-      return `« ${path} » n’est pas une image (png, jpeg, gif, webp).`
+      return t('composer.isntAnImagePngJpegGif', { path })
     }
     addPath(draft, path, found)
     return null
@@ -333,7 +334,7 @@
         continue
       }
       const path = paths.get(a.attachmentId)
-      if (!path) throw new Error(`La copie de « ${a.name} » est introuvable : retirez-la et joignez-la de nouveau.`)
+      if (!path) throw new Error(t('composer.theCopyOfCantBeFound', { name: a.name }))
       blocks.push({ kind: a.kind === 'image' ? 'image' : 'file', path })
     }
     return blocks
@@ -406,11 +407,11 @@
   /** Model choice without an open conversation: kept for the first send. */
   function applyLocalModel(next: string, reasoning: string | null): string | null {
     const target = app.model(next)
-    if (!target) return `Modèle inconnu : ${next}.`
+    if (!target) return t('composer.unknownModel', { next })
     const known = (profile: string | null) =>
       profile !== null && target.profiles.some((p) => p.id === profile)
     if (reasoning !== null && !known(reasoning)) {
-      return `Profil d’effort inconnu pour ${target.name} : ${reasoning}.`
+      return t('composer.unknownEffortProfileFor', { name: target.name, reasoning })
     }
     pickedModel = next
     pickedEffort = reasoning ?? (known(draftEffort) ? draftEffort : null)
@@ -421,7 +422,7 @@
   /** Effort choice without an open conversation: kept for the first send. */
   function applyLocalEffort(profile: string | null): string | null {
     if (profile !== null && !(choice?.profiles.some((p) => p.id === profile) ?? false)) {
-      return `Profil d’effort inconnu : ${profile}.`
+      return t('composer.unknownEffortProfile', { profile })
     }
     pickedEffort = profile
     if (project && selection) app.setDraftModel(project.id, selection, profile)
@@ -494,7 +495,7 @@
     if (conversation) return { conversation }
     const projectId = project?.id ?? null
     const created = await app.startConversation(selection ?? undefined, effortValue ?? undefined)
-    if (!created) return { error: app.lastError?.message ?? 'Impossible de créer la conversation.' }
+    if (!created) return { error: app.lastError?.message ?? t('composer.couldNotCreateTheConversation') }
     createdFor = projectId
     return { conversation: created }
   }
@@ -508,7 +509,7 @@
   async function send() {
     if (isSlashLine) return runSlashDraft()
     if (!canSend) {
-      if (blocked) refusal = 'Retirez les pièces jointes en erreur pour envoyer.'
+      if (blocked) refusal = t('composer.removeTheFailedAttachmentsToSend')
       return
     }
     refusal = null
@@ -589,7 +590,7 @@
     untrack(() => {
       awaiting = null
       if (failed) {
-        refusal = `Skill « ${failed.name} » non activé : ${failed.reason ?? 'raison inconnue'}. Rien n’a été envoyé.`
+        refusal = t('composer.skillNotActivatedNothingWasSent', { name: failed.name, value: failed.reason ?? t('composer.unknownReason') })
         return
       }
       if (refusedByEngine) return
@@ -606,10 +607,10 @@
 
   // Engine refusals of the commands this composer sends, shown near the editor.
   const REJECTION_LABELS: Record<string, string> = {
-    submit: 'Envoi refusé',
-    set_model: 'Changement de modèle refusé',
-    set_reasoning: 'Changement d’effort refusé',
-    compact: 'Compaction refusée',
+    get submit() { return t('composer.sendingRefused') },
+    get set_model() { return t('composer.modelChangeRefused') },
+    get set_reasoning() { return t('composer.effortChangeRefused') },
+    get compact() { return t('composer.compactionRefused') },
   }
   let dismissedRejectionAt = $state<number | null>(null)
   const rejection = $derived.by(() => {
@@ -618,7 +619,7 @@
     return r
   })
   const rejectionLabel = $derived(
-    rejection ? (REJECTION_LABELS[rejection.command] ?? 'Commande refusée') : null,
+    rejection ? (REJECTION_LABELS[rejection.command] ?? t('composer.commandRefused')) : null,
   )
 
   /** Progress and result of the `/compact` sent from this composer. */
@@ -627,10 +628,10 @@
     if (!w || conversation?.sessionId !== w.sessionId) return null
     const conv = app.conversations.get(w.sessionId)
     const done = conv?.lastCompaction
-    if (done && done.at >= w.sentAt) return `Compaction : ${done.outcome}`
+    if (done && done.at >= w.sentAt) return t('composer.compaction', { outcome: done.outcome })
     const refusedNow = conv?.lastRejection
     if (refusedNow && refusedNow.command === 'compact' && refusedNow.at >= w.sentAt) return null
-    return 'Compaction en cours…'
+    return t('common.compacting')
   })
 
   async function cancel() {
@@ -693,7 +694,7 @@
   async function requestQuit(): Promise<string | null> {
     const active = [...app.conversations.values()]
       .filter((c) => c.running)
-      .map((c) => c.title || 'Conversation sans titre')
+      .map((c) => c.title || t('composer.untitledConversation'))
     if (active.length > 0) {
       quitRuns = active
       return null
@@ -718,9 +719,9 @@
     currentSession: () => conversation?.sessionId ?? null,
     async ensureSession() {
       if (conversation) return { sessionId: conversation.sessionId }
-      if (!project) return { error: 'Ouvrez un projet pour utiliser cette commande.' }
-      if (project.missing) return { error: 'Le dossier du projet est introuvable.' }
-      if (!hasModels) return { error: 'Aucun modèle configuré.' }
+      if (!project) return { error: t('composer.openAProjectToUseThis') }
+      if (project.missing) return { error: t('composer.theProjectFolderCantBeFound') }
+      if (!hasModels) return { error: t('composer.noModelConfigured') }
       const ensured = await ensureConversation()
       return 'error' in ensured ? ensured : { sessionId: ensured.conversation.sessionId }
     },
@@ -741,10 +742,10 @@
     open: (view, args) => ui.open(view, args),
     openAgent: (agentId) => ui.openAgent(agentId),
     attachmentBlocks() {
-      if (saving > 0 || importing) return { error: 'Attendez la fin de la copie de la pièce jointe.' }
-      if (blocked) return { error: 'Retirez les pièces jointes en erreur pour envoyer.' }
+      if (saving > 0 || importing) return { error: t('composer.waitForTheAttachmentToFinish') }
+      if (blocked) return { error: t('composer.removeTheFailedAttachmentsToSend') }
       if (draft.attachments.some((a) => a.attachmentId)) {
-        return { error: 'Envoyez les fichiers joints avec un message, sans commande.' }
+        return { error: t('composer.sendAttachedFilesWithAMessage') }
       }
       return { blocks: draft.attachments.map(toBlock) }
     },
@@ -909,7 +910,7 @@
       return
     }
     if (found === 'missing') {
-      target.attachments.push({ id: crypto.randomUUID(), kind: 'file', path, name: basename(path), error: 'Élément introuvable.' })
+      target.attachments.push({ id: crypto.randomUUID(), kind: 'file', path, name: basename(path), error: t('composer.itemNotFound') })
       return
     }
     addPath(target, path, found)
@@ -1056,7 +1057,7 @@
     untrack(() => {
       ui.picker = null
       if (!editable) {
-        refusal = 'Choisissez un projet et un modèle avant de changer ce réglage.'
+        refusal = t('composer.chooseAProjectAndAModel')
         return
       }
       if (requested === 'model') {
@@ -1064,7 +1065,7 @@
         return
       }
       if (!choice || choice.profiles.length === 0) {
-        refusal = 'Ce modèle n’a pas de profil d’effort configuré.'
+        refusal = t('composer.thisModelHasNoEffortProfile')
         return
       }
       effortOpen = true
@@ -1083,7 +1084,7 @@
 
 <section
   bind:this={rootEl}
-  aria-label="Zone de saisie"
+  aria-label={t('common.messageInput')}
   class="shrink-0 px-4 pt-1 pb-3"
 >
   <div class="mx-auto flex max-w-3xl flex-col gap-2">
@@ -1093,7 +1094,7 @@
         <Button
           variant="ghost"
           size="icon-xs"
-          aria-label="Masquer ce message"
+          aria-label={t('composer.hideThisMessage')}
           onclick={() => (dismissedRejectionAt = rejection.at)}
         >
           <XIcon aria-hidden="true" />
@@ -1153,11 +1154,11 @@
       {/if}
 
       {#if dragging}
-        <p class="px-1 text-sm text-muted-foreground">Déposez les fichiers pour les joindre.</p>
+        <p class="px-1 text-sm text-muted-foreground">{t('composer.dropTheFilesToAttachThem')}</p>
       {/if}
 
       {#if draft.attachments.length > 0}
-        <ul class="flex flex-wrap gap-1.5" aria-label="Pièces jointes">
+        <ul class="flex flex-wrap gap-1.5" aria-label={t('common.attachments')}>
           {#each draft.attachments as attachment (attachment.id)}
             <li>
               <AttachmentChip
@@ -1171,12 +1172,12 @@
       {/if}
 
       {#if draft.skills.length > 0}
-        <ul class="flex flex-wrap gap-1.5" aria-label="Skills pour le prochain message">
+        <ul class="flex flex-wrap gap-1.5" aria-label={t('composer.skillsForTheNextMessage')}>
           {#each draft.skills as name (name)}
             <li class="inline-flex max-w-full items-center gap-1.5 rounded-md border border-transparent bg-muted/60 py-1 pr-1 pl-1.5 text-sm">
               <SparklesIcon class="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
               <span class="min-w-0 max-w-56 truncate font-mono text-xs" title={name}>{name}</span>
-              <Button variant="ghost" size="icon-xs" aria-label={`Retirer le skill ${name}`} onclick={() => removeSkill(name)}>
+              <Button variant="ghost" size="icon-xs" aria-label={t('composer.removeSkill', { name })} onclick={() => removeSkill(name)}>
                 <XIcon aria-hidden="true" />
               </Button>
             </li>
@@ -1185,7 +1186,7 @@
       {/if}
 
       {#if saving > 0}
-        <p class="px-1 text-xs text-muted-foreground" role="status">Copie des pièces jointes…</p>
+        <p class="px-1 text-xs text-muted-foreground" role="status">{t('composer.copyingAttachments')}</p>
       {/if}
 
       <Textarea
@@ -1198,7 +1199,7 @@
         disabled={!editable}
         readonly={sending}
         {placeholder}
-        aria-label="Message"
+        aria-label={t('composer.message')}
         role="combobox"
         aria-autocomplete="list"
         aria-haspopup="listbox"
@@ -1247,8 +1248,8 @@
             <Button
               size="icon"
               class="relative -top-1 -left-1 rounded-full bg-destructive text-white hover:bg-destructive/90"
-              aria-label="Arrêter la génération"
-              title="Arrêter"
+              aria-label={t('composer.stopGenerating')}
+              title={t('common.stop')}
               onclick={cancel}
             >
               <SquareIcon aria-hidden="true" />
@@ -1261,7 +1262,7 @@
                     {...props}
                     size="icon"
                     class="relative -top-1 -left-1 rounded-full"
-                    aria-label="Envoyer le message"
+                    aria-label={t('composer.sendMessage')}
                     disabled={!canSend && !slashReady}
                     onclick={send}
                   >
@@ -1269,7 +1270,7 @@
                   </Button>
                 {/snippet}
               </Tooltip.Trigger>
-              <Tooltip.Content side="top">Envoyer</Tooltip.Content>
+              <Tooltip.Content side="top">{t('common.send')}</Tooltip.Content>
             </Tooltip.Root>
           {/if}
         </div>

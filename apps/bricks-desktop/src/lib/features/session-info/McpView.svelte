@@ -1,6 +1,7 @@
 <script lang="ts">
 	// MCP servers of the session (`/mcp`): name and state as the engine reports
 	// them. Read-only: no installation or management here.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import { untrack } from 'svelte';
 	import { Badge } from '$lib/components/ui/badge';
 	import { errorMessage, sessionMcp, type McpServerInfo } from '$lib/ipc/client';
@@ -51,14 +52,14 @@
 
 {#if !conv || !sessionId}
 	<EmptyState
-		title="Aucune conversation ouverte"
+		title={t('common.noOpenConversation2')}
 	/>
 {:else if loadError}
-	<p role="alert" class="text-sm text-destructive">Lecture des serveurs MCP impossible : {loadError}</p>
+	<p role="alert" class="text-sm text-destructive">{t('sessionInfo.couldNotReadTheMcpServers', { loadError })}</p>
 {:else if servers === null}
-	<p class="text-sm text-muted-foreground" aria-live="polite">Chargement des serveurs MCP…</p>
+	<p class="text-sm text-muted-foreground" aria-live="polite">{t('sessionInfo.loadingMcpServers')}</p>
 {:else if servers.length === 0}
-	<EmptyState title="Aucun serveur MCP pour ce projet" />
+	<EmptyState title={t('sessionInfo.noMcpServerForThisProject')} />
 {:else}
 	<ul class="flex flex-col divide-y divide-border rounded-lg border border-border">
 		{#each servers as server, i (i)}

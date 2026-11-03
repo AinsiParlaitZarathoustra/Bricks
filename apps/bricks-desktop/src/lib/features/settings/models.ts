@@ -1,7 +1,8 @@
-// Pure helpers of the « Modèles » settings: form state, client validation,
+// Pure helpers of the models settings: form state, client validation,
 // patch building, labels and write-failure mapping. No state, no IPC: the
 // write calls live in ModelSettings.svelte. Rust validates the rest.
 
+import { t } from '$lib/i18n/i18n.svelte';
 import type { ModelPatch } from '$lib/ipc/bindings/ModelPatch';
 import type { ModelProfileView } from '$lib/ipc/bindings/ModelProfileView';
 import type { ModelView } from '$lib/ipc/bindings/ModelView';
@@ -18,9 +19,9 @@ export const PROTOCOL_OPTIONS: readonly { value: string; label: string }[] = [
 ];
 
 export const AUTH_OPTIONS: readonly { value: string; label: string }[] = [
-	{ value: 'bearer', label: 'Jeton porteur (Bearer)' },
-	{ value: 'api_key_header', label: 'Clé dans un en-tête' },
-	{ value: 'none', label: 'Aucune' }
+	{ value: 'bearer', get label() { return t('settings.bearerToken') } },
+	{ value: 'api_key_header', get label() { return t('settings.keyInAHeader') } },
+	{ value: 'none', get label() { return t('common.none') } }
 ];
 
 /** Input modalities the form offers, in display order (unknown ones are kept as they are). */
@@ -29,30 +30,30 @@ export const MODALITY_OPTIONS: readonly string[] = ['text', 'image', 'audio', 'v
 /** Accepted file types offered with the document input. */
 export const DOCUMENT_TYPE_PRESETS: readonly { value: string; label: string }[] = [
 	{ value: 'application/pdf', label: 'PDF' },
-	{ value: '*/*', label: 'Tout fichier' }
+	{ value: '*/*', get label() { return t('settings.anyFile') } }
 ];
 
-export const CONFLICT_MESSAGE =
-	'Le fichier des fournisseurs a été modifié ailleurs. Vos modifications n’ont pas été enregistrées : les valeurs ont été rechargées, vérifiez-les avant d’enregistrer à nouveau.';
+export const CONFLICT_MESSAGE = (): string =>
+	t('settings.theProvidersFileWasChangedElsewhere');
 
-export const COUNT_ERROR = 'Saisissez un nombre entier supérieur à 0.';
-export const PRICE_ERROR = 'Saisissez un nombre positif ou nul, par exemple 0.30.';
-export const ID_ERROR = 'Lettres, chiffres, « . », « _ » et « - », en commençant par une lettre ou un chiffre.';
-export const ID_DUPLICATE = 'Cet identifiant existe déjà.';
-export const MODALITY_REQUIRED = 'Cochez au moins une entrée.';
-export const DOCUMENT_TYPES_REQUIRED = 'Indiquez au moins un type de fichier.';
-export const DOCUMENT_TYPE_INVALID = 'Chaque type s’écrit type/sous-type, par exemple application/pdf.';
-export const REQUIRED_MESSAGE = 'Ce champ est requis.';
-export const API_KEY_ENV_REQUIRED_MESSAGE =
-	'Indiquez la variable qui contient la clé : elle est requise avec cette authentification.';
-export const API_KEY_ENV_CLEAR_MESSAGE = 'Cette variable ne peut pas être effacée depuis cette fenêtre.';
+export const COUNT_ERROR = (): string => t('settings.typeAWholeNumberAbove0');
+export const PRICE_ERROR = (): string => t('settings.typeAPositiveNumberOrZero');
+export const ID_ERROR = (): string => t('settings.lettersDigitsAndStartingWithA');
+export const ID_DUPLICATE = (): string => t('settings.thisIdentifierAlreadyExists');
+export const MODALITY_REQUIRED = (): string => t('settings.tickAtLeastOneInput');
+export const DOCUMENT_TYPES_REQUIRED = (): string => t('settings.giveAtLeastOneFileType');
+export const DOCUMENT_TYPE_INVALID = (): string => t('settings.eachTypeIsWrittenTypeSubtype');
+export const REQUIRED_MESSAGE = (): string => t('settings.thisFieldIsRequired');
+export const API_KEY_ENV_REQUIRED_MESSAGE = (): string =>
+	t('settings.giveTheVariableHoldingTheKey');
+export const API_KEY_ENV_CLEAR_MESSAGE = (): string => t('settings.thisVariableCantBeClearedFrom');
 
-export const PROFILE_ID_REQUIRED = 'Saisissez un identifiant.';
-export const PROFILE_ID_DUPLICATE = 'Cet identifiant existe déjà pour ce modèle.';
-export const PROFILE_PARAMETERS_OBJECT = 'Les paramètres doivent être un objet JSON, entre accolades.';
-export const PROFILE_POINTER = 'Chaque chemin commence par « / », par exemple /champ/sous-champ.';
-export const DEFAULT_PROFILE_PENDING =
-	'Le profil par défaut a été retiré ou renommé : choisissez-en un autre, ou « Aucun ».';
+export const PROFILE_ID_REQUIRED = (): string => t('settings.typeAnIdentifier');
+export const PROFILE_ID_DUPLICATE = (): string => t('settings.thisIdentifierAlreadyExistsForThis');
+export const PROFILE_PARAMETERS_OBJECT = (): string => t('settings.parametersMustBeAJsonObject');
+export const PROFILE_POINTER = (): string => t('settings.eachPathStartsWithForExample');
+export const DEFAULT_PROFILE_PENDING = (): string =>
+	t('settings.theDefaultProfileWasRemovedOr');
 
 /** The name to show: the name when it has text, else the id (an empty label would render blank). */
 export function displayName(name: string | null | undefined, id: string): string {
@@ -73,9 +74,9 @@ export function authLabel(value: string): string {
 	return AUTH_OPTIONS.find((o) => o.value === value)?.label ?? value;
 }
 
-/** « 1 modèle », « 3 modèles » (digits grouped as in the rest of the dialog). */
+/** The number of models, digits grouped as in the rest of the dialog. */
 export function modelCountLabel(count: number): string {
-	return `${formatCount(count)} ${count === 1 ? 'modèle' : 'modèles'}`;
+	return t('settings.modelCount', { count });
 }
 
 function isJsonObject(value: unknown): value is Record<string, unknown> {
@@ -163,20 +164,20 @@ export type ProfileParse = { ok: true; value: ReasoningProfileEdit } | { ok: fal
 export function parseProfileDraft(draft: ProfileDraft, takenIds: readonly string[]): ProfileParse {
 	const errors: ProfileErrors = {};
 	const id = draft.id.trim();
-	if (id === '') errors.id = PROFILE_ID_REQUIRED;
-	else if (takenIds.includes(id)) errors.id = PROFILE_ID_DUPLICATE;
+	if (id === '') errors.id = PROFILE_ID_REQUIRED();
+	else if (takenIds.includes(id)) errors.id = PROFILE_ID_DUPLICATE();
 
 	let parameters: Record<string, unknown> | null = null;
 	try {
 		const parsed: unknown = JSON.parse(draft.parameters.trim() === '' ? '{}' : draft.parameters);
 		if (isJsonObject(parsed)) parameters = parsed;
-		else errors.parameters = PROFILE_PARAMETERS_OBJECT;
+		else errors.parameters = PROFILE_PARAMETERS_OBJECT();
 	} catch (e) {
-		errors.parameters = `JSON invalide : ${e instanceof Error ? e.message : String(e)}`;
+		errors.parameters = t('common.invalidJson', { e: e instanceof Error ? e.message : String(e) });
 	}
 
 	const remove = pointerLines(draft.remove);
-	if (remove.some((pointer) => !pointer.startsWith('/'))) errors.remove = PROFILE_POINTER;
+	if (remove.some((pointer) => !pointer.startsWith('/'))) errors.remove = PROFILE_POINTER();
 
 	if (errors.id || errors.parameters || errors.remove || parameters === null) return { ok: false, errors };
 	const label = draft.label.trim();
@@ -269,9 +270,9 @@ const MIME = /^[^\s/]+\/[^\s/]+$/;
 /** A new id: letters, digits, `.`, `_` and `-`, starting with a letter or a digit. */
 export function validateNewId(id: string, taken: readonly string[]): string | undefined {
 	const value = id.trim();
-	if (value === '') return REQUIRED_MESSAGE;
-	if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value)) return ID_ERROR;
-	if (taken.includes(value)) return ID_DUPLICATE;
+	if (value === '') return REQUIRED_MESSAGE();
+	if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(value)) return ID_ERROR();
+	if (taken.includes(value)) return ID_DUPLICATE();
 	return undefined;
 }
 
@@ -300,22 +301,22 @@ export interface ProviderFormErrors {
  */
 export function validateModelForm(form: ModelForm): ModelFormErrors {
 	const errors: ModelFormErrors = {};
-	if (form.name.trim() === '') errors.name = REQUIRED_MESSAGE;
-	if (form.apiModel.trim() === '') errors.apiModel = REQUIRED_MESSAGE;
-	if (parseCount(form.maxInput) === null) errors.maxInput = COUNT_ERROR;
-	if (parseCount(form.maxOutput) === null) errors.maxOutput = COUNT_ERROR;
-	if (form.modalities.length === 0) errors.modalities = MODALITY_REQUIRED;
+	if (form.name.trim() === '') errors.name = REQUIRED_MESSAGE();
+	if (form.apiModel.trim() === '') errors.apiModel = REQUIRED_MESSAGE();
+	if (parseCount(form.maxInput) === null) errors.maxInput = COUNT_ERROR();
+	if (parseCount(form.maxOutput) === null) errors.maxOutput = COUNT_ERROR();
+	if (form.modalities.length === 0) errors.modalities = MODALITY_REQUIRED();
 	if (form.modalities.includes('document')) {
 		const types = documentTypes(form.documentTypes);
-		if (types.length === 0) errors.documentTypes = DOCUMENT_TYPES_REQUIRED;
-		else if (!types.every((t) => MIME.test(t))) errors.documentTypes = DOCUMENT_TYPE_INVALID;
+		if (types.length === 0) errors.documentTypes = DOCUMENT_TYPES_REQUIRED();
+		else if (!types.every((t) => MIME.test(t))) errors.documentTypes = DOCUMENT_TYPE_INVALID();
 	}
-	if (parsePrice(form.priceInput) === null) errors.priceInput = PRICE_ERROR;
-	if (parsePrice(form.priceOutput) === null) errors.priceOutput = PRICE_ERROR;
-	if (parsePrice(form.priceCache) === null) errors.priceCache = PRICE_ERROR;
+	if (parsePrice(form.priceInput) === null) errors.priceInput = PRICE_ERROR();
+	if (parsePrice(form.priceOutput) === null) errors.priceOutput = PRICE_ERROR();
+	if (parsePrice(form.priceCache) === null) errors.priceCache = PRICE_ERROR();
 	const ids = form.profiles.map((p) => p.id.trim());
 	if (form.defaultPending || (form.reasoningDefault !== null && !ids.includes(form.reasoningDefault))) {
-		errors.defaultProfile = DEFAULT_PROFILE_PENDING;
+		errors.defaultProfile = DEFAULT_PROFILE_PENDING();
 	}
 	return errors;
 }
@@ -323,18 +324,18 @@ export function validateModelForm(form: ModelForm): ModelFormErrors {
 /** `provider` is `null` for a new provider. */
 export function validateProviderForm(form: ProviderForm, provider: ProviderView | null): ProviderFormErrors {
 	const errors: ProviderFormErrors = {};
-	if (form.name.trim() === '') errors.name = REQUIRED_MESSAGE;
-	if (form.endpoint.trim() === '') errors.endpoint = REQUIRED_MESSAGE;
+	if (form.name.trim() === '') errors.name = REQUIRED_MESSAGE();
+	if (form.endpoint.trim() === '') errors.endpoint = REQUIRED_MESSAGE();
 	// A provider with an inline key has no variable to name: the field is disabled there.
 	if (provider === null) {
-		if (form.apiKeyEnv.trim() === '' && form.auth !== 'none') errors.apiKeyEnv = API_KEY_ENV_REQUIRED_MESSAGE;
+		if (form.apiKeyEnv.trim() === '' && form.auth !== 'none') errors.apiKeyEnv = API_KEY_ENV_REQUIRED_MESSAGE();
 	} else if (!provider.has_inline_key) {
 		const variable = form.apiKeyEnv.trim();
 		if (variable === '' && form.auth !== 'none') {
-			errors.apiKeyEnv = API_KEY_ENV_REQUIRED_MESSAGE;
+			errors.apiKeyEnv = API_KEY_ENV_REQUIRED_MESSAGE();
 		} else if (variable === '' && (provider.api_key_env ?? '') !== '') {
 			// Removing a variable is not expressible in the patch (`null` means unchanged).
-			errors.apiKeyEnv = API_KEY_ENV_CLEAR_MESSAGE;
+			errors.apiKeyEnv = API_KEY_ENV_CLEAR_MESSAGE();
 		}
 	}
 	return errors;
@@ -382,8 +383,8 @@ export function profilesPatch(original: readonly ModelProfileView[], drafts: rea
 		const parsed = parseProfileDraft(draft, others);
 		if (!parsed.ok) {
 			const first = parsed.errors.id ?? parsed.errors.parameters ?? parsed.errors.remove ?? '';
-			const name = draft.id.trim() === '' ? 'sans identifiant' : `« ${draft.id.trim()} »`;
-			return { ok: false, message: `Profil ${name} : ${first}` };
+			const name = draft.id.trim() === '' ? t('settings.noIdentifier') : t('common.quoted', { text: draft.id.trim() });
+			return { ok: false, message: t('settings.profile2', { name, first }) };
 		}
 		edits.push(parsed.value);
 	}
@@ -551,9 +552,9 @@ export function isEmptyModelPatch(patch: ModelPatch): boolean {
 
 /** What deleting a provider takes with it: its models, by name. */
 export function providerDeletionDetail(provider: ProviderView): string {
-	if (provider.models.length === 0) return 'Aucun modèle n’est déclaré pour ce fournisseur.';
-	const names = provider.models.map((m) => `« ${displayName(m.name, m.id)} »`).join(', ');
-	return `Ses modèles sont retirés avec lui : ${names}.`;
+	if (provider.models.length === 0) return t('settings.noModelIsDeclaredForThis');
+	const names = provider.models.map((m) => t('common.quoted', { text: displayName(m.name, m.id) })).join(', ');
+	return t('settings.itsModelsAreRemovedWithIt', { names });
 }
 
 export type WriteOutcome = { ok: true } | { ok: false; message: string; conflict: boolean };
@@ -564,7 +565,7 @@ function isConflictError(error: unknown): boolean {
 
 /** The message to show for a failed write; a stale revision gets its own explanation. */
 export function writeFailure(error: unknown): WriteOutcome {
-	if (isConflictError(error)) return { ok: false, message: CONFLICT_MESSAGE, conflict: true };
+	if (isConflictError(error)) return { ok: false, message: CONFLICT_MESSAGE(), conflict: true };
 	const message = error instanceof Error ? error.message : String(error);
-	return { ok: false, message: message || 'Échec de l’enregistrement.', conflict: false };
+	return { ok: false, message: message || t('settings.couldNotSave'), conflict: false };
 }

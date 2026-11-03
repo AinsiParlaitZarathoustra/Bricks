@@ -1,6 +1,7 @@
 // HTML of the assistant Markdown. One marked instance, configured once here. Block HTML
 // is raw until `finishHtml`: sanitized (sanitizeMarkdown), then math placeholders replaced
 // by the math renderer (or by the source when none is installed).
+import { t } from '$lib/i18n/i18n.svelte'
 import hljs from 'highlight.js/lib/common'
 import { Lexer, Marked, type Parser, type Token, type Tokens } from 'marked'
 import { isOpenableUrl } from '../links'
@@ -71,11 +72,11 @@ const LINK_CLASS =
   'rounded-sm text-primary underline underline-offset-2 hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none'
 
 const ALERT_TITLES: Record<string, string> = {
-  note: 'Note',
-  tip: 'Astuce',
-  important: 'Important',
-  warning: 'Attention',
-  caution: 'Danger',
+  get note() { return t('common.note') },
+  get tip() { return t('conversation.tip') },
+  get important() { return t('conversation.important') },
+  get warning() { return t('conversation.warning') },
+  get caution() { return t('conversation.danger') },
 }
 
 /** The language highlight.js knows for a fence, or '' for plain text. */
@@ -133,7 +134,7 @@ export function codeShell(label: string, body: string, icon: string | null = nul
 
 /** A code block as HTML: highlighted when the language is known, escaped otherwise. */
 export function codeBlockHtml(text: string, lang: string): string {
-  return codeShell(fenceLanguage(lang) || 'texte', highlightedBody(text, knownLanguage(lang)), fenceIconId(lang))
+  return codeShell(fenceLanguage(lang) || t('conversation.codeLanguageText'), highlightedBody(text, knownLanguage(lang)), fenceIconId(lang))
 }
 
 function fileButton(ref: FileReference, label: string): string {
@@ -207,7 +208,7 @@ const renderer = {
     )
   },
   image({ text, href }: Tokens.Image) {
-    return `<span class="text-muted-foreground">[image : ${escapeHtml(text || href || 'sans titre')}]</span>`
+    return `<span class="text-muted-foreground">[image : ${escapeHtml(text || href || t('conversation.untitled'))}]</span>`
   },
 }
 
@@ -331,12 +332,12 @@ export function footnotesHtml(notes: FootnoteNote[], prefix: string, links: Link
       const backs = Array.from(
         { length: note.count },
         (_unused, index) =>
-          `<a href="#${prefix}-fnref:${escapeHtml(note.id)}-${index + 1}" data-fn-back aria-label="Retour au texte">↩</a>`,
+          `<a href="#${prefix}-fnref:${escapeHtml(note.id)}-${index + 1}" data-fn-back aria-label="${escapeHtml(t('conversation.backToText'))}">↩</a>`,
       ).join(' ')
       const withBacks = paragraph.replace(/<\/p>\n?$/, ` ${backs}</p>`)
       return `<li id="${prefix}-fn:${escapeHtml(note.id)}">${withBacks}</li>`
     })
-    return `<section class="md-footnotes" aria-label="Notes"><ol>${items.join('')}</ol></section>`
+    return `<section class="md-footnotes" aria-label="${escapeHtml(t('conversation.footnotes'))}"><ol>${items.join('')}</ol></section>`
   })
   return finishHtml(html, maths, math)
 }

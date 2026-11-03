@@ -12,21 +12,21 @@ import {
 } from '../../src/lib/features/commands/palette';
 
 const REGISTRY: SlashCommandInfo[] = [
-	{ name: 'model', aliases: ['m'], args: '[provider/model [profile]]', description: 'modèle' },
-	{ name: 'effort', aliases: [], args: '[profile id | default]', description: 'effort' },
-	{ name: 'search', aliases: ['s'], args: '<text> | re:<regex>', description: 'recherche' },
-	{ name: 'agents', aliases: [], args: '[search words] | reload', description: 'agents' },
-	{ name: 'skill', aliases: [], args: '<name> <request>', description: 'skill' },
-	{ name: 'skills', aliases: [], args: '[search words]', description: 'skills' },
-	{ name: 'changes', aliases: [], args: '<changeset id> inspect', description: 'changes' },
-	{ name: 'jobs', aliases: [], args: '[stop <job id>]', description: 'jobs' },
-	{ name: 'memory', aliases: [], args: '', description: 'mémoire' },
-	{ name: 'context', aliases: ['ctx'], args: '', description: 'contexte' },
-	{ name: 'cost', aliases: ['usage'], args: '', description: 'coût' },
-	{ name: 'compact', aliases: [], args: '', description: 'compacter' },
-	{ name: 'clear', aliases: [], args: '', description: 'vider' },
-	{ name: 'help', aliases: ['?'], args: '', description: 'aide' },
-	{ name: 'quit', aliases: ['exit', 'q'], args: '', description: 'quitter' }
+	{ name: 'model', aliases: ['m'], args: '[provider/model [profile]]', description: 'model', description_fr: 'modèle' },
+	{ name: 'effort', aliases: [], args: '[profile id | default]', description: 'effort', description_fr: 'effort' },
+	{ name: 'search', aliases: ['s'], args: '<text> | re:<regex>', description: 'search', description_fr: 'recherche' },
+	{ name: 'agents', aliases: [], args: '[search words] | reload', description: 'agents', description_fr: 'agents' },
+	{ name: 'skill', aliases: [], args: '<name> <request>', description: 'skill', description_fr: 'skill' },
+	{ name: 'skills', aliases: [], args: '[search words]', description: 'skills', description_fr: 'skills' },
+	{ name: 'changes', aliases: [], args: '<changeset id> inspect', description: 'changes', description_fr: 'changes' },
+	{ name: 'jobs', aliases: [], args: '[stop <job id>]', description: 'jobs', description_fr: 'jobs' },
+	{ name: 'memory', aliases: [], args: '', description: 'memory', description_fr: 'mémoire' },
+	{ name: 'context', aliases: ['ctx'], args: '', description: 'context', description_fr: 'contexte' },
+	{ name: 'cost', aliases: ['usage'], args: '', description: 'cost', description_fr: 'coût' },
+	{ name: 'compact', aliases: [], args: '', description: 'compact', description_fr: 'compacter' },
+	{ name: 'clear', aliases: [], args: '', description: 'clear', description_fr: 'vider' },
+	{ name: 'help', aliases: ['?'], args: '', description: 'help', description_fr: 'aide' },
+	{ name: 'quit', aliases: ['exit', 'q'], args: '', description: 'quit', description_fr: 'quitter' }
 ];
 
 const names = (list: SlashCommandInfo[]) => list.map((c) => c.name);

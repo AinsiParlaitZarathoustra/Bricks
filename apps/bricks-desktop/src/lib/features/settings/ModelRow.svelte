@@ -1,5 +1,6 @@
 <script lang="ts">
 	// One model inside a provider container: its name, edit and delete. The name expands the details.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import Trash from '@lucide/svelte/icons/trash';
 	import { Button } from '$lib/components/ui/button';
@@ -44,14 +45,14 @@
 						variant="ghost"
 						size="icon-sm"
 						class="shrink-0 text-muted-foreground"
-						aria-label={`Modifier le modèle ${title}`}
+						aria-label={t('settings.editModel', { id: title })}
 						onclick={onEdit}
 					>
 						<Pencil aria-hidden="true" />
 					</Button>
 				{/snippet}
 			</Tooltip.Trigger>
-			<Tooltip.Content>Modifier le modèle</Tooltip.Content>
+			<Tooltip.Content>{t('settings.editTheModel')}</Tooltip.Content>
 		</Tooltip.Root>
 
 		<Tooltip.Root>
@@ -62,45 +63,45 @@
 						variant="ghost"
 						size="icon-sm"
 						class="shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
-						aria-label={`Supprimer le modèle ${title}`}
+						aria-label={t('settings.deleteModel', { title })}
 						onclick={onDelete}
 					>
 						<Trash aria-hidden="true" />
 					</Button>
 				{/snippet}
 			</Tooltip.Trigger>
-			<Tooltip.Content>Supprimer le modèle</Tooltip.Content>
+			<Tooltip.Content>{t('settings.deleteTheModel')}</Tooltip.Content>
 		</Tooltip.Root>
 	</div>
 
 	{#if expanded}
 		<dl id={detailId} class="grid grid-cols-[auto_1fr] items-baseline gap-x-4 gap-y-1.5 px-3.5 pt-1 pb-3 text-xs">
-			<dt class="text-muted-foreground">Sélection</dt>
+			<dt class="text-muted-foreground">{t('settings.selection')}</dt>
 			<dd class="font-mono break-all text-foreground">{model.selection}</dd>
 
-			<dt class="text-muted-foreground">Nom API</dt>
+			<dt class="text-muted-foreground">{t('settings.apiName')}</dt>
 			<dd class="font-mono break-all text-foreground">{model.api_model}</dd>
 
-			<dt class="text-muted-foreground">Entrée maximale</dt>
+			<dt class="text-muted-foreground">{t('settings.maximumInput')}</dt>
 			<dd class="tabular-nums text-foreground">{formatTokens(model.max_input_tokens)}</dd>
 
-			<dt class="text-muted-foreground">Sortie maximale</dt>
+			<dt class="text-muted-foreground">{t('settings.maximumOutput')}</dt>
 			<dd class="tabular-nums text-foreground">{formatTokens(model.max_output_tokens)}</dd>
 
-			<dt class="text-muted-foreground">Entrées acceptées</dt>
+			<dt class="text-muted-foreground">{t('settings.acceptedInputs')}</dt>
 			<dd class="text-foreground">{formatModalities(model.input_modalities)}</dd>
 
-			<dt class="text-muted-foreground">Profils d’effort</dt>
+			<dt class="text-muted-foreground">{t('settings.effortProfiles')}</dt>
 			<dd class="text-foreground">
 				{#if model.profiles.length === 0}
-					Aucun
+					{t('settings.none')}
 				{:else}
 					<ul class="flex flex-col gap-0.5">
 						{#each model.profiles as profile (profile.id)}
 							<li>
 								{profileLabel(profile)}
 								{#if profile.id === model.reasoning_default}
-									<span class="text-muted-foreground">(par défaut)</span>
+									<span class="text-muted-foreground">{t('settings.default2')}</span>
 								{/if}
 							</li>
 						{/each}
@@ -108,12 +109,12 @@
 				{/if}
 			</dd>
 
-			<dt class="text-muted-foreground">Coûts / M tokens</dt>
+			<dt class="text-muted-foreground">{t('settings.costsMTokens')}</dt>
 			<dd class="tabular-nums text-foreground">
 				{#if model.pricing}
-					Entrée {formatPrice(model.pricing.input)} · Sortie {formatPrice(model.pricing.output)} · Cache {formatPrice(model.pricing.cache_read)}
+					{t('settings.inputOutputCache', { input: formatPrice(model.pricing.input), output: formatPrice(model.pricing.output), cacheRead: formatPrice(model.pricing.cache_read) })}
 				{:else}
-					Non renseignés
+					{t('settings.notProvided')}
 				{/if}
 			</dd>
 		</dl>

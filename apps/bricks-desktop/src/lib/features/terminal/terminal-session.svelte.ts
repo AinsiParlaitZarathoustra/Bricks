@@ -5,6 +5,7 @@
 // xterm. xterm and the PTY commands are injected through `TerminalDeps`, so the
 // rules here are testable without a window.
 
+import { t } from '$lib/i18n/i18n.svelte';
 import type { IDisposable, ITerminalOptions, ITheme } from '@xterm/xterm';
 import type { PtyEvent } from '../../ipc/bindings/PtyEvent';
 import type { PtyInfo } from '../../ipc/bindings/PtyInfo';
@@ -271,8 +272,8 @@ export class TerminalSession {
 		this.status = 'exited';
 		this.exitCode = event.code;
 		this.#ptyId = null;
-		const code = event.code === null ? '' : ` (code ${event.code})`;
-		this.#engine.term.write(`\r\n\x1b[2m[Processus terminé${code}]\x1b[0m\r\n`);
+		const code = event.code === null ? '' : t('terminal.code', { exitCode: event.code });
+		this.#engine.term.write(`\r\n\x1b[2m[${t('terminal.processFinishedNotice', { code })}]\x1b[0m\r\n`);
 	}
 
 	#input(data: string): void {

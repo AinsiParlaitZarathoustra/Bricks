@@ -8,6 +8,7 @@ use super::{error, io_error, not_found};
 use crate::contract::{
     IpcErrorCode, IpcResult, ModelProfileView, ModelView, PricingView, ProviderView, ProvidersFile,
 };
+use crate::i18n::{msg, tr};
 use bricks_provider::config::{ProviderConfig, ProvidersConfig};
 use sha2::{Digest, Sha256};
 use std::io::Write;
@@ -55,7 +56,7 @@ pub fn view(path: &Path, has_credentials: &dyn Fn(&ProviderConfig) -> bool) -> P
         };
     };
     let parsed = std::str::from_utf8(&bytes)
-        .map_err(|_| "le fichier providers.toml n'est pas en UTF-8".to_string())
+        .map_err(|_| tr!(msg::THE_PROVIDERS_TOML_FILE_ISNT_UTF).to_string())
         .and_then(|text| {
             ProvidersConfig::from_toml_str(text, &path_text).map_err(|e| e.to_string())
         });
@@ -138,18 +139,17 @@ fn provider_view(p: &ProviderConfig, has_credentials: bool) -> ProviderView {
 pub fn commit(path: &Path, revision: &str, edit: &Edit) -> IpcResult<()> {
     let origin = path.display().to_string();
     let bytes =
-        read_file(path)?.ok_or_else(|| not_found(format!("le fichier {origin} n'existe pas")))?;
+        read_file(path)?.ok_or_else(|| not_found(tr!(msg::FILE_DOESNT_EXIST, origin = origin)))?;
     if revision_of(&bytes) != revision {
         return Err(error(
             IpcErrorCode::Conflict,
-            "le fichier providers.toml a changé depuis son chargement : rechargez la liste avant \
-             de modifier",
+            tr!(msg::PROVIDERS_FILE_CHANGED),
         ));
     }
     let text = std::str::from_utf8(&bytes).map_err(|_| {
         error(
             IpcErrorCode::Config,
-            "le fichier providers.toml n'est pas en UTF-8",
+            tr!(msg::THE_PROVIDERS_TOML_FILE_ISNT_UTF),
         )
     })?;
     let next = providers_toml::apply(text, edit, &origin)?;

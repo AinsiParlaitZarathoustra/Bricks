@@ -625,6 +625,8 @@ pub struct Preferences {
     pub computer_use_enabled: bool,
     /// Keeps the computer from sleeping while Bricks is open, off by default.
     pub keep_awake: bool,
+    /// The interface language; conversations and files keep their own.
+    pub language: Language,
 }
 
 impl Default for Preferences {
@@ -647,8 +649,17 @@ impl Default for Preferences {
             memory_enabled: false,
             computer_use_enabled: false,
             keep_awake: false,
+            language: Language::En,
         }
     }
+}
+
+/// The interface language. English unless the person chose otherwise.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum Language {
+    En,
+    Fr,
 }
 
 /// The question timer: off by default; `smart` lets the model choose each
@@ -706,8 +717,10 @@ pub struct SlashCommandInfo {
     pub aliases: Vec<String>,
     /// Argument syntax, e.g. `[provider/model [profil]]`.
     pub args: String,
-    /// French description shown in the palette and the help.
+    /// Description shown in the palette and the help, in English.
     pub description: String,
+    /// The same description in French.
+    pub description_fr: String,
 }
 
 /// What a parsed `/` line does. `Engine` commands go through

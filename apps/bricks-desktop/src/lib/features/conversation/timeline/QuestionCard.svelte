@@ -4,6 +4,7 @@
   // so a reload or a switch of conversation never restarts it; the engine closes
   // the question at expiry. A closed question shows nothing here: its `Ask` line
   // counts the answers.
+  import { t } from '$lib/i18n/i18n.svelte'
   import CircleAlert from '@lucide/svelte/icons/circle-alert'
   import { Button } from '$lib/components/ui/button'
   import { Input } from '$lib/components/ui/input'
@@ -70,14 +71,14 @@
     <header class="flex flex-col gap-1.5 border-b border-border bg-muted/40 px-4 py-3">
       <div class="flex items-center gap-1.5 text-caption font-medium text-warning">
         <CircleAlert class="size-3.5 shrink-0" aria-hidden="true" />
-        <span>Requiert votre intervention</span>
+        <span>{t('conversation.needsYourInput')}</span>
         {#if left !== null}
           <span
             class={cn(
               'ml-auto font-mono tabular-nums',
               left < 10 ? 'text-destructive' : left < 30 ? 'text-warning' : 'text-muted-foreground',
             )}
-            aria-label={`Temps restant : ${leftText}`}
+            aria-label={t('conversation.timeLeft', { leftText })}
           >
             {leftText}
           </span>
@@ -88,7 +89,7 @@
 
     <fieldset class="m-0 border-0 p-0">
       <legend class="sr-only">{question.question}</legend>
-      {#each [...question.options, { label: 'Autre', description: undefined }] as option, index (index)}
+      {#each [...question.options, { label: t('common.other'), description: undefined }] as option, index (index)}
         <label
           class={cn(
             'flex cursor-pointer gap-3 px-4 py-3 transition-colors hover:bg-muted/50',
@@ -105,7 +106,7 @@
           />
           <span class="flex min-w-0 flex-col gap-0.5">
             <span class="text-ui break-words">
-              {option.label}{#if index === question.recommended}<span class="ml-1 text-muted-foreground">(Recommandé)</span>{/if}
+              {option.label}{#if index === question.recommended}<span class="ml-1 text-muted-foreground">{t('conversation.recommended')}</span>{/if}
             </span>
             {#if option.description}
               <span class="text-caption break-words text-muted-foreground">{option.description}</span>
@@ -115,7 +116,7 @@
       {/each}
       {#if selected === OTHER}
         <div class="px-4 pb-3 pl-11">
-          <Input bind:value={other} aria-label="Votre réponse" class="h-8 text-ui" />
+          <Input bind:value={other} aria-label={t('conversation.yourAnswer')} class="h-8 text-ui" />
         </div>
       {/if}
     </fieldset>
@@ -125,8 +126,8 @@
         <p class="mr-auto text-caption break-words text-destructive" role="alert">{refusal}</p>
       {/if}
       <Button size="sm" variant="secondary" disabled={sending} onclick={() => answer({ kind: 'skip' })}>
-        Passer
+        {t('conversation.skip')}
       </Button>
-      <Button size="sm" disabled={!canSend} onclick={send}>Envoyer</Button>
+      <Button size="sm" disabled={!canSend} onclick={send}>{t('common.send')}</Button>
     </footer>
   </section>

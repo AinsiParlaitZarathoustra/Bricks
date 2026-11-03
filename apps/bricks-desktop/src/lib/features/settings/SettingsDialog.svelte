@@ -1,5 +1,6 @@
 <script lang="ts">
 	// Settings of Bricks: a large dialog with a section list. Entry point mounted by App.svelte.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import type { Component } from 'svelte';
 	import { MediaQuery } from 'svelte/reactivity';
 	import * as Dialog from '$lib/components/ui/dialog';
@@ -28,13 +29,13 @@
 		label: string;
 		icon: Component<{ class?: string; 'aria-hidden'?: boolean | 'true' | 'false' }>;
 	}[] = [
-		{ id: 'appearance', label: 'Apparence', icon: Palette },
-		{ id: 'general', label: 'Général', icon: SlidersHorizontal },
-		{ id: 'memory', label: 'Mémoire', icon: Brain },
-		{ id: 'models', label: 'Modèles', icon: Cpu },
-		{ id: 'skills', label: 'Skills', icon: Sparkles },
-		{ id: 'extensions', label: 'Extensions', icon: Plug },
-		{ id: 'application', label: 'Application', icon: AppWindow }
+		{ id: 'appearance', get label() { return t('settings.appearance') }, icon: Palette },
+		{ id: 'general', get label() { return t('settings.general') }, icon: SlidersHorizontal },
+		{ id: 'memory', get label() { return t('common.memory') }, icon: Brain },
+		{ id: 'models', get label() { return t('settings.models') }, icon: Cpu },
+		{ id: 'skills', get label() { return t('common.skills') }, icon: Sparkles },
+		{ id: 'extensions', get label() { return t('settings.extensions') }, icon: Plug },
+		{ id: 'application', get label() { return t('settings.application') }, icon: AppWindow }
 	];
 
 	let section = $state<SectionId>('appearance');
@@ -47,9 +48,9 @@
 		class="flex h-[min(44rem,calc(100dvh-2rem))] w-[min(60rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none"
 	>
 		<div class="flex flex-col gap-1 border-b border-border px-6 py-4 pr-14">
-			<Dialog.Title class="text-base font-semibold text-foreground">Paramètres de Bricks</Dialog.Title>
+			<Dialog.Title class="text-base font-semibold text-foreground">{t('common.bricksSettings')}</Dialog.Title>
 			<Dialog.Description class="sr-only">
-				Préférences de l’application. Les modifications sont enregistrées automatiquement.
+				{t('settings.applicationPreferencesChangesAreSavedAutomatically')}
 			</Dialog.Description>
 		</div>
 
@@ -60,7 +61,7 @@
 		>
 			<Tabs.List
 				variant="line"
-				aria-label="Sections des paramètres"
+				aria-label={t('settings.settingsSections')}
 				class="w-full shrink-0 justify-start gap-1 overflow-x-auto rounded-none border-b border-border bg-muted/40 p-2 sm:w-56 sm:gap-0.5 sm:border-r sm:border-b-0 sm:p-3"
 			>
 				{#each SECTIONS as item (item.id)}

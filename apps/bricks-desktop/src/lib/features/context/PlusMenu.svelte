@@ -1,5 +1,6 @@
 <script lang="ts">
 	// « Plus »: the ADK inspectors of the shown conversation, from the top bar.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import { app } from '$lib/state/app.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import { buttonVariants } from '$lib/components/ui/button';
@@ -23,7 +24,7 @@
 		disabled={!enabled}
 	>
 		<EllipsisIcon aria-hidden="true" />
-		Plus
+		{t('context.more')}
 	</DropdownMenu.Trigger>
 	<DropdownMenu.Content align="end" class="min-w-64">
 		{#each ADK_ACCESS_GROUPS as group, i (group.label)}
@@ -47,8 +48,8 @@
 			class="flex cursor-default items-center gap-3 rounded-sm px-2 py-1.5 outline-hidden select-none focus:bg-accent focus:text-accent-foreground"
 		>
 			<span class="flex min-w-0 flex-1 flex-col">
-				<span class="text-sm">Maintenir l’ordinateur actif</span>
-				<span class="text-xs text-muted-foreground">Uniquement pour cette session</span>
+				<span class="text-sm">{t('common.keepTheComputerAwake')}</span>
+				<span class="text-xs text-muted-foreground">{t('context.onlyForThisSession')}</span>
 			</span>
 			<span
 				aria-hidden="true"

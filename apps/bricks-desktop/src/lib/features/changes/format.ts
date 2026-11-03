@@ -1,6 +1,8 @@
 // Labels and number formats shared by the changes views.
+import { t, dateTimeFormat } from '$lib/i18n/i18n.svelte';
 
-const DATE_TIME = new Intl.DateTimeFormat('fr-FR', {
+
+const DATE_TIME = dateTimeFormat({
   day: 'numeric',
   month: 'short',
   hour: '2-digit',
@@ -8,7 +10,7 @@ const DATE_TIME = new Intl.DateTimeFormat('fr-FR', {
 })
 
 /** What the edit counts are: sums of edit operations, not a Git diff. */
-export const EDIT_SUM_LABEL = 'somme des opérations d’édition (pas un diff Git net)'
+export const editSumLabel = (): string => t('changes.sumOfEditOperationsNotA')
 
 export function formatDateTime(ms: number): string {
   return DATE_TIME.format(new Date(ms))
@@ -18,11 +20,11 @@ export function formatDateTime(ms: number): string {
 export function kindLabel(kind: string): string {
   switch (kind) {
     case 'create':
-      return 'Créé'
+      return t('common.created')
     case 'modify':
-      return 'Modifié'
+      return t('common.modified')
     case 'delete':
-      return 'Supprimé'
+      return t('common.deleted')
     default:
       return kind
   }
@@ -32,21 +34,21 @@ export function kindLabel(kind: string): string {
 export function gitCodeLabel(code: string): string {
   switch (code) {
     case 'M':
-      return 'Modifié'
+      return t('common.modified')
     case 'A':
-      return 'Ajouté'
+      return t('common.added')
     case 'D':
-      return 'Supprimé'
+      return t('common.deleted')
     case 'R':
-      return 'Renommé'
+      return t('common.renamed')
     case 'C':
-      return 'Copié'
+      return t('common.copied')
     case 'T':
-      return 'Type modifié'
+      return t('changes.typeChanged')
     case 'U':
-      return 'Conflit'
+      return t('common.conflict')
     case '?':
-      return 'Non suivi'
+      return t('changes.untracked2')
     default:
       return code
   }
@@ -67,6 +69,3 @@ export function shortId(id: string): string {
   return id.length > 8 ? id.slice(0, 8) : id
 }
 
-export function plural(count: number, one: string, many: string): string {
-  return `${count} ${count === 1 ? one : many}`
-}

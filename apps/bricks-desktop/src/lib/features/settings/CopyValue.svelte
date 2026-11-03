@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { t } from '$lib/i18n/i18n.svelte';
 	import { onDestroy } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import { Button } from '$lib/components/ui/button';
@@ -22,9 +23,9 @@
 			copied = true;
 			if (resetTimer) clearTimeout(resetTimer);
 			resetTimer = setTimeout(() => (copied = false), 1500);
-			toast.success(`${label} copié`);
+			toast.success(t('settings.copied', { label }));
 		} catch {
-			toast.error(`Copie impossible pour ${label}`);
+			toast.error(t('settings.couldNotCopy', { label }));
 		}
 	}
 
@@ -37,12 +38,12 @@
 	<code class="min-w-0 flex-1 truncate rounded-md bg-code-bg px-2 py-1 font-mono text-xs text-code-foreground" title={value}>
 		{value}
 	</code>
-	<Button variant="outline" size="sm" onclick={copy} aria-label={`Copier : ${label}`}>
+	<Button variant="outline" size="sm" onclick={copy} aria-label={t('settings.copy', { label })}>
 		{#if copied}
 			<Check class="size-4" aria-hidden="true" />
 		{:else}
 			<Copy class="size-4" aria-hidden="true" />
 		{/if}
-		{copied ? 'Copié' : 'Copier'}
+		{copied ? t('common.copied') : t('common.copy')}
 	</Button>
 </div>

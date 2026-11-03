@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { t } from '$lib/i18n/i18n.svelte';
 	import { onMount, untrack } from 'svelte';
 	import ChevronRightIcon from '@lucide/svelte/icons/chevron-right';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
@@ -35,7 +36,7 @@
 	const refreshAnswer = $derived(refresh.answered<ControlAnswer>());
 	const stop = new EngineRequest();
 	const stopAnswer = $derived(stop.answered<ControlAnswer>());
-	const summary = $derived(refresh.pending && jobs.length === 0 ? 'Actualisation…' : jobsSummary(jobs));
+	const summary = $derived(refresh.pending && jobs.length === 0 ? t('catalog.refreshing') : jobsSummary(jobs));
 	/** Folded: the summary says the state; the list and each job's details open on demand. */
 	let open = $state(false);
 
@@ -72,9 +73,9 @@
 
 <div class="flex flex-col gap-3 text-ui">
 	{#if !conv}
-		<p class="text-muted-foreground">Aucune conversation ouverte</p>
+		<p class="text-muted-foreground">{t('common.noOpenConversation2')}</p>
 	{:else}
-		<section aria-label="Tâches de fond" class="rounded-xl border border-border bg-card text-card-foreground">
+		<section aria-label={t('common.backgroundJobs')} class="rounded-xl border border-border bg-card text-card-foreground">
 			<Collapsible bind:open>
 				<div class="flex min-w-0 items-center gap-1 pr-1.5">
 					<CollapsibleTrigger
@@ -90,8 +91,8 @@
 					<Button
 						variant="ghost"
 						size="icon-xs"
-						aria-label="Actualiser"
-						title="Actualiser"
+						aria-label={t('common.refresh')}
+						title={t('common.refresh')}
 						disabled={refresh.pending}
 						onclick={refreshJobs}
 					>
@@ -122,8 +123,8 @@
 											<Button
 												variant="ghost"
 												size="icon-xs"
-												aria-label={`Arrêter ${job.command}`}
-												title="Arrêter"
+												aria-label={t('catalog.stop', { command: job.command })}
+												title={t('common.stop')}
 												disabled={stop.pending}
 												onclick={() => askStop(job.jobId)}
 											>
@@ -133,30 +134,30 @@
 									</div>
 									<CollapsibleContent>
 										<dl class="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-x-3 gap-y-1 px-3 pt-0.5 pb-2 pl-9 text-xs">
-											<dt class="text-muted-foreground">État</dt>
+											<dt class="text-muted-foreground">{t('catalog.status')}</dt>
 											<dd>{status.label}</dd>
-											<dt class="text-muted-foreground">Démarrée</dt>
+											<dt class="text-muted-foreground">{t('catalog.started')}</dt>
 											<dd class="tabular-nums">{formatTime(job.startedAt)}</dd>
-											<dt class="text-muted-foreground">Dossier</dt>
+											<dt class="text-muted-foreground">{t('common.folder')}</dt>
 											<dd class="font-mono break-all">{job.cwd}</dd>
 											<dt class="text-muted-foreground">PID</dt>
 											<dd class="tabular-nums">{job.pid}</dd>
-											<dt class="text-muted-foreground">Agent</dt>
+											<dt class="text-muted-foreground">{t('common.agent2')}</dt>
 											<dd class="font-mono break-all">{job.agentId}</dd>
-											<dt class="text-muted-foreground">Sortie</dt>
+											<dt class="text-muted-foreground">{t('common.output')}</dt>
 											<dd class="tabular-nums">
-												{formatBytes(job.stdoutBytes)} stdout · {formatBytes(job.stderrBytes)} stderr
+												{t('catalog.stdoutStderr', { stdoutBytes: formatBytes(job.stdoutBytes), stderrBytes: formatBytes(job.stderrBytes) })}
 											</dd>
 											{#if job.code !== undefined}
-												<dt class="text-muted-foreground">Code</dt>
+												<dt class="text-muted-foreground">{t('catalog.code')}</dt>
 												<dd class="tabular-nums">{job.code}</dd>
 											{/if}
 											{#if job.signal !== undefined}
-												<dt class="text-muted-foreground">Signal</dt>
+												<dt class="text-muted-foreground">{t('catalog.signal')}</dt>
 												<dd class="tabular-nums">{job.signal}</dd>
 											{/if}
 											{#if job.logs.length > 0}
-												<dt class="text-muted-foreground">Journaux</dt>
+												<dt class="text-muted-foreground">{t('catalog.logs')}</dt>
 												<dd class="font-mono break-all">{job.logs.join(', ')}</dd>
 											{/if}
 										</dl>
@@ -170,16 +171,16 @@
 		</section>
 
 		{#if refresh.refusal}
-			<p role="alert" class="text-xs text-pretty text-destructive">Actualisation refusée : {refresh.refusal}</p>
+			<p role="alert" class="text-xs text-pretty text-destructive">{t('catalog.refreshRefused', { refusal: refresh.refusal })}</p>
 		{:else if refreshAnswer && !refreshAnswer.ok}
-			<p role="alert" class="text-xs text-pretty text-destructive">Actualisation impossible : {refreshAnswer.text}</p>
+			<p role="alert" class="text-xs text-pretty text-destructive">{t('catalog.couldNotRefresh', { text: refreshAnswer.text })}</p>
 		{/if}
 		{#if stop.refusal}
-			<p role="alert" class="text-xs text-pretty text-destructive">Arrêt refusé : {stop.refusal}</p>
+			<p role="alert" class="text-xs text-pretty text-destructive">{t('catalog.stopRefused', { refusal: stop.refusal })}</p>
 		{:else if stop.pending}
-			<p role="status" class="text-xs text-muted-foreground">Arrêt demandé</p>
+			<p role="status" class="text-xs text-muted-foreground">{t('catalog.stopRequested')}</p>
 		{:else if stopAnswer && !stopAnswer.ok}
-			<p role="alert" class="text-xs text-pretty text-destructive">Arrêt impossible : {stopAnswer.text}</p>
+			<p role="alert" class="text-xs text-pretty text-destructive">{t('catalog.couldNotStop', { text: stopAnswer.text })}</p>
 		{/if}
 	{/if}
 </div>
@@ -187,14 +188,14 @@
 <AlertDialog.Root bind:open={confirmOpen}>
 	<AlertDialog.Content>
 		<AlertDialog.Header>
-			<AlertDialog.Title>Arrêter cette tâche ?</AlertDialog.Title>
+			<AlertDialog.Title>{t('catalog.stopThisJob')}</AlertDialog.Title>
 			<AlertDialog.Description class="font-mono break-all">
 				{confirmCommand}
 			</AlertDialog.Description>
 		</AlertDialog.Header>
 		<AlertDialog.Footer>
-			<AlertDialog.Cancel>Annuler</AlertDialog.Cancel>
-			<AlertDialog.Action variant="destructive" onclick={stopConfirmed}>Arrêter</AlertDialog.Action>
+			<AlertDialog.Cancel>{t('common.cancel')}</AlertDialog.Cancel>
+			<AlertDialog.Action variant="destructive" onclick={stopConfirmed}>{t('common.stop')}</AlertDialog.Action>
 		</AlertDialog.Footer>
 	</AlertDialog.Content>
 </AlertDialog.Root>

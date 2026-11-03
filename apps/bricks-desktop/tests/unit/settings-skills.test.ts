@@ -33,7 +33,7 @@ describe('paging', () => {
 	});
 
 	it('names a count of skills in French', () => {
-		expect(skillCountLabel(0)).toBe('0 skills');
+		expect(skillCountLabel(0)).toBe('0 skill');
 		expect(skillCountLabel(1)).toBe('1 skill');
 		expect(skillCountLabel(7)).toBe('7 skills');
 	});

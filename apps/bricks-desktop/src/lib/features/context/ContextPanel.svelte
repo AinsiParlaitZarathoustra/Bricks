@@ -1,6 +1,7 @@
 <script lang="ts">
 	// Right panel: pending approvals, the project environment and the context
 	// occupation of the shown conversation. Its sub-agents are in the thread.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import { app } from '$lib/state/app.svelte';
 	import { ScrollArea } from '$lib/components/ui/scroll-area';
 	import EmptyState from '$lib/layout/EmptyState.svelte';
@@ -20,13 +21,13 @@
 		if (!viewport) return;
 		viewport.tabIndex = 0;
 		viewport.setAttribute('role', 'region');
-		viewport.setAttribute('aria-label', 'Contexte du projet');
+		viewport.setAttribute('aria-label', t('context.projectContext'));
 	});
 </script>
 
 <div class="h-full">
 	{#if !project}
-		<EmptyState title="Aucun projet ouvert" icon={FolderOpenIcon} />
+		<EmptyState title={t('common.noOpenProject')} icon={FolderOpenIcon} />
 	{:else}
 		<ScrollArea class="h-full" bind:viewportRef={viewport}>
 			<div class="flex flex-col gap-3 px-3 pt-5 pb-3">

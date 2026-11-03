@@ -2,6 +2,7 @@
 	// Visual palette of one colour: a saturation and brightness area, a hue slider, preset swatches,
 	// the hex code, a preview and the contrast checks of the role. It edits one colour and hands the
 	// new value to the parent, which stores it per mode.
+	import { numberFormat, t } from '$lib/i18n/i18n.svelte';
 	import { Input } from '$lib/components/ui/input';
 	import {
 		hexToHsv,
@@ -109,8 +110,10 @@
 		commitHex();
 	}
 
+	const ratioFormat = numberFormat({ minimumFractionDigits: 1, maximumFractionDigits: 1 });
+
 	function ratioText(ratio: number): string {
-		return `${ratio.toFixed(1).replace('.', ',')} : 1`;
+		return `${ratioFormat.format(ratio)} : 1`;
 	}
 </script>
 
@@ -136,7 +139,7 @@
 	</div>
 
 	<div class="grid grid-cols-[auto_1fr] items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
-		<span id={`${uid}-sat-label`}>Saturation</span>
+		<span id={`${uid}-sat-label`}>{t('settings.saturation')}</span>
 		<input
 			type="range"
 			min="0"
@@ -149,7 +152,7 @@
 			aria-labelledby={`${uid}-sat-label`}
 		/>
 
-		<span id={`${uid}-val-label`}>Luminosité</span>
+		<span id={`${uid}-val-label`}>{t('settings.brightness')}</span>
 		<input
 			type="range"
 			min="0"
@@ -162,7 +165,7 @@
 			aria-labelledby={`${uid}-val-label`}
 		/>
 
-		<span id={`${uid}-hue-label`}>Teinte</span>
+		<span id={`${uid}-hue-label`}>{t('settings.hue')}</span>
 		<input
 			type="range"
 			min="0"
@@ -175,7 +178,7 @@
 		/>
 	</div>
 
-	<div class="flex flex-wrap gap-1.5" role="group" aria-label={`Couleurs proposées, ${label}`}>
+	<div class="flex flex-wrap gap-1.5" role="group" aria-label={t('settings.suggestedColors', { label })}>
 		{#each presets as preset (preset.hex)}
 			<button
 				type="button"
@@ -201,12 +204,12 @@
 			spellcheck={false}
 			maxlength={7}
 			class="h-8 font-mono text-xs"
-			aria-label={`Code couleur, ${label}`}
+			aria-label={t('settings.colorCode', { label })}
 			aria-invalid={typedInvalid ? 'true' : undefined}
 			aria-describedby={typedInvalid ? `${uid}-hex-error` : undefined}
 		/>
 		{#if typedInvalid}
-			<p id={`${uid}-hex-error`} role="alert" class="text-xs text-destructive">Saisissez un code hexadécimal, par exemple #a4512c.</p>
+			<p id={`${uid}-hex-error`} role="alert" class="text-xs text-destructive">{t('settings.typeAHexadecimalCodeForExample')}</p>
 		{/if}
 	</div>
 
@@ -221,13 +224,13 @@
 		</div>
 	</div>
 
-	<ul class="flex flex-col gap-1 text-xs" aria-label={`Contrastes, ${label}`}>
+	<ul class="flex flex-col gap-1 text-xs" aria-label={t('settings.contrasts', { label })}>
 		{#each checks as check (check.label)}
 			{@const passes = check.ratio >= check.min}
 			<li class="flex items-center justify-between gap-2">
 				<span class="text-muted-foreground">{check.label}</span>
 				<span class={passes ? 'tabular-nums text-foreground' : 'tabular-nums text-warning'}>
-					{ratioText(check.ratio)}, {passes ? 'conforme' : `insuffisant (minimum ${ratioText(check.min)})`}
+					{ratioText(check.ratio)}, {passes ? t('settings.compliant') : t('settings.insufficientMinimum', { min: ratioText(check.min) })}
 				</span>
 			</li>
 		{/each}

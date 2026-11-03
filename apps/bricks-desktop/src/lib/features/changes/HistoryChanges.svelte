@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { t } from '$lib/i18n/i18n.svelte';
 	import { untrack } from 'svelte';
 	import { changeLogDiff, type ChangeRecord } from '$lib/ipc/client';
 	import { Button } from '$lib/components/ui/button';
@@ -36,7 +37,7 @@
 
 	function sessionTitle(sessionId: string): string {
 		const session = app.sessions.find((s) => s.id === sessionId);
-		return session?.title.trim() || `Conversation ${shortId(sessionId)}`;
+		return session?.title.trim() || t('changes.conversation', { sessionId: shortId(sessionId) });
 	}
 
 	function patchesOf(record: ChangeRecord, path: string, hasPatch: boolean): PatchSource[] {
@@ -44,7 +45,7 @@
 		return [
 			{
 				key: `${record.id}:${path}`,
-				title: `Diff de l’opération du ${formatDateTime(record.at)}`,
+				title: t('changes.diffOfTheOperationOf', { at: formatDateTime(record.at) }),
 				load: () => changeLogDiff(record.id, path),
 			},
 		];
@@ -52,21 +53,21 @@
 </script>
 
 {#if shown.view === 'no_project'}
-	<EmptyState title="Aucun projet ouvert" description="Choisissez un projet pour voir son historique de modifications." />
+	<EmptyState title={t('common.noOpenProject')} description={t('changes.chooseAProjectToSeeIts2')} />
 {:else if shown.view === 'failed' && journal}
-	<EmptyState title="Historique indisponible" description={journal.error ?? undefined}>
+	<EmptyState title={t('changes.historyUnavailable2')} description={journal.error ?? undefined}>
 		{#snippet action()}
-			<Button variant="outline" size="sm" onclick={() => journal?.load()}>Réessayer</Button>
+			<Button variant="outline" size="sm" onclick={() => journal?.load()}>{t('common.retry')}</Button>
 		{/snippet}
 	</EmptyState>
 {:else if shown.view === 'loading'}
-	<p class="px-3 py-6 text-center text-sm text-muted-foreground">Chargement…</p>
+	<p class="px-3 py-6 text-center text-sm text-muted-foreground">{t('common.loading')}</p>
 {:else if shown.view === 'entries' && journal}
 	<div class="flex flex-col gap-3">
 		{#if shown.inlineError}
 			<div role="alert" class="flex flex-wrap items-center justify-between gap-2 text-xs text-destructive">
-				<p class="min-w-0 break-words">Impossible de charger la suite : {shown.inlineError}</p>
-				<Button variant="outline" size="sm" disabled={journal.loading} onclick={() => journal?.more()}>Réessayer</Button>
+				<p class="min-w-0 break-words">{t('changes.couldNotLoadMore', { inlineError: shown.inlineError })}</p>
+				<Button variant="outline" size="sm" disabled={journal.loading} onclick={() => journal?.more()}>{t('common.retry')}</Button>
 			</div>
 		{/if}
 
@@ -79,8 +80,8 @@
 					</div>
 					<div class="flex min-w-0 items-center justify-between gap-2">
 						<p class="min-w-0 truncate text-xs text-muted-foreground">
-							{record.tool}{record.agent_id ? ` · Agent ${shortId(record.agent_id)}` : ''}{record.changeset_id
-								? ` · Changeset ${shortId(record.changeset_id)}`
+							{record.tool}{record.agent_id ? t('changes.agent', { agentId: shortId(record.agent_id) }) : ''}{record.changeset_id
+								? t('changes.changeset', { changesetId: shortId(record.changeset_id) })
 								: ''}
 						</p>
 						{#each changesetIdsOf([{ changesetId: record.changeset_id }]) as id (id)}
@@ -113,7 +114,7 @@
 		{#if !journal.exhausted}
 			<div class="flex justify-center">
 				<Button variant="outline" size="sm" disabled={journal.loading} onclick={() => journal?.more()}>
-					{journal.loading ? 'Chargement…' : 'Charger plus'}
+					{journal.loading ? t('common.loading') : t('changes.loadMore')}
 				</Button>
 			</div>
 		{/if}

@@ -4,6 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import tokens from '../../src/lib/theme/tokens.json';
+import { bound, call } from './french-keys';
 
 const source = (path: string) => readFileSync(new URL(`../../src/${path}`, import.meta.url), 'utf8');
 
@@ -27,10 +28,10 @@ describe('folders and Git', () => {
 
 	it('says Git is not installed in the folder, without a final period', () => {
 		const env = source('lib/features/context/ProjectEnvironment.svelte');
-		expect(env).toContain('Git n’est pas installé dans ce dossier<');
+		expect(env).toContain(`{${call('Git n’est pas installé dans ce dossier')}}</span>`);
 		expect(env).not.toContain('n’est pas un dépôt Git');
 		expect(source('lib/features/changes/GitChanges.svelte')).toContain(
-			'title="Git n’est pas installé dans ce dossier"'
+			bound('title', 'Git n’est pas installé dans ce dossier')
 		);
 	});
 });

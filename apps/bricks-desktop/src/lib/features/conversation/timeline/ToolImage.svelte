@@ -2,6 +2,7 @@
   // The image a tool call showed the model (`ViewImage`): the bytes it received,
   // read from the session's history. The round's message is written once all its
   // calls end, so the image is asked for again as the timeline grows, until found.
+  import { t } from '$lib/i18n/i18n.svelte'
   import { sessionToolImage } from '$lib/ipc/client'
   import type { Conversation, ToolItem } from '$lib/state/conversation.svelte'
   import { basename, isRecord } from '../format'
@@ -34,7 +35,7 @@
 {#if src}
   <img
     {src}
-    alt={path ? basename(path) : 'Image vue par le modèle'}
+    alt={path ? basename(path) : t('conversation.imageSeenByTheModel')}
     title={path}
     class="mt-1 ml-5 max-h-64 max-w-[min(100%,28rem)] rounded-md border border-border object-contain"
   />

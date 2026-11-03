@@ -1,6 +1,7 @@
 <script lang="ts">
   // While Bricks starts: its logo, breathing in a soft shadow. No text. The logo
   // contrasts with the theme last shown: dark tile on light, light tile on dark.
+  import { t } from '$lib/i18n/i18n.svelte'
   import darkTile from '../../assets/brand/app-dark.png'
   import lightTile from '../../assets/brand/app-light.png'
   import { theme } from '$lib/theme/theme.svelte'
@@ -8,7 +9,7 @@
   const src = $derived(theme.resolved === 'dark' ? lightTile : darkTile)
 </script>
 
-<div role="status" aria-label="Démarrage de Bricks" class="grid h-screen place-items-center">
+<div role="status" aria-label={t('layout.startingBricks')} class="grid h-screen place-items-center">
   <img {src} alt="" width="96" height="96" draggable="false" class="logo size-24 select-none" />
 </div>
 

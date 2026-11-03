@@ -1,6 +1,7 @@
 // One light line per tool call, and the one-line trace of a resolved approval.
 // Shared by the timeline and the sub-agent inspector. Pure functions only.
 
+import { t } from '$lib/i18n/i18n.svelte';
 import { DECIDED_BY_LABEL, DECISION_LABEL, formatDuration } from '../format';
 import type { DecidedBy, Decision } from '$lib/ipc/engine';
 
@@ -8,10 +9,10 @@ import type { DecidedBy, Decision } from '$lib/ipc/engine';
 export type ToolLineState = 'running' | 'done' | 'failed' | 'interrupted';
 
 export const TOOL_LINE_LABEL: Record<ToolLineState, string> = {
-	running: 'En cours',
-	done: 'Terminé',
-	failed: 'Échec',
-	interrupted: 'Interrompu'
+	get running() { return t('common.running') },
+	get done() { return t('common.finished') },
+	get failed() { return t('common.failed') },
+	get interrupted() { return t('common.interrupted') }
 };
 
 /** The facts of a call that the line depends on (a timeline tool or a sub-agent tool). */

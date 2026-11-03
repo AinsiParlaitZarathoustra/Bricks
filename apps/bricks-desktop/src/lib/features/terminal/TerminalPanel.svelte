@@ -3,6 +3,7 @@
 	// The sessions live in terminals.svelte.ts (store and session rules in
 	// terminal-store / terminal-session); this component only shows the active
 	// one.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import '@xterm/xterm/css/xterm.css';
 	import { untrack } from 'svelte';
 	import Plus from '@lucide/svelte/icons/plus';
@@ -24,7 +25,7 @@
 	const list = $derived(projectId ? terminals.list(projectId) : []);
 	const activeId = $derived(projectId ? terminals.activeId(projectId) : null);
 	const active = $derived(list.find((s) => s.id === activeId) ?? null);
-	const activeName = $derived(active ? `Terminal ${list.indexOf(active) + 1}` : 'Terminal');
+	const activeName = $derived(active ? t('terminal.terminal', { value: list.indexOf(active) + 1 }) : t('common.terminal'));
 
 	// The first terminal of a project opens by itself, once per application run.
 	$effect(() => {
@@ -75,7 +76,7 @@
 
 <div class="flex h-full min-h-0 flex-col bg-code-bg">
 	<div class="flex h-9 shrink-0 items-center gap-1 border-b border-border bg-background px-2">
-		<div role="group" aria-label="Terminaux du projet" class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+		<div role="group" aria-label={t('terminal.projectTerminals')} class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
 			{#each list as session, index (session.id)}
 				{@const isActive = session.id === activeId}
 				<div class={cn('flex shrink-0 items-center rounded-md', isActive && 'bg-muted')}>
@@ -88,13 +89,13 @@
 						)}
 						onclick={() => select(session.id)}
 					>
-						Terminal {index + 1}
+						{t('terminal.terminal', { value: index + 1 })}
 					</button>
 					<button
 						type="button"
 						class="rounded-md p-1 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-						aria-label={`Fermer le terminal ${index + 1}`}
-						title="Fermer le terminal"
+						aria-label={t('terminal.closeTerminal', { value: index + 1 })}
+						title={t('terminal.closeTheTerminal')}
 						onclick={() => close(session.id)}
 					>
 						<X class="size-3.5" aria-hidden="true" />
@@ -105,8 +106,8 @@
 		<Button
 			variant="ghost"
 			size="icon-sm"
-			aria-label="Nouveau terminal"
-			title="Nouveau terminal"
+			aria-label={t('terminal.newTerminal')}
+			title={t('terminal.newTerminal')}
 			disabled={!projectId}
 			onclick={create}
 		>
@@ -116,8 +117,8 @@
 			<Button
 				variant="ghost"
 				size="icon-sm"
-				aria-label="Masquer le terminal"
-				title="Masquer le terminal"
+				aria-label={t('common.hideTheTerminal')}
+				title={t('common.hideTheTerminal')}
 				onclick={onHide}
 			>
 				<X class="size-4" aria-hidden="true" />
@@ -135,12 +136,12 @@
 		{#if !active}
 			<div class="absolute inset-0 flex items-center justify-center bg-code-bg">
 				<EmptyState
-					title={projectId ? 'Aucun terminal ouvert' : 'Aucun projet ouvert'}
-					description={projectId ? 'Ouvrez un terminal dans le dossier du projet.' : 'Choisissez un projet pour ouvrir un terminal.'}
+					title={projectId ? t('terminal.noTerminalOpen') : t('common.noOpenProject')}
+					description={projectId ? t('terminal.openATerminalInTheProject') : t('terminal.chooseAProjectToOpenA')}
 				>
 					{#snippet action()}
 						{#if projectId}
-							<Button variant="outline" size="sm" onclick={create}>Nouveau terminal</Button>
+							<Button variant="outline" size="sm" onclick={create}>{t('terminal.newTerminal')}</Button>
 						{/if}
 					{/snippet}
 				</EmptyState>
@@ -151,11 +152,11 @@
 				class="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 border-t border-border bg-card px-3 py-2 text-xs text-card-foreground"
 			>
 				<span>
-					Processus terminé{active.exitCode !== null ? ` (code ${active.exitCode})` : ''}
+					{t('terminal.processFinished', { value: active.exitCode !== null ? t('terminal.code', { exitCode: active.exitCode }) : '' })}
 				</span>
 				<Button variant="outline" size="sm" onclick={() => active?.restart()}>
 					<RotateCw class="size-3.5" aria-hidden="true" />
-					Relancer
+					{t('terminal.restart')}
 				</Button>
 			</div>
 		{:else if active.status === 'error'}
@@ -163,8 +164,8 @@
 				role="alert"
 				class="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 border-t border-border bg-card px-3 py-2 text-xs text-destructive"
 			>
-				<span class="min-w-0 truncate">Impossible de démarrer le terminal : {active.error}</span>
-				<Button variant="outline" size="sm" onclick={() => active?.restart()}>Réessayer</Button>
+				<span class="min-w-0 truncate">{t('terminal.couldNotStartTheTerminal', { error: active.error })}</span>
+				<Button variant="outline" size="sm" onclick={() => active?.restart()}>{t('common.retry')}</Button>
 			</div>
 		{/if}
 	</div>

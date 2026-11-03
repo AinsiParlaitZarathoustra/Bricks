@@ -1,5 +1,6 @@
 <script lang="ts">
 	// Mermaid and SVG viewer preferences (`Preferences.diagrams`).
+	import { t } from '$lib/i18n/i18n.svelte';
 	import { app } from '$lib/state/app.svelte';
 	import * as Select from '$lib/components/ui/select';
 	import { Label } from '$lib/components/ui/label';
@@ -27,27 +28,31 @@
 		loose: 'Loose'
 	};
 	const THEME_LABEL: Record<'app' | MermaidTheme, string> = {
-		app: 'Thème de Bricks',
-		default: 'Default',
-		forest: 'Forest',
-		dark: 'Dark',
-		neutral: 'Neutral',
-		base: 'Base'
+		get app() { return t('settings.bricksTheme') },
+		get default() { return t('settings.mermaidThemeDefault') },
+		get forest() { return t('settings.mermaidThemeForest') },
+		get dark() { return t('settings.mermaidThemeDark') },
+		get neutral() { return t('settings.mermaidThemeNeutral') },
+		get base() { return t('settings.mermaidThemeBase') }
 	};
-	const LOOK_LABEL: Record<MermaidLook, string> = { classic: 'Classic', handDrawn: 'Hand drawn', neo: 'Neo' };
+	const LOOK_LABEL: Record<MermaidLook, string> = {
+		get classic() { return t('settings.mermaidLookClassic') },
+		get handDrawn() { return t('settings.mermaidLookHandDrawn') },
+		get neo() { return t('settings.mermaidLookNeo') }
+	};
 	const THEMES = ['app', ...MERMAID_THEMES] as const;
 
 	type Control = Exclude<keyof DiagramViewerSettings, 'followAppTheme' | 'capabilitiesRevision'>;
 	const controls: { key: Control; label: string }[] = [
-		{ key: 'allowZoom', label: 'Zoom' },
-		{ key: 'allowPan', label: 'Déplacement' },
-		{ key: 'allowFullscreen', label: 'Plein écran' },
-		{ key: 'allowDownload', label: 'Téléchargement SVG' },
-		{ key: 'allowCopy', label: 'Copie de la source' },
-		{ key: 'allowTooltips', label: 'Infobulles' },
-		{ key: 'allowSelection', label: 'Sélection du texte' },
-		{ key: 'allowLinks', label: 'Liens' },
-		{ key: 'allowAnimations', label: 'Animations' }
+		{ key: 'allowZoom', get label() { return t('settings.allowZoom') } },
+		{ key: 'allowPan', get label() { return t('settings.pan') } },
+		{ key: 'allowFullscreen', get label() { return t('common.fullscreen') } },
+		{ key: 'allowDownload', get label() { return t('settings.svgDownload') } },
+		{ key: 'allowCopy', get label() { return t('settings.copySource') } },
+		{ key: 'allowTooltips', get label() { return t('settings.tooltips') } },
+		{ key: 'allowSelection', get label() { return t('settings.textSelection') } },
+		{ key: 'allowLinks', get label() { return t('settings.links') } },
+		{ key: 'allowAnimations', get label() { return t('settings.animations') } }
 	];
 
 	const theme = $derived(diagramTheme(settings));
@@ -82,7 +87,7 @@
 </script>
 
 <div class="flex flex-col gap-3">
-	<Label for={`${uid}-security`} class="text-ui font-semibold text-foreground">Sécurité Mermaid</Label>
+	<Label for={`${uid}-security`} class="text-ui font-semibold text-foreground">{t('settings.mermaidSecurity')}</Label>
 	<Select.Root type="single" value={settings.mermaid.securityLevel} onValueChange={chooseSecurity}>
 		<Select.Trigger id={`${uid}-security`} class="w-full max-w-72">
 			<span class="truncate">{SECURITY_LABEL[settings.mermaid.securityLevel]}</span>
@@ -95,9 +100,9 @@
 	</Select.Root>
 </div>
 
-<SettingsGroup title="Diagrammes et SVG">
+<SettingsGroup title={t('settings.diagramsAndSvg')}>
 	<div class="flex flex-wrap items-center gap-3 p-3 text-ui">
-		<Label for={`${uid}-theme`} class="text-ui">Thème</Label>
+		<Label for={`${uid}-theme`} class="text-ui">{t('settings.theme')}</Label>
 		<Select.Root type="single" value={theme} onValueChange={chooseTheme}>
 			<Select.Trigger id={`${uid}-theme`} class="w-44">
 				<span class="truncate">{THEME_LABEL[theme]}</span>
@@ -108,7 +113,7 @@
 				{/each}
 			</Select.Content>
 		</Select.Root>
-		<Label for={`${uid}-look`} class="text-ui">Style</Label>
+		<Label for={`${uid}-look`} class="text-ui">{t('settings.style')}</Label>
 		<Select.Root type="single" value={settings.mermaid.look} onValueChange={chooseLook}>
 			<Select.Trigger id={`${uid}-look`} class="w-36">
 				<span class="truncate">{LOOK_LABEL[settings.mermaid.look]}</span>

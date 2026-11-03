@@ -82,6 +82,7 @@ fn export_bindings() {
         AppIcon,
         AskTimerPrefs,
         AskTimerMode,
+        Language,
         SlashCommandInfo,
         SlashAction,
         SlashPresent,

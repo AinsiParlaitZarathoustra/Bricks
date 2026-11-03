@@ -5,6 +5,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { formatInt } from '../../src/lib/features/inspect/format';
+import { fr } from '../../src/lib/i18n/messages/fr';
+import { bound, call } from './french-keys';
 
 const src = (path: string) => readFileSync(new URL(`../../src/${path}`, import.meta.url), 'utf8');
 
@@ -25,7 +27,7 @@ describe('pages', () => {
 	});
 
 	it('says which entries the page shows out of the total', () => {
-		expect(view).toContain('{formatInt(offset + 1)}–{formatInt(offset + page.entries.length)} sur {formatInt(page.total)}');
+		expect(view).toContain("t('inspect.of', { value: formatInt(offset + 1), entries: formatInt(offset + page.entries.length), total: formatInt(page.total) })");
 		expect(formatInt(1)).toBe(new Intl.NumberFormat('fr-FR').format(1));
 		expect(formatInt(1234.4)).toBe(new Intl.NumberFormat('fr-FR').format(1234));
 	});
@@ -40,18 +42,20 @@ describe('pages', () => {
 
 describe('filters', () => {
 	it('offers the five filters in order, with their engine values and French labels', () => {
-		const expected = [
-			["'all'", "'Tout'"],
-			["'notes'", "'Notes'"],
-			["'exchanges'", "'Échanges'"],
-			["'facts'", "'Faits'"],
-			["'fact_history'", "'Historique des faits'"]
+		// Each label is a catalogue key; its French text is checked against fr.ts.
+		const expected: [string, string, string][] = [
+			["'all'", 'inspect.all', 'Tout'],
+			["'notes'", 'inspect.notes', 'Notes'],
+			["'exchanges'", 'inspect.exchanges', 'Échanges'],
+			["'facts'", 'inspect.facts', 'Faits'],
+			["'fact_history'", 'inspect.factHistory', 'Historique des faits']
 		];
 		const start = view.indexOf('const FILTERS');
 		const block = view.slice(start, view.indexOf('];', start));
 		let at = 0;
-		for (const [value, label] of expected) {
-			const found = block.indexOf(`value: ${value}, label: ${label}`, at);
+		for (const [value, key, label] of expected) {
+			expect(fr[key as keyof typeof fr], key).toBe(label);
+			const found = block.indexOf(`value: ${value}, get label() { return t('${key}') }`, at);
 			expect(found, `${value} ${label}`).toBeGreaterThan(-1);
 			at = found;
 		}
@@ -60,7 +64,7 @@ describe('filters', () => {
 	it('explains that no fact is extracted automatically, on the facts filters only', () => {
 		expect(view).toContain("const factsShown = $derived(filter === 'facts' || filter === 'fact_history');");
 		expect(view).toContain('{#if factsShown}');
-		expect(view).toContain('Aucun fait n’est extrait automatiquement.');
+		expect(view).toContain(call('Aucun fait n’est extrait automatiquement.'));
 	});
 });
 
@@ -75,7 +79,7 @@ describe('search', () => {
 	});
 
 	it('labels the search field for screen readers', () => {
-		expect(view).toContain('aria-label="Rechercher dans la mémoire"');
+		expect(view).toContain(bound('aria-label', 'Rechercher dans la mémoire'));
 	});
 });
 
@@ -91,7 +95,7 @@ describe('scope', () => {
 	});
 
 	it('disables the project tab when there is no project, and never reads conversations without one', () => {
-		expect(view).toContain('<Tabs.Trigger value="project" disabled={!project}>Projet</Tabs.Trigger>');
+		expect(view).toContain(`<Tabs.Trigger value="project" disabled={!project}>{${call('Projet')}}</Tabs.Trigger>`);
 		expect(view).toContain('const project = $derived(app.currentProject && !app.currentProject.chats ? app.currentProject : null);');
 	});
 });
@@ -105,15 +109,15 @@ describe('reading is independent of the switch', () => {
 
 describe('entries', () => {
 	it('names each kind in French', () => {
-		expect(view).toContain("note: 'Note',");
-		expect(view).toContain("exchange: 'Échange',");
-		expect(view).toContain("fact: 'Fait'");
+		expect(view).toContain(`get note() { return ${call('Note')} }`);
+		expect(view).toContain(`get exchange() { return ${call('Échange')} }`);
+		expect(view).toContain(`get fact() { return ${call('Fait')} }`);
 	});
 
 	it('names the role of an exchange and the status of a fact in French', () => {
 		expect(view).toContain("user: 'message',");
-		expect(view).toContain("assistant: 'réponse',");
-		expect(view).toContain("tool: 'outil'");
+		expect(view).toContain(`get assistant() { return ${call('réponse')} }`);
+		expect(view).toContain(`get tool() { return ${call('outil')} }`);
 		for (const [status, label] of [
 			['active', 'actif'],
 			['proposed', 'proposé'],
@@ -122,31 +126,31 @@ describe('entries', () => {
 			['retracted', 'retiré'],
 			['unsupported', 'sans source']
 		]) {
-			expect(view).toContain(`${status}: '${label}'`);
+			expect(view).toContain(`get ${status}() { return ${call(label)} }`);
 		}
 	});
 
 	it('shows the evidence of a fact as quotes, and the time of the entry', () => {
-		expect(view).toContain('« {proof.quote} »');
+		expect(view).toContain("t('common.quoted', { text: proof.quote })");
 		expect(view).toContain('<time datetime={new Date(entry.at).toISOString()}>{when(entry.at)}</time>');
 	});
 
 	it('says where a global entry comes from: its project, then its conversation', () => {
 		const start = view.indexOf('function source(');
 		const body = view.slice(start, view.indexOf('</script>'));
-		expect(body).toContain("if (scope === 'global' && e.project_id) parts.push(`Projet ${e.project_name ?? e.project_id}`);");
-		expect(body).toContain("parts.push(conversation(e.session_id) ?? 'Conversation fermée')");
-		expect(body.indexOf('Projet')).toBeLessThan(body.indexOf('Conversation fermée'));
+		expect(body).toContain("if (scope === 'global' && e.project_id) parts.push(t('inspect.project', { projectId: e.project_name ?? e.project_id }));");
+		expect(body).toContain(`parts.push(conversation(e.session_id) ?? ${call('Conversation fermée')})`);
+		expect(body.indexOf("t('inspect.project'")).toBeLessThan(body.indexOf("t('inspect.closedConversation'"));
 	});
 
 	it('names an untitled conversation of the loaded lists', () => {
-		expect(view).toContain("return found.title || 'Sans titre';");
+		expect(view).toContain(`return found.title || ${call('Sans titre')};`);
 	});
 });
 
 describe('empty and failed reads', () => {
 	it('says there is no memory when the page is empty, and shows a failed read as an alert', () => {
-		expect(view).toContain('<p class="text-ui text-muted-foreground">Aucune mémoire</p>');
+		expect(view).toContain(`<p class="text-ui text-muted-foreground">{${call('Aucune mémoire')}}</p>`);
 		expect(view).toContain('<p role="alert" class="text-ui text-pretty text-destructive">{loadError}</p>');
 	});
 

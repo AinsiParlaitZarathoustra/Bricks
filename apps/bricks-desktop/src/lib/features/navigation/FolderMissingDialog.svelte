@@ -2,6 +2,7 @@
 	// « Dossier de travail introuvable »: shown while an action waits for a project
 	// whose folder is missing. Choosing its new place moves the project and its
 	// conversations there, then the action goes on. Mounted once, by App.svelte.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import { Button } from '$lib/components/ui/button';
 	import { app } from '$lib/state/app.svelte';
@@ -29,7 +30,7 @@
 <AlertDialog.Root open={app.folderRequest !== null} {onOpenChange}>
 	<AlertDialog.Content>
 		<AlertDialog.Header>
-			<AlertDialog.Title>Dossier de travail introuvable</AlertDialog.Title>
+			<AlertDialog.Title>{t('navigation.workingFolderNotFound')}</AlertDialog.Title>
 			{#if project}
 				<AlertDialog.Description class="break-all">
 					{project.name} · <span class="font-mono text-xs">{project.path}</span>
@@ -37,8 +38,8 @@
 			{/if}
 		</AlertDialog.Header>
 		<AlertDialog.Footer>
-			<AlertDialog.Cancel>Annuler</AlertDialog.Cancel>
-			<Button onclick={choose} disabled={choosing}>Choisir un dossier…</Button>
+			<AlertDialog.Cancel>{t('common.cancel')}</AlertDialog.Cancel>
+			<Button onclick={choose} disabled={choosing}>{t('navigation.chooseAFolder')}</Button>
 		</AlertDialog.Footer>
 	</AlertDialog.Content>
 </AlertDialog.Root>

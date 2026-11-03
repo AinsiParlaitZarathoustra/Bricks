@@ -1,6 +1,7 @@
 <script lang="ts">
 	// Context occupation (`/context`, `/ctx`): the same line as the context card
 	// (contextView.ts), and explicit compaction and clearing.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import type { InspectorState } from '$lib/state/ui.svelte';
 	import { app } from '$lib/state/app.svelte';
 	import { ui } from '$lib/state/ui.svelte';
@@ -54,28 +55,28 @@
 </script>
 
 <div class="flex min-w-0 flex-col gap-4">
-	<section class="flex flex-col gap-1" aria-label="Occupation du contexte">
+	<section class="flex flex-col gap-1" aria-label={t('inspect.contextUsage')}>
 		<p class="text-base font-medium tabular-nums">{line}</p>
 	</section>
 
 	<div class="flex flex-wrap gap-2">
 		<Button variant="outline" size="sm" onclick={compact} disabled={busy || compactPending}>
-			{compactPending ? 'Compaction en cours…' : 'Compacter maintenant'}
+			{compactPending ? t('common.compacting') : t('inspect.compactNow')}
 		</Button>
-		<Button variant="outline" size="sm" onclick={() => ui.open('clear')}>Vider le contexte…</Button>
+		<Button variant="outline" size="sm" onclick={() => ui.open('clear')}>{t('inspect.clearContext')}</Button>
 	</div>
 
 	<div class="flex flex-col gap-2 text-sm" role="status" aria-live="polite">
 		{#if compactPending}
 			<p class="text-muted-foreground">
-				Compaction en attente de la réponse du moteur…
+				{t('inspect.compactionWaitingForTheEnginesAnswer')}
 			</p>
 		{:else if compactRefused !== null}
-			<p role="alert" class="text-destructive">Compaction refusée : {compactRefused}</p>
+			<p role="alert" class="text-destructive">{t('inspect.compactionRefused', { compactRefused })}</p>
 		{:else if compactDone}
 			<p>
-				{compactDone.compacted ? 'Contexte compacté.' : 'Contexte non compacté.'}
-				<span class="text-muted-foreground">Résultat du moteur : {compactDone.outcome}</span>
+				{compactDone.compacted ? t('inspect.contextCompacted') : t('inspect.contextNotCompacted')}
+				<span class="text-muted-foreground">{t('inspect.engineResult', { outcome: compactDone.outcome })}</span>
 			</p>
 		{/if}
 		{#if actionError}

@@ -5,6 +5,7 @@
 // context-card-structure.test.ts.
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { call } from './french-keys';
 
 const src = (path: string) => readFileSync(new URL(`../../src/${path}`, import.meta.url), 'utf8');
 
@@ -28,8 +29,8 @@ describe('menu Plus: the item is for this conversation only', () => {
 	});
 
 	it('is titled « Maintenir l’ordinateur actif », with the sub-text « Uniquement pour cette session » and no full stop', () => {
-		expect(plus).toContain('<span class="text-sm">Maintenir l’ordinateur actif</span>');
-		expect(plus).toContain('<span class="text-xs text-muted-foreground">Uniquement pour cette session</span>');
+		expect(plus).toContain(`<span class="text-sm">{${call('Maintenir l’ordinateur actif')}}</span>`);
+		expect(plus).toContain(`<span class="text-xs text-muted-foreground">{${call('Uniquement pour cette session')}}</span>`);
 		expect(plus).not.toContain('Uniquement pour cette session.');
 	});
 });
@@ -44,7 +45,7 @@ describe('Paramètres › Général: one switch, no sub-text', () => {
 	});
 
 	it('its label is the title alone, the switch inside it', () => {
-		expect(general).toMatch(/<label class="[^"]*">\s*Maintenir l’ordinateur actif\s*<Switch/);
+		expect(general).toMatch(/<label class="[^"]*">\s*\{t\('common\.keepTheComputerAwake'\)\}\s*<Switch/);
 	});
 
 	it('has no sub-text: nothing about the session, and no description line', () => {

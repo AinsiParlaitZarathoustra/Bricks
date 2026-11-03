@@ -2,6 +2,7 @@
 	// The long-term memory (`/memory`, `/memory global`, the settings): the entries of the
 	// project's or the global memory, 50 per page, searched and filtered by type. Reading
 	// works whether the memory is on or off. A note is one entry, never also an exchange.
+	import { t, localeTag } from '$lib/i18n/i18n.svelte';
 	import type { InspectorState } from '$lib/state/ui.svelte';
 	import type { MemoryEntry, MemoryEntryFilter, MemoryEntryPage, MemoryScope } from '$lib/ipc/client';
 	import * as ipc from '$lib/ipc/client';
@@ -30,29 +31,29 @@
 	let loadError = $state<string | null>(null);
 
 	const FILTERS: { value: MemoryEntryFilter; label: string }[] = [
-		{ value: 'all', label: 'Tout' },
-		{ value: 'notes', label: 'Notes' },
-		{ value: 'exchanges', label: 'Échanges' },
-		{ value: 'facts', label: 'Faits' },
-		{ value: 'fact_history', label: 'Historique des faits' }
+		{ value: 'all', get label() { return t('inspect.all') } },
+		{ value: 'notes', get label() { return t('inspect.notes') } },
+		{ value: 'exchanges', get label() { return t('inspect.exchanges') } },
+		{ value: 'facts', get label() { return t('inspect.facts') } },
+		{ value: 'fact_history', get label() { return t('inspect.factHistory') } }
 	];
 	const KIND: Record<MemoryEntry['kind'], string> = {
-		note: 'Note',
-		exchange: 'Échange',
-		fact: 'Fait'
+		get note() { return t('common.note') },
+		get exchange() { return t('inspect.exchange') },
+		get fact() { return t('inspect.fact') }
 	};
 	const ROLE: Record<string, string> = {
 		user: 'message',
-		assistant: 'réponse',
-		tool: 'outil'
+		get assistant() { return t('inspect.answer') },
+		get tool() { return t('inspect.memoryTool') }
 	};
 	const STATUS: Record<string, string> = {
-		active: 'actif',
-		proposed: 'proposé',
-		superseded: 'remplacé',
-		contested: 'contesté',
-		retracted: 'retiré',
-		unsupported: 'sans source'
+		get active() { return t('inspect.memoryActive') },
+		get proposed() { return t('inspect.proposed') },
+		get superseded() { return t('inspect.replaced') },
+		get contested() { return t('inspect.disputed') },
+		get retracted() { return t('inspect.withdrawn') },
+		get unsupported() { return t('inspect.noSource') }
 	};
 
 	const filterLabel = $derived(FILTERS.find((f) => f.value === filter)?.label ?? '');
@@ -91,14 +92,14 @@
 	}
 
 	function when(at: number): string {
-		return new Date(at).toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' });
+		return new Date(at).toLocaleString(localeTag(), { dateStyle: 'medium', timeStyle: 'short' });
 	}
 
 	/** The title of a conversation of the loaded lists, when known. */
 	function conversation(sessionId: string): string | null {
 		for (const list of app.sessionsByProject.values()) {
 			const found = list.find((s) => s.id === sessionId);
-			if (found) return found.title || 'Sans titre';
+			if (found) return found.title || t('common.untitled');
 		}
 		return null;
 	}
@@ -106,8 +107,8 @@
 	/** Where an entry comes from: its project (global memory), its conversation. */
 	function source(e: MemoryEntry): string {
 		const parts: string[] = [];
-		if (scope === 'global' && e.project_id) parts.push(`Projet ${e.project_name ?? e.project_id}`);
-		if (e.session_id) parts.push(conversation(e.session_id) ?? 'Conversation fermée');
+		if (scope === 'global' && e.project_id) parts.push(t('inspect.project', { projectId: e.project_name ?? e.project_id }));
+		if (e.session_id) parts.push(conversation(e.session_id) ?? t('inspect.closedConversation'));
 		return parts.join(' · ');
 	}
 </script>
@@ -115,15 +116,15 @@
 <div class="flex min-w-0 flex-col gap-4">
 	<div class="flex flex-wrap items-center gap-2">
 		<Tabs.Root value={scope} onValueChange={(v) => choose(() => (scope = v as MemoryScope))}>
-			<Tabs.List aria-label="Mémoire affichée">
-				<Tabs.Trigger value="project" disabled={!project}>Projet</Tabs.Trigger>
-				<Tabs.Trigger value="global">Globale</Tabs.Trigger>
+			<Tabs.List aria-label={t('inspect.memoryShown')}>
+				<Tabs.Trigger value="project" disabled={!project}>{t('common.project')}</Tabs.Trigger>
+				<Tabs.Trigger value="global">{t('inspect.global')}</Tabs.Trigger>
 			</Tabs.List>
 		</Tabs.Root>
 		<Input
 			type="search"
-			placeholder="Rechercher"
-			aria-label="Rechercher dans la mémoire"
+			placeholder={t('common.search')}
+			aria-label={t('inspect.searchTheMemory')}
 			class="h-8 min-w-40 flex-1 text-ui"
 			value={query}
 			oninput={(event) => choose(() => (query = event.currentTarget.value))}
@@ -133,7 +134,7 @@
 			value={filter}
 			onValueChange={(v) => choose(() => (filter = v as MemoryEntryFilter))}
 		>
-			<Select.Trigger id={`${uid}-filter`} aria-label="Type" class="h-8 w-48 text-ui">
+			<Select.Trigger id={`${uid}-filter`} aria-label={t('inspect.type')} class="h-8 w-48 text-ui">
 				<span class="truncate">{filterLabel}</span>
 			</Select.Trigger>
 			<Select.Content>
@@ -145,7 +146,7 @@
 	</div>
 
 	{#if factsShown}
-		<p class="text-caption text-muted-foreground">Aucun fait n’est extrait automatiquement.</p>
+		<p class="text-caption text-muted-foreground">{t('inspect.noFactIsExtractedAutomatically')}</p>
 	{/if}
 
 	{#if loadError !== null}
@@ -156,7 +157,7 @@
 			<Skeleton class="h-14 w-full" />
 		</div>
 	{:else if page.entries.length === 0}
-		<p class="text-ui text-muted-foreground">Aucune mémoire</p>
+		<p class="text-ui text-muted-foreground">{t('inspect.noMemory')}</p>
 	{:else}
 		<ul class="flex flex-col divide-y divide-border rounded-lg border border-border">
 			{#each page.entries as entry (entry.id)}
@@ -178,7 +179,7 @@
 					{#if entry.evidence.length > 0}
 						<ul class="flex flex-col gap-1 border-l-2 border-border pl-2 text-caption text-muted-foreground">
 							{#each entry.evidence as proof, i (i)}
-								<li class="break-words">« {proof.quote} »</li>
+								<li class="break-words">{t('common.quoted', { text: proof.quote })}</li>
 							{/each}
 						</ul>
 					{/if}
@@ -187,7 +188,7 @@
 		</ul>
 		<div class="flex items-center justify-between gap-2 text-caption text-muted-foreground">
 			<span class="tabular-nums">
-				{formatInt(offset + 1)}–{formatInt(offset + page.entries.length)} sur {formatInt(page.total)}
+				{t('inspect.of', { value: formatInt(offset + 1), entries: formatInt(offset + page.entries.length), total: formatInt(page.total) })}
 			</span>
 			<div class="flex gap-2">
 				<Button
@@ -196,7 +197,7 @@
 					disabled={offset === 0}
 					onclick={() => (offset = Math.max(0, offset - PAGE))}
 				>
-					Précédent
+					{t('common.previous')}
 				</Button>
 				<Button
 					variant="ghost"
@@ -204,7 +205,7 @@
 					disabled={offset + PAGE >= page.total}
 					onclick={() => (offset += PAGE)}
 				>
-					Suivant
+					{t('common.next')}
 				</Button>
 			</div>
 		</div>

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '$lib/i18n/i18n.svelte'
   import ChevronDown from '@lucide/svelte/icons/chevron-down'
   import ShieldAlert from '@lucide/svelte/icons/shield-alert'
   import ShieldCheck from '@lucide/svelte/icons/shield-check'
@@ -28,7 +29,7 @@
   const agentName = $derived.by(() => {
     if (!approval.agent_id) return null
     const agent = conversation.agents.get(approval.agent_id)
-    return agent ? agent.spawn.profile : `agent inconnu (${approval.agent_id.slice(0, 8)})`
+    return agent ? agent.spawn.profile : t('conversation.unknownAgent', { value: approval.agent_id.slice(0, 8) })
   })
   const inputSummary = $derived(summarizeInput(approval.tool, approval.input))
   const inputText = $derived(prettyJson(approval.input))
@@ -60,16 +61,16 @@
   </p>
 {:else}
   <section
-    aria-label="Autorisation demandée"
+    aria-label={t('conversation.approvalRequested2')}
     class="flex flex-col gap-2.5 rounded-lg border border-warning/40 bg-card p-3 text-sm text-card-foreground"
   >
     <header class="flex flex-wrap items-center gap-x-2 gap-y-1">
       <ShieldAlert class="size-4 shrink-0 text-warning" aria-hidden="true" />
-      <h2 class="font-medium">Autorisation demandée</h2>
+      <h2 class="font-medium">{t('conversation.approvalRequested2')}</h2>
       <span class="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">{approval.tool}</span>
-      <span class="text-xs text-muted-foreground">Niveau : {approval.level}</span>
+      <span class="text-xs text-muted-foreground">{t('conversation.level', { level: approval.level })}</span>
       {#if agentName}
-        <span class="text-xs text-muted-foreground">Agent : {agentName}</span>
+        <span class="text-xs text-muted-foreground">{t('conversation.agent', { agentName })}</span>
       {/if}
     </header>
 
@@ -84,10 +85,10 @@
         class="group inline-flex w-fit items-center gap-1 rounded-md text-xs text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
       >
         <ChevronDown class="size-3.5 transition-transform group-data-[state=open]:rotate-180" aria-hidden="true" />
-        Entrée complète
+        {t('conversation.fullInput')}
       </CollapsibleTrigger>
       <CollapsibleContent class="mt-1.5">
-        <MonoBlock text={inputText} label={`Entrée complète de ${approval.tool}`} />
+        <MonoBlock text={inputText} label={t('conversation.fullInputOf', { tool: approval.tool })} />
       </CollapsibleContent>
     </Collapsible>
 
@@ -96,25 +97,25 @@
         <p class="text-xs text-destructive break-words">{approval.preview.refusal}</p>
       {/if}
       {#if approval.preview.files.length > 0}
-        <ul class="flex flex-col gap-2 border-t border-border pt-2.5" aria-label="Fichiers concernés">
+        <ul class="flex flex-col gap-2 border-t border-border pt-2.5" aria-label={t('conversation.filesInvolved')}>
           {#each approval.preview.files as file (file.absolute)}
             <li class="flex flex-col gap-1.5">
               <Collapsible>
                 <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
                   <span class="text-muted-foreground">{CHANGE_KIND_LABEL[file.kind]}</span>
                   <span class="min-w-0 break-all font-mono">{file.path}</span>
-                  <DiffStat additions={file.added} deletions={file.removed} label="lignes" />
+                  <DiffStat additions={file.added} deletions={file.removed} label={t('common.lines')} />
                   {#if file.diff}
                     <CollapsibleTrigger
-                      aria-label={`Voir le diff de ${file.path}`} class="rounded px-1 text-primary underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                      aria-label={t('conversation.viewTheDiffOf', { path: file.path })} class="rounded px-1 text-primary underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                     >
-                      Voir le diff
+                      {t('conversation.viewTheDiff')}
                     </CollapsibleTrigger>
                   {/if}
                 </div>
                 {#if file.diff}
                   <CollapsibleContent class="mt-1.5">
-                    <MonoBlock text={file.diff} label={`Diff de ${file.path}`} diff maxLines={400} />
+                    <MonoBlock text={file.diff} label={t('conversation.diffOf', { path: file.path })} diff maxLines={400} />
                   </CollapsibleContent>
                 {/if}
               </Collapsible>
@@ -125,13 +126,13 @@
     {/if}
 
     <div class="flex flex-wrap gap-2">
-      <Button size="sm" disabled={sending !== null} onclick={() => decide('allow')}>Autoriser</Button>
+      <Button size="sm" disabled={sending !== null} onclick={() => decide('allow')}>{t('common.allow')}</Button>
       <Button size="sm" variant="ghost" class="text-destructive hover:text-destructive" disabled={sending !== null} onclick={() => decide('deny')}>
-        Refuser
+        {t('common.refuse')}
       </Button>
     </div>
     {#if sending !== null && refusal === null}
-      <p class="text-xs text-muted-foreground" role="status">Décision envoyée…</p>
+      <p class="text-xs text-muted-foreground" role="status">{t('conversation.decisionSent')}</p>
     {/if}
     {#if refusal}
       <p class="text-xs text-destructive break-words" role="alert">{refusal}</p>

@@ -2,6 +2,7 @@
 import type { AppIcon } from "./AppIcon";
 import type { AskTimerPrefs } from "./AskTimerPrefs";
 import type { DiagramSettings } from "./DiagramSettings";
+import type { Language } from "./Language";
 import type { Theme } from "./Theme";
 import type { ThemeColors } from "./ThemeColors";
 
@@ -40,4 +41,8 @@ computer_use_enabled: boolean,
 /**
  * Keeps the computer from sleeping while Bricks is open, off by default.
  */
-keep_awake: boolean, };
+keep_awake: boolean, 
+/**
+ * The interface language; conversations and files keep their own.
+ */
+language: Language, };

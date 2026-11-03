@@ -2,6 +2,7 @@
 	// The timer of the questions the model asks (`Ask`): off by default; SMART lets
 	// the model choose each duration, CUSTOM imposes one. Saved in the preferences
 	// and sent with each message: a change applies from the next message.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import type { AskTimerMode } from '$lib/ipc/client';
 	import { Label } from '$lib/components/ui/label';
 	import { Input } from '$lib/components/ui/input';
@@ -37,14 +38,14 @@
 	}
 </script>
 
-<SettingsGroup title="Délai des questions">
+<SettingsGroup title={t('settings.questionTimer')}>
 	<label class="flex items-center justify-between gap-3 p-3 text-ui">
-		Activer le délai
+		{t('settings.enableTheTimer')}
 		<Switch checked={timer.enabled} onCheckedChange={(on) => update({ enabled: on })} />
 	</label>
 	{#if timer.enabled}
 		<fieldset class="flex flex-wrap items-center gap-4 p-3 text-ui">
-			<legend class="sr-only">Mode du délai</legend>
+			<legend class="sr-only">{t('settings.timerMode')}</legend>
 			{#each MODES as mode (mode.value)}
 				<label class="flex items-center gap-2">
 					<input
@@ -59,7 +60,7 @@
 			{/each}
 			{#if timer.mode === 'custom'}
 				<div class="flex items-center gap-2">
-					<Label for={`${uid}-seconds`} class="text-ui">Durée (s)</Label>
+					<Label for={`${uid}-seconds`} class="text-ui">{t('settings.durationS')}</Label>
 					<Input
 						id={`${uid}-seconds`}
 						type="number"
@@ -75,7 +76,7 @@
 				</div>
 				{#if invalid}
 					<p id={`${uid}-error`} role="alert" class="w-full text-caption text-destructive">
-						Entre {MIN} et {MAX} secondes.
+						{t('settings.betweenAndSeconds', { MIN, MAX })}
 					</p>
 				{/if}
 			{/if}

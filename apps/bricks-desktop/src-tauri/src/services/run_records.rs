@@ -14,6 +14,7 @@
 //! each event to its run (sub-agents and jobs by their owner) and says when a
 //! run's record must be written.
 
+use crate::i18n::{msg, tr};
 use super::io_error;
 use super::run_labels::{append_line, check_session_id, move_lines};
 use crate::contract::{IpcResult, RunCommand, RunFile, RunRecord, RunUsageRecord};
@@ -69,7 +70,7 @@ impl RunRecordStore {
         let text = match std::fs::read_to_string(&path) {
             Ok(t) => t,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(e) => return Err(io_error("enregistrements des exécutions", e)),
+            Err(e) => return Err(io_error(&tr!(msg::RUN_RECORDS), e)),
         };
         let mut skipped = 0usize;
         let mut runs: Vec<RunRecord> = Vec::new();
@@ -107,7 +108,7 @@ impl RunRecordStore {
         let line = serde_json::to_string(record)
             .map_err(|e| super::error(crate::contract::IpcErrorCode::Internal, e.to_string()))?;
         append_line(&self.path(session_id), &line)
-            .map_err(|e| io_error("enregistrements des exécutions", e))?;
+            .map_err(|e| io_error(&tr!(msg::RUN_RECORDS), e))?;
         Ok(true)
     }
 
@@ -122,12 +123,12 @@ impl RunRecordStore {
         if let Err(e) = std::fs::remove_file(&aside)
             && e.kind() != std::io::ErrorKind::NotFound
         {
-            return Err(io_error("enregistrements des exécutions", e));
+            return Err(io_error(&tr!(msg::RUN_RECORDS), e));
         }
         match std::fs::remove_file(self.path(session_id)) {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(io_error("enregistrements des exécutions", e)),
+            Err(e) => Err(io_error(&tr!(msg::RUN_RECORDS), e)),
         }
     }
 
@@ -148,7 +149,7 @@ impl RunRecordStore {
                     .is_ok_and(|r| r.user_index.is_some_and(|i| i >= user_index))
             },
         )
-        .map_err(|e| io_error("enregistrements des exécutions", e))
+        .map_err(|e| io_error(&tr!(msg::RUN_RECORDS), e))
     }
 
     /// Whether the session has a records file (for the deletion check).

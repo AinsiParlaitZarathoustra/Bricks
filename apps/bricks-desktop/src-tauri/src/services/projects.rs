@@ -8,6 +8,7 @@
 //! [`CHATS_PROJECT_ID`], never written in the file: its folder
 //! (`<bricks_home>/desktop/conversations`) holds one folder per conversation.
 
+use crate::i18n::{msg, tr};
 use super::paths::{check_folder, desktop_dir, write_atomic};
 use super::{error, io_error, invalid, not_found, now_ms};
 use crate::contract::{IpcError, IpcErrorCode, IpcResult, Project};
@@ -69,11 +70,10 @@ impl ProjectStore {
             Ok(bytes) => match serde_json::from_slice::<FileDoc>(&bytes) {
                 Ok(doc) if doc.schema == SCHEMA => doc.projects,
                 Ok(doc) => {
-                    let msg = format!(
-                        "{} : version {} du fichier de projets non reconnue ; les projets \
-                         ne sont pas modifiés",
-                        file.display(),
-                        doc.schema
+                    let msg = tr!(
+                        msg::UNKNOWN_PROJECTS_FILE_VERSION,
+                        file = file.display(),
+                        schema = doc.schema
                     );
                     blocked = Some(msg.clone());
                     notes.push(msg);
@@ -82,14 +82,11 @@ impl ProjectStore {
                 Err(e) => {
                     let aside = file.with_extension(format!("json.unreadable-{}", now_ms()));
                     let moved = std::fs::rename(&file, &aside).is_ok();
-                    let msg = format!(
-                        "fichier de projets illisible ({e}) : {}",
-                        if moved {
-                            format!("conservé sous {}", aside.display())
+                    let msg = tr!(msg::UNREADABLE_PROJECTS_FILE, e = e, detail = if moved {
+                            tr!(msg::KEPT_AS, aside = aside.display())
                         } else {
-                            format!("{} n'a pas pu être mis de côté", file.display())
-                        }
-                    );
+                            tr!(msg::COULD_NOT_BE_SET_ASIDE, file = file.display())
+                        });
                     if !moved {
                         blocked = Some(msg.clone());
                     }
@@ -99,7 +96,7 @@ impl ProjectStore {
             },
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
             Err(e) => {
-                let msg = format!("fichier de projets {} illisible : {e}", file.display());
+                let msg = tr!(msg::PROJECTS_FILE_IS_UNREADABLE, e = e, file = file.display());
                 blocked = Some(msg.clone());
                 notes.push(msg);
                 Vec::new()
@@ -145,7 +142,7 @@ impl ProjectStore {
             .iter()
             .find(|p| p.id == id)
             .map(view)
-            .ok_or_else(|| not_found("projet inconnu"))
+            .ok_or_else(|| not_found(tr!(msg::UNKNOWN_PROJECT)))
     }
 
     /// Registers a folder. The folder must exist and be readable; it is never
@@ -153,7 +150,7 @@ impl ProjectStore {
     pub fn add(&self, path: &str) -> IpcResult<Project> {
         let given = PathBuf::from(path.trim());
         if path.trim().is_empty() {
-            return Err(invalid("aucun dossier indiqué"));
+            return Err(invalid(tr!(msg::NO_FOLDER_GIVEN)));
         }
         let canonical = std::fs::canonicalize(&given).map_err(|e| folder_missing(&given, e))?;
         check_folder(&canonical).map_err(|e| {
@@ -190,7 +187,7 @@ impl ProjectStore {
     /// and is no other project's folder.
     pub fn relocation_target(&self, id: &str, path: &str) -> IpcResult<PathBuf> {
         if path.trim().is_empty() {
-            return Err(invalid("aucun dossier indiqué"));
+            return Err(invalid(tr!(msg::NO_FOLDER_GIVEN)));
         }
         let given = PathBuf::from(path.trim());
         let canonical = std::fs::canonicalize(&given).map_err(|e| folder_missing(&given, e))?;
@@ -205,7 +202,7 @@ impl ProjectStore {
         if let Some(other) = state.projects.iter().find(|p| p.path == key && p.id != id) {
             return Err(error(
                 IpcErrorCode::Conflict,
-                format!("ce dossier est déjà celui du projet « {} »", other.name),
+                tr!(msg::THIS_FOLDER_ALREADY_BELONGS_TO_PROJECT, name = other.name),
             ));
         }
         Ok(canonical)
@@ -219,11 +216,11 @@ impl ProjectStore {
         if state.projects.iter().any(|p| p.path == key && p.id != id) {
             return Err(error(
                 IpcErrorCode::Conflict,
-                "ce dossier est déjà celui d'un autre projet",
+                tr!(msg::THIS_FOLDER_ALREADY_BELONGS_TO_ANOTHER),
             ));
         }
         let Some(index) = state.projects.iter().position(|p| p.id == id) else {
-            return Err(not_found("projet inconnu"));
+            return Err(not_found(tr!(msg::UNKNOWN_PROJECT)));
         };
         let previous = std::mem::replace(&mut state.projects[index].path, key);
         if let Err(e) = self.save(&state) {
@@ -237,7 +234,7 @@ impl ProjectStore {
     pub fn remove(&self, id: &str) -> IpcResult<()> {
         let mut state = self.state.lock();
         let Some(index) = state.projects.iter().position(|p| p.id == id) else {
-            return Err(not_found("projet inconnu"));
+            return Err(not_found(tr!(msg::UNKNOWN_PROJECT)));
         };
         let removed = state.projects.remove(index);
         if let Err(e) = self.save(&state) {
@@ -250,16 +247,14 @@ impl ProjectStore {
     pub fn rename(&self, id: &str, name: &str) -> IpcResult<Project> {
         let name = name.trim();
         if name.is_empty() {
-            return Err(invalid("le nom ne peut pas être vide"));
+            return Err(invalid(tr!(msg::THE_NAME_CANT_BE_EMPTY)));
         }
         if name.chars().count() > MAX_NAME_CHARS {
-            return Err(invalid(format!(
-                "le nom dépasse {MAX_NAME_CHARS} caractères"
-            )));
+            return Err(invalid(tr!(msg::THE_NAME_EXCEEDS_CHARACTERS, MAX_NAME_CHARS = MAX_NAME_CHARS)));
         }
         let mut state = self.state.lock();
         let Some(index) = state.projects.iter().position(|p| p.id == id) else {
-            return Err(not_found("projet inconnu"));
+            return Err(not_found(tr!(msg::UNKNOWN_PROJECT)));
         };
         let previous = std::mem::replace(&mut state.projects[index].name, name.to_string());
         if let Err(e) = self.save(&state) {
@@ -304,10 +299,10 @@ impl ProjectStore {
             match std::fs::create_dir(&dir) {
                 Ok(()) => return Ok(dir),
                 Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
-                Err(e) => return Err(io_error("dossier de la conversation", e)),
+                Err(e) => return Err(io_error(&tr!(msg::CONVERSATION_FOLDER), e)),
             }
         }
-        Err(error(IpcErrorCode::Io, "aucun dossier libre pour la conversation"))
+        Err(error(IpcErrorCode::Io, tr!(msg::NO_FREE_FOLDER_FOR_THE_CONVERSATION)))
     }
 
     /// Whether `dir` is the own folder of a conversation without a project.
@@ -451,7 +446,7 @@ mod tests {
         std::fs::write(&file, "{ not json").unwrap();
         let s = ProjectStore::load(file.clone());
         assert_eq!(s.notes().len(), 1);
-        assert!(s.notes()[0].contains("conservé"), "{:?}", s.notes());
+        assert!(s.notes()[0].contains("kept as"), "{:?}", s.notes());
         assert!(!file.exists());
         assert!(s.list().is_empty());
     }

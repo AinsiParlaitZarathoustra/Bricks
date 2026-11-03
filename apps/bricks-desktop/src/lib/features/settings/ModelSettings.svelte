@@ -1,6 +1,7 @@
 <script lang="ts">
 	// « Modèles » of the settings: the providers of the providers file, each with its models.
 	// Reads and writes the file through the IPC; every write carries the revision last read.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import { onMount } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { app } from '$lib/state/app.svelte';
@@ -102,7 +103,7 @@
 	 */
 	async function write(run: (revision: string) => Promise<ProvidersFile>): Promise<WriteOutcome> {
 		const current = file;
-		if (!current) return { ok: false, message: 'Le fichier des fournisseurs n’est pas encore lu.', conflict: false };
+		if (!current) return { ok: false, message: t('settings.theProvidersFileHasntBeenRead'), conflict: false };
 		try {
 			file = await run(current.revision);
 			void app.reloadModels();
@@ -134,21 +135,21 @@
 		const provider = fresh.providers.find((p) => p.id === open.provider.id);
 		if (!provider) {
 			dialog = null;
-			pageNotice = `Le fournisseur « ${displayName(open.provider.name, open.provider.id)} » n’existe plus dans le fichier des fournisseurs.`;
+			pageNotice = t('settings.providerNoLongerExistsInThe', { id: displayName(open.provider.name, open.provider.id) });
 			return;
 		}
 		if (open.kind === 'create-model') return;
 		if (open.kind === 'edit-provider' || open.kind === 'delete-provider') {
-			dialog = { kind: open.kind, provider, notice: CONFLICT_MESSAGE };
+			dialog = { kind: open.kind, provider, notice: CONFLICT_MESSAGE() };
 			return;
 		}
 		const model = provider.models.find((m) => m.id === open.model.id);
 		if (!model) {
 			dialog = null;
-			pageNotice = `Le modèle « ${displayName(open.model.name, open.model.id)} » n’existe plus dans le fichier des fournisseurs.`;
+			pageNotice = t('settings.modelNoLongerExistsInThe', { id: displayName(open.model.name, open.model.id) });
 			return;
 		}
-		dialog = { kind: open.kind, provider, model, notice: CONFLICT_MESSAGE };
+		dialog = { kind: open.kind, provider, model, notice: CONFLICT_MESSAGE() };
 	}
 
 	function saveProvider(provider: ProviderView, patch: ProviderPatch): Promise<WriteOutcome> {
@@ -179,11 +180,11 @@
 <div class="flex flex-col gap-6">
 	<section class="flex flex-col gap-3" aria-labelledby="models-providers-title">
 		<div class="flex items-center justify-between gap-2">
-			<h3 id="models-providers-title" class="text-ui font-semibold text-foreground">Fournisseurs et modèles</h3>
+			<h3 id="models-providers-title" class="text-ui font-semibold text-foreground">{t('settings.providersAndModels')}</h3>
 			{#if file}
 				<Button variant="outline" size="sm" onclick={() => openDialog({ kind: 'create-provider' })}>
 					<Plus aria-hidden="true" />
-					Ajouter un fournisseur
+					{t('settings.addAProvider')}
 				</Button>
 			{/if}
 		</div>
@@ -197,30 +198,30 @@
 				<div role="alert" class="flex flex-col items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-ui">
 					<p class="flex items-start gap-2 text-pretty">
 						<TriangleAlert class="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
-						Impossible de lire les fournisseurs : {loadError}
+						{t('settings.couldNotReadTheProviders', { loadError })}
 					</p>
 					<Button variant="outline" size="sm" onclick={load} disabled={loading}>
 						<RefreshCw aria-hidden="true" />
-						Réessayer
+						{t('common.retry')}
 					</Button>
 				</div>
 			{:else}
-				<p role="status" class="text-ui text-muted-foreground">Lecture des fournisseurs…</p>
+				<p role="status" class="text-ui text-muted-foreground">{t('settings.readingProviders')}</p>
 			{/if}
 		{:else}
 			{#if loadError}
-				<p role="alert" class="text-ui text-pretty text-destructive">Relecture impossible : {loadError}</p>
+				<p role="alert" class="text-ui text-pretty text-destructive">{t('settings.couldNotReload', { loadError })}</p>
 			{/if}
 
 			{#if file.error}
 				<div role="alert" class="flex flex-col items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-ui">
 					<p class="flex items-start gap-2 text-pretty">
 						<TriangleAlert class="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
-						Le fichier des fournisseurs est invalide : {file.error}
+						{t('settings.theProvidersFileIsInvalid', { error: file.error })}
 					</p>
 					<Button variant="outline" size="sm" onclick={load} disabled={loading}>
 						<RefreshCw aria-hidden="true" />
-						Réessayer
+						{t('common.retry')}
 					</Button>
 				</div>
 			{/if}
@@ -229,10 +230,10 @@
 				<div class="flex flex-wrap items-center gap-3 rounded-lg border border-warning/40 bg-warning/5 p-3 text-ui">
 					<p class="flex flex-1 items-center gap-2">
 						<TriangleAlert class="size-4 shrink-0 text-warning" aria-hidden="true" />
-						{unpriced === 1 ? '1 modèle sans coûts' : `${unpriced} modèles sans coûts`}
+						{t('settings.modelsWithoutCosts', { count: unpriced })}
 					</p>
 					<Button variant="outline" size="sm" onclick={fillMissingPrices} disabled={filling}>
-						Compléter les coûts manquants à 0
+						{t('settings.setTheMissingCostsTo0')}
 					</Button>
 					{#if fillError}
 						<p role="alert" class="w-full text-pretty text-destructive">{fillError}</p>
@@ -242,10 +243,10 @@
 
 			{#if providers.length === 0}
 				{#if !file.error}
-					<p class="text-ui text-muted-foreground">Aucun fournisseur configuré.</p>
+					<p class="text-ui text-muted-foreground">{t('common.noProviderConfigured')}</p>
 				{/if}
 			{:else}
-				<ul class="flex flex-col gap-3" aria-label="Fournisseurs">
+				<ul class="flex flex-col gap-3" aria-label={t('settings.providers')}>
 					{#each providers as provider (provider.id)}
 						<li>
 							<ProviderGroup
@@ -302,8 +303,8 @@
 		{:else if dialog?.kind === 'delete-provider'}
 			{@const target = dialog.provider}
 			<DeleteDialog
-				title={`Supprimer le fournisseur ${displayName(target.name, target.id)} ?`}
-				description={`Le fournisseur disparaît de la configuration de Bricks. ${providerDeletionDetail(target)}`}
+				title={t('settings.deleteProvider', { id: displayName(target.name, target.id) })}
+				description={t('settings.theProviderLeavesBricksConfiguration', { target: providerDeletionDetail(target) })}
 				notice={dialog.notice}
 				onConfirm={() => removeProvider(target)}
 				onClose={closeDialog}
@@ -312,8 +313,8 @@
 			{@const owner = dialog.provider}
 			{@const target = dialog.model}
 			<DeleteDialog
-				title={`Supprimer le modèle ${displayName(target.name, target.id)} ?`}
-				description="Le modèle disparaît de la configuration de Bricks."
+				title={t('settings.deleteModel2', { id: displayName(target.name, target.id) })}
+				description={t('settings.theModelLeavesBricksConfiguration')}
 				notice={dialog.notice}
 				onConfirm={() => removeModel(owner, target)}
 				onClose={closeDialog}

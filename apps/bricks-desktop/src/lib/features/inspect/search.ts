@@ -7,6 +7,7 @@
 // highlight only: when it does not compile here, the hit is shown without
 // highlight (the engine's own match is the reference).
 
+import { t } from '$lib/i18n/i18n.svelte';
 import type { SearchHit } from '$lib/ipc/engine';
 
 /** Prefix that asks for a regular expression, as in the TUI (`/search re:<regex>`). */
@@ -80,13 +81,13 @@ export interface SearchStatusView {
 }
 
 const STATUS: Record<string, SearchStatusView> = {
-	complete: { label: 'Recherche terminée', tone: 'success' },
-	partial: { label: 'Résultats partiels : l’absence ne prouve rien', tone: 'warning' },
-	cancelled: { label: 'Recherche annulée', tone: 'muted' },
-	error: { label: 'Erreur de recherche', tone: 'destructive' }
+	complete: { get label() { return t('inspect.searchFinished') }, tone: 'success' },
+	partial: { get label() { return t('inspect.partialResultsAbsenceProvesNothing') }, tone: 'warning' },
+	cancelled: { get label() { return t('inspect.searchCancelled') }, tone: 'muted' },
+	error: { get label() { return t('inspect.searchError') }, tone: 'destructive' }
 };
 
 /** Label and tone of the engine's `search_results.status`. */
 export function searchStatus(status: string): SearchStatusView {
-	return STATUS[status] ?? { label: `Statut inconnu : ${status}`, tone: 'muted' };
+	return STATUS[status] ?? { label: t('inspect.unknownStatus', { status }), tone: 'muted' };
 }

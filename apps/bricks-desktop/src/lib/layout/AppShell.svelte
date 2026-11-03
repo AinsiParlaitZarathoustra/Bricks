@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { t } from '$lib/i18n/i18n.svelte';
 	import type { Snippet } from 'svelte';
 	import { tick, untrack } from 'svelte';
 	import { innerWidth } from 'svelte/reactivity/window';
@@ -318,21 +319,21 @@
 						{@render left()}
 					</div>
 				</Pane>
-				<Resizable.Handle class="bg-border/50" aria-label="Redimensionner le panneau de gauche" onDraggingChange={onHandleDragging} />
+				<Resizable.Handle class="bg-border/50" aria-label={t('layout.resizeTheLeftPanel')} onDraggingChange={onHandleDragging} />
 			{/if}
 
 			<Pane id="bricks-center" order={2} defaultSize={centerPct} minSize={centerMinPct}>
 				<div class="flex h-full min-w-0 flex-col" bind:clientHeight={centerHeight}>
 					<PaneGroup direction="vertical" bind:this={vGroup} onLayoutChange={onVerticalLayout} class="flex h-full w-full flex-col">
 						<Pane id="bricks-conversation" order={1} defaultSize={convPct} minSize={convMinPct}>
-							<main aria-label="Conversation" class="flex h-full min-h-0 min-w-0 flex-col bg-background">
+							<main aria-label={t('common.conversation')} class="flex h-full min-h-0 min-w-0 flex-col bg-background">
 								{@render center()}
 							</main>
 						</Pane>
 						{#if terminalInline && terminal}
-							<Resizable.Handle class="bg-border/50" aria-label="Redimensionner le terminal" onDraggingChange={onHandleDragging} />
+							<Resizable.Handle class="bg-border/50" aria-label={t('layout.resizeTheTerminal')} onDraggingChange={onHandleDragging} />
 							<Pane id="bricks-terminal" order={2} defaultSize={termPct} minSize={termMinPct} maxSize={termMaxPct}>
-								<section aria-label="Terminal" class="flex h-full min-h-0 flex-col bg-background">
+								<section aria-label={t('common.terminal')} class="flex h-full min-h-0 flex-col bg-background">
 									{@render terminal(hideTerminal)}
 								</section>
 							</Pane>
@@ -342,9 +343,9 @@
 			</Pane>
 
 			{#if rightInline && right}
-				<Resizable.Handle class="bg-border/50" aria-label="Redimensionner le panneau de droite" onDraggingChange={onHandleDragging} />
+				<Resizable.Handle class="bg-border/50" aria-label={t('layout.resizeTheRightPanel')} onDraggingChange={onHandleDragging} />
 				<Pane id="bricks-right" order={3} defaultSize={rightPct} minSize={sideMinPct} maxSize={rightMaxPct}>
-					<aside aria-label="Contexte" class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-sidebar text-sidebar-foreground">
+					<aside aria-label={t('common.context')} class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-sidebar text-sidebar-foreground">
 						{@render right()}
 					</aside>
 				</Pane>
@@ -356,7 +357,7 @@
 {#if left && leftIsOverlay}
 	<Sheet.Root bind:open={leftOverlay}>
 		<Sheet.Content side="left" class="gap-0 p-0" style="width: min(20rem, 88vw)">
-			<Sheet.Title class="sr-only">Panneau de gauche</Sheet.Title>
+			<Sheet.Title class="sr-only">{t('layout.leftPanel')}</Sheet.Title>
 			<div class="flex h-full min-h-0 flex-col overflow-hidden">
 				{@render left()}
 			</div>
@@ -367,8 +368,8 @@
 {#if right && rightIsOverlay}
 	<Sheet.Root bind:open={rightOverlay}>
 		<Sheet.Content side="right" class="gap-0 p-0 data-[side=right]:sm:max-w-none" style="width: min({rightWidth}px, 92vw)">
-			<Sheet.Title class="sr-only">Panneau de droite</Sheet.Title>
-			<aside aria-label="Contexte" class="flex h-full min-h-0 flex-col overflow-hidden">
+			<Sheet.Title class="sr-only">{t('layout.rightPanel')}</Sheet.Title>
+			<aside aria-label={t('common.context')} class="flex h-full min-h-0 flex-col overflow-hidden">
 				{@render right()}
 			</aside>
 		</Sheet.Content>

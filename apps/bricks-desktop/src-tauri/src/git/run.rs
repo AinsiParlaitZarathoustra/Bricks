@@ -1,6 +1,7 @@
 //! Runs git inside a project folder: bounded time, bounded output, no
 //! inherited repository redirection (`GIT_DIR` and friends), no prompts.
 
+use crate::i18n::{msg, tr};
 use std::path::Path;
 use std::process::{ExitStatus, Stdio};
 use std::time::Duration;
@@ -37,14 +38,14 @@ impl Captured {
 pub(super) async fn capture(dir: &Path, args: &[&str], cap: usize) -> IpcResult<Captured> {
     match tokio::time::timeout(TIMEOUT, run(dir, args, cap)).await {
         Ok(result) => result,
-        Err(_) => Err(io_error("Git n'a pas répondu à temps.")),
+        Err(_) => Err(io_error(&tr!(msg::GIT_DIDNT_ANSWER_IN_TIME))),
     }
 }
 
 /// Error for a git invocation that failed, carrying git's own message.
 pub(super) fn failure(out: &Captured, what: &str) -> IpcError {
     let detail = if out.stderr.is_empty() {
-        "aucun détail".to_string()
+        tr!(msg::NO_DETAILS).to_string()
     } else {
         out.stderr.clone()
     };
@@ -77,15 +78,15 @@ async fn run(dir: &Path, args: &[&str], cap: usize) -> IpcResult<Captured> {
 
     let mut child = command.spawn().map_err(|e| match e.kind() {
         std::io::ErrorKind::NotFound => {
-            io_error("Git est introuvable : installez Git pour utiliser cette vue.")
+            io_error(&tr!(msg::GIT_CANT_BE_FOUND_INSTALL_GIT))
         }
-        _ => io_error(&format!("Impossible de lancer Git ({e}).")),
+        _ => io_error(&tr!(msg::COULD_NOT_LAUNCH_GIT, e = e)),
     })?;
 
     // Drain stderr concurrently: a full stderr pipe would stall git.
     let stderr_task = tokio::spawn(keep_head(child.stderr.take()));
     let Some(stdout) = child.stdout.take() else {
-        return Err(io_error("Sortie de Git indisponible."));
+        return Err(io_error(&tr!(msg::GIT_OUTPUT_UNAVAILABLE)));
     };
 
     let mut out = Vec::new();
@@ -93,7 +94,7 @@ async fn run(dir: &Path, args: &[&str], cap: usize) -> IpcResult<Captured> {
         .take(cap as u64 + 1)
         .read_to_end(&mut out)
         .await
-        .map_err(|e| io_error(&format!("Lecture de la sortie Git impossible ({e}).")))?;
+        .map_err(|e| io_error(&tr!(msg::COULD_NOT_READ_GITS_OUTPUT, e = e)))?;
 
     let truncated = out.len() > cap;
     if truncated {
@@ -103,7 +104,7 @@ async fn run(dir: &Path, args: &[&str], cap: usize) -> IpcResult<Captured> {
     let status = child
         .wait()
         .await
-        .map_err(|e| io_error(&format!("Attente de Git impossible ({e}).")))?;
+        .map_err(|e| io_error(&tr!(msg::COULD_NOT_WAIT_FOR_GIT, e = e)))?;
     let stderr = stderr_task.await.unwrap_or_default();
 
     Ok(Captured {

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { t } from '$lib/i18n/i18n.svelte';
 	import { onDestroy } from 'svelte';
 	import { toast } from 'svelte-sonner';
 	import { app } from '$lib/state/app.svelte';
@@ -56,9 +57,9 @@
 	}
 
 	function headLabel(s: GitStatus): string {
-		if (s.detached) return s.head ? `HEAD détachée (${s.head})` : 'HEAD détachée';
-		const branch = s.branch ?? 'Branche inconnue';
-		return s.head ? branch : `${branch} (aucun commit)`;
+		if (s.detached) return s.head ? t('context.detachedHead', { head: s.head }) : t('context.detachedHead2');
+		const branch = s.branch ?? t('context.unknownBranch');
+		return s.head ? branch : t('context.noCommits', { branch });
 	}
 
 	async function refreshGit(id: string) {
@@ -103,7 +104,7 @@
 			clearTimeout(copyTimer);
 			copyTimer = setTimeout(() => (copied = false), 1500);
 		} catch (e) {
-			toast.error('Copie impossible', { description: errorMessage(e) });
+			toast.error(t('common.couldNotCopy'), { description: errorMessage(e) });
 		}
 	}
 
@@ -112,9 +113,9 @@
 	const pendingText = $derived.by(() => {
 		const change = conversation?.pendingChange;
 		if (!change) return null;
-		const what = change.what === 'model' ? 'Modèle' : 'Raisonnement';
-		const when = change.applies === 'next_turn' ? 'au prochain tour' : 'à la prochaine exécution';
-		return `${what} : changement appliqué ${when}.`;
+		const what = change.what === 'model' ? t('common.model') : t('context.reasoning');
+		const when = change.applies === 'next_turn' ? t('common.onTheNextTurn') : t('context.onTheNextRun');
+		return t('context.changeApplied', { what, when });
 	});
 </script>
 
@@ -124,21 +125,21 @@
 	}}
 />
 
-<SectionCard title="Environnement">
+<SectionCard title={t('context.environment')}>
 	<dl class="grid grid-cols-[1rem_minmax(0,1fr)] items-start gap-x-2.5 gap-y-2 text-xs">
 		<dt class="flex h-4 items-center text-muted-foreground">
 			<FolderKanbanIcon class="size-3.5" aria-hidden="true" />
-			<span class="sr-only">Projet</span>
+			<span class="sr-only">{t('common.project')}</span>
 		</dt>
 		<dd class="min-w-0 truncate font-medium" title={projectName}>{projectName}</dd>
 
 		<dt class="flex h-4 items-center text-muted-foreground">
 			<FolderIcon class="size-3.5" aria-hidden="true" />
-			<span class="sr-only">Dossier</span>
+			<span class="sr-only">{t('common.folder')}</span>
 		</dt>
 		<dd class="flex min-w-0 items-center gap-1">
 			<span class="min-w-0 flex-1 truncate font-mono text-xs" title={projectPath}>{projectPath}</span>
-			<Button variant="ghost" size="icon-xs" aria-label="Copier le chemin du dossier" onclick={copyPath}>
+			<Button variant="ghost" size="icon-xs" aria-label={t('context.copyTheFolderPath')} onclick={copyPath}>
 				{#if copied}
 					<CheckIcon aria-hidden="true" />
 				{:else}
@@ -153,36 +154,36 @@
 		</dt>
 		<dd class="min-w-0">
 			{#if projectMissing}
-				<span class="text-muted-foreground">Dossier introuvable.</span>
+				<span class="text-muted-foreground">{t('context.folderNotFound')}</span>
 			{:else if gitView === null}
-				<span class="text-muted-foreground">Lecture de l’état du dépôt…</span>
+				<span class="text-muted-foreground">{t('context.readingTheRepositoryStatus')}</span>
 			{:else if gitView.kind === 'error'}
 				<span class="flex items-start gap-1.5 text-warning">
 					<TriangleAlertIcon class="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
-					<span class="min-w-0 text-pretty">Git indisponible : {gitView.message}</span>
+					<span class="min-w-0 text-pretty">{t('context.gitUnavailable', { message: gitView.message })}</span>
 				</span>
 			{:else if !gitView.status.is_repo}
-				<span class="text-muted-foreground">Git n’est pas installé dans ce dossier</span>
+				<span class="text-muted-foreground">{t('common.gitIsntInstalledInThisFolder')}</span>
 			{:else}
 				<div class="flex min-w-0 flex-col gap-1">
 					<span class="truncate font-mono">{headLabel(gitView.status)}</span>
 
 					{#if gitView.status.ahead > 0 || gitView.status.behind > 0}
 						<span class="flex flex-wrap gap-x-3 tabular-nums text-muted-foreground">
-							{#if gitView.status.ahead > 0}<span>↑ {gitView.status.ahead} à publier</span>{/if}
-							{#if gitView.status.behind > 0}<span>↓ {gitView.status.behind} à récupérer</span>{/if}
+							{#if gitView.status.ahead > 0}<span>{t('context.toPublish', { ahead: gitView.status.ahead })}</span>{/if}
+							{#if gitView.status.behind > 0}<span>{t('context.toPull', { behind: gitView.status.behind })}</span>{/if}
 						</span>
 					{/if}
 
 					{#if dirtyCount(gitView.counts) === 0}
-						<span class="text-success">Espace de travail propre</span>
+						<span class="text-success">{t('context.cleanWorkspace')}</span>
 					{:else}
 						<ul class="flex flex-wrap gap-x-3 gap-y-0.5 tabular-nums text-muted-foreground">
-							{#if gitView.counts.staged > 0}<li>Indexés : {gitView.counts.staged}</li>{/if}
-							{#if gitView.counts.unstaged > 0}<li>Non indexés : {gitView.counts.unstaged}</li>{/if}
-							{#if gitView.counts.untracked > 0}<li>Non suivis : {gitView.counts.untracked}</li>{/if}
+							{#if gitView.counts.staged > 0}<li>{t('context.staged', { staged: gitView.counts.staged })}</li>{/if}
+							{#if gitView.counts.unstaged > 0}<li>{t('context.unstaged', { unstaged: gitView.counts.unstaged })}</li>{/if}
+							{#if gitView.counts.untracked > 0}<li>{t('context.untracked', { untracked: gitView.counts.untracked })}</li>{/if}
 							{#if gitView.counts.conflicted > 0}
-								<li class="text-destructive">En conflit : {gitView.counts.conflicted}</li>
+								<li class="text-destructive">{t('context.conflicted', { conflicted: gitView.counts.conflicted })}</li>
 							{/if}
 						</ul>
 					{/if}

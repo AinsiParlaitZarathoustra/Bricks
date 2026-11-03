@@ -1,6 +1,7 @@
 // The shared `/` command list, loaded once from the engine registry
 // (`slash_commands`) and cached. A failed load is shown and can be retried.
 
+import { currentLanguage } from '$lib/i18n/i18n.svelte'
 import { errorMessage, slashCommands } from '$lib/ipc/client'
 import type { SlashCommandInfo } from '$lib/ipc/bindings/SlashCommandInfo'
 
@@ -44,3 +45,8 @@ class SlashRegistry {
 }
 
 export const slashRegistry = new SlashRegistry()
+
+/** What a command does, in the interface language (the engine gives both). */
+export function commandDescription(command: SlashCommandInfo): string {
+  return currentLanguage() === 'fr' ? command.description_fr : command.description
+}

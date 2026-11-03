@@ -3,6 +3,7 @@
 // reads the same figures as the card. Same approach as removed-texts.test.ts.
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { bound, call, tkey } from './french-keys';
 
 const src = (path: string) => readFileSync(new URL(`../../src/${path}`, import.meta.url), 'utf8');
 
@@ -13,7 +14,7 @@ describe('context card: compact, one share, one meter, no session block', () => 
 	const card = src(CARD);
 
 	it('keeps the title and reads the share from contextGauge and the figures from formatShort', () => {
-		expect(card).toContain('<SectionCard title="Contexte">');
+		expect(card).toContain(`<SectionCard ${bound('title', 'Contexte')}>`);
 		expect(card).toContain('const status = $derived(conversation.context ?? null);');
 		expect(card).toContain('const stale = $derived(conversation.contextStale ?? false);');
 		expect(card).toContain('const gauge = $derived(contextGauge(status, stale));');
@@ -25,9 +26,9 @@ describe('context card: compact, one share, one meter, no session block', () => 
 
 	it('shows one meter bar with its role and its value, and an unknown share as a dash', () => {
 		expect(card).toContain('role="meter"');
-		expect(card).toContain("aria-label=\"Contexte utilisé\"");
+		expect(card).toContain(bound('aria-label', 'Contexte utilisé'));
 		expect(card).toContain("gauge.percent === null ? '—' : `${Math.round(gauge.percent)} %`");
-		expect(card).toContain("'inconnu'");
+		expect(card).toContain("t('common.unknownValue')");
 	});
 
 	it('has no approximation sign', () => {
@@ -60,10 +61,10 @@ describe('composer ring: same figures as the card, accessible name kept', () => 
 	});
 
 	it('names the ring « Contexte d’entrée : inconnu » when there is no share, and gives the cache rate as a dash when unknown', () => {
-		expect(ring).toContain("'Contexte d’entrée : inconnu'");
-		expect(ring).toContain("`Contexte d’entrée : ${value}`");
+		expect(ring).toContain(call('Contexte d’entrée : inconnu'));
+		expect(ring).toContain(tkey('Contexte d’entrée : {value}'));
 		expect(ring).toContain("cache === null ? '—' : formatPercent(cache)");
-		expect(ring).toContain('Taux de cache moyen');
+		expect(ring).toContain(call('Taux de cache moyen'));
 	});
 
 	it('keeps the drawn fill bounded through the gauge ratio', () => {

@@ -28,10 +28,10 @@ describe('computerUseLabel', () => {
 		expect(computerUseLabel(status({ state }))).toBe(label);
 	});
 
-	it('names the tools offered when ready, with the singular for one', () => {
+	it('names the tools offered when ready, with the singular for 0 and 1 (French plural rule)', () => {
 		expect(computerUseLabel(status({ state: 'ready', tools: 1 }))).toBe('Actif · 1 outil');
 		expect(computerUseLabel(status({ state: 'ready', tools: 3 }))).toBe('Actif · 3 outils');
-		expect(computerUseLabel(status({ state: 'ready', tools: 0 }))).toBe('Actif · 0 outils');
+		expect(computerUseLabel(status({ state: 'ready', tools: 0 }))).toBe('Actif · 0 outil');
 	});
 
 	it('keeps the error text out of the label: it is shown on its own line', () => {

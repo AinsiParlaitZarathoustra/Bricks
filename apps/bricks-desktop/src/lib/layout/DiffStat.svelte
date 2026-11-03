@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { numberFormat, t } from '$lib/i18n/i18n.svelte';
 	import { cn } from '$lib/utils.js';
 	import type { HTMLAttributes } from 'svelte/elements';
 
@@ -13,13 +14,13 @@
 
 	let { additions, deletions, label, class: className, ...restProps }: Props = $props();
 
-	const formatter = new Intl.NumberFormat('fr-FR');
+	const formatter = numberFormat();
 	const add = $derived(Math.max(0, Math.trunc(additions) || 0));
 	const del = $derived(Math.max(0, Math.trunc(deletions) || 0));
 	const addText = $derived(formatter.format(add));
 	const delText = $derived(formatter.format(del));
 	const spoken = $derived(
-		`${addText} ajout${add > 1 ? 's' : ''}, ${delText} suppression${del > 1 ? 's' : ''}${label ? `, ${label}` : ''}`
+		[t('layout.additionCount', { count: add }), t('layout.deletionCount', { count: del }), label].filter(Boolean).join(', ')
 	);
 </script>
 

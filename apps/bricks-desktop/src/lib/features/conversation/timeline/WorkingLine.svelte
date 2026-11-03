@@ -3,6 +3,7 @@
   // timestamp of the run (approval waits included, as in the « bilan »). Without a
   // known start, no duration is shown. The timer lives only while this text is mounted;
   // the work block (WorkBlock.svelte) places it in its bar.
+  import { t } from '$lib/i18n/i18n.svelte'
   import type { Conversation } from '$lib/state/conversation.svelte'
   import { createClock } from '$lib/features/navigation/clock.svelte'
   import { formatWorked } from '../runend'
@@ -27,7 +28,7 @@
 </script>
 
 {#if elapsed}
-  <span class="tabular-nums">Travaille depuis {elapsed}</span>
+  <span class="tabular-nums">{t('conversation.workingFor', { elapsed })}</span>
 {:else}
-  <span>Travaille…</span>
+  <span>{t('conversation.working')}</span>
 {/if}

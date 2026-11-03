@@ -9,6 +9,7 @@ import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushSync, mount, unmount } from 'svelte'
 import SvgViewer from '../../src/lib/features/conversation/markdown/SvgViewer.svelte'
+import { bound, call } from './french-keys'
 
 // The sanitizer is replaced by the identity: this file checks the export, not the cleaning
 // (markdown-svg-vega-blocks and vega-chart cover it).
@@ -47,8 +48,8 @@ function functionBody(name: string): string {
 
 describe('SvgViewer image actions: order and labels', () => {
 	it('puts "Copier l’image" right after "Copier la source"', () => {
-		const source = SOURCE.indexOf('aria-label="Copier la source"')
-		const image = SOURCE.indexOf(`aria-label="Copier l${CURLY}image"`)
+		const source = SOURCE.indexOf(bound('aria-label', 'Copier la source'))
+		const image = SOURCE.indexOf(bound('aria-label', `Copier l${CURLY}image`))
 		expect(source).toBeGreaterThan(-1)
 		expect(image).toBeGreaterThan(source)
 		const between = SOURCE.slice(source, image)
@@ -58,19 +59,19 @@ describe('SvgViewer image actions: order and labels', () => {
 	})
 
 	it('gives the image button a title equal to its aria-label', () => {
-		expect(SOURCE).toContain(`title="Copier l${CURLY}image" aria-label="Copier l${CURLY}image"`)
+		expect(SOURCE).toContain(`${bound('title', `Copier l${CURLY}image`)} ${bound('aria-label', `Copier l${CURLY}image`)}`)
 	})
 
 	it('puts the PNG export after the SVG export, both behind the download permission', () => {
-		const svg = SOURCE.indexOf('aria-label="Exporter en SVG"')
-		const png = SOURCE.indexOf('aria-label="Exporter en PNG"')
+		const svg = SOURCE.indexOf(bound('aria-label', 'Exporter en SVG'))
+		const png = SOURCE.indexOf(bound('aria-label', 'Exporter en PNG'))
 		expect(svg).toBeGreaterThan(-1)
 		expect(png).toBeGreaterThan(svg)
 		expect(SOURCE.slice(png - 200, png)).toMatch(/\{#if options\.allowDownload && frame\.svg\}/)
 	})
 
 	it('disables the image button when there is no drawing', () => {
-		const button = SOURCE.slice(SOURCE.indexOf(`aria-label="Copier l${CURLY}image"`) - 200, SOURCE.indexOf(`aria-label="Copier l${CURLY}image"`) + 200)
+		const button = SOURCE.slice(SOURCE.indexOf(bound('aria-label', `Copier l${CURLY}image`)) - 200, SOURCE.indexOf(bound('aria-label', `Copier l${CURLY}image`)) + 200)
 		expect(button).toContain('disabled={!frame.svg}')
 	})
 })
@@ -94,8 +95,8 @@ describe('SvgViewer copyImage', () => {
 
 	it('reports success only once the write and the image are both done', () => {
 		expect(body).toContain('Promise.all([written, image])')
-		expect(body).toContain("flash('Image copiée')")
-		expect(body).toContain("flash('Copie impossible')")
+		expect(body).toContain(`flash(${call('Image copiée')})`)
+		expect(body).toContain(`flash(${call('Copie impossible')})`)
 	})
 
 	it('reports a failure of the write synchronously, without leaving the image promise unhandled', () => {
@@ -108,7 +109,7 @@ describe('SvgViewer clipboard support', () => {
 		expect(SOURCE).toContain("typeof ClipboardItem !== 'undefined'")
 		expect(SOURCE).toContain('navigator.clipboard?.write')
 		const gate = SOURCE.indexOf('{#if canCopyImage}')
-		const button = SOURCE.indexOf(`aria-label="Copier l${CURLY}image"`)
+		const button = SOURCE.indexOf(bound('aria-label', `Copier l${CURLY}image`))
 		const end = SOURCE.indexOf('{/if}', button)
 		expect(gate).toBeGreaterThan(-1)
 		expect(gate).toBeLessThan(button)

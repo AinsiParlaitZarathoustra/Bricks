@@ -2,6 +2,7 @@
   // One applied edit operation: a compact line per file (name and the
   // operation's counts). The full path is the name's tooltip; a click opens
   // the file in the reader.
+  import { t } from '$lib/i18n/i18n.svelte'
   import DiffStat from '$lib/layout/DiffStat.svelte'
   import FileIcon from '$lib/features/file-icons/FileIcon.svelte'
   import type { Conversation, EditItem } from '$lib/state/conversation.svelte'
@@ -12,7 +13,7 @@
 
   const agentName = $derived.by(() => {
     if (!item.agentId) return null
-    return conversation.agents.get(item.agentId)?.spawn.profile ?? `agent inconnu (${item.agentId.slice(0, 8)})`
+    return conversation.agents.get(item.agentId)?.spawn.profile ?? t('conversation.unknownAgent', { value: item.agentId.slice(0, 8) })
   })
 
   function baseName(path: string): string {
@@ -31,7 +32,7 @@
 </script>
 
 <ul
-  aria-label={agentName ? `Fichiers modifiés par ${agentName}` : 'Fichiers modifiés'}
+  aria-label={agentName ? t('conversation.filesChangedBy', { agentName }) : t('conversation.filesChanged')}
   class={inline ? 'contents' : 'flex flex-col gap-0.5 py-0.5 text-ui'}
 >
   {#each item.files as file, i (`${file.absolute ?? file.path}#${i}`)}
@@ -46,7 +47,7 @@
         <span class="min-w-0 truncate">{baseName(file.path)}</span>
       </button>
       {#if file.binary}
-        <span class="text-xs text-muted-foreground">binaire</span>
+        <span class="text-xs text-muted-foreground">{t('common.binary')}</span>
       {:else}
         <DiffStat additions={file.added} deletions={file.removed} />
       {/if}

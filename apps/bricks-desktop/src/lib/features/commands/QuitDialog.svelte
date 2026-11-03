@@ -2,6 +2,7 @@
   // Confirmation of `/quit` while a run is active: it lists the conversations
   // with a run in progress, then closes the application through the native
   // command.
+  import { t } from '$lib/i18n/i18n.svelte'
   import * as AlertDialog from '$lib/components/ui/alert-dialog'
   import { appQuit } from '$lib/ipc/client'
   import { app } from '$lib/state/app.svelte'
@@ -33,9 +34,9 @@
 >
   <AlertDialog.Content>
     <AlertDialog.Header>
-      <AlertDialog.Title>Quitter Bricks ?</AlertDialog.Title>
+      <AlertDialog.Title>{t('commands.quitBricks')}</AlertDialog.Title>
       <AlertDialog.Description>
-        Une génération est en cours dans les conversations suivantes :
+        {t('commands.aGenerationIsRunningInThese')}
       </AlertDialog.Description>
     </AlertDialog.Header>
     <ul class="list-disc pl-5 text-sm">
@@ -44,8 +45,8 @@
       {/each}
     </ul>
     <AlertDialog.Footer>
-      <AlertDialog.Cancel>Rester</AlertDialog.Cancel>
-      <AlertDialog.Action onclick={quit}>Quitter</AlertDialog.Action>
+      <AlertDialog.Cancel>{t('commands.stay')}</AlertDialog.Cancel>
+      <AlertDialog.Action onclick={quit}>{t('commands.quit')}</AlertDialog.Action>
     </AlertDialog.Footer>
   </AlertDialog.Content>
 </AlertDialog.Root>

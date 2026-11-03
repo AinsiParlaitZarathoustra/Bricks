@@ -1,5 +1,7 @@
 // Pure helpers for the navigation feature: dates, folder labels and search
 // highlighting. No Svelte or IPC imports, so they stay easy to test.
+import { t, relativeTimeFormat } from '$lib/i18n/i18n.svelte';
+
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -15,7 +17,7 @@ const RELATIVE_UNITS: Array<[Intl.RelativeTimeFormatUnit, number]> = [
 	['minute', MINUTE]
 ];
 
-const relativeFormat = new Intl.RelativeTimeFormat('fr', { numeric: 'auto' });
+const relativeFormat = relativeTimeFormat({ numeric: 'auto' });
 
 /**
  * French relative date for a millisecond timestamp, e.g. « il y a 5 minutes »,
@@ -32,7 +34,7 @@ export function relativeDate(timestampMs: number, now: number = Date.now()): str
 
 /** Title to show for a conversation; an untitled one gets a French placeholder. */
 export function displayTitle(title: string): string {
-	return title.trim() || 'Sans titre';
+	return title.trim() || t('common.untitled');
 }
 
 /** Last `segments` parts of a folder path, with an ellipsis when it is shortened. */

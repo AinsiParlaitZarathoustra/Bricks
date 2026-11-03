@@ -3,6 +3,7 @@
 
 use crate::contract::*;
 use crate::engine::AppState;
+use crate::i18n::{msg, tr};
 use crate::services::{error, invalid};
 use std::sync::Arc;
 use tauri::State;
@@ -34,7 +35,7 @@ pub async fn computer_use_request_permission(
     permission: ComputerUsePermission,
 ) -> IpcResult<()> {
     if !cfg!(target_os = "macos") {
-        return Err(invalid("les autorisations ne concernent que macOS"));
+        return Err(invalid(tr!(msg::PERMISSIONS_ONLY_APPLY_TO_MACOS)));
     }
     state
         .computer_use

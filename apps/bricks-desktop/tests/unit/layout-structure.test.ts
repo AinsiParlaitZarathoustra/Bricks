@@ -5,6 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { bound, call } from './french-keys';
 
 const src = (path: string) => readFileSync(new URL(`../../src/${path}`, import.meta.url), 'utf8');
 
@@ -18,7 +19,7 @@ const RUN_END = 'lib/features/conversation/timeline/RunEndCard.svelte';
 describe('top bar: the « Plus » menu comes after the panel toggles', () => {
 	it('renders the trailing slot after the « Affichage » group', () => {
 		const topbar = src(TOPBAR);
-		const group = topbar.indexOf('aria-label="Affichage"');
+		const group = topbar.indexOf(bound('aria-label', 'Affichage'));
 		const lastToggle = topbar.indexOf('{#if onToggleReader}');
 		const trailing = topbar.indexOf('{@render trailing()}');
 		expect(group).toBeGreaterThan(-1);
@@ -37,7 +38,7 @@ describe('the « Plus » menu and the context panel', () => {
 	it('PlusMenu is the labelled trigger of the ADK access groups, disabled without a conversation', () => {
 		const plus = src(PLUS);
 		expect(plus).toContain('ADK_ACCESS_GROUPS');
-		expect(plus).toMatch(/<EllipsisIcon[^>]*\/>\s*Plus/);
+		expect(plus).toMatch(/<EllipsisIcon[^>]*\/>\s*\{t\('context\.more'\)\}/);
 		expect(plus).toContain('disabled={!enabled}');
 	});
 
@@ -60,8 +61,9 @@ describe('project environment: icons instead of the Projet, Dossier and Git labe
 	});
 
 	it('names each icon for screen readers with sr-only text', () => {
+		const shown: Record<string, string> = { Projet: `{${call('Projet')}}`, Dossier: `{${call('Dossier')}}`, Git: 'Git' };
 		for (const name of ['Projet', 'Dossier', 'Git']) {
-			expect(env, name).toContain(`<span class="sr-only">${name}</span>`);
+			expect(env, name).toContain(`<span class="sr-only">${shown[name]}</span>`);
 		}
 	});
 

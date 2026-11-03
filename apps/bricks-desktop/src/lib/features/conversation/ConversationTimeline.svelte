@@ -1,9 +1,10 @@
 <script lang="ts">
+  import { t } from '$lib/i18n/i18n.svelte'
   import { tick, untrack } from 'svelte'
   import { ArrowDown } from '@lucide/svelte'
   import { Button } from '$lib/components/ui/button'
   import type { Conversation, TimelineItem } from '$lib/state/conversation.svelte'
-  import { OUTCOME_LABEL, plural, truncate } from './format'
+  import { OUTCOME_LABEL, truncate } from './format'
   import ApprovalCard from './timeline/ApprovalCard.svelte'
   import QuestionCard from './timeline/QuestionCard.svelte'
   import SkillsTrustBanner from './timeline/SkillsTrustBanner.svelte'
@@ -146,14 +147,14 @@
   function announcementFor(item: TimelineItem): string | null {
     switch (item.kind) {
       case 'approval':
-        return item.resolved ? null : `Autorisation demandée : ${item.approval.tool}.`
+        return item.resolved ? null : t('conversation.approvalRequested', { tool: item.approval.tool })
       case 'question':
-        return item.outcome ? null : `Question : ${item.question.question}`
+        return item.outcome ? null : t('conversation.question', { question: item.question.question })
       case 'run_end': {
         const run = conversation.runs.get(item.runId)
-        const label = run?.outcome ? OUTCOME_LABEL[run.outcome] : 'fin de l’exécution'
+        const label = run?.outcome ? OUTCOME_LABEL[run.outcome] : t('conversation.endOfTheRun')
         const text = run?.finalText?.trim()
-        return text ? `Réponse terminée (${label}) : ${truncate(text, 300)}` : `Exécution terminée : ${label}.`
+        return text ? t('conversation.answerFinished', { label, value: truncate(text, 300) }) : t('conversation.runFinished', { label })
       }
       case 'notice':
         return item.level === 'error' ? item.message : null
@@ -186,7 +187,7 @@
     data-conversation-scroll
     onscroll={updateNearBottom}
     role="region"
-    aria-label="Conversation"
+    aria-label={t('common.conversation')}
     tabindex="0"
     class="edge-fade min-h-0 flex-1 overflow-y-auto overscroll-contain focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:outline-none"
   >
@@ -194,13 +195,13 @@
       bind:this={listEl}
       role="log"
       aria-live="off"
-      aria-label="Échanges de la conversation"
+      aria-label={t('conversation.conversationMessages')}
       class="mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 pt-6 pb-10"
     >
       {#if hiddenCount > 0}
         <div class="flex justify-center">
           <Button variant="ghost" size="sm" onclick={loadEarlier}>
-            Charger les messages précédents ({hiddenCount})
+            {t('conversation.loadEarlierMessages', { hiddenCount })}
           </Button>
         </div>
       {/if}
@@ -241,9 +242,9 @@
         onclick={() => scrollToBottom(true)}
       >
         <ArrowDown aria-hidden="true" />
-        Aller en bas
+        {t('conversation.goToBottom')}
         {#if unseen > 0}
-          <span class="tabular-nums">· {unseen} {unseen > 1 ? 'nouveaux' : 'nouveau'}</span>
+          <span class="tabular-nums">· {t('conversation.newMessages', { count: unseen })}</span>
         {/if}
       </Button>
     </div>

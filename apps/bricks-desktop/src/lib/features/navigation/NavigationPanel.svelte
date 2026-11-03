@@ -1,6 +1,7 @@
 <script lang="ts">
 	// Left panel: projects with their conversations, the conversations without a project, and search.
 	// Entry point mounted by App.svelte with no props. All state lives in `app`.
+	import { t } from '$lib/i18n/i18n.svelte';
 	import FolderPlus from '@lucide/svelte/icons/folder-plus';
 	import Settings from '@lucide/svelte/icons/settings';
 	import { Button } from '$lib/components/ui/button';
@@ -30,7 +31,7 @@
 </script>
 
 <aside
-	aria-label="Projets et conversations"
+	aria-label={t('navigation.projectsAndConversations')}
 	class="flex h-full min-h-0 flex-col bg-sidebar text-sidebar-foreground"
 >
 	<div class="relative flex flex-col gap-0.5 px-2 pt-7 pb-3">
@@ -40,7 +41,7 @@
 		<NewConversationButton class="w-full justify-start px-2 text-ui" />
 		<Button variant="ghost" class="w-full justify-start px-2 text-ui" onclick={addProject} disabled={adding}>
 			<FolderPlus class="size-4" aria-hidden="true" />
-			Nouveau projet
+			{t('navigation.newProject')}
 		</Button>
 	</div>
 
@@ -48,15 +49,15 @@
 		<div class="flex flex-col gap-4 pb-3">
 			{#if app.folders.length > 0}
 				<section class="flex flex-col gap-1 px-2">
-					<h2 class="px-2 text-xs font-medium text-muted-foreground">Projets</h2>
+					<h2 class="px-2 text-xs font-medium text-muted-foreground">{t('navigation.projects')}</h2>
 					<ProjectList />
 				</section>
 			{/if}
 
 			{#if chats && app.sessionsOf(chats.id).length > 0}
 				<section class="flex flex-col gap-1 px-2">
-					<h2 class="px-2 text-xs font-medium text-muted-foreground">Conversations</h2>
-					<ConversationList projectId={chats.id} label="Conversations" />
+					<h2 class="px-2 text-xs font-medium text-muted-foreground">{t('navigation.conversations')}</h2>
+					<ConversationList projectId={chats.id} label={t('navigation.conversations')} />
 				</section>
 			{/if}
 		</div>
@@ -66,11 +67,11 @@
 		<Button
 			variant="ghost"
 			class="w-full justify-start text-ui"
-			aria-label="Paramètres de Bricks"
+			aria-label={t('common.bricksSettings')}
 			onclick={() => (ui.settingsOpen = true)}
 		>
 			<Settings class="size-4" aria-hidden="true" />
-			Paramètres
+			{t('navigation.settings')}
 		</Button>
 	</div>
 </aside>

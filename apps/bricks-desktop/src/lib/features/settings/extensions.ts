@@ -1,31 +1,32 @@
 // Labels of the Extensions section: the state of Computer Use and of its permissions.
+import { t } from '$lib/i18n/i18n.svelte'
 import type { ComputerUseStatus } from '$lib/ipc/bindings/ComputerUseStatus'
 import type { PermissionState } from '$lib/ipc/bindings/PermissionState'
 
 export function computerUseLabel(status: ComputerUseStatus): string {
   switch (status.state) {
     case 'unsupported':
-      return 'Indisponible sur ce système'
+      return t('settings.unavailableOnThisSystem')
     case 'missing':
-      return 'Cua Driver introuvable'
+      return t('settings.cuaDriverNotFound')
     case 'off':
-      return 'Désactivé'
+      return t('settings.disabled')
     case 'starting':
-      return 'Démarrage…'
+      return t('settings.starting')
     case 'ready':
-      return status.tools === 1 ? 'Actif · 1 outil' : `Actif · ${status.tools} outils`
+      return t('settings.activeTools', { count: status.tools })
     case 'error':
-      return 'Erreur'
+      return t('common.error')
   }
 }
 
 export function permissionLabel(state: PermissionState): string {
   switch (state) {
     case 'granted':
-      return 'Autorisée'
+      return t('settings.allowed')
     case 'missing':
-      return 'Non autorisée'
+      return t('settings.notAllowed')
     case 'unknown':
-      return 'Non vérifiée'
+      return t('settings.notChecked')
   }
 }

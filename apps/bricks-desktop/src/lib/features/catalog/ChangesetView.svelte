@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { t } from '$lib/i18n/i18n.svelte';
 	import { onMount } from 'svelte';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import { Badge } from '$lib/components/ui/badge';
@@ -7,8 +8,7 @@
 		changeStatusLabel,
 		changesetLabel,
 		changesetVariant,
-		formatDuration,
-		plural
+		formatDuration
 	} from '$lib/features/agents/agentView';
 	import DiffView from '$lib/features/changes/DiffView.svelte';
 	import DiffStat from '$lib/layout/DiffStat.svelte';
@@ -84,15 +84,15 @@
 
 <div class="flex flex-col gap-4 text-sm">
 	{#if !conv}
-		<p class="text-muted-foreground">Aucune conversation ouverte.</p>
+		<p class="text-muted-foreground">{t('common.noOpenConversation')}</p>
 	{:else if change}
 		<div class="flex flex-wrap items-center gap-2">
 			<Badge variant={changesetVariant(change.state)}>{changesetLabel(change.state)}</Badge>
-			<span class="text-xs text-muted-foreground">{plural(change.files.length, 'fichier', 'fichiers')}</span>
+			<span class="text-xs text-muted-foreground">{t('common.fileCount', { count: change.files.length })}</span>
 			<span class="min-w-0 font-mono text-xs break-all text-muted-foreground">{change.branch}</span>
 			{#if changes.length > 1}
 				<Button variant="ghost" size="xs" class="ml-auto" onclick={() => (picked = '')}>
-					Liste des modifications
+					{t('catalog.changeList')}
 				</Button>
 			{/if}
 		</div>
@@ -103,9 +103,9 @@
 		{/if}
 
 		<dl class="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-xs">
-			<dt class="text-muted-foreground">Agent</dt>
+			<dt class="text-muted-foreground">{t('common.agent2')}</dt>
 			<dd class="font-mono break-all">{change.agent_id}</dd>
-			<dt class="text-muted-foreground">Espace isolé</dt>
+			<dt class="text-muted-foreground">{t('catalog.isolatedWorkspace')}</dt>
 			<dd class="font-mono break-all">{change.workspace}</dd>
 		</dl>
 
@@ -119,7 +119,7 @@
 							{#if file.from}<span class="text-muted-foreground">← {file.from}</span>{/if}
 						</span>
 						{#if file.binary}
-							<span class="shrink-0 text-muted-foreground">binaire</span>
+							<span class="shrink-0 text-muted-foreground">{t('common.binary')}</span>
 						{:else}
 							<DiffStat additions={file.added ?? 0} deletions={file.removed ?? 0} class="shrink-0" />
 						{/if}
@@ -129,14 +129,14 @@
 		{/if}
 
 		{#if change.validations.length > 0}
-			<section aria-label="Vérifications" class="flex flex-col gap-1">
-				<h3 class="text-xs font-medium text-muted-foreground">Vérifications</h3>
+			<section aria-label={t('catalog.checks')} class="flex flex-col gap-1">
+				<h3 class="text-xs font-medium text-muted-foreground">{t('catalog.checks')}</h3>
 				<ul class="flex flex-col gap-1 text-xs">
 					{#each change.validations as check, i (i)}
 						<li class="flex min-w-0 items-center gap-2">
 							<span class="min-w-0 flex-1 truncate font-mono">{check.command}</span>
 							{#if check.is_error}
-								<span class="shrink-0 text-destructive">erreur</span>
+								<span class="shrink-0 text-destructive">{t('catalog.error')}</span>
 							{/if}
 							<span class="shrink-0 tabular-nums text-muted-foreground">{formatDuration(check.duration_ms)}</span>
 						</li>
@@ -147,27 +147,27 @@
 
 		{#if actionable(change)}
 			<div class="flex flex-wrap gap-2">
-				<Button size="sm" disabled={act.pending} onclick={() => ask('apply_changes')}>Appliquer</Button>
+				<Button size="sm" disabled={act.pending} onclick={() => ask('apply_changes')}>{t('catalog.apply')}</Button>
 				<Button variant="outline" size="sm" disabled={act.pending} onclick={() => ask('discard_changes')}>
-					Abandonner
+					{t('catalog.discard')}
 				</Button>
 			</div>
 		{/if}
 
 		{#if act.pending}
-			<p role="status" class="text-xs text-muted-foreground">Réponse du moteur en attente…</p>
+			<p role="status" class="text-xs text-muted-foreground">{t('catalog.waitingForTheEnginesAnswer')}</p>
 		{:else if act.refusal}
 			<p role="alert" class="rounded-md bg-destructive/10 px-3 py-2 text-xs text-pretty text-destructive">
-				Commande refusée : {act.refusal}
+				{t('catalog.commandRefused', { refusal: act.refusal })}
 			</p>
 		{:else if actAnswer}
 			{#if actAnswer.ok}
 				<p role="status" class="text-xs text-pretty text-muted-foreground">
-					Réponse du moteur : {actAnswer.text}
+					{t('catalog.engineAnswer', { text: actAnswer.text })}
 				</p>
 			{:else}
 				<p role="alert" class="rounded-md bg-destructive/10 px-3 py-2 text-xs text-pretty text-destructive">
-					{actAnswer.action === 'apply_changes' ? 'Application impossible' : 'Abandon impossible'} :
+					{actAnswer.action === 'apply_changes' ? t('common.couldNotApply') : t('common.couldNotDiscard')} :
 					{actAnswer.text}
 				</p>
 			{/if}
@@ -175,12 +175,12 @@
 
 		{#if change.state === 'conflict'}
 			<p role="alert" class="rounded-md bg-warning-soft px-3 py-2 text-xs text-pretty">
-				Conflit : cette modification ne s’applique plus au projet. Rien n’a été écrit.
+				{t('catalog.conflictThisChangeNoLongerApplies')}
 			</p>
 		{/if}
 
-		<section aria-label="Diff" class="flex flex-col gap-1">
-			<h3 class="text-xs font-medium text-muted-foreground">Modifications</h3>
+		<section aria-label={t('common.diff')} class="flex flex-col gap-1">
+			<h3 class="text-xs font-medium text-muted-foreground">{t('common.changes')}</h3>
 			<DiffView patch={change.patch} />
 		</section>
 
@@ -188,24 +188,24 @@
 			<AlertDialog.Content>
 				<AlertDialog.Header>
 					{#if confirmWrite === 'apply_changes'}
-						<AlertDialog.Title>Appliquer cette modification ?</AlertDialog.Title>
+						<AlertDialog.Title>{t('catalog.applyThisChange')}</AlertDialog.Title>
 						<AlertDialog.Description>
-							{plural(change.files.length, 'fichier', 'fichiers')} seront écrits dans le projet.
+							{t('catalog.filesWillBeWritten', { count: change.files.length })}
 						</AlertDialog.Description>
 					{:else}
-						<AlertDialog.Title>Abandonner cette modification ?</AlertDialog.Title>
+						<AlertDialog.Title>{t('catalog.discardThisChange')}</AlertDialog.Title>
 						<AlertDialog.Description>
-							La modification isolée sera supprimée. Cette action est irréversible.
+							{t('catalog.theIsolatedChangeWillBeDeleted')}
 						</AlertDialog.Description>
 					{/if}
 				</AlertDialog.Header>
 				<AlertDialog.Footer>
-					<AlertDialog.Cancel>Annuler</AlertDialog.Cancel>
+					<AlertDialog.Cancel>{t('common.cancel')}</AlertDialog.Cancel>
 					<AlertDialog.Action
 						variant={confirmWrite === 'discard_changes' ? 'destructive' : 'default'}
 						onclick={writeConfirmed}
 					>
-						{confirmWrite === 'apply_changes' ? 'Appliquer' : 'Abandonner'}
+						{confirmWrite === 'apply_changes' ? t('catalog.apply') : t('catalog.discard')}
 					</AlertDialog.Action>
 				</AlertDialog.Footer>
 			</AlertDialog.Content>
@@ -213,39 +213,39 @@
 	{:else if selectedId}
 		{#if requested !== 'inspect'}
 			<p role="alert" class="rounded-md bg-destructive/10 px-3 py-2 text-xs text-pretty text-destructive">
-				Modification isolée « {selectedId} » introuvable dans cette conversation.
+				{t('catalog.isolatedChangeNotFoundInThis', { selectedId })}
 			</p>
 		{:else if inspect.pending}
-			<p role="status" class="text-xs text-muted-foreground">Recherche de la modification « {selectedId} »…</p>
+			<p role="status" class="text-xs text-muted-foreground">{t('catalog.lookingForChange', { selectedId })}</p>
 		{:else if inspect.refusal}
 			<p role="alert" class="rounded-md bg-destructive/10 px-3 py-2 text-xs text-pretty text-destructive">
-				Commande refusée : {inspect.refusal}
+				{t('catalog.commandRefused', { refusal: inspect.refusal })}
 			</p>
 		{:else if inspectAnswer && inspectAnswer.ok}
 			{@const shown = splitShortened(inspectAnswer.text)}
 			<p role="status" class="text-xs text-pretty text-muted-foreground">
-				Modification « {selectedId} » connue du moteur seulement : son diff, sans le détail de la conversation.
+				{t('catalog.changeIsKnownToTheEngine', { selectedId })}
 			</p>
 			<DiffView patch={shown.patch} truncated={shown.truncated} />
 		{:else if inspectAnswer}
 			<p role="alert" class="rounded-md bg-destructive/10 px-3 py-2 text-xs text-pretty text-destructive">
-				Modification isolée « {selectedId} » introuvable : {inspectAnswer.text}
+				{t('catalog.isolatedChangeNotFound', { selectedId, text: inspectAnswer.text })}
 			</p>
 		{/if}
 		{#if changes.length > 0}
 			<Button variant="ghost" size="xs" class="self-start" onclick={() => (picked = '')}>
-				Liste des modifications
+				{t('catalog.changeList')}
 			</Button>
 		{/if}
 	{:else if changes.length === 0}
-		<p class="text-muted-foreground">Aucune modification isolée dans cette conversation.</p>
+		<p class="text-muted-foreground">{t('catalog.noIsolatedChangeInThisConversation')}</p>
 	{:else}
 		<!-- A named, focusable scroll container: keyboard users must be able to scroll
 			it (WCAG 2.1.1). The rule only checks the role, so it is suppressed here. -->
 		<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 		<div
 			role="region"
-			aria-label="Modifications isolées"
+			aria-label={t('common.isolatedChanges')}
 			tabindex="0"
 			class="flex max-h-[52vh] flex-col gap-2 overflow-y-auto rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
 		>
@@ -262,7 +262,7 @@
 								<Badge variant={changesetVariant(item.state)}>{changesetLabel(item.state)}</Badge>
 							</span>
 							<span class="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-								<span>{plural(item.files.length, 'fichier', 'fichiers')}</span>
+								<span>{t('common.fileCount', { count: item.files.length })}</span>
 								<span class="min-w-0 font-mono break-all">{item.branch}</span>
 							</span>
 						</button>

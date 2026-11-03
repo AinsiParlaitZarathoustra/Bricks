@@ -7,6 +7,7 @@
 //! grants no trust. The service re-reads the store when it changed, so a
 //! change made here shows at the next call; `reload` reads it again anyway.
 
+use crate::i18n::{msg, tr};
 use crate::contract::{
     IpcErrorCode, IpcResult, SkillChange, SkillProblem, SkillSourceView, SkillsCatalog,
 };
@@ -72,7 +73,7 @@ impl SkillsCatalogStore {
         };
         let listing = listing(&service, query, page as usize);
         let listing = serde_json::to_value(listing)
-            .map_err(|e| error(IpcErrorCode::Internal, format!("liste des skills : {e}")))?;
+            .map_err(|e| error(IpcErrorCode::Internal, tr!(msg::SKILL_LIST, e = e)))?;
         Ok(SkillsCatalog {
             project_id,
             listing,

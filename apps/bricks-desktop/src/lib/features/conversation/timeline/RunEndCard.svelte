@@ -3,6 +3,7 @@
   // then the files it changed (cumulative counts of the applied operations). Each
   // file opens its changes in the reader, or shows itself in the Finder. The time
   // worked is in the bar of its steps (WorkBlock.svelte).
+  import { localeTag, t } from '$lib/i18n/i18n.svelte'
   import ChevronRight from '@lucide/svelte/icons/chevron-right'
   import ExternalLink from '@lucide/svelte/icons/external-link'
   import Eye from '@lucide/svelte/icons/eye'
@@ -13,7 +14,6 @@
   import { readerFileReveal } from '$lib/ipc/reader'
   import type { Conversation, RunEndItem, RunFileSummary, RunInfo } from '$lib/state/conversation.svelte'
   import { reader } from '$lib/state/reader.svelte'
-  import { plural } from '../format'
   import { runEndSummary } from '../runend'
 
   let { item, conversation }: { item: RunEndItem; conversation: Conversation } = $props()
@@ -22,7 +22,7 @@
   const summary = $derived(runEndSummary(run))
 
   const files = $derived(
-    run ? [...run.fileSummaries].sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path)) : [],
+    run ? [...run.fileSummaries].sort((a, b) => a.name.localeCompare(b.name, localeTag()) || a.path.localeCompare(b.path, localeTag())) : [],
   )
   const totals = $derived.by(() => {
     if (files.length === 0 || files.every((f) => f.binary)) return null
@@ -78,19 +78,19 @@
 {#if reason || summary.error || unsatisfied > 0 || files.length > 0}
 <div class="flex flex-col gap-2">
   {#if reason}
-    <p class="text-xs break-words text-warning">Motif : {reason}.</p>
+    <p class="text-xs break-words text-warning">{t('conversation.reason', { reason })}</p>
   {/if}
   {#if summary.error}
-    <p class="text-xs break-words whitespace-pre-wrap text-destructive">Erreur : {summary.error}</p>
+    <p class="text-xs break-words whitespace-pre-wrap text-destructive">{t('conversation.error', { error: summary.error })}</p>
   {/if}
   {#if unsatisfied > 0}
     <p class="text-xs text-warning">
-      {plural(unsatisfied, 'autorisation non accordée', 'autorisations non accordées')}
+      {t('conversation.approvalsNotGranted', { count: unsatisfied })}
     </p>
   {/if}
 
   {#if files.length > 0}
-    <section aria-label="Fichiers modifiés" class="rounded-xl border border-border bg-card text-ui text-card-foreground">
+    <section aria-label={t('conversation.filesChanged')} class="rounded-xl border border-border bg-card text-ui text-card-foreground">
       <Collapsible bind:open>
         <CollapsibleTrigger
           class="group flex w-full min-w-0 items-center gap-2 rounded-xl px-3 py-2 text-start hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
@@ -99,7 +99,7 @@
             class="size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-90"
             aria-hidden="true"
           />
-          <span class="font-medium">{plural(files.length, 'fichier modifié', 'fichiers modifiés')}</span>
+          <span class="font-medium">{t('common.filesChanged', { count: files.length })}</span>
           {#if totals}
             <DiffStat additions={totals.added} deletions={totals.removed} class="text-ui" />
           {/if}
@@ -115,7 +115,7 @@
                   <span class="min-w-0 truncate text-xs text-muted-foreground">{folder}/</span>
                 {/if}
                 {#if file.binary}
-                  <span class="shrink-0 text-xs text-muted-foreground">binaire</span>
+                  <span class="shrink-0 text-xs text-muted-foreground">{t('common.binary')}</span>
                 {:else}
                   <DiffStat additions={file.added} deletions={file.removed} class="shrink-0" />
                 {/if}
@@ -123,8 +123,8 @@
                   <Button
                     variant="ghost"
                     size="icon-xs"
-                    aria-label={`Voir les modifications de ${file.name}`}
-                    title="Voir les modifications"
+                    aria-label={t('conversation.viewTheChangesOf', { name: file.name })}
+                    title={t('conversation.viewTheChanges')}
                     onclick={() => review(file)}
                   >
                     <Eye aria-hidden="true" />
@@ -132,8 +132,8 @@
                   <Button
                     variant="ghost"
                     size="icon-xs"
-                    aria-label={`Afficher ${file.name} dans le Finder`}
-                    title="Afficher dans le Finder"
+                    aria-label={t('conversation.showInTheFinder', { name: file.name })}
+                    title={t('conversation.showInTheFinder2')}
                     onclick={() => reveal(file)}
                   >
                     <ExternalLink aria-hidden="true" />

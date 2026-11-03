@@ -8,6 +8,7 @@
 // A role without a value keeps the theme token from tokens.json. Status, error and diff colours are
 // never customised. Values are `#rrggbb` strings; `null` in the stored ColorSet means "theme token".
 
+import { t } from '$lib/i18n/i18n.svelte';
 import type { ColorSet } from '$lib/ipc/bindings/ColorSet';
 import tokenSource from './tokens.json';
 
@@ -18,9 +19,9 @@ export type ResolvedMode = 'light' | 'dark';
 export const COLOR_ROLES: readonly ColorRole[] = ['accent', 'background', 'panel'];
 
 export const COLOR_ROLE_LABELS: Record<ColorRole, string> = {
-	accent: 'Accent',
-	background: 'Fond principal',
-	panel: 'Fond des panneaux'
+	get accent() { return t('theme.accent') },
+	get background() { return t('theme.mainBackground') },
+	get panel() { return t('theme.panelBackground') }
 };
 
 /** Text colours used on customised surfaces: near-black and near-white, never pure black or white. */
@@ -343,14 +344,14 @@ export function colorChecks(colors: ColorSet | null | undefined, mode: ResolvedM
 	const accent = roleColor(colors, mode, 'accent');
 	if (role === 'accent') {
 		return [
-			{ label: 'Focus sur le fond principal', ratio: contrastRatio(accent, background), min: 3 },
-			{ label: 'Texte sur l’accent', ratio: contrastRatio(roleForeground(colors, mode, 'accent'), accent), min: 4.5 }
+			{ label: t('theme.focusOnTheMainBackground'), ratio: contrastRatio(accent, background), min: 3 },
+			{ label: t('theme.textOnTheAccent'), ratio: contrastRatio(roleForeground(colors, mode, 'accent'), accent), min: 4.5 }
 		];
 	}
 	if (role === 'background') {
 		return [
 			{
-				label: 'Texte sur le fond principal',
+				label: t('theme.textOnTheMainBackground'),
 				ratio: contrastRatio(roleForeground(colors, mode, 'background'), background),
 				min: 4.5
 			}
@@ -358,7 +359,7 @@ export function colorChecks(colors: ColorSet | null | undefined, mode: ResolvedM
 	}
 	return [
 		{
-			label: 'Texte sur les panneaux',
+			label: t('theme.textOnThePanels'),
 			ratio: contrastRatio(roleForeground(colors, mode, 'panel'), panel),
 			min: 4.5
 		}
@@ -375,31 +376,31 @@ export interface Swatch {
 /** Quick choices of each role, in French. A custom colour is still possible from the palette. */
 export const PRESETS: Record<ColorRole, readonly Swatch[]> = {
 	accent: [
-		{ label: 'Terre cuite', hex: '#a4512c' },
-		{ label: 'Ambre', hex: '#b7791f' },
-		{ label: 'Olive', hex: '#5f7a2b' },
-		{ label: 'Vert', hex: '#2f7d5b' },
-		{ label: 'Sarcelle', hex: '#1f7a80' },
-		{ label: 'Bleu', hex: '#2f5fa8' },
-		{ label: 'Indigo', hex: '#4c4fb3' },
-		{ label: 'Violet', hex: '#7b4bb0' },
-		{ label: 'Rose', hex: '#b03f74' },
-		{ label: 'Graphite', hex: '#4a4f57' }
+		{ get label() { return t('theme.terracotta') }, hex: '#a4512c' },
+		{ get label() { return t('theme.amber') }, hex: '#b7791f' },
+		{ get label() { return t('theme.olive') }, hex: '#5f7a2b' },
+		{ get label() { return t('theme.green') }, hex: '#2f7d5b' },
+		{ get label() { return t('theme.teal') }, hex: '#1f7a80' },
+		{ get label() { return t('theme.blue') }, hex: '#2f5fa8' },
+		{ get label() { return t('theme.indigo') }, hex: '#4c4fb3' },
+		{ get label() { return t('theme.violet') }, hex: '#7b4bb0' },
+		{ get label() { return t('theme.pink') }, hex: '#b03f74' },
+		{ get label() { return t('theme.graphite') }, hex: '#4a4f57' }
 	],
 	background: [
-		{ label: 'Papier', hex: '#fbfaf7' },
-		{ label: 'Sable', hex: '#f4efe6' },
-		{ label: 'Brume', hex: '#eef1f4' },
-		{ label: 'Sauge', hex: '#eef2ec' },
-		{ label: 'Charbon', hex: '#1c1b19' },
-		{ label: 'Nuit', hex: '#14171c' }
+		{ get label() { return t('theme.paper') }, hex: '#fbfaf7' },
+		{ get label() { return t('theme.sand') }, hex: '#f4efe6' },
+		{ get label() { return t('theme.mist') }, hex: '#eef1f4' },
+		{ get label() { return t('theme.sage') }, hex: '#eef2ec' },
+		{ get label() { return t('theme.charcoal') }, hex: '#1c1b19' },
+		{ get label() { return t('theme.night') }, hex: '#14171c' }
 	],
 	panel: [
-		{ label: 'Lin', hex: '#f0ebe1' },
-		{ label: 'Bruine', hex: '#e8e4dc' },
-		{ label: 'Ardoise claire', hex: '#e6e9ee' },
-		{ label: 'Sauge claire', hex: '#e8efe9' },
-		{ label: 'Cacao', hex: '#2a2622' },
-		{ label: 'Ardoise', hex: '#262a31' }
+		{ get label() { return t('theme.linen') }, hex: '#f0ebe1' },
+		{ get label() { return t('theme.drizzle') }, hex: '#e8e4dc' },
+		{ get label() { return t('theme.lightSlate') }, hex: '#e6e9ee' },
+		{ get label() { return t('theme.lightSage') }, hex: '#e8efe9' },
+		{ get label() { return t('theme.cocoa') }, hex: '#2a2622' },
+		{ get label() { return t('theme.slate') }, hex: '#262a31' }
 	]
 };

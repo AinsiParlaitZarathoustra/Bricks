@@ -10,6 +10,10 @@ export type SlashCommandInfo = { name: string, aliases: Array<string>,
  */
 args: string, 
 /**
- * French description shown in the palette and the help.
+ * Description shown in the palette and the help, in English.
  */
-description: string, };
+description: string, 
+/**
+ * The same description in French.
+ */
+description_fr: string, };
