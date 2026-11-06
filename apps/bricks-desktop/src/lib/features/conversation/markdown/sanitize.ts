@@ -33,8 +33,9 @@ const MARKDOWN_CONFIG: Config = {
   // HTML only: the default of DOMPurify would also allow SVG and MathML, which Markdown never produces.
   USE_PROFILES: { html: true },
   // `type` is read as a URI otherwise, and refused: it is kept below, on buttons only.
+  // `align`, the alignment marked gives to table cells, is refused the same way.
   ADD_ATTR: ['type'],
-  ADD_URI_SAFE_ATTR: ['type'],
+  ADD_URI_SAFE_ATTR: ['type', 'align'],
   FORBID_TAGS: ['style', 'img', 'form', 'input', 'select', 'textarea', 'iframe', 'object', 'embed', 'link', 'meta', 'base'],
   FORBID_ATTR: ['style'],
   // Fragments of the same page (heading and footnote ids) are the only relative links.

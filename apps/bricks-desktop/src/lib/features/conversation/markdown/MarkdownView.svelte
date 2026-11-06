@@ -105,23 +105,16 @@
   .md {
     overflow-wrap: anywhere;
   }
+  .md :global(strong) {
+    font-weight: 700;
+  }
+  /* 12 px between blocks, 18 px before a heading. */
   .md :global(p) {
-    margin: 0.5rem 0;
-  }
-  .md :global(p:first-child),
-  .md :global(h1:first-child),
-  .md :global(h2:first-child),
-  .md :global(h3:first-child) {
-    margin-top: 0;
-  }
-  .md :global(p:last-child),
-  .md :global(ul:last-child),
-  .md :global(ol:last-child) {
-    margin-bottom: 0;
+    margin: 0.75rem 0;
   }
   .md :global(ul),
   .md :global(ol) {
-    margin: 0.5rem 0;
+    margin: 0.75rem 0;
     padding-left: 1.25rem;
   }
   .md :global(ul) {
@@ -138,7 +131,7 @@
   .md :global(h4),
   .md :global(h5),
   .md :global(h6) {
-    margin: 0.75rem 0 0.25rem;
+    margin: 1.125rem 0 0.75rem;
     font-weight: 600;
     line-height: 1.3;
   }
@@ -154,7 +147,7 @@
     font-size: 0.9375rem;
   }
   .md :global(blockquote) {
-    margin: 0.5rem 0;
+    margin: 0.75rem 0;
     border-left: 2px solid var(--border);
     padding-left: 0.75rem;
     color: var(--muted-foreground);
@@ -163,19 +156,48 @@
     margin: 0.75rem 0;
     border-color: var(--border);
   }
-  .md :global(table) {
-    display: block;
+  .md :global(.md-table),
+  .md :global(.code-block),
+  .md :global(.diff-block),
+  .md :global(figure) {
+    margin-block: 0.75rem;
+  }
+  .md :global(.md-table) {
     max-width: 100%;
     overflow-x: auto;
+  }
+  .md :global(table) {
     border-collapse: collapse;
     font-size: 0.8125rem;
   }
   .md :global(th),
   .md :global(td) {
-    border: 1px solid var(--border);
-    padding: 0.25rem 0.5rem;
-    text-align: left;
+    border-bottom: 1px solid color-mix(in oklab, var(--border) 60%, transparent);
+    padding: 0.4375rem 0.75rem;
+    /* Words stay whole, and no column is crushed by a longer one: the table
+       scrolls instead. */
+    min-width: 7rem;
+    overflow-wrap: normal;
+    text-align: start;
     vertical-align: top;
+  }
+  .md :global(th) {
+    background: var(--muted);
+    font-weight: 600;
+  }
+  .md :global(tbody tr:last-child td) {
+    border-bottom: 0;
+  }
+  .md :global(th[align='center']),
+  .md :global(td[align='center']) {
+    text-align: center;
+  }
+  .md :global(th[align='right']),
+  .md :global(td[align='right']) {
+    text-align: right;
+  }
+  .md :global(a code) {
+    color: inherit;
   }
   .md :global(:not(pre) > code) {
     border-radius: 0.25rem;
@@ -196,7 +218,7 @@
     background: color-mix(in oklab, var(--info-soft) 60%, transparent);
   }
   .md :global(.md-alert) {
-    margin: 0.5rem 0;
+    margin: 0.75rem 0;
     border-left: 2px solid var(--md-alert-accent);
     padding-left: 0.75rem;
   }
@@ -292,13 +314,23 @@
     text-underline-offset: 3px;
   }
   .md :global(.katex-display) {
-    margin: 0.5rem 0;
+    margin: 0.75rem 0;
     overflow-x: auto;
     overflow-y: hidden;
     padding: 0.125rem 0;
   }
   .md :global(.katex) {
     font-size: 1.05em;
+  }
+  .md :global(p:first-child),
+  .md > :global(:first-child) {
+    margin-top: 0;
+  }
+  .md :global(p:last-child),
+  .md :global(ul:last-child),
+  .md :global(ol:last-child),
+  .md > :global(:last-child) {
+    margin-bottom: 0;
   }
   .md.streaming > :global(:last-child)::after {
     content: '';

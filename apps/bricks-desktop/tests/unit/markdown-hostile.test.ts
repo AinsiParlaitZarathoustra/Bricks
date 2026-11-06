@@ -224,3 +224,13 @@ describe('Mermaid source, neutralized before Mermaid sees it', () => {
 		}
 	})
 })
+
+describe('what the real sanitizer keeps', () => {
+	it('keeps the alignment of table cells and the formatting of links', () => {
+		const doc = new MarkdownDocument({ idPrefix: 'k' })
+		const html = htmlOf(doc.update('| a | b | c |\n|:--|:-:|--:|\n| 1 | 2 | 3 |\n\n[**x** `y`](https://example.com)', true))
+		expect(html).toContain('<th align="center">b</th>')
+		expect(html).toContain('<td align="right">3</td>')
+		expect(html).toContain('<strong>x</strong> <code>y</code></a>')
+	})
+})

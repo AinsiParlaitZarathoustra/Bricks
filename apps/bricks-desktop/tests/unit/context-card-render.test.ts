@@ -85,13 +85,13 @@ describe('without a breakdown: one plain bar, no list', () => {
 });
 
 describe('with a breakdown: the bar is split and the list names each source', () => {
-	it('lists each source that counted text, with its tokens and its share', () => {
+	it('lists each source that counted text, with its figure and its share', () => {
 		render(conversationWith(statusOf({ conversation: 600, tool_results: 400 })));
 		const items = [...target.querySelectorAll<HTMLElement>('[aria-label="Répartition du contexte"] li')];
 		expect(items.map((li) => li.textContent?.replace(/\s+/g, ' ').trim())).toEqual([
-			'Messages 209.8k tokens 60,0 %',
-			'Sorties d’outils 139.8k tokens 40,0 %',
-			'Espace libre 650.4k tokens'
+			'Messages 209.8k 60,0 %',
+			'Sorties d’outils 139.8k 40,0 %',
+			'Espace libre 650.4k'
 		]);
 	});
 
@@ -114,7 +114,7 @@ describe('with a breakdown: the bar is split and the list names each source', ()
 		render(conversationWith(statusOf({ conversation: 600, tool_results: 400 })));
 		const items = [...target.querySelectorAll<HTMLElement>('[aria-label="Répartition du contexte"] li')];
 		const last = items.at(-1)?.textContent?.replace(/\s+/g, ' ').trim();
-		expect(last).toBe('Espace libre 650.4k tokens');
+		expect(last).toBe('Espace libre 650.4k');
 		expect(last).not.toContain('%');
 	});
 

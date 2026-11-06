@@ -82,7 +82,7 @@
 				<li class="flex min-w-0 items-center gap-1.5">
 					<span aria-hidden="true" class={['size-2 shrink-0 rounded-sm', COLOR[part.source]]}></span>
 					<span class="min-w-0 flex-1 truncate text-foreground" title={part.label}>{part.label}</span>
-					<span class="shrink-0 tabular-nums text-muted-foreground">{t('common.tokens', { tokens: formatShort(part.tokens) })}</span>
+					<span class="shrink-0 tabular-nums text-muted-foreground">{formatShort(part.tokens)}</span>
 					<span class="w-11 shrink-0 text-right whitespace-nowrap tabular-nums text-foreground">{formatPercent(part.share * 100)}</span>
 				</li>
 			{/each}
@@ -90,7 +90,7 @@
 				<li class="flex min-w-0 items-center gap-1.5">
 					<span aria-hidden="true" class="size-2 shrink-0 rounded-sm border border-border bg-muted"></span>
 					<span class="min-w-0 flex-1 truncate text-muted-foreground">{t('context.freeSpace')}</span>
-					<span class="shrink-0 tabular-nums text-muted-foreground">{t('common.tokens', { tokens: formatShort(free) })}</span>
+					<span class="shrink-0 tabular-nums text-muted-foreground">{formatShort(free)}</span>
 					<span class="w-11 shrink-0" aria-hidden="true"></span>
 				</li>
 			{/if}

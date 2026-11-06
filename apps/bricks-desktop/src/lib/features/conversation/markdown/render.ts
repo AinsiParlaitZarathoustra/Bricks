@@ -3,7 +3,7 @@
 // by the math renderer (or by the source when none is installed).
 import { t } from '$lib/i18n/i18n.svelte'
 import hljs from 'highlight.js/lib/common'
-import { Lexer, Marked, type Parser, type Token, type Tokens } from 'marked'
+import { Lexer, Marked, Renderer, type Parser, type Token, type Tokens } from 'marked'
 import { isOpenableUrl } from '../links'
 import { parseFileReference, safeDecode } from './fileref-parse'
 import {
@@ -137,12 +137,13 @@ export function codeBlockHtml(text: string, lang: string): string {
   return codeShell(fenceLanguage(lang) || t('conversation.codeLanguageText'), highlightedBody(text, knownLanguage(lang)), fenceIconId(lang))
 }
 
+/** The button of a file reference; `label` is safe HTML. */
 function fileButton(ref: FileReference, label: string): string {
   const line = ref.line === undefined ? '' : ` data-line="${ref.line}"`
   const endLine = ref.endLine === undefined ? '' : ` data-end-line="${ref.endLine}"`
   return (
     `<button type="button" class="file-ref" data-file-path="${escapeHtml(ref.path)}"${line}${endLine}>` +
-    `${escapeHtml(label)}</button>`
+    `${label}</button>`
   )
 }
 
@@ -188,8 +189,13 @@ const renderer = {
   html({ text }: Tokens.HTML | Tokens.Tag) {
     return escapeHtml(text)
   },
-  link({ href, text }: Tokens.Link) {
-    const label = escapeHtml(text || href)
+  table(this: Renderer, token: Tokens.Table) {
+    // The scroll lives on a wrapper: the table itself keeps its native layout.
+    return `<div class="md-table">${Renderer.prototype.table.call(this, token)}</div>\n`
+  },
+  link(this: { parser: Parser }, { href, text, tokens }: Tokens.Link) {
+    // Its inline tokens, so that bold or code in a link stay what they are.
+    const label = tokens.length > 0 ? this.parser.parseInline(tokens) : escapeHtml(text || href)
     if (href.startsWith('#')) {
       // An in-page anchor: the id a heading or footnote of this message gets.
       const fragment = safeDecode(href.slice(1)) ?? href.slice(1)
@@ -197,7 +203,7 @@ const renderer = {
       return `<a href="${escapeHtml(target)}" class="${LINK_CLASS}" data-local-anchor>${label}</a>`
     }
     const file = parseFileReference(href, 'href')
-    if (file) return fileButton(file, text || href)
+    if (file) return fileButton(file, label)
     if (!isOpenableUrl(href)) return label
     const address = escapeHtml(href)
     // The address is shown when the link text differs, so the destination is visible.
@@ -241,7 +247,7 @@ export const marked = new Marked({
       name: 'fileRef',
       renderer: (token) => {
         const node = token as Tok
-        return fileButton(node.ref as FileReference, node.text as string)
+        return fileButton(node.ref as FileReference, escapeHtml(node.text as string))
       },
     },
     {
