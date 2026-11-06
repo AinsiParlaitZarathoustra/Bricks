@@ -205,7 +205,7 @@
 </figure>
 <Dialog.Root open={expanded && options.allowFullscreen} onOpenChange={(open) => (expanded = open)}>
   <Dialog.Content class="flex h-[100dvh] w-screen max-w-none flex-col gap-2 rounded-none sm:max-w-none">
-    <Dialog.Header><Dialog.Title class="text-ui">{title}</Dialog.Title></Dialog.Header>
+    <Dialog.Header><Dialog.Title class="text-center text-ui">{title}</Dialog.Title></Dialog.Header>
     {@render controls(true)}
     {#if frame.svg}{@render viewport(true)}{/if}
     {@render sourceView()}
