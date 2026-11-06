@@ -19,7 +19,9 @@
 
 use super::*;
 use crate::shell::{self, ShellConfig};
-use crate::tool_report::{ToolBody, ToolReport, ToolStatus, suggest};
+#[cfg(unix)]
+use crate::tool_report::suggest;
+use crate::tool_report::{ToolBody, ToolReport, ToolStatus};
 use serde::Deserialize;
 use std::time::Duration;
 
@@ -65,6 +67,7 @@ struct Input {
     #[serde(default)]
     background: bool,
     /// Text given to the command's stdin (default: empty stdin).
+    #[cfg_attr(not(unix), allow(dead_code))]
     input: Option<String>,
     /// Background only: a regex on the task's output lines that means
     /// "ready" (e.g. a server's "listening on").
@@ -92,6 +95,7 @@ pub(crate) fn progress_for(ctx: &ToolContext, tool: &'static str) -> Option<shel
 }
 
 /// First word of each simple command (for permission details).
+#[cfg(unix)]
 fn invoked_names(command: &str) -> Vec<String> {
     let mut names = Vec::new();
     for segment in command.split(['\n', ';', '|', '&', '(', ')', '{', '}']) {
@@ -611,6 +615,7 @@ async fn start_background(
     ToolResult::from_report(report)
 }
 
+#[cfg(unix)]
 fn launch_failure(e: std::io::Error, started: std::time::Instant) -> ToolResult {
     let mut report = ToolReport::new(
         ToolStatus::Failure,

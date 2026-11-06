@@ -289,7 +289,7 @@ impl Fetcher {
 /// Take up to `want` bytes from the shared budget; returns what was granted.
 fn take_budget(budget: &AtomicUsize, want: usize) -> usize {
     let mut granted = 0;
-    let _ = budget.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+    let _ = budget.try_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
         granted = want.min(left);
         Some(left - granted)
     });

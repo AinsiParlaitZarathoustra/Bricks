@@ -19,8 +19,7 @@
 
 use parking_lot::Mutex;
 use std::collections::BTreeMap;
-use std::ffi::{OsStr, OsString};
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -304,6 +303,21 @@ fn set_field<V>(
     false
 }
 
+/// An OS string from what bash recorded. On Unix the bytes are kept as they
+/// are; Windows has no byte strings, so a value that is not UTF-8 is replaced
+/// lossily there.
+#[cfg(unix)]
+fn os_string(bytes: &[u8]) -> OsString {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+    OsStr::from_bytes(bytes).to_os_string()
+}
+
+#[cfg(not(unix))]
+fn os_string(bytes: &[u8]) -> OsString {
+    String::from_utf8_lossy(bytes).into_owned().into()
+}
+
 /// Quoted for bash: single quotes, with `'` written `'\''`.
 fn quote(bytes: &[u8]) -> Vec<u8> {
     let mut out = vec![b'\''];
@@ -322,7 +336,7 @@ fn prelude_script(base: &Snapshot) -> Vec<u8> {
     let mut s = b"shopt -s expand_aliases 2>/dev/null\n".to_vec();
     if let Some(old) = &base.cwd.oldpwd {
         s.extend_from_slice(b"OLDPWD=");
-        s.extend(quote(old.as_os_str().as_bytes()));
+        s.extend(quote(old.as_os_str().as_encoded_bytes()));
         s.push(b'\n');
     }
     for alias in base.aliases.values() {
@@ -350,16 +364,16 @@ pub fn parse_dump(bytes: &[u8]) -> Option<Snapshot> {
     while let Some(kind) = parts.next() {
         match kind {
             b"cwd" => {
-                snap.cwd.pwd = PathBuf::from(OsStr::from_bytes(parts.next()?));
+                snap.cwd.pwd = PathBuf::from(os_string(parts.next()?));
                 cwd_seen = true;
             }
             b"oldpwd" => {
-                snap.cwd.oldpwd = Some(PathBuf::from(OsStr::from_bytes(parts.next()?)));
+                snap.cwd.oldpwd = Some(PathBuf::from(os_string(parts.next()?)));
             }
             b"oldpwd-unset" => snap.cwd.oldpwd = None,
             b"env" => {
                 let name = String::from_utf8(parts.next()?.to_vec()).ok()?;
-                let value = OsString::from_vec(parts.next()?.to_vec());
+                let value = os_string(parts.next()?);
                 if valid_name(&name) {
                     snap.exports.insert(name, value);
                 }

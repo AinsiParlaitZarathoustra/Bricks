@@ -128,6 +128,8 @@ impl PwshSession {
                 Ok(())
             });
         }
+        #[cfg(windows)]
+        cmd.creation_flags(procs::DETACHED);
         let mut child = cmd.spawn()?;
         let pid = child.id().unwrap_or(0);
         let accepted = tokio::time::timeout(Duration::from_secs(30), listener.accept()).await;

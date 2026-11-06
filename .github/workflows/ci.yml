@@ -69,6 +69,36 @@ jobs:
       - name: Doc tests
         run: cargo test --workspace --doc --locked
 
+  windows:
+    name: Windows build
+    runs-on: windows-2025
+    timeout-minutes: 90
+    env:
+      RUSTFLAGS: -Dwarnings
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install && rustc --version
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: apps/bricks-desktop/package-lock.json
+
+      # The desktop crate embeds the built frontend (`frontendDist`).
+      - name: Build the desktop frontend
+        working-directory: apps/bricks-desktop
+        run: |
+          npm ci
+          npm run build
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Build the workspace
+        run: cargo build --workspace --locked
+
   desktop:
     name: Desktop interface
     runs-on: ubuntu-24.04

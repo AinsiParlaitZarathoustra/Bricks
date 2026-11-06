@@ -445,6 +445,7 @@ impl Task {
             .stdin(stdin_cfg)
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
+        #[cfg(unix)]
         // SAFETY: setsid is async-signal-safe.
         unsafe {
             cmd.pre_exec(|| {
@@ -454,6 +455,8 @@ impl Task {
                 Ok(())
             });
         }
+        #[cfg(windows)]
+        cmd.creation_flags(procs::DETACHED);
         let mut child = cmd.spawn()?;
         let pid = child.id().unwrap_or(0);
         let is_ordinary = ordinary.is_some();

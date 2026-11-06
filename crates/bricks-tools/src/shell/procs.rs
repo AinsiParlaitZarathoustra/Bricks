@@ -691,6 +691,11 @@ mod imp {
     use super::Termination;
     use std::time::Duration;
 
+    /// What `setsid` gives on Unix: a process group of its own, which a Ctrl+C
+    /// of the console does not reach, and no console window (the desktop
+    /// application has none to share). `CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW`.
+    pub const DETACHED: u32 = 0x0000_0200 | 0x0800_0000;
+
     /// Not enumerated on Windows; trees are terminated with `taskkill /T`.
     pub fn descendants(_root: u32) -> Vec<u32> {
         Vec::new()
@@ -753,6 +758,8 @@ mod imp {
     }
 }
 
+#[cfg(windows)]
+pub use imp::DETACHED;
 pub use imp::{
     descendants, group_alive, group_members, is_running, signal_group, terminate,
     terminate_tree_now, wait_gone,

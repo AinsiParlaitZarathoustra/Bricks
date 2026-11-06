@@ -130,9 +130,12 @@ pub struct ShellSessions {
     /// commands.
     tasks: parking_lot::Mutex<Vec<Arc<background::Task>>>,
     /// Ordinary commands in flight (possibly handed over too).
+    #[cfg(unix)]
     commands: parking_lot::Mutex<Vec<Arc<bash::Run>>>,
     /// Commands described for an approval: `(command, fingerprint)`.
+    #[cfg(unix)]
     described: parking_lot::Mutex<Vec<(String, String)>>,
+    #[cfg(unix)]
     next_task: AtomicU64,
     generation: AtomicU64,
 }
@@ -169,8 +172,11 @@ pub fn session(id: &str, config: &ShellConfig) -> Arc<ShellSessions> {
                 pwsh: tokio::sync::Mutex::new(None),
                 reset_notice: parking_lot::Mutex::new(None),
                 tasks: parking_lot::Mutex::new(Vec::new()),
+                #[cfg(unix)]
                 commands: parking_lot::Mutex::new(Vec::new()),
+                #[cfg(unix)]
                 described: parking_lot::Mutex::new(Vec::new()),
+                #[cfg(unix)]
                 next_task: AtomicU64::new(1),
                 generation: AtomicU64::new(0),
             })
@@ -332,10 +338,12 @@ impl ShellSessions {
 
     pub async fn close(&self) {
         let tasks = self.tasks.lock().clone();
+        #[cfg(unix)]
         let runs = self.commands.lock().clone();
         for t in tasks {
             t.stop(Duration::from_secs(2)).await;
         }
+        #[cfg(unix)]
         for r in runs {
             r.task().stop(Duration::from_secs(2)).await;
         }
@@ -349,6 +357,7 @@ impl ShellSessions {
         for t in self.tasks.lock().iter() {
             t.kill_now();
         }
+        #[cfg(unix)]
         for r in self.commands.lock().iter() {
             r.task().kill_now();
         }
@@ -366,6 +375,7 @@ impl Drop for ShellSessions {
         for t in self.tasks.lock().iter() {
             t.kill_now();
         }
+        #[cfg(unix)]
         for r in self.commands.lock().iter() {
             r.task().kill_now();
         }

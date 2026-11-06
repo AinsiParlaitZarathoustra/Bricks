@@ -4,7 +4,9 @@
 //! is held and the request is refused.
 
 use parking_lot::Mutex;
-use std::process::{Child, Command, Stdio};
+use std::process::Child;
+#[cfg(target_os = "macos")]
+use std::process::{Command, Stdio};
 
 #[derive(Default)]
 pub struct KeepAwake {

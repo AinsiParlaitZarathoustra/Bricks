@@ -82,6 +82,7 @@ struct Session {
 struct Control {
     /// The shell's pid. On Unix it is also its process group id: the shell
     /// is a session leader (portable-pty calls `setsid`).
+    #[cfg_attr(not(unix), allow(dead_code))]
     pid: Option<u32>,
     /// Set by the exit thread once the shell has been reaped. Signals are
     /// only sent while this is false, so a reused pid is never hit.

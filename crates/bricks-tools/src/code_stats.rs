@@ -413,7 +413,9 @@ struct Candidate {
     /// What is opened: the entry itself, or a file link's canonical target.
     open: PathBuf,
     detect: Detect,
+    #[cfg_attr(not(unix), allow(dead_code))]
     dev: u64,
+    #[cfg_attr(not(unix), allow(dead_code))]
     ino: u64,
 }
 
