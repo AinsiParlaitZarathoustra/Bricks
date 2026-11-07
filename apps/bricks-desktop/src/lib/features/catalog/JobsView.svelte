@@ -160,6 +160,10 @@
 												<dt class="text-muted-foreground">{t('catalog.logs')}</dt>
 												<dd class="font-mono break-all">{job.logs.join(', ')}</dd>
 											{/if}
+											{#if job.logsError}
+												<dt class="text-muted-foreground">{t('catalog.logCopy')}</dt>
+												<dd class="break-all text-destructive">{job.logsError}</dd>
+											{/if}
 										</dl>
 									</CollapsibleContent>
 								</Collapsible>

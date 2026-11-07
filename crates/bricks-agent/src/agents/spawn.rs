@@ -778,6 +778,10 @@ fn parent_ctx(ctx: &ToolContext, depth: u32) -> ParentCtx {
             .extensions
             .get::<bricks_tools::jobs::JobsHandle>()
             .map(|j| (*j).clone()),
+        shell: ctx
+            .extensions
+            .get::<bricks_tools::shell::ShellConfig>()
+            .map(|c| (*c).clone()),
     }
 }
 
@@ -811,6 +815,8 @@ struct ParentCtx {
     depth: u32,
     sink: Option<SubAgentSink>,
     jobs: Option<bricks_tools::jobs::JobsHandle>,
+    /// The shell settings of the parent (`[bash]`).
+    shell: Option<bricks_tools::shell::ShellConfig>,
     /// The parent's skills service and trust (its project's sources, read
     /// in place: a worktree child uses its origin project's skills). The
     /// parent's activations are not passed on.
@@ -2026,6 +2032,9 @@ impl AgentSpawner {
         }
         if let Some(w) = &pc.web {
             ext.insert(w.clone());
+        }
+        if let Some(c) = &pc.shell {
+            ext.insert(c.clone());
         }
         ext.insert(AgentIdentity {
             agent_id: info.agent_id.clone(),

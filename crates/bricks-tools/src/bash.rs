@@ -554,6 +554,11 @@ async fn start_background(
         Ok(t) => t,
         Err(e) => return launch_failure(e, started),
     };
+    // A job as soon as it runs, never out of reach while it starts. If the
+    // call is abandoned before it reports (the run is cancelled), nobody got
+    // its id: it is stopped.
+    let job_id = registry.register(slot, owner, Arc::clone(&task), &ctx.working_dir, true);
+    let mut unreported = StopIfUnreported(Some(Arc::clone(&task)));
     let wait = match (input.ready_pattern.is_some(), input.ready_timeout) {
         (true, Some(ms)) => Duration::from_millis(ms).min(config.max_timeout),
         (true, None) => Duration::from_secs(10),
@@ -565,8 +570,8 @@ async fn start_background(
         // Give a command that fails at once the chance to say so.
         task.wait_finished(Duration::from_millis(150)).await;
     }
+    unreported.0 = None;
     let st = task.status();
-    let job_id = registry.register(slot, owner, Arc::clone(&task), &ctx.working_dir, true);
     let mut lines = vec![format!(
         "Started job {job_id} (pid {}) in {}: {}",
         st.pid,
@@ -613,6 +618,20 @@ async fn start_background(
         "ready": matches!(st.readiness, Readiness::Ready { .. }),
     }));
     ToolResult::from_report(report)
+}
+
+/// Stops a background task when dropped still holding it: the call that
+/// started it ended before reporting its job.
+#[cfg(unix)]
+struct StopIfUnreported(Option<Arc<shell::background::Task>>);
+
+#[cfg(unix)]
+impl Drop for StopIfUnreported {
+    fn drop(&mut self) {
+        if let Some(task) = self.0.take() {
+            task.kill_now();
+        }
+    }
 }
 
 #[cfg(unix)]

@@ -495,6 +495,8 @@ pub enum Event {
         duration_ms: u64,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         logs: Vec<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        logs_error: Option<String>,
     },
     /// Answer to `agent_control`.
     AgentControlResult {

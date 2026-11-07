@@ -80,6 +80,7 @@ export const fr: Record<MessageKey, Message> = {
 	'catalog.jobsRunning': { one: '{count} en cours', other: '{count} en cours' },
 	'catalog.jobsStopped': { one: '{count} arrêtée', other: '{count} arrêtées' },
 	'catalog.kib': '{value} Kio',
+	'catalog.logCopy': 'Copie des journaux',
 	'catalog.logs': 'Journaux',
 	'catalog.lookingForChange': 'Recherche de la modification « {selectedId} »…',
 	'catalog.mib': '{value} Mio',

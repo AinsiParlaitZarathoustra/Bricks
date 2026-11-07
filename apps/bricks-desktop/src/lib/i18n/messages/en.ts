@@ -81,6 +81,7 @@ export const en = {
 	'catalog.jobsRunning': { one: '{count} running', other: '{count} running' },
 	'catalog.jobsStopped': { one: '{count} stopped', other: '{count} stopped' },
 	'catalog.kib': '{value} KiB',
+	'catalog.logCopy': 'Log copy',
 	'catalog.logs': 'Logs',
 	'catalog.lookingForChange': 'Looking for change “{selectedId}”…',
 	'catalog.mib': '{value} MiB',

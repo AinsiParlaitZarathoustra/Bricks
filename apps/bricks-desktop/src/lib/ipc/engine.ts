@@ -558,6 +558,7 @@ export type Event =
       signal?: number
       duration_ms: number
       logs?: string[]
+      logs_error?: string
     }
   | { type: 'agent_control_result'; action: string; ok: boolean; text: string }
   | {

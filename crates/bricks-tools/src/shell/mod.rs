@@ -31,6 +31,7 @@ pub mod procs;
 pub mod state;
 
 use serde::{Deserialize, Serialize};
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -48,19 +49,32 @@ pub struct ProgressSink(pub Arc<ProgressSinkFn>);
 pub type ProgressSinkFn = dyn Fn(&str, &str) + Send + Sync;
 
 /// `[bash]` in `bricks.toml`: settings of the Bash tool.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct BashSettings {
     /// Milliseconds a foreground command runs before the call returns it as
     /// a job (`Running`, with a `job_id`) while it goes on. A call's
     /// `yield_time_ms` overrides it; `timeout` still ends the command.
     pub yield_time_ms: u64,
+    /// Directories added at the end of the `PATH` a Bash session starts with
+    /// (absolute, or starting with `~`). An entry already there is not added
+    /// again, and the session may change its `PATH` afterwards.
+    pub extra_path: Vec<String>,
 }
 
 impl Default for BashSettings {
     fn default() -> Self {
         Self {
             yield_time_ms: 10_000,
+            extra_path: if cfg!(target_os = "macos") {
+                vec![
+                    "/opt/homebrew/bin".into(),
+                    "/usr/local/bin".into(),
+                    "~/.cargo/bin".into(),
+                ]
+            } else {
+                Vec::new()
+            },
         }
     }
 }
@@ -69,7 +83,40 @@ impl BashSettings {
     /// Applies these settings to a shell configuration.
     pub fn apply_to(&self, config: &mut ShellConfig) {
         config.yield_time = Duration::from_millis(self.yield_time_ms);
+        let home = dirs::home_dir();
+        config.extra_path = self
+            .extra_path
+            .iter()
+            .filter_map(|entry| resolve_extra_path(entry, home.as_deref()).ok())
+            .collect();
     }
+
+    /// Why entries of `extra_path` cannot be used: they are ignored.
+    pub fn extra_path_problems(&self) -> Vec<String> {
+        let home = dirs::home_dir();
+        self.extra_path
+            .iter()
+            .filter_map(|entry| resolve_extra_path(entry, home.as_deref()).err())
+            .collect()
+    }
+}
+
+/// An `extra_path` entry as a directory: a leading `~` is `home`. A relative
+/// entry is refused, as it would search whatever directory a command is in.
+fn resolve_extra_path(entry: &str, home: Option<&Path>) -> Result<PathBuf, String> {
+    let path = match Path::new(entry).strip_prefix("~") {
+        Ok(rest) => home
+            .ok_or_else(|| format!("extra_path {entry:?}: no home directory"))?
+            .join(rest),
+        Err(_) => PathBuf::from(entry),
+    };
+    if !path.is_absolute() {
+        return Err(format!("extra_path {entry:?}: not an absolute path"));
+    }
+    if std::env::join_paths([&path]).is_err() {
+        return Err(format!("extra_path {entry:?}: cannot be part of PATH"));
+    }
+    Ok(path)
 }
 
 /// Settings of shell execution. Put one in `ToolContext::extensions` to
@@ -80,6 +127,9 @@ pub struct ShellConfig {
     pub bash_path: Option<PathBuf>,
     /// `pwsh`/`powershell` to use (default: found on `PATH`).
     pub pwsh_path: Option<PathBuf>,
+    /// Directories added at the end of the `PATH` of a new Bash session
+    /// state. PowerShell does not use them.
+    pub extra_path: Vec<PathBuf>,
     /// Foreground timeout when a call gives none.
     pub default_timeout: Duration,
     /// Upper bound of a requested timeout.
@@ -104,6 +154,7 @@ impl Default for ShellConfig {
         Self {
             bash_path: None,
             pwsh_path: None,
+            extra_path: Vec::new(),
             default_timeout: Duration::from_secs(120),
             max_timeout: Duration::from_secs(600),
             yield_time: Duration::from_millis(BashSettings::default().yield_time_ms),
@@ -168,7 +219,7 @@ pub fn session(id: &str, config: &ShellConfig) -> Arc<ShellSessions> {
                 dir: config
                     .base_dir
                     .join(format!("{}-{}-{n}", sanitize(id), std::process::id())),
-                state: Arc::new(state::ShellState::from_env()),
+                state: Arc::new(state::ShellState::with_extra_path(&config.extra_path)),
                 pwsh: tokio::sync::Mutex::new(None),
                 reset_notice: parking_lot::Mutex::new(None),
                 tasks: parking_lot::Mutex::new(Vec::new()),
@@ -202,6 +253,15 @@ pub fn close_session_now(id: &str) {
 /// (`None`: no shell yet, or it starts in the tools' directory).
 pub fn session_cwd(id: &str) -> Option<PathBuf> {
     REGISTRY.get(id).and_then(|s| s.state.cwd())
+}
+
+/// The `PATH` the next Bash command of session `id` starts with: the session's
+/// once it exists, else the one it will be created with.
+pub fn session_path(id: &str, config: &ShellConfig) -> Option<OsString> {
+    match REGISTRY.get(id) {
+        Some(s) => s.state.path(),
+        None => state::extended_path(std::env::var_os("PATH").as_deref(), &config.extra_path),
+    }
 }
 
 /// The shell the Bash tool runs with `config` (`None`: none found), and
@@ -379,5 +439,51 @@ impl Drop for ShellSessions {
         for r in self.commands.lock().iter() {
             r.task().kill_now();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extra_path_entries_are_resolved_against_the_home_directory() {
+        let home = std::env::temp_dir();
+        let resolve = |entry| resolve_extra_path(entry, Some(&home));
+        assert_eq!(resolve("~").unwrap(), home);
+        assert_eq!(resolve("~/.cargo/bin").unwrap(), home.join(".cargo/bin"));
+        let absolute = home.join("tools");
+        assert_eq!(resolve(absolute.to_str().unwrap()).unwrap(), absolute);
+    }
+
+    #[test]
+    fn extra_path_entries_that_cannot_be_resolved_are_refused() {
+        let home = std::env::temp_dir();
+        for entry in ["bin", "./bin", "", "~other/bin"] {
+            let error = resolve_extra_path(entry, Some(&home)).unwrap_err();
+            assert!(error.contains("not an absolute path"), "{error}");
+        }
+        let error = resolve_extra_path("~/bin", None).unwrap_err();
+        assert!(error.contains("no home directory"), "{error}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_path_separator_inside_an_entry_is_refused() {
+        let error = resolve_extra_path("/opt/a:/opt/b", None).unwrap_err();
+        assert!(error.contains("cannot be part of PATH"), "{error}");
+    }
+
+    #[test]
+    fn bad_entries_are_reported_and_left_out_of_the_config() {
+        let good = std::env::temp_dir().join("tools");
+        let settings = BashSettings {
+            extra_path: vec![good.display().to_string(), "bin".into()],
+            ..BashSettings::default()
+        };
+        let mut config = ShellConfig::default();
+        settings.apply_to(&mut config);
+        assert_eq!(config.extra_path, vec![good]);
+        assert_eq!(settings.extra_path_problems().len(), 1);
     }
 }

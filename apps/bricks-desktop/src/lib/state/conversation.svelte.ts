@@ -366,6 +366,7 @@ export interface JobInfo {
   signal?: number
   durationMs?: number
   logs: string[]
+  logsError?: string
 }
 
 export interface SearchResult {
@@ -1417,6 +1418,7 @@ export class Conversation {
           j.signal = env.signal
           j.durationMs = env.duration_ms
           j.logs = env.logs ?? []
+          j.logsError = env.logs_error
         }
         const link = this.jobCommands.get(env.job_id)
         if (link) this.updateCommand(link.runId, link.key, env.state, env.duration_ms, env.logs ?? [])

@@ -36,7 +36,8 @@ pub struct BricksConfig {
     /// `[background]`: background jobs (`Bash` with `background: true`,
     /// the `Job` tool).
     pub background: bricks_tools::jobs::JobSettings,
-    /// `[bash]`: foreground commands (`yield_time_ms`, the hand-over to a task).
+    /// `[bash]`: foreground commands (`yield_time_ms`, the hand-over to a
+    /// task) and the directories added to `PATH` (`extra_path`).
     pub bash: bricks_tools::shell::BashSettings,
 }
 
@@ -166,7 +167,13 @@ impl BricksConfig {
                 .push(format!("{name}: [background]: {e} (job defaults used)")),
         }
         match table_from_bricks_toml::<bricks_tools::shell::BashSettings>(text, "bash") {
-            Ok(Some(b)) => c.bash = b,
+            Ok(Some(b)) => {
+                for problem in b.extra_path_problems() {
+                    c.diagnostics
+                        .push(format!("{name}: [bash]: {problem} (entry ignored)"));
+                }
+                c.bash = b;
+            }
             Ok(None) => {}
             Err(e) => c
                 .diagnostics
@@ -414,6 +421,25 @@ mod tests {
             c.diagnostics.iter().any(|d| d.contains("[bash]")),
             "{:#?}",
             c.diagnostics
+        );
+    }
+
+    /// `[bash] extra_path` is read; an entry that cannot be used is reported
+    /// and the rest of the section is kept.
+    #[test]
+    fn the_bash_section_reads_the_extra_path_and_reports_bad_entries() {
+        let c = BricksConfig::from_texts(
+            Some("[bash]\nyield_time_ms = 2500\nextra_path = [\"~/.cargo/bin\", \"bin\"]\n"),
+            &[],
+        );
+        assert_eq!(c.bash.yield_time_ms, 2500);
+        assert_eq!(c.bash.extra_path, ["~/.cargo/bin", "bin"]);
+        assert_eq!(c.diagnostics.len(), 1, "{:#?}", c.diagnostics);
+        assert!(c.diagnostics[0].contains("\"bin\""), "{:#?}", c.diagnostics);
+        let c = BricksConfig::from_texts(Some("[bash]\nyield_time_ms = 2500\n"), &[]);
+        assert_eq!(
+            c.bash.extra_path,
+            bricks_tools::shell::BashSettings::default().extra_path
         );
     }
 

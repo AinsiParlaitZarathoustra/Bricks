@@ -3,11 +3,12 @@
 //! request (the git state when it may have changed), bounded, never fatal.
 
 use crate::system_prompt::{GitSnapshot, ModelIdentity, RequestContext};
-use std::path::Path;
+use std::ffi::{OsStr, OsString};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
-/// Programs worth knowing about, looked up once on `PATH`.
+/// Programs worth knowing about, looked up on the `PATH` Bash runs with.
 const EXECUTABLES: &[&str] = &[
     "git", "rg", "node", "npm", "python3", "cargo", "go", "java", "docker", "make",
 ];
@@ -18,10 +19,12 @@ const GIT_COMMITS: usize = 5;
 /// One git command at most this long.
 const GIT_TIMEOUT: Duration = Duration::from_secs(3);
 
-/// Facts of this process, looked up once for every agent: they do not change
+/// A fact of this process, looked up once for every agent: it does not change
 /// while it runs.
-static EXECUTABLES_FOUND: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
 static TIME_ZONE: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+
+/// A directory of `PATH` and when its entries last changed (`None`: unreadable).
+type SearchedDir = (PathBuf, Option<SystemTime>);
 
 /// An agent's git state, read again when the workspace may have changed.
 #[derive(Default)]
@@ -30,6 +33,8 @@ pub(crate) struct RequestEnv {
     /// The git state must be read again before the next request.
     git_stale: AtomicBool,
     git_read: AtomicBool,
+    /// The programs found, and the directories they were looked up in.
+    executables: parking_lot::Mutex<Option<(Vec<SearchedDir>, Vec<String>)>>,
 }
 
 impl RequestEnv {
@@ -49,16 +54,37 @@ impl RequestEnv {
         self.git.lock().clone()
     }
 
-    pub(crate) fn executables(&self) -> Vec<String> {
-        EXECUTABLES_FOUND
-            .get_or_init(|| {
-                EXECUTABLES
-                    .iter()
-                    .filter(|e| which::which(e).is_ok())
-                    .map(|e| e.to_string())
-                    .collect()
+    /// The programs found on `path` from `cwd`. Each call costs one `stat`
+    /// per directory; they are looked up again only when a directory changed
+    /// (another `PATH`, another `cwd` for a relative entry, or a program added
+    /// to or removed from one of them).
+    pub(crate) fn executables(&self, path: Option<&OsStr>, cwd: &Path) -> Vec<String> {
+        // Read before the lookup: a change during it is seen by the next call.
+        let dirs: Vec<SearchedDir> = search_dirs(path, cwd)
+            .into_iter()
+            .map(|dir| {
+                let modified = std::fs::metadata(&dir).and_then(|m| m.modified()).ok();
+                (dir, modified)
             })
-            .clone()
+            .collect();
+        let mut cache = self.executables.lock();
+        if let Some((seen, found)) = cache.as_ref()
+            && *seen == dirs
+        {
+            return found.clone();
+        }
+        let found: Vec<String> = EXECUTABLES
+            .iter()
+            .filter(|e| {
+                dirs.iter().any(|(dir, _)| {
+                    // A name with a directory: `which` looks at that file only.
+                    which::which_in(dir.join(e), None::<&OsStr>, cwd).is_ok()
+                })
+            })
+            .map(|e| e.to_string())
+            .collect();
+        *cache = Some((dirs, found.clone()));
+        found
     }
 
     pub(crate) fn time_zone(&self) -> Option<String> {
@@ -73,6 +99,8 @@ pub(crate) fn context(
     tools_dir: &Path,
     shell: Option<(Option<std::path::PathBuf>, bool)>,
     shell_dir: Option<std::path::PathBuf>,
+    path: Option<OsString>,
+    path_cwd: &Path,
     model: ModelIdentity,
     plan: Option<bricks_tools::todo_write::PlanState>,
 ) -> RequestContext {
@@ -93,10 +121,27 @@ pub(crate) fn context(
         shell_directory: shell_dir
             .filter(|d| d != tools_dir)
             .map(|d| d.display().to_string()),
-        executables: env.executables(),
+        executables: env.executables(path.as_deref(), path_cwd),
         model: Some(model),
         plan,
     }
+}
+
+/// The directories of `path` as a shell in `cwd` searches them: a relative
+/// entry (an empty one is `cwd` itself) from `cwd`, `~` as the home directory.
+fn search_dirs(path: Option<&OsStr>, cwd: &Path) -> Vec<PathBuf> {
+    let Some(path) = path else {
+        return Vec::new();
+    };
+    std::env::split_paths(path)
+        .map(|entry| match entry.strip_prefix("~") {
+            Ok(rest) => match dirs::home_dir() {
+                Some(home) => home.join(rest),
+                None => entry,
+            },
+            Err(_) => cwd.join(entry),
+        })
+        .collect()
 }
 
 /// `TZ` when it names a zone, else the target of `/etc/localtime`.
@@ -200,6 +245,188 @@ fn branch_of(header: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A fake `cargo` in a temporary directory.
+    #[cfg(unix)]
+    fn fake_cargo() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("cargo");
+        std::fs::write(&file, "#!/bin/sh\n").unwrap();
+        make_executable(&file);
+        dir
+    }
+
+    #[cfg(unix)]
+    fn make_executable(file: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    fn cargo() -> Vec<String> {
+        vec!["cargo".to_string()]
+    }
+
+    /// The list follows the `PATH` it is given, also after a first lookup.
+    #[cfg(unix)]
+    #[test]
+    fn the_executables_follow_the_path() {
+        let dir = fake_cargo();
+        let empty = tempfile::tempdir().unwrap();
+        let env = RequestEnv::default();
+        let cwd = empty.path();
+        let with = Some(dir.path().as_os_str());
+        let without = Some(empty.path().as_os_str());
+        assert!(env.executables(without, cwd).is_empty());
+        assert_eq!(env.executables(with, cwd), cargo());
+        assert_eq!(env.executables(with, cwd), cargo());
+        assert!(env.executables(without, cwd).is_empty());
+        assert!(env.executables(None, cwd).is_empty());
+    }
+
+    /// A program installed or removed in a directory already on `PATH`.
+    #[cfg(unix)]
+    #[test]
+    fn a_program_added_or_removed_in_a_known_directory_is_seen() {
+        let dir = fake_cargo();
+        let file = dir.path().join("cargo");
+        let path = Some(dir.path().as_os_str());
+        let env = RequestEnv::default();
+        assert_eq!(env.executables(path, dir.path()), cargo());
+        // Past the resolution of a coarse file system clock.
+        std::thread::sleep(Duration::from_millis(50));
+        std::fs::remove_file(&file).unwrap();
+        assert!(env.executables(path, dir.path()).is_empty());
+        std::thread::sleep(Duration::from_millis(50));
+        std::fs::write(&file, "#!/bin/sh\n").unwrap();
+        make_executable(&file);
+        assert_eq!(env.executables(path, dir.path()), cargo());
+    }
+
+    /// A directory that appears after the first lookup.
+    #[cfg(unix)]
+    #[test]
+    fn a_directory_created_later_is_seen() {
+        let base = tempfile::tempdir().unwrap();
+        let later = base.path().join("later");
+        let env = RequestEnv::default();
+        assert!(
+            env.executables(Some(later.as_os_str()), base.path())
+                .is_empty()
+        );
+        std::fs::create_dir(&later).unwrap();
+        std::fs::write(later.join("cargo"), "#!/bin/sh\n").unwrap();
+        make_executable(&later.join("cargo"));
+        assert_eq!(
+            env.executables(Some(later.as_os_str()), base.path()),
+            cargo()
+        );
+    }
+
+    /// With the directories unchanged, nothing is looked up: the program
+    /// slipped in here, under the directory's previous date, stays unseen.
+    #[cfg(unix)]
+    #[test]
+    fn unchanged_directories_reuse_the_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = Some(dir.path().as_os_str());
+        let date = std::fs::metadata(dir.path()).unwrap().modified().unwrap();
+        let env = RequestEnv::default();
+        assert!(env.executables(path, dir.path()).is_empty());
+        let file = dir.path().join("cargo");
+        std::fs::write(&file, "#!/bin/sh\n").unwrap();
+        make_executable(&file);
+        std::fs::File::open(dir.path())
+            .unwrap()
+            .set_modified(date)
+            .unwrap();
+        assert!(env.executables(path, dir.path()).is_empty());
+    }
+
+    /// A relative entry is searched from the directory given, never from the
+    /// process's, and the list follows that directory.
+    #[cfg(unix)]
+    #[test]
+    fn a_relative_entry_follows_the_directory_of_the_session() {
+        let base = tempfile::tempdir().unwrap();
+        let project = base.path().join("project");
+        std::fs::create_dir_all(project.join("rel")).unwrap();
+        std::fs::write(project.join("rel/cargo"), "#!/bin/sh\n").unwrap();
+        make_executable(&project.join("rel/cargo"));
+        let path = Some(OsStr::new("rel"));
+        let env = RequestEnv::default();
+        assert_eq!(env.executables(path, &project), cargo());
+        assert!(env.executables(path, base.path()).is_empty());
+        assert_eq!(env.executables(path, &project), cargo());
+    }
+
+    /// An empty entry of `PATH` is the current directory, as in a shell.
+    #[cfg(unix)]
+    #[test]
+    fn an_empty_entry_is_the_directory_of_the_session() {
+        let dir = fake_cargo();
+        let other = tempfile::tempdir().unwrap();
+        let path = Some(OsStr::new("/nonexistent-bricks:"));
+        let env = RequestEnv::default();
+        assert_eq!(env.executables(path, dir.path()), cargo());
+        assert!(env.executables(path, other.path()).is_empty());
+    }
+
+    /// Absolute entries do not depend on the directory: changing it keeps
+    /// the list, without a new lookup.
+    #[cfg(unix)]
+    #[test]
+    fn absolute_entries_do_not_depend_on_the_directory() {
+        let dir = fake_cargo();
+        let other = tempfile::tempdir().unwrap();
+        let path = Some(dir.path().as_os_str());
+        assert_eq!(
+            search_dirs(path, other.path()),
+            search_dirs(path, dir.path())
+        );
+        let env = RequestEnv::default();
+        assert_eq!(env.executables(path, other.path()), cargo());
+        assert_eq!(env.executables(path, dir.path()), cargo());
+    }
+
+    /// A directory holding a `:` cannot be written in a `PATH`, but a
+    /// relative entry may lead there.
+    #[cfg(unix)]
+    #[test]
+    fn a_relative_entry_works_from_a_directory_with_a_separator() {
+        let base = tempfile::tempdir().unwrap();
+        let cwd = base.path().join("a:b");
+        std::fs::create_dir_all(cwd.join("rel")).unwrap();
+        std::fs::write(cwd.join("rel/cargo"), "#!/bin/sh\n").unwrap();
+        make_executable(&cwd.join("rel/cargo"));
+        let env = RequestEnv::default();
+        assert_eq!(env.executables(Some(OsStr::new("rel")), &cwd), cargo());
+    }
+
+    #[test]
+    fn a_tilde_entry_is_the_home_directory() {
+        let Some(home) = dirs::home_dir() else {
+            return;
+        };
+        let dirs = search_dirs(Some(OsStr::new("~/bin")), Path::new("/elsewhere"));
+        assert_eq!(dirs, vec![home.join("bin")]);
+    }
+
+    /// Two agents with different `PATH`s in one process do not share a list.
+    #[cfg(unix)]
+    #[test]
+    fn the_executables_are_not_shared_between_agents() {
+        let dir = fake_cargo();
+        let empty = tempfile::tempdir().unwrap();
+        let first = RequestEnv::default();
+        let second = RequestEnv::default();
+        let found = first.executables(Some(dir.path().as_os_str()), dir.path());
+        assert_eq!(found, cargo());
+        assert!(
+            second
+                .executables(Some(empty.path().as_os_str()), dir.path())
+                .is_empty()
+        );
+    }
 
     #[test]
     fn the_branch_is_read_from_the_status_header() {

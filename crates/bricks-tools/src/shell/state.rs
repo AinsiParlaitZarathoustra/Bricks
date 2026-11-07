@@ -19,7 +19,7 @@
 
 use parking_lot::Mutex;
 use std::collections::BTreeMap;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -129,6 +129,32 @@ impl ShellState {
             }),
             generation: AtomicU64::new(0),
         }
+    }
+
+    /// [`Self::from_env`] with `extra` at the end of `PATH`. Applied here
+    /// only, so a later change of `PATH` in the session is kept as it is.
+    pub fn with_extra_path(extra: &[PathBuf]) -> Self {
+        let state = Self::from_env();
+        {
+            let mut inner = state.inner.lock();
+            let current = inner.exports.get("PATH").and_then(|f| f.value.clone());
+            if let Some(path) = extended_path(current.as_deref(), extra) {
+                inner.exports.insert(
+                    "PATH".to_string(),
+                    Field {
+                        value: Some(path),
+                        seq: 0,
+                    },
+                );
+            }
+        }
+        state
+    }
+
+    /// The `PATH` commands start from (`None`: unset).
+    pub fn path(&self) -> Option<OsString> {
+        let inner = self.inner.lock();
+        inner.exports.get("PATH").and_then(|f| f.value.clone())
     }
 
     /// The working directory commands start from, once one was set.
@@ -249,6 +275,30 @@ impl ShellState {
     }
 }
 
+/// `path` followed by the directories of `extra` it does not have yet, with
+/// the separator of this system. Without anything to add, `path` is returned
+/// as it is.
+pub(crate) fn extended_path(path: Option<&OsStr>, extra: &[PathBuf]) -> Option<OsString> {
+    // An empty `PATH` has no entry: splitting it would give the current
+    // directory.
+    let mut entries: Vec<PathBuf> = path
+        .filter(|p| !p.is_empty())
+        .map(|p| std::env::split_paths(p).collect())
+        .unwrap_or_default();
+    let existing = entries.len();
+    for dir in extra {
+        if !entries.contains(dir) {
+            entries.push(dir.clone());
+        }
+    }
+    if entries.len() == existing {
+        return path.map(OsStr::to_os_string);
+    }
+    std::env::join_paths(entries)
+        .ok()
+        .or_else(|| path.map(OsStr::to_os_string))
+}
+
 fn valid_name(name: &str) -> bool {
     let mut chars = name.chars();
     matches!(chars.next(), Some(c) if c == '_' || c.is_ascii_alphabetic())
@@ -308,7 +358,6 @@ fn set_field<V>(
 /// lossily there.
 #[cfg(unix)]
 fn os_string(bytes: &[u8]) -> OsString {
-    use std::ffi::OsStr;
     use std::os::unix::ffi::OsStrExt;
     OsStr::from_bytes(bytes).to_os_string()
 }
@@ -399,6 +448,39 @@ pub fn parse_dump(bytes: &[u8]) -> Option<Snapshot> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extra_directories_go_last_in_their_order_and_only_once() {
+        let path = OsStr::new("/a:/b/");
+        let extra = [
+            PathBuf::from("/c"),
+            PathBuf::from("/a"),
+            PathBuf::from("/b"),
+            PathBuf::from("/d"),
+            PathBuf::from("/c/"),
+        ];
+        assert_eq!(
+            extended_path(Some(path), &extra),
+            Some(OsString::from("/a:/b/:/c:/d"))
+        );
+    }
+
+    #[test]
+    fn nothing_to_add_keeps_the_path_as_it_is() {
+        let path = OsStr::new("/a::/b:/a");
+        assert_eq!(extended_path(Some(path), &[]).as_deref(), Some(path));
+        let known = [PathBuf::from("/b/")];
+        assert_eq!(extended_path(Some(path), &known).as_deref(), Some(path));
+        assert_eq!(extended_path(None, &[]), None);
+    }
+
+    #[test]
+    fn an_empty_path_does_not_become_the_current_directory() {
+        let extra = [PathBuf::from("/c")];
+        let expected = Some(OsString::from("/c"));
+        assert_eq!(extended_path(Some(OsStr::new("")), &extra), expected);
+        assert_eq!(extended_path(None, &extra), expected);
+    }
 
     fn base(dir: &str) -> Snapshot {
         Snapshot {

@@ -857,14 +857,34 @@ impl Agent {
                 let replace = o.replace_system_prompt && o.custom_system_prompt.is_some();
                 if !replace {
                     o.git_status = self.request_env.git(&self.working_dir).await;
-                    let shell = has("Bash").then(|| {
-                        let config = self
-                            .extensions
+                    let shell_config = has("Bash").then(|| {
+                        self.extensions
                             .get::<bricks_tools::shell::ShellConfig>()
                             .map(|c| (*c).clone())
-                            .unwrap_or_default();
-                        bricks_tools::shell::tool_shell(&config, &self.extensions)
+                            .unwrap_or_default()
                     });
+                    let shell = shell_config
+                        .as_ref()
+                        .map(|c| bricks_tools::shell::tool_shell(c, &self.extensions));
+                    let shell_dir = has("Bash")
+                        .then(|| bricks_tools::shell::session_cwd(&self.shell_session_id))
+                        .flatten();
+                    // Bash on this machine: the programs it can reach from
+                    // where its next command starts. In a sandbox, or without
+                    // Bash, nothing says more than the process's own `PATH`.
+                    let (path, path_cwd) = match (&shell, &shell_config) {
+                        (Some((_, true)), Some(c)) => (
+                            bricks_tools::shell::session_path(&self.shell_session_id, c),
+                            shell_dir
+                                .clone()
+                                .filter(|d| d.is_dir())
+                                .unwrap_or_else(|| self.working_dir.clone()),
+                        ),
+                        _ => (
+                            std::env::var_os("PATH"),
+                            std::env::current_dir().unwrap_or_default(),
+                        ),
+                    };
                     let identity = selection.provider.request_identity(options);
                     let model = system_prompt::ModelIdentity {
                         selection: Some(selection.model_label()),
@@ -877,9 +897,9 @@ impl Agent {
                         &self.request_env,
                         &self.working_dir,
                         shell,
-                        has("Bash")
-                            .then(|| bricks_tools::shell::session_cwd(&self.shell_session_id))
-                            .flatten(),
+                        shell_dir,
+                        path,
+                        &path_cwd,
                         model,
                         plan,
                     ));

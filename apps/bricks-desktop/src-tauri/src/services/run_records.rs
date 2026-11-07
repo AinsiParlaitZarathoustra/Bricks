@@ -1058,6 +1058,7 @@ mod tests {
                 signal: None,
                 duration_ms: 5_000,
                 logs: vec!["fin".into()],
+                logs_error: None,
             },
         ));
         assert_eq!(late.as_deref(), Some("run-1"));

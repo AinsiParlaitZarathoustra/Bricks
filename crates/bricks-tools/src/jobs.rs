@@ -103,6 +103,9 @@ pub enum JobEvent {
         /// Durable copies of the raw logs.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         logs: Vec<String>,
+        /// Why a durable copy is missing, when copying failed.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        logs_error: Option<String>,
     },
 }
 
@@ -114,6 +117,7 @@ struct Entry {
     task: Arc<Task>,
     cwd: PathBuf,
     logs: Vec<String>,
+    logs_error: Option<String>,
     /// Explicitly started in the background (not a handed-over command):
     /// survives the run that started it.
     durable: bool,
@@ -236,6 +240,7 @@ impl JobRegistry {
                 task: Arc::clone(&task),
                 cwd: cwd.to_path_buf(),
                 logs: Vec::new(),
+                logs_error: None,
                 durable,
             });
         }
@@ -258,9 +263,10 @@ impl JobRegistry {
                     });
                 }
             }
-            let logs = me.preserve_logs(&jid, &task);
+            let (logs, logs_error) = me.preserve_logs(&jid, &task);
             if let Some(e) = me.table.lock().entries.iter_mut().find(|e| e.id == jid) {
                 e.logs = logs.clone();
+                e.logs_error = logs_error.clone();
             }
             let (state, code, signal) = match task.state() {
                 TaskState::Completed { code } => ("completed", Some(code), None),
@@ -275,29 +281,34 @@ impl JobRegistry {
                 signal,
                 duration_ms: task.elapsed().as_millis() as u64,
                 logs,
+                logs_error,
             });
         });
         id
     }
 
-    /// Copy a finished job's raw logs (each capped) to the session's files.
-    fn preserve_logs(&self, id: &str, task: &Task) -> Vec<String> {
+    /// Copy a finished job's raw logs (each capped) to the session's files:
+    /// the copies made, and why any is missing.
+    fn preserve_logs(&self, id: &str, task: &Task) -> (Vec<String>, Option<String>) {
         let Some(dir) = &self.durable_dir else {
-            return Vec::new();
+            return (Vec::new(), None);
         };
         let dir = dir.join(id);
-        if std::fs::create_dir_all(&dir).is_err() {
-            return Vec::new();
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            return (Vec::new(), Some(format!("cannot create {}: {e}", dir.display())));
         }
         let (out, err) = task.raw_logs();
         let mut kept = Vec::new();
+        let mut failures = Vec::new();
         for (src, name) in [(out, "stdout.log"), (err, "stderr.log")] {
             let dst = dir.join(name);
-            if std::fs::copy(&src, &dst).is_ok() {
-                kept.push(dst.display().to_string());
+            match std::fs::copy(&src, &dst) {
+                Ok(_) => kept.push(dst.display().to_string()),
+                Err(e) => failures.push(format!("{name} not copied: {e}")),
             }
         }
-        kept
+        let error = (!failures.is_empty()).then(|| failures.join("; "));
+        (kept, error)
     }
 
     /// A job its owner (or a frontend: `viewer` = `None`) may see.
@@ -333,6 +344,7 @@ impl JobRegistry {
                 task: Arc::clone(&e.task),
                 cwd: e.cwd.clone(),
                 kept_logs: e.logs.clone(),
+                logs_error: e.logs_error.clone(),
             })
             .collect()
     }
@@ -422,6 +434,8 @@ pub struct JobView {
     pub cwd: PathBuf,
     /// Durable copies of the raw logs, once they exist (the job ended).
     pub kept_logs: Vec<String>,
+    /// Why a durable copy is missing, when copying failed.
+    pub logs_error: Option<String>,
 }
 
 impl JobView {
@@ -463,6 +477,14 @@ impl JobView {
     /// Where the raw logs are now: the durable copies once made, else the
     /// live logs (never a copy announced before it exists).
     fn logs_line(&self) -> String {
+        let line = self.live_logs_line();
+        match &self.logs_error {
+            Some(e) => format!("{line}; keeping them failed: {e}"),
+            None => line,
+        }
+    }
+
+    fn live_logs_line(&self) -> String {
         if !self.kept_logs.is_empty() {
             return format!("raw logs (kept): {}", self.kept_logs.join(", "));
         }
@@ -487,6 +509,9 @@ pub const NO_ACCESSIBLE_JOB: &str = "No accessible job with this id. A job is vi
 
 /// Marker of a line cut to fit a page.
 const PAGE_CUT: &str = " [truncated to fit the page; the whole line is in the raw log]";
+/// The same, when the raw log is capped or failed: it may not hold the line.
+const PAGE_CUT_NO_RAW: &str =
+    " [truncated to fit the page; the raw log is incomplete and may not hold the whole line]";
 
 /// `Job`: the calling agent's jobs, on its session's registry.
 pub struct JobTool {
@@ -739,6 +764,11 @@ impl Tool for JobTool {
 /// holds a line always moves the cursor: a first line longer than the
 /// budget is shown cut (and marked), and the cursor goes past it.
 fn render_page(page: &crate::shell::background::Page, budget: usize) -> String {
+    let marker = if page.raw_log_capped || page.raw_log_error.is_some() {
+        PAGE_CUT_NO_RAW
+    } else {
+        PAGE_CUT
+    };
     let mut body = String::new();
     let mut shown = 0u64;
     let mut cut = false;
@@ -753,12 +783,12 @@ fn render_page(page: &crate::shell::background::Page, budget: usize) -> String {
         if shown == 0 {
             // The first line alone exceeds the page: an excerpt, cut on a
             // character boundary, with room for the marker.
-            let mut end = budget.saturating_sub(PAGE_CUT.len() + 1).min(line.len());
+            let mut end = budget.saturating_sub(marker.len() + 1).min(line.len());
             while !line.is_char_boundary(end) {
                 end -= 1;
             }
             body.push_str(&line[..end]);
-            body.push_str(PAGE_CUT);
+            body.push_str(marker);
             body.push('\n');
             shown = 1;
             cut = true;
@@ -816,7 +846,7 @@ fn render_page(page: &crate::shell::background::Page, budget: usize) -> String {
         out.push_str(&format!(
             "[line in progress, not yet complete; it does not move the offset]\n{}{}\n",
             &p[..end],
-            if end < p.len() { PAGE_CUT } else { "" }
+            if end < p.len() { marker } else { "" }
         ));
     }
     out
@@ -939,6 +969,92 @@ mod tests {
             .expect("finished");
         assert_eq!(logs.len(), 2);
         assert!(std::fs::read_to_string(&logs[0]).unwrap().contains("two"));
+    }
+
+    #[tokio::test]
+    async fn a_start_abandoned_while_waiting_for_readiness_is_a_stopped_job() {
+        let dir = tempfile::tempdir().unwrap();
+        let reg = JobRegistry::new(JobSettings::default(), None);
+        let a = ctx(dir.path(), &reg, "agent_a");
+        // The run is cancelled while Bash waits for a line that never comes.
+        let abandoned = tokio::time::timeout(
+            Duration::from_millis(400),
+            start(
+                &a,
+                "sleep 30",
+                json!({ "ready_pattern": "never printed", "ready_timeout": 10_000 }),
+            ),
+        )
+        .await;
+        assert!(abandoned.is_err(), "the call was still waiting");
+        let jobs = reg.views(Some("agent_a"));
+        assert_eq!(jobs.len(), 1, "the command is a job, not out of reach");
+        assert!(
+            jobs[0].task.wait_finished(Duration::from_secs(5)).await,
+            "nobody got its id: it is stopped"
+        );
+        assert_eq!(reg.running(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_failed_log_copy_is_said_at_the_end_and_in_status() {
+        let dir = tempfile::tempdir().unwrap();
+        // The place for the durable copies is a file: no directory there.
+        let blocked = dir.path().join("jobs");
+        std::fs::write(&blocked, "").unwrap();
+        let reg = JobRegistry::new(JobSettings::default(), Some(blocked));
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let ev = Arc::clone(&events);
+        reg.set_sink(Arc::new(move |e| ev.lock().push(e)));
+        let a = ctx(dir.path(), &reg, "agent_a");
+        let id = job_id(&start(&a, "echo done", json!({})).await.content);
+        job(&a, json!({ "action": "wait", "job_id": id, "timeout_ms": 10_000 })).await;
+        let mut error = None;
+        for _ in 0..50 {
+            error = events.lock().iter().find_map(|e| match e {
+                JobEvent::Finished { logs, logs_error, .. } => {
+                    assert!(logs.is_empty());
+                    logs_error.clone()
+                }
+                _ => None,
+            });
+            if error.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        let error = error.expect("the end says why the logs were not kept");
+        assert!(error.contains("cannot create"), "{error}");
+        let status = job(&a, json!({ "action": "status", "job_id": id })).await;
+        assert!(
+            status.content.contains("keeping them failed: cannot create"),
+            "{}",
+            status.content
+        );
+    }
+
+    #[test]
+    fn a_cut_line_promises_the_raw_log_only_when_it_is_whole() {
+        let mut page = crate::shell::background::Page {
+            stream: Stream::Stdout,
+            lines: vec![(1, "x".repeat(4096))],
+            dropped_before: 0,
+            evicted: 0,
+            total_lines: 1,
+            next_offset: 1,
+            partial: None,
+            raw_log: PathBuf::from("/tmp/stdout.log"),
+            raw_log_capped: false,
+            raw_log_error: None,
+            received_bytes: 4097,
+        };
+        assert!(render_page(&page, 1024).contains(PAGE_CUT));
+        page.raw_log_capped = true;
+        let capped = render_page(&page, 1024);
+        assert!(capped.contains(PAGE_CUT_NO_RAW) && !capped.contains(PAGE_CUT), "{capped}");
+        page.raw_log_capped = false;
+        page.raw_log_error = Some("disk full".into());
+        assert!(render_page(&page, 1024).contains(PAGE_CUT_NO_RAW));
     }
 
     #[tokio::test]
