@@ -8,6 +8,7 @@ pub mod changes;
 pub mod computer_use;
 pub mod conversations;
 pub mod keep_awake;
+pub mod mail;
 pub mod paths;
 pub mod prefs;
 pub mod projects;

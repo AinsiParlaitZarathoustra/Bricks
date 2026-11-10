@@ -216,6 +216,8 @@ export const sessionClose = (sessionId: string, cancel = false) =>
 export const sessionRename = (sessionId: string, title: string) =>
   call<SessionItem>('session_rename', { sessionId, title })
 export const sessionDelete = (sessionId: string) => call<void>('session_delete', { sessionId })
+/** Copies the conversation into a new one, a fork of it. */
+export const sessionFork = (sessionId: string) => call<SessionItem>('session_fork', { sessionId })
 /** `display`: the typed command of a submit (e.g. `/skill debug`), shown on its user message. */
 export const sessionCommand = (sessionId: string, command: Command, display: string | null = null) =>
   call<void>('session_command', { sessionId, command, display })

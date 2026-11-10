@@ -660,6 +660,7 @@ dependencies = [
 name = "bricks-desktop"
 version = "1.0.0-alpha.1"
 dependencies = [
+ "async-trait",
  "base64 0.22.1",
  "bricks-agent",
  "bricks-config",

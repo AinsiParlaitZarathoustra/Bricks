@@ -67,6 +67,7 @@ pub fn run() {
             commands::sessions::session_close,
             commands::sessions::session_rename,
             commands::sessions::session_delete,
+            commands::sessions::session_fork,
             commands::sessions::session_command,
             commands::sessions::session_snapshot,
             commands::sessions::attachment_save,

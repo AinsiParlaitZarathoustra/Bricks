@@ -49,6 +49,12 @@ pub async fn session_rename(state: State<'_, AppState>, session_id: String, titl
     state.rename_session(&session_id, &title).await
 }
 
+/// Copies the conversation into a new one, a fork of it.
+#[tauri::command]
+pub async fn session_fork(state: State<'_, AppState>, session_id: String) -> IpcResult<SessionItem> {
+    state.fork_session(&session_id).await
+}
+
 /// Closes the controller (cancelling a run) then deletes the stored
 /// session.
 #[tauri::command]

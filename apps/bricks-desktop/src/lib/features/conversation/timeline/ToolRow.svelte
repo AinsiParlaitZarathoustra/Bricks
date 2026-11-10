@@ -30,6 +30,13 @@
     questions.some((q) => q.outcome?.state === 'skipped' && q.outcome.reason === 'cancelled'),
   )
   const state = $derived(cancelled ? 'failed' : toolLineState(item, interrupted))
+  // An image the call showed the model: `Read` of an image (its result names it, after the
+  // report header a reopened history keeps), or `ViewImage` in former conversations.
+  const READ_IMAGE = /^(?:[^\n]*\[Read\][^\n]*\n)?Image .+: image\/(?:png|jpeg|gif|webp)/
+  const showsImage = $derived(
+    item.status === 'ok' &&
+      (item.name === 'ViewImage' || (item.name === 'Read' && READ_IMAGE.test(item.output ?? ''))),
+  )
 </script>
 
 <ToolLine name={item.name} {state} durationMs={item.durationMs}>
@@ -40,6 +47,6 @@
     <EditRow item={edit} {conversation} inline />
   {/each}
 </ToolLine>
-{#if item.name === 'ViewImage' && item.status === 'ok'}
+{#if showsImage}
   <ToolImage {item} {conversation} />
 {/if}

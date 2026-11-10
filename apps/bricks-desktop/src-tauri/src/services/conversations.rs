@@ -187,6 +187,7 @@ pub fn item_from_summary(
         working_dir: s.working_dir.as_deref().map(path_text),
         open,
         running,
+        parent_id: s.parent.clone(),
     }
 }
 

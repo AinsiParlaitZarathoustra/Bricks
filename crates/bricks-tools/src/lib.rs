@@ -156,7 +156,7 @@ pub struct ToolResult {
     /// Structured form of the result, when the tool provides one; the agent
     /// renders it uniformly (see [`tool_report`]).
     pub report: Option<Box<tool_report::ToolReport>>,
-    /// Images the result shows the model (`ViewImage`). The agent carries
+    /// Images the result shows the model (`Read` of an image). The agent carries
     /// them as the model's protocol allows, or says why it cannot.
     pub images: Vec<ToolImage>,
 }
@@ -495,12 +495,11 @@ pub fn coding() -> Vec<Box<dyn Tool>> {
     tools
 }
 
-/// File system tools: Read, ViewImage, Write, Edit, ApplyPatch, Glob, Grep,
+/// File system tools: Read (text and images), Write, Edit, ApplyPatch, Glob, Grep,
 /// CodeSearch, CodeScout, CodeStats.
 pub fn filesystem() -> Vec<Box<dyn Tool>> {
     vec![
         Box::new(file_read::FileReadTool),
-        Box::new(view_image::ViewImageTool),
         Box::new(file_write::FileWriteTool),
         Box::new(file_edit::FileEditTool),
         Box::new(apply_patch::ApplyPatchTool),

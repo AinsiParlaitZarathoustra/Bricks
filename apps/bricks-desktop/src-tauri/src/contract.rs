@@ -199,6 +199,8 @@ pub struct SessionItem {
     /// A controller of this application currently owns the session.
     pub open: bool,
     pub running: bool,
+    /// The conversation this one was forked from.
+    pub parent_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]

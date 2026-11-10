@@ -1,4 +1,5 @@
-//! ViewImage: shows the model an image file (PNG, JPEG, GIF, WebP).
+//! Images read by `Read`: an image file (PNG, JPEG, GIF, WebP) is shown to
+//! the model.
 //!
 //! The file is read and its type found from its bytes, never from its name.
 //! The result's text names the image; the image itself travels in
@@ -7,7 +8,6 @@
 
 use super::*;
 use base64::Engine as _;
-use serde::Deserialize;
 
 /// Largest image read, in bytes: its base64 form stays under the 5 MB most
 /// providers accept for one image.
@@ -15,90 +15,59 @@ pub const MAX_IMAGE_BYTES: usize = 3_750_000;
 /// Longest side accepted, in pixels, when the format says it.
 pub const MAX_IMAGE_SIDE: u32 = 8_000;
 
-pub struct ViewImageTool;
-
-#[async_trait]
-impl Tool for ViewImageTool {
-    fn name(&self) -> &str {
-        "ViewImage"
-    }
-    fn description(&self) -> &str {
-        "Look at an image file (PNG, JPEG, GIF or WebP, up to 3.75 MB): you see the image \
-         itself, not a description. Use it for screenshots, diagrams or pictures on disk; \
-         use Read for text."
-    }
-    fn permission_level(&self) -> PermissionLevel {
-        PermissionLevel::ReadOnly
-    }
-    fn category(&self) -> ToolCategory {
-        ToolCategory::FileSystem
-    }
-
-    fn input_schema(&self) -> Value {
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "file_path": { "type": "string", "description": "Path to the image file" }
-            },
-            "required": ["file_path"]
-        })
-    }
-
-    async fn execute(&self, input: Value, ctx: &ToolContext) -> ToolResult {
-        #[derive(Deserialize)]
-        #[serde(deny_unknown_fields)]
-        struct Input {
-            file_path: String,
+/// Whether the file at `path` starts like a PNG, JPEG, GIF or WebP image.
+pub(crate) fn starts_like_image(path: &std::path::Path) -> bool {
+    use std::io::Read as _;
+    let mut head = [0u8; 12];
+    let Ok(mut file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut n = 0;
+    while n < head.len() {
+        match file.read(&mut head[n..]) {
+            Ok(0) | Err(_) => break,
+            Ok(k) => n += k,
         }
-
-        let input: Input = match crate::tool_feedback::parse_input(self, &input) {
-            Ok(i) => i,
-            Err(e) => return e,
-        };
-        // Relative paths are resolved against the agent's working directory.
-        let path = ctx.working_dir.join(&input.file_path);
-        if path.is_dir() {
-            return ToolResult::error(format!(
-                "{} is a directory, not an image. Use Glob to find the image files in it.",
-                input.file_path
-            ));
-        }
-        let read = path.clone();
-        let bytes = match tokio::task::spawn_blocking(move || read_limited(&read)).await {
-            Ok(Ok(b)) => b,
-            Ok(Err(e)) => return ToolResult::error(format!("{}: {e}", input.file_path)),
-            Err(e) => return ToolResult::error(format!("{}: {e}", input.file_path)),
-        };
-        let Some(media_type) = image_type(&bytes) else {
-            return ToolResult::error(format!(
-                "{} is not a PNG, JPEG, GIF or WebP image (its bytes say so, whatever its name). \
-                 Use Read for text files.",
-                input.file_path
-            ));
-        };
-        let size = image_size(&bytes, media_type);
-        if let Some((w, h)) = size
-            && w.max(h) > MAX_IMAGE_SIDE
-        {
-            return ToolResult::error(format!(
-                "{} is {w}×{h} pixels; images over {MAX_IMAGE_SIDE} pixels on a side are not \
-                 accepted. Make a smaller copy first (e.g. `sips -Z 2000 <file> --out <copy>`).",
-                input.file_path
-            ));
-        }
-        let shown = path.display().to_string();
-        let dims = size.map(|(w, h)| format!(", {w}×{h}")).unwrap_or_default();
-        let text = format!("Image {shown}: {media_type}{dims}, {} bytes.", bytes.len());
-        let image = ToolImage {
-            media_type: media_type.to_string(),
-            data_base64: base64::engine::general_purpose::STANDARD.encode(&bytes),
-            path: Some(shown),
-            bytes: bytes.len(),
-        };
-        ToolResult::success(text)
-            .with_metadata(serde_json::json!({ "media_type": media_type, "size": image.bytes }))
-            .with_images(vec![image])
     }
+    image_type(&head[..n]).is_some()
+}
+
+/// Shows the image at `path` to the model (`file_path` as the agent wrote it,
+/// for messages): its type and size in text, the image itself in
+/// [`ToolResult::images`].
+pub(crate) async fn view(path: std::path::PathBuf, file_path: &str) -> ToolResult {
+    let read = path.clone();
+    let bytes = match tokio::task::spawn_blocking(move || read_limited(&read)).await {
+        Ok(Ok(b)) => b,
+        Ok(Err(e)) => return ToolResult::error(format!("{file_path}: {e}")),
+        Err(e) => return ToolResult::error(format!("{file_path}: {e}")),
+    };
+    let Some(media_type) = image_type(&bytes) else {
+        return ToolResult::error(format!(
+            "{file_path} is not a PNG, JPEG, GIF or WebP image (its bytes say so, whatever its name)."
+        ));
+    };
+    let size = image_size(&bytes, media_type);
+    if let Some((w, h)) = size
+        && w.max(h) > MAX_IMAGE_SIDE
+    {
+        return ToolResult::error(format!(
+            "{file_path} is {w}×{h} pixels; images over {MAX_IMAGE_SIDE} pixels on a side are not \
+             accepted. Make a smaller copy first (e.g. `sips -Z 2000 <file> --out <copy>`)."
+        ));
+    }
+    let shown = path.display().to_string();
+    let dims = size.map(|(w, h)| format!(", {w}×{h}")).unwrap_or_default();
+    let text = format!("Image {shown}: {media_type}{dims}, {} bytes.", bytes.len());
+    let image = ToolImage {
+        media_type: media_type.to_string(),
+        data_base64: base64::engine::general_purpose::STANDARD.encode(&bytes),
+        path: Some(shown),
+        bytes: bytes.len(),
+    };
+    ToolResult::success(text)
+        .with_metadata(serde_json::json!({ "media_type": media_type, "size": image.bytes }))
+        .with_images(vec![image])
 }
 
 /// The file's bytes, refused past [`MAX_IMAGE_BYTES`] (only one byte more is read).
@@ -184,7 +153,7 @@ mod tests {
     fn ctx(dir: &std::path::Path) -> ToolContext {
         ToolContext {
             working_dir: dir.to_path_buf(),
-            session_id: "view-image-test".into(),
+            session_id: "read-image-test".into(),
             permissions: Arc::new(AllowAll),
             cost_tracker: Arc::new(CostTracker::new()),
             mcp_manager: None,
@@ -196,7 +165,7 @@ mod tests {
     async fn an_image_is_named_in_text_and_carried_as_an_image() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("shot.png"), png(640, 480)).unwrap();
-        let r = ViewImageTool
+        let r = crate::file_read::FileReadTool
             .execute(
                 serde_json::json!({ "file_path": "shot.png" }),
                 &ctx(dir.path()),
@@ -210,24 +179,45 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn text_named_like_an_image_is_refused() {
+    async fn text_named_like_an_image_is_read_as_text() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("fake.png"), "not an image").unwrap();
-        let r = ViewImageTool
+        let r = crate::file_read::FileReadTool
             .execute(
                 serde_json::json!({ "file_path": "fake.png" }),
                 &ctx(dir.path()),
             )
             .await;
-        assert!(r.is_error);
+        assert!(!r.is_error, "read as text: {}", r.content);
+        assert!(r.content.contains("not an image"), "{}", r.content);
         assert!(r.images.is_empty());
+    }
+
+    #[tokio::test]
+    async fn offset_and_limit_are_refused_for_an_image() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("shot.png"), png(2, 2)).unwrap();
+        for input in [
+            serde_json::json!({ "file_path": "shot.png", "offset": 1 }),
+            serde_json::json!({ "file_path": "shot.png", "limit": 10 }),
+        ] {
+            let r = crate::file_read::FileReadTool
+                .execute(input, &ctx(dir.path()))
+                .await;
+            assert!(
+                r.is_error && r.content.contains("offset and limit"),
+                "{}",
+                r.content
+            );
+            assert!(r.images.is_empty());
+        }
     }
 
     #[tokio::test]
     async fn too_large_or_too_wide_images_are_refused() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("wide.png"), png(9_000, 10)).unwrap();
-        let r = ViewImageTool
+        let r = crate::file_read::FileReadTool
             .execute(
                 serde_json::json!({ "file_path": "wide.png" }),
                 &ctx(dir.path()),
@@ -237,7 +227,7 @@ mod tests {
         let mut big = png(10, 10);
         big.resize(MAX_IMAGE_BYTES + 1, 0);
         std::fs::write(dir.path().join("big.png"), big).unwrap();
-        let r = ViewImageTool
+        let r = crate::file_read::FileReadTool
             .execute(
                 serde_json::json!({ "file_path": "big.png" }),
                 &ctx(dir.path()),
@@ -263,7 +253,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir(dir.path().join("sub")).unwrap();
         std::fs::write(dir.path().join("sub/diagram.png"), png(4, 5)).unwrap();
-        let r = ViewImageTool
+        let r = crate::file_read::FileReadTool
             .execute(
                 serde_json::json!({ "file_path": "sub/diagram.png" }),
                 &ctx(dir.path()),
@@ -281,7 +271,7 @@ mod tests {
         let other = tempfile::tempdir().unwrap();
         let abs = image_dir.path().join("abs.png");
         std::fs::write(&abs, png(2, 3)).unwrap();
-        let r = ViewImageTool
+        let r = crate::file_read::FileReadTool
             .execute(
                 serde_json::json!({ "file_path": abs.display().to_string() }),
                 &ctx(other.path()),
@@ -299,7 +289,7 @@ mod tests {
     async fn a_directory_is_refused_with_a_hint_to_glob_it() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir(dir.path().join("pics")).unwrap();
-        let r = ViewImageTool
+        let r = crate::file_read::FileReadTool
             .execute(serde_json::json!({ "file_path": "pics" }), &ctx(dir.path()))
             .await;
         assert!(r.is_error);
@@ -314,14 +304,14 @@ mod tests {
     #[tokio::test]
     async fn a_missing_file_is_an_error_naming_it_and_shows_nothing() {
         let dir = tempfile::tempdir().unwrap();
-        let r = ViewImageTool
+        let r = crate::file_read::FileReadTool
             .execute(
                 serde_json::json!({ "file_path": "nope.png" }),
                 &ctx(dir.path()),
             )
             .await;
         assert!(r.is_error);
-        assert!(r.content.starts_with("nope.png:"), "{}", r.content);
+        assert!(r.content.contains("nope.png"), "{}", r.content);
         assert!(r.images.is_empty());
     }
 
@@ -330,7 +320,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let bytes = webp();
         std::fs::write(dir.path().join("pic.webp"), &bytes).unwrap();
-        let r = ViewImageTool
+        let r = crate::file_read::FileReadTool
             .execute(
                 serde_json::json!({ "file_path": "pic.webp" }),
                 &ctx(dir.path()),
@@ -352,7 +342,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let bytes = png(7, 9);
         std::fs::write(dir.path().join("exact.png"), &bytes).unwrap();
-        let r = ViewImageTool
+        let r = crate::file_read::FileReadTool
             .execute(
                 serde_json::json!({ "file_path": "exact.png" }),
                 &ctx(dir.path()),
@@ -370,7 +360,7 @@ mod tests {
         let mut exact = png(10, 10);
         exact.resize(MAX_IMAGE_BYTES, 0);
         std::fs::write(dir.path().join("edge.png"), &exact).unwrap();
-        let r = ViewImageTool
+        let r = crate::file_read::FileReadTool
             .execute(
                 serde_json::json!({ "file_path": "edge.png" }),
                 &ctx(dir.path()),
@@ -388,17 +378,22 @@ mod tests {
             serde_json::json!({ "file_path": "shot.png", "width": 3 }),
             serde_json::json!({}),
         ] {
-            let r = ViewImageTool.execute(input, &ctx(dir.path())).await;
+            let r = crate::file_read::FileReadTool
+                .execute(input, &ctx(dir.path()))
+                .await;
             assert!(r.is_error, "{}", r.content);
             assert!(r.images.is_empty());
         }
     }
 
     #[test]
-    fn view_image_only_reads_and_belongs_to_the_filesystem_set() {
-        assert_eq!(ViewImageTool.permission_level(), PermissionLevel::ReadOnly);
-        assert_eq!(ViewImageTool.category(), ToolCategory::FileSystem);
-        assert!(crate::filesystem().iter().any(|t| t.name() == "ViewImage"));
+    fn read_is_the_only_tool_that_opens_files() {
+        let names: Vec<_> = crate::filesystem()
+            .iter()
+            .map(|t| t.name().to_string())
+            .collect();
+        assert!(names.iter().any(|n| n == "Read"));
+        assert!(!names.iter().any(|n| n == "ViewImage"), "{names:?}");
     }
 
     #[test]

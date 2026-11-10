@@ -569,6 +569,17 @@ class AppStore {
     }
   }
 
+  /** Copies the conversation into a fork of it, then shows the fork. */
+  async forkSession(sessionId: string) {
+    try {
+      const item = await ipc.sessionFork(sessionId)
+      this.onSessionUpdated(item)
+      await this.openSession(item.id)
+    } catch (e) {
+      this.fail(e)
+    }
+  }
+
   /** Deletes after the caller's confirmation; closes the session first. */
   async deleteSession(sessionId: string): Promise<boolean> {
     try {
@@ -732,7 +743,17 @@ class AppStore {
   private onSessionUpdated(item: SessionItem) {
     this.conversations.get(item.id)?.updateSession(item)
     const pid = item.project_id ?? this.projectOf(item.id)
-    if (pid) this.upsertSession(pid, item)
+    if (!pid) return
+    // A conversation moved to another project leaves the list of the one it was in.
+    for (const [other, list] of this.sessionsByProject) {
+      if (other !== pid && list.some((s) => s.id === item.id)) {
+        this.sessionsByProject.set(
+          other,
+          list.filter((s) => s.id !== item.id),
+        )
+      }
+    }
+    this.upsertSession(pid, item)
   }
 
   private upsertSession(projectId: string, item: SessionItem) {

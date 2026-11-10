@@ -1,7 +1,8 @@
 <script lang="ts">
-  // The image a tool call showed the model (`ViewImage`): the bytes it received,
-  // read from the session's history. The round's message is written once all its
-  // calls end, so the image is asked for again as the timeline grows, until found.
+  // The image a tool call showed the model (`Read` of an image, or `ViewImage` in former
+  // conversations): the bytes it received, read from the session's history. The round's
+  // message is written once all its calls end, so the image is asked for again as the
+  // timeline grows, until found.
   import { t } from '$lib/i18n/i18n.svelte'
   import { sessionToolImage } from '$lib/ipc/client'
   import type { Conversation, ToolItem } from '$lib/state/conversation.svelte'

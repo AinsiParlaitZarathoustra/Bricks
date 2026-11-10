@@ -93,13 +93,78 @@ pub enum PermissionProfile {
 /// The rules of the CUSTOM profile: an effect per class, and per tool
 /// (a tool's own rule wins over its class).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+#[serde(default, from = "StoredCustomRules")]
 pub struct CustomRules {
     pub read: PermissionEffect,
     pub write: PermissionEffect,
     pub execute: PermissionEffect,
     pub network: PermissionEffect,
     pub tools: BTreeMap<String, PermissionEffect>,
+}
+
+/// [`CustomRules`] as written in a file, before former tool names move.
+#[derive(Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct StoredCustomRules {
+    read: PermissionEffect,
+    write: PermissionEffect,
+    execute: PermissionEffect,
+    network: PermissionEffect,
+    tools: BTreeMap<String, PermissionEffect>,
+}
+
+impl Default for StoredCustomRules {
+    fn default() -> Self {
+        let d = CustomRules::default();
+        Self {
+            read: d.read,
+            write: d.write,
+            execute: d.execute,
+            network: d.network,
+            tools: d.tools,
+        }
+    }
+}
+
+impl From<StoredCustomRules> for CustomRules {
+    /// `ViewImage` became `Read` (images are read by `Read`): its rule goes
+    /// to `Read`, keeping the stricter of the two, so nothing a rule
+    /// refused or asked runs freely.
+    fn from(s: StoredCustomRules) -> Self {
+        let mut tools = s.tools;
+        if let Some(images) = tools.remove("ViewImage") {
+            let read = tools.get("Read").copied().unwrap_or(s.read);
+            let stricter = if images.strictness() > read.strictness() {
+                images
+            } else {
+                read
+            };
+            if stricter != read {
+                tracing::warn!(
+                    "the CUSTOM rule of ViewImage now applies to Read, which reads images: Read is {stricter:?}"
+                );
+                tools.insert("Read".to_string(), stricter);
+            }
+        }
+        Self {
+            read: s.read,
+            write: s.write,
+            execute: s.execute,
+            network: s.network,
+            tools,
+        }
+    }
+}
+
+impl PermissionEffect {
+    /// Allow < Ask < Deny.
+    fn strictness(self) -> u8 {
+        match self {
+            PermissionEffect::Allow => 0,
+            PermissionEffect::Ask => 1,
+            PermissionEffect::Deny => 2,
+        }
+    }
 }
 
 impl Default for CustomRules {
@@ -580,6 +645,23 @@ mod tests {
             effect(&p, "x", PermissionLevel::Forbidden, ToolCategory::Shell),
             Deny
         );
+    }
+
+    #[test]
+    fn a_former_view_image_rule_moves_to_read_and_never_loosens() {
+        let rules = |json: &str| serde_json::from_str::<CustomRules>(json).unwrap();
+        // Stricter than Read: Read takes it.
+        let r = rules(r#"{"read":"allow","tools":{"ViewImage":"deny"}}"#);
+        assert_eq!(r.tools.get("Read"), Some(&PermissionEffect::Deny));
+        assert!(!r.tools.contains_key("ViewImage"));
+        // Looser than Read's own rule: Read keeps its rule.
+        let r = rules(r#"{"tools":{"ViewImage":"allow","Read":"ask"}}"#);
+        assert_eq!(r.tools.get("Read"), Some(&PermissionEffect::Ask));
+        // The same as the read class: nothing to add.
+        let r = rules(r#"{"read":"ask","tools":{"ViewImage":"ask"}}"#);
+        assert!(r.tools.is_empty());
+        // Unknown fields are still refused.
+        assert!(serde_json::from_str::<CustomRules>(r#"{"reed":"allow"}"#).is_err());
     }
 
     #[test]

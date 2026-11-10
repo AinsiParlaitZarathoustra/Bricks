@@ -4,4 +4,8 @@ export type SessionItem = { id: string, project_id: string | null, title: string
 /**
  * A controller of this application currently owns the session.
  */
-open: boolean, running: boolean, };
+open: boolean, running: boolean, 
+/**
+ * The conversation this one was forked from.
+ */
+parent_id: string | null, };

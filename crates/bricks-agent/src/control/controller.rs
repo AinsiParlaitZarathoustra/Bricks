@@ -510,6 +510,7 @@ pub async fn list_sessions(sessions_dir: &Path) -> Result<Vec<SessionSummary>, S
             working_dir: meta.as_ref().map(|m| m.working_dir.clone()),
             model: meta.as_ref().map(|m| m.model.clone()),
             reasoning: meta.as_ref().and_then(|m| m.reasoning.clone()),
+            parent: meta.as_ref().and_then(|m| m.parent.clone()),
             id: s.id,
         });
     }

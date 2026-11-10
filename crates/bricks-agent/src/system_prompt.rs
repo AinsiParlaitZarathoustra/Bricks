@@ -365,8 +365,9 @@ fn ask_bullet(timer: crate::control::AskTimer) -> String {
     }
 }
 
-/// The foundation's bullet kept only when `ViewImage` is announced.
-const VIEW_IMAGE_BULLET: &str = "- Utilise ViewImage pour voir une image du disque.";
+/// The foundation's bullet kept only when `Read` is announced.
+const READ_IMAGE_BULLET: &str =
+    "- Read ouvre aussi les images du disque (PNG, JPEG, GIF, WebP) et te les montre.";
 const MEMORY_SEARCH_BULLET: &str =
     "- Use memory_search before asking the user to repeat relevant context.";
 const MEMORY_WRITE_BULLET: &str = "- Use memory_write for durable notes. Write to global memory only for a lasting preference or an explicit request to remember across projects.";
@@ -448,8 +449,8 @@ pub fn bricks_foundation(tools: &[String]) -> String {
 pub fn bricks_foundation_with(tools: &[String], ask_timer: crate::control::AskTimer) -> String {
     let has = |name: &str| tools.iter().any(|t| t == name);
     let mut bullets = vec![explore_bullet(&has)];
-    if has("ViewImage") {
-        bullets.push(VIEW_IMAGE_BULLET.to_string());
+    if has("Read") {
+        bullets.push(READ_IMAGE_BULLET.to_string());
     }
     bullets.extend(edit_bullet(&has));
     if has("Bash") {
@@ -743,9 +744,8 @@ mod tests {
     /// The reference text, written apart from the implementation.
     const REFERENCE: &str = include_str!("../tests/fixtures/bricks_foundation.txt");
 
-    /// Glob, Grep, Read, ViewImage, Edit and Write: the bullets that name
-    /// them are whole.
-    const FILE_TOOLS: [&str; 6] = ["Glob", "Grep", "Read", "ViewImage", "Edit", "Write"];
+    /// Glob, Grep, Read, Edit and Write: the bullets that name them are whole.
+    const FILE_TOOLS: [&str; 5] = ["Glob", "Grep", "Read", "Edit", "Write"];
 
     /// The reference with the file tools, keeping the Bash (with Job),
     /// CodeScout, CodeStats and web bullets as asked.
@@ -849,6 +849,7 @@ mod tests {
     fn a_bullet_names_only_the_announced_tools() {
         let f = bricks_foundation(&tools(&["Read"]));
         assert!(f.contains("- Pour explorer le dépôt, privilégie Read pour les lire."));
+        assert!(f.contains(READ_IMAGE_BULLET), "Read names its images");
         for absent in [
             "Glob",
             "Grep",

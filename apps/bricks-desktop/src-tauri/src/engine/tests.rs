@@ -985,3 +985,401 @@ async fn a_leftover_journal_is_undone_when_the_store_still_has_the_old_path() {
     assert_eq!(state.projects.get(&project).unwrap().path, from.display().to_string());
     assert!(!journal_file(home.path(), &project).exists());
 }
+
+// ─── Conversations writing to each other, forks, moves ──────────────────────
+
+const SENDER: &str = "20990101-000000-aaaaaa";
+
+/// A stored conversation for [`SENDER`]: only existing conversations send.
+fn register_sender(state: &AppState, wd: &Path) {
+    SessionMeta::new(SENDER, wd, "test/a", None)
+        .save(&files_dir(state.sessions_dir(), SENDER))
+        .unwrap();
+}
+
+#[tokio::test]
+async fn a_message_to_a_busy_conversation_waits_then_gets_its_own_answer() {
+    use crate::services::mail::MailState;
+    let home = tempfile::tempdir().unwrap();
+    let wd_dir = tempfile::tempdir().unwrap();
+    let wd = std::fs::canonicalize(wd_dir.path()).unwrap();
+    let (state, project) = state_with_project(home.path(), &wd);
+    register_sender(&state, &wd);
+    let script = Script::new(vec![Reply::hang(), Reply::text("réponse de B")]);
+    let b = open_scripted(&state, &project, &wd, script).await;
+    let b_id = b.session_id.clone();
+
+    // B works on something of its own.
+    b.controller
+        .send(Command::Submit { prompt: Prompt::text("travail en cours") })
+        .unwrap();
+    eventually("B to work", || b.is_running()).await;
+
+    // The send returns at once; the message waits for B.
+    let mail = state.mail_send(SENDER, &b_id, "bonjour B").await.expect("sent");
+    assert_eq!(mail.state, MailState::Sent);
+    let early = state.mail.wait(&mail.id, Duration::from_millis(100)).await.unwrap();
+    assert_eq!(early.state, MailState::Sent, "still waiting while B works");
+
+    // B's own run ends; the message is delivered, and only its run answers.
+    b.controller.send(Command::Cancel).unwrap();
+    let done = state.mail.wait(&mail.id, Duration::from_secs(10)).await.unwrap();
+    assert_eq!(done.state, MailState::Answered, "{done:?}");
+    assert_eq!(done.answer.as_deref(), Some("réponse de B"));
+    let history = b.controller.history().await;
+    assert!(
+        history.iter().any(|m| message_text(m).contains("bonjour B")),
+        "the message is in B's conversation"
+    );
+    let _ = state.close_session(&b_id, true).await;
+}
+
+#[tokio::test]
+async fn deleting_the_conversation_a_message_waits_for_fails_it_at_once() {
+    use crate::services::mail::MailState;
+    let home = tempfile::tempdir().unwrap();
+    let wd_dir = tempfile::tempdir().unwrap();
+    let wd = std::fs::canonicalize(wd_dir.path()).unwrap();
+    let (state, project) = state_with_project(home.path(), &wd);
+    register_sender(&state, &wd);
+    let b = open_scripted(&state, &project, &wd, Script::new(vec![Reply::hang()])).await;
+    let b_id = b.session_id.clone();
+    b.controller
+        .send(Command::Submit { prompt: Prompt::text("travail en cours") })
+        .unwrap();
+    eventually("B to work", || b.is_running()).await;
+    let mail = state.mail_send(SENDER, &b_id, "bonjour").await.expect("sent");
+
+    // The sender waits; meanwhile B is deleted.
+    let mailbox = Arc::clone(&state.mail);
+    let id = mail.id.clone();
+    let waiting = tokio::spawn(async move { mailbox.wait(&id, Duration::from_secs(20)).await });
+    state.delete_session(&b_id).await.expect("delete");
+    let failed = tokio::time::timeout(Duration::from_secs(5), waiting)
+        .await
+        .expect("the wait ends with the deletion, not at its timeout")
+        .unwrap()
+        .unwrap();
+    assert_eq!(failed.state, MailState::Failed);
+    assert!(failed.reason.unwrap().contains("closed or deleted"));
+}
+
+#[tokio::test]
+async fn a_conversation_answering_a_message_cannot_write_back_during_that_turn() {
+    use crate::services::mail::MailState;
+    let home = tempfile::tempdir().unwrap();
+    let wd_dir = tempfile::tempdir().unwrap();
+    let wd = std::fs::canonicalize(wd_dir.path()).unwrap();
+    let (state, project) = state_with_project(home.path(), &wd);
+    register_sender(&state, &wd);
+    let b = open_scripted(&state, &project, &wd, Script::new(vec![Reply::hang()])).await;
+    let b_id = b.session_id.clone();
+    let mail = state.mail_send(SENDER, &b_id, "réponds-moi").await.expect("sent");
+    let mailbox = Arc::clone(&state.mail);
+    let id = mail.id.clone();
+    eventually("the message's run to start", || {
+        mailbox.get(&id).is_some_and(|m| m.state == MailState::InProgress)
+    })
+    .await;
+    let back = state.mail_send(&b_id, SENDER, "et toi ?").await.unwrap_err();
+    assert_eq!(back.code, IpcErrorCode::Rejected);
+    assert!(back.message.contains("answering a message"), "{}", back.message);
+    // Writing to itself is refused too.
+    assert_eq!(state.mail_send(&b_id, &b_id, "x").await.unwrap_err().code, IpcErrorCode::Invalid);
+    // Closing B cancels the message's run: it gets no answer, and says so.
+    let _ = state.close_session(&b_id, true).await;
+    let ended = state.mail.wait(&mail.id, Duration::from_secs(10)).await.unwrap();
+    assert_eq!(ended.state, MailState::Failed, "{ended:?}");
+    assert!(ended.answer.is_none());
+}
+
+#[tokio::test]
+async fn a_fork_copies_the_history_and_files_and_outlives_its_parent() {
+    let home = tempfile::tempdir().unwrap();
+    let wd_dir = tempfile::tempdir().unwrap();
+    let wd = std::fs::canonicalize(wd_dir.path()).unwrap();
+    let (state, project) = state_with_project(home.path(), &wd);
+    let entry = open_scripted(&state, &project, &wd, Script::new(vec![Reply::text("ok")])).await;
+    let id = entry.session_id.clone();
+    entry
+        .controller
+        .send(Command::Submit { prompt: Prompt::text("une question à forker") })
+        .unwrap();
+    entry.controller.wait_idle().await;
+    let _ = state.rename_session(&id, "Salut").await;
+    // A file of the conversation, named in its history.
+    let files = files_dir(state.sessions_dir(), &id);
+    std::fs::create_dir_all(files.join("attachments")).unwrap();
+    std::fs::write(files.join("attachments/a.png"), b"png").unwrap();
+    state.close_session(&id, false).await.unwrap();
+
+    let fork = state.fork_session(&id).await.expect("fork");
+    assert_eq!(fork.title, "Salut (fork)");
+    assert_eq!(fork.parent_id.as_deref(), Some(id.as_str()));
+    let fork_files = files_dir(state.sessions_dir(), &fork.id);
+    assert!(fork_files.join("attachments/a.png").exists(), "files copied");
+    let store = bricks_memory::JsonlMemory::new(state.sessions_dir());
+    use bricks_memory::Memory as _;
+    let copied = store.load(&fork.id).await.unwrap();
+    assert!(copied.iter().any(|m| message_text(m).contains("une question à forker")));
+
+    // The parent goes; the fork stays whole and lists its parent.
+    state.delete_session(&id).await.unwrap();
+    assert!(fork_files.join("attachments/a.png").exists());
+    assert_eq!(store.load(&fork.id).await.unwrap().len(), copied.len());
+    let listed = state.sessions_list(&project).await.unwrap();
+    assert!(listed.iter().any(|s| s.id == fork.id && s.parent_id.as_deref() == Some(id.as_str())));
+}
+
+#[tokio::test]
+async fn moving_a_conversation_goes_to_another_project_only_and_never_while_it_works() {
+    let home = tempfile::tempdir().unwrap();
+    let wd_dir = tempfile::tempdir().unwrap();
+    let wd = std::fs::canonicalize(wd_dir.path()).unwrap();
+    let other_dir = tempfile::tempdir().unwrap();
+    let other = std::fs::canonicalize(other_dir.path()).unwrap();
+    let stray_dir = tempfile::tempdir().unwrap();
+    let (state, project) = state_with_project(home.path(), &wd);
+    let other_project = state.projects.add(other.to_str().unwrap()).unwrap().id;
+    let script = Script::new(vec![Reply::text("ok"), Reply::hang()]);
+    let entry = open_scripted(&state, &project, &wd, script).await;
+    let id = entry.session_id.clone();
+    entry
+        .controller
+        .send(Command::Submit { prompt: Prompt::text("premier") })
+        .unwrap();
+    entry.controller.wait_idle().await;
+
+    // A folder that is no project is refused, and nothing changes.
+    let refused = state
+        .move_session(&id, stray_dir.path().to_str().unwrap())
+        .await
+        .unwrap_err();
+    assert_eq!(refused.code, IpcErrorCode::Rejected);
+    // A working conversation is not moved.
+    entry
+        .controller
+        .send(Command::Submit { prompt: Prompt::text("bloqué") })
+        .unwrap();
+    eventually("the run to start", || entry.is_running()).await;
+    let busy = state.move_session(&id, other.to_str().unwrap()).await.unwrap_err();
+    assert_eq!(busy.code, IpcErrorCode::SessionBusy);
+    let meta = SessionMeta::load(&files_dir(state.sessions_dir(), &id)).unwrap().unwrap();
+    assert_eq!(meta.working_dir, wd, "unchanged");
+
+    entry.controller.send(Command::Cancel).unwrap();
+    entry.controller.wait_idle().await;
+    let moved = state.move_session(&id, other.to_str().unwrap()).await.expect("moved");
+    assert_eq!(moved.project_id.as_deref(), Some(other_project.as_str()));
+    assert!(state.open_entry(&id).is_none(), "closed to move");
+    let meta = SessionMeta::load(&files_dir(state.sessions_dir(), &id)).unwrap().unwrap();
+    assert_eq!(meta.working_dir, other);
+}
+
+/// The history of the stored conversation `id`, as its messages' texts.
+async fn stored_texts(state: &AppState, id: &str) -> Vec<String> {
+    let store = bricks_memory::JsonlMemory::new(state.sessions_dir());
+    use bricks_memory::Memory as _;
+    store.load(id).await.unwrap().iter().map(message_text).collect()
+}
+
+#[tokio::test]
+async fn two_messages_to_a_busy_conversation_each_get_their_own_answer() {
+    use crate::services::mail::MailState;
+    let home = tempfile::tempdir().unwrap();
+    let wd_dir = tempfile::tempdir().unwrap();
+    let wd = std::fs::canonicalize(wd_dir.path()).unwrap();
+    let (state, project) = state_with_project(home.path(), &wd);
+    register_sender(&state, &wd);
+    let script = Script::new(vec![Reply::hang(), Reply::text("réponse 1"), Reply::text("réponse 2")]);
+    let b = open_scripted(&state, &project, &wd, script).await;
+    let b_id = b.session_id.clone();
+    b.controller
+        .send(Command::Submit { prompt: Prompt::text("travail en cours") })
+        .unwrap();
+    eventually("B to work", || b.is_running()).await;
+
+    let one = state.mail_send(SENDER, &b_id, "message un").await.expect("first sent");
+    let two = state.mail_send(SENDER, &b_id, "message deux").await.expect("second sent");
+    assert_ne!(one.id, two.id);
+    b.controller.send(Command::Cancel).unwrap();
+
+    let one = state.mail.wait(&one.id, Duration::from_secs(20)).await.unwrap();
+    let two = state.mail.wait(&two.id, Duration::from_secs(20)).await.unwrap();
+    assert_eq!(one.state, MailState::Answered, "{one:?}");
+    assert_eq!(two.state, MailState::Answered, "{two:?}");
+    // Which message is delivered first is a race between the two waits; what
+    // holds is that each run's answer goes to the message whose prompt it
+    // answered: the run of the earlier message in the history got the first reply.
+    let history = b.controller.history().await;
+    let at = |needle: &str| {
+        history
+            .iter()
+            .position(|m| message_text(m).contains(needle))
+            .unwrap_or_else(|| panic!("«{needle}» is in the history"))
+    };
+    let (earlier, later) = if at("message un") < at("message deux") {
+        (&one, &two)
+    } else {
+        (&two, &one)
+    };
+    assert_eq!(earlier.answer.as_deref(), Some("réponse 1"), "{earlier:?}");
+    assert_eq!(later.answer.as_deref(), Some("réponse 2"), "{later:?}");
+    assert_eq!(earlier.outcome.as_deref(), Some("succeeded"));
+    assert_eq!(later.outcome.as_deref(), Some("succeeded"));
+    // Each message is logged under its sender, with its own answer.
+    let log = std::fs::read_to_string(crate::services::mail::log_path(&home.path().join("desktop").join("messages"), SENDER))
+        .unwrap();
+    assert!(log.contains(&one.id) && log.contains(&two.id), "{log}");
+    let _ = state.close_session(&b_id, true).await;
+}
+
+#[tokio::test]
+async fn a_message_to_a_stored_conversation_that_is_not_open_opens_it_and_is_delivered() {
+    use crate::contract::OpenSessionRequest;
+    use crate::services::mail::MailState;
+    let home = tempfile::tempdir().unwrap();
+    // The real registry (the local provider of the fixtures, refusing its
+    // connections at once), so opening the conversation goes through the
+    // same path as the application's: no scripted catalog.
+    let providers = home.path().join("providers.toml");
+    std::fs::write(&providers, crate::services::providers_toml::fixtures::PROVIDERS).unwrap();
+    let registry = bricks_config::load_registry(Some(&providers)).map(Arc::new);
+    let state = AppState::assemble(home.path().to_path_buf(), registry);
+    let wd_dir = tempfile::tempdir().unwrap();
+    let wd = std::fs::canonicalize(wd_dir.path()).unwrap();
+    let project = state.projects.add(wd.to_str().unwrap()).expect("project").id;
+    register_sender(&state, &wd);
+
+    let opened = state
+        .open_session(OpenSessionRequest {
+            project_id: project.clone(),
+            session_id: None,
+            model: Some("local/small".into()),
+            reasoning: None,
+        })
+        .await
+        .expect("opened");
+    let id = opened.session.id.clone();
+    // A conversation is stored once a run has been made in it: this one fails
+    // at the provider, which is all the stored conversation needs.
+    state.send_command(&id, submit_json("première"), None).await.expect("first run");
+    state.open_entry(&id).expect("open").controller.wait_idle().await;
+    state.close_session(&id, false).await.expect("closed: only its stored files remain");
+    assert!(state.open_entry(&id).is_none());
+
+    let mail = state.mail_send(SENDER, &id, "bonjour").await.expect("sent");
+    assert!(state.open_entry(&id).is_some(), "the target is opened to receive the message");
+    let done = state
+        .mail
+        .wait(&mail.id, Duration::from_secs(60))
+        .await
+        .expect("the message is known");
+    assert!(done.state.is_final(), "the message ends: {done:?}");
+    assert_ne!(done.state, MailState::Sent, "it was submitted to the opened conversation");
+    assert!(
+        stored_texts(&state, &id).await.iter().any(|t| t.contains("bonjour")),
+        "the message is in the conversation's history"
+    );
+    let _ = state.close_session(&id, true).await;
+}
+
+#[tokio::test]
+async fn a_fork_of_a_fork_names_its_parent_and_the_last_fork_outlives_the_middle_one() {
+    let home = tempfile::tempdir().unwrap();
+    let wd_dir = tempfile::tempdir().unwrap();
+    let wd = std::fs::canonicalize(wd_dir.path()).unwrap();
+    let (state, project) = state_with_project(home.path(), &wd);
+    let entry = open_scripted(&state, &project, &wd, Script::new(vec![Reply::text("ok")])).await;
+    let root = entry.session_id.clone();
+    entry
+        .controller
+        .send(Command::Submit { prompt: Prompt::text("une question") })
+        .unwrap();
+    entry.controller.wait_idle().await;
+    state.close_session(&root, false).await.unwrap();
+
+    let middle = state.fork_session(&root).await.expect("first fork");
+    let last = state.fork_session(&middle.id).await.expect("fork of the fork");
+    assert_eq!(middle.parent_id.as_deref(), Some(root.as_str()));
+    assert_eq!(last.parent_id.as_deref(), Some(middle.id.as_str()), "the parent is the fork, not the root");
+    assert_eq!(last.title, format!("{} (fork)", middle.title), "the title of the parent, forked again");
+    let expected = stored_texts(&state, &root).await;
+    assert_eq!(stored_texts(&state, &last.id).await, expected, "the whole history is copied");
+
+    // The middle conversation goes: the last fork stays whole, and still names it.
+    state.delete_session(&middle.id).await.expect("delete the middle");
+    assert_eq!(stored_texts(&state, &last.id).await, expected, "still readable after its parent's deletion");
+    let page = state.session_page(&last.id, 0, 100).await.expect("readable");
+    assert_eq!(page.total, expected.len());
+    let listed = state.sessions_list(&project).await.unwrap();
+    let kept = listed.iter().find(|s| s.id == last.id).expect("still listed");
+    assert_eq!(kept.parent_id.as_deref(), Some(middle.id.as_str()), "the parent is kept as recorded");
+    assert!(listed.iter().any(|s| s.id == root), "the root stays");
+    assert!(!listed.iter().any(|s| s.id == middle.id), "the middle one is gone");
+}
+
+#[tokio::test]
+async fn session_page_pages_the_messages_and_refuses_an_unknown_conversation() {
+    let home = tempfile::tempdir().unwrap();
+    let wd_dir = tempfile::tempdir().unwrap();
+    let wd = std::fs::canonicalize(wd_dir.path()).unwrap();
+    let (state, project) = state_with_project(home.path(), &wd);
+    let script = Script::new(vec![Reply::text("r1"), Reply::text("r2"), Reply::text("r3")]);
+    let entry = open_scripted(&state, &project, &wd, script).await;
+    let id = entry.session_id.clone();
+    for prompt in ["p1", "p2", "p3"] {
+        entry.controller.send(Command::Submit { prompt: Prompt::text(prompt) }).unwrap();
+        entry.controller.wait_idle().await;
+    }
+    // Three exchanges: six messages, user then assistant.
+    let open = state.session_page(&id, 0, 2).await.expect("an open conversation is read");
+    assert_eq!(open.total, 6);
+    assert_eq!(open.lines.len(), 2);
+    assert!(open.lines[0].starts_with("[0] user: p1"), "{:?}", open.lines);
+    assert!(open.lines[1].starts_with("[1] assistant: r1"), "{:?}", open.lines);
+    state.close_session(&id, false).await.unwrap();
+
+    let page = state.session_page(&id, 2, 2).await.expect("a stored conversation is read");
+    assert_eq!((page.offset, page.total, page.lines.len()), (2, 6, 2));
+    assert!(page.lines[0].starts_with("[2] user: p2"), "{:?}", page.lines);
+    let tail = state.session_page(&id, 4, 10).await.unwrap();
+    assert_eq!(tail.lines.len(), 2, "what is left after the offset");
+    assert!(tail.lines[1].starts_with("[5] assistant: r3"), "{:?}", tail.lines);
+    let past = state.session_page(&id, 6, 2).await.unwrap();
+    assert!(past.lines.is_empty());
+    assert_eq!(past.total, 6, "the total is kept past the end");
+    // A limit is kept between 1 and 100.
+    assert_eq!(state.session_page(&id, 0, 0).await.unwrap().lines.len(), 1);
+    assert_eq!(state.session_page(&id, 0, 10_000).await.unwrap().lines.len(), 6);
+
+    let unknown = state.session_page("20990101-000000-zzzzzz", 0, 5).await.err().expect("refused");
+    assert_eq!(unknown.code, IpcErrorCode::NotFound);
+    let malformed = state.session_page("../secrets", 0, 5).await.err().expect("refused");
+    assert_eq!(malformed.code, IpcErrorCode::Invalid);
+}
+
+#[tokio::test]
+async fn moving_to_a_vanished_folder_or_to_the_chats_folder_is_refused_and_changes_nothing() {
+    let home = tempfile::tempdir().unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let wd = folder(root.path(), "projet");
+    let gone = folder(root.path(), "disparu");
+    let (state, project) = state_with_project(home.path(), &wd);
+    let vanished = state.projects.add(gone.to_str().unwrap()).unwrap().id;
+    let id = stored_session(&state, &project, &wd).await;
+    std::fs::remove_dir_all(&gone).unwrap();
+    assert!(state.projects.get(&vanished).unwrap().missing);
+
+    let to_vanished = state.move_session(&id, gone.to_str().unwrap()).await.err().expect("refused");
+    assert_eq!(to_vanished.code, IpcErrorCode::Rejected, "{}", to_vanished.message);
+    let chats = state.projects.chats().expect("the chats project");
+    let to_chats = state.move_session(&id, &chats.path).await.err().expect("refused");
+    assert_eq!(to_chats.code, IpcErrorCode::Rejected, "{}", to_chats.message);
+
+    let meta = SessionMeta::load(&files_dir(state.sessions_dir(), &id)).unwrap().unwrap();
+    assert_eq!(meta.working_dir, wd, "still in its project's folder");
+    let listed = state.sessions_list(&project).await.unwrap();
+    assert!(listed.iter().any(|s| s.id == id), "still listed in its project");
+    assert!(state.sessions_list(&vanished).await.unwrap().iter().all(|s| s.id != id));
+}

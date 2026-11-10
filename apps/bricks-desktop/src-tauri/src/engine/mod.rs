@@ -11,6 +11,7 @@ pub mod hub;
 pub mod live;
 pub mod memory;
 pub mod relocate;
+pub mod session_tool;
 pub mod sessions;
 
 use crate::i18n::{msg, tr};
@@ -73,6 +74,11 @@ pub struct AppState {
     /// What the desktop keeps of each finished run.
     pub(crate) run_records: Arc<RunRecordStore>,
     pub(crate) hub: Arc<Hub>,
+    /// The messages conversations send each other.
+    pub(crate) mail: Arc<crate::services::mail::Mailbox>,
+    /// The application, once it runs: the `Session` tool reaches the state
+    /// through it (tests have none, and no such tool).
+    pub(crate) app: std::sync::OnceLock<tauri::AppHandle>,
     /// The open sessions, by session id.
     sessions: Mutex<HashMap<String, Arc<OpenSession>>>,
     /// Serialises the operations that create or retire controllers, so a
@@ -132,6 +138,8 @@ impl AppState {
             run_records: Arc::new(RunRecordStore::at(desktop.join("run-records"))),
             projects: Arc::new(projects),
             hub: Arc::new(Hub::new(journal)),
+            mail: Arc::new(crate::services::mail::Mailbox::at(desktop.join("messages"))),
+            app: std::sync::OnceLock::new(),
             sessions: Mutex::new(HashMap::new()),
             lifecycle: tokio::sync::Mutex::new(()),
             home,
@@ -266,6 +274,7 @@ pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     // Computer Use starts in the background when it was left on.
     let computer_use = Arc::clone(&state.computer_use);
     tauri::async_runtime::spawn(async move { computer_use.resume().await });
+    let _ = state.app.set(app.handle().clone());
     app.manage(state);
     Ok(())
 }

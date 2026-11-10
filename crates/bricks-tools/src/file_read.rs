@@ -12,7 +12,8 @@ impl Tool for FileReadTool {
         "Read"
     }
     fn description(&self) -> &str {
-        "Read a file from the filesystem. Use offset/limit to read a slice of a large file."
+        "Read a file from the filesystem: text, or an image (PNG, JPEG, GIF or WebP, up to \
+         3.75 MB) that you see itself. Use offset/limit to read a slice of a large text file."
     }
     fn permission_level(&self) -> PermissionLevel {
         PermissionLevel::ReadOnly
@@ -61,6 +62,21 @@ impl Tool for FileReadTool {
             ));
         }
 
+        // An image is shown to the model; offset and limit are for text.
+        let head = resolved.clone();
+        let is_image =
+            tokio::task::spawn_blocking(move || crate::view_image::starts_like_image(&head))
+                .await
+                .unwrap_or(false);
+        if is_image {
+            if input.offset.is_some() || input.limit.is_some() {
+                return ToolResult::error(format!(
+                    "{} is an image: offset and limit apply to text files only. Read it without them.",
+                    input.file_path
+                ));
+            }
+            return crate::view_image::view(resolved.clone(), &input.file_path).await;
+        }
         let offset = input.offset.unwrap_or(0);
         let limit = input.limit.unwrap_or(2000);
         let p = path.to_path_buf();
@@ -367,15 +383,27 @@ mod tests {
     #[tokio::test]
     async fn binary_utf16_and_latin1_are_reported_not_garbled() {
         let tmp = tempfile::tempdir().unwrap();
+        // An image is shown to the model, not described as binary.
         let png = tmp.path().join("i.png");
         std::fs::write(&png, b"\x89PNG\r\n\x1a\n\0\0\0\rIHDR").unwrap();
         let r = read(&png, serde_json::json!({})).await;
-        assert!(!r.is_error);
+        assert!(!r.is_error, "{}", r.content);
         assert!(
-            r.content.contains("binary file (image/png, 16 bytes)"),
+            r.content.starts_with("Image ") && r.content.contains("image/png"),
             "{}",
             r.content
         );
+        assert_eq!(r.images.len(), 1);
+        // Another binary file is still named by its type.
+        let pdf = tmp.path().join("d.pdf");
+        std::fs::write(&pdf, b"%PDF-1.7\n\0\0binary").unwrap();
+        let r = read(&pdf, serde_json::json!({})).await;
+        assert!(
+            !r.is_error && r.content.contains("binary file"),
+            "{}",
+            r.content
+        );
+        assert!(r.images.is_empty());
 
         let u16 = tmp.path().join("u.txt");
         let text: Vec<u8> = "hello world"

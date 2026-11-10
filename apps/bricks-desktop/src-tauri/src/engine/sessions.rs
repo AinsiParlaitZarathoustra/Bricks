@@ -89,8 +89,13 @@ impl AppState {
             project_id: project.id.clone(),
         }));
         // Computer Use lends its tools to every session, as they are when a
-        // run starts.
-        cfg.tool_lender = Some(Arc::clone(&self.computer_use) as Arc<dyn bricks_agent::ToolLender>);
+        // run starts; so does `Session`, once the application runs.
+        let mut lenders: Vec<Arc<dyn bricks_agent::ToolLender>> =
+            vec![Arc::clone(&self.computer_use) as Arc<dyn bricks_agent::ToolLender>];
+        if let Some(app) = self.app.get() {
+            lenders.push(Arc::new(super::session_tool::SessionLender { app: app.clone() }));
+        }
+        cfg.tool_lender = Some(Arc::new(super::session_tool::Lenders(lenders)));
         // Sessions are stored under this application state's home (tests use
         // a temporary one), never the global default.
         cfg.sessions_dir = self.sessions_dir().to_path_buf();
@@ -431,7 +436,7 @@ impl AppState {
             .map_err(|reason| error(IpcErrorCode::Rejected, reason))
     }
 
-    /// The image a tool call showed the model (`ViewImage`), as a data URL,
+    /// The image a tool call showed the model (`Read` of an image), as a data URL,
     /// read from the open session's history: the bytes the model received,
     /// never the file as it is now. `None` when the call showed none.
     pub async fn tool_image(&self, session_id: &str, tool_call_id: &str) -> IpcResult<Option<String>> {
@@ -500,7 +505,7 @@ impl AppState {
     }
 
     /// A stored session's item, from its metadata.
-    fn item_from_meta(
+    pub(super) fn item_from_meta(
         &self,
         meta: &SessionMeta,
         message_count: usize,
@@ -519,6 +524,7 @@ impl AppState {
             working_dir: Some(path_text(&meta.working_dir)),
             open,
             running,
+            parent_id: meta.parent.clone(),
         }
     }
 }
@@ -547,7 +553,7 @@ async fn settle(controller: &Controller, budget: Duration) -> bool {
 
 /// A session id becomes a file name: letters, digits, `-`, `_` and `.`, not
 /// starting with a dot.
-fn check_session_id(id: &str) -> IpcResult<()> {
+pub(super) fn check_session_id(id: &str) -> IpcResult<()> {
     let ok = !id.is_empty()
         && id.len() <= 128
         && !id.starts_with('.')

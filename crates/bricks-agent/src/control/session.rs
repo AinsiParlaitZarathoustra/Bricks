@@ -29,6 +29,9 @@ pub struct SessionMeta {
     /// Long-term memory space, when one was attached.
     #[serde(default)]
     pub memory_space: Option<String>,
+    /// The conversation this one was forked from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<String>,
 }
 
 impl SessionMeta {
@@ -44,6 +47,7 @@ impl SessionMeta {
             model: model.to_string(),
             reasoning,
             memory_space: None,
+            parent: None,
         }
     }
 
@@ -104,6 +108,9 @@ pub struct SessionSummary {
     pub model: Option<String>,
     #[serde(default)]
     pub reasoning: Option<String>,
+    /// The conversation this one was forked from.
+    #[serde(default)]
+    pub parent: Option<String>,
 }
 
 /// Which stored sessions a listing shows.

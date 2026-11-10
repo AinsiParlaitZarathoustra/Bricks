@@ -4,6 +4,7 @@
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
 	import Folder from '@lucide/svelte/icons/folder';
+	import GitFork from '@lucide/svelte/icons/git-fork';
 	import Pencil from '@lucide/svelte/icons/pencil';
 	import Pin from '@lucide/svelte/icons/pin';
 	import PinOff from '@lucide/svelte/icons/pin-off';
@@ -47,12 +48,50 @@
 		const project = app.projects.find((p) => p.id === session.project_id);
 		return project && !project.chats ? project.name : null;
 	}
-	// The shown conversation is always listed, even past the limit.
-	const visible = $derived(
+	/**
+	 * Forks sit under the first conversation of their line that is listed here, oldest first;
+	 * a fork whose parent is not listed is shown on its own.
+	 */
+	const byId = $derived(new Map(sorted.map((s) => [s.id, s])));
+	function rootOf(session: SessionItem): string {
+		let root = session;
+		const seen = new Set<string>([root.id]);
+		while (root.parent_id && byId.has(root.parent_id) && !seen.has(root.parent_id)) {
+			root = byId.get(root.parent_id)!;
+			seen.add(root.id);
+		}
+		return root.id;
+	}
+	const forks = $derived.by(() => {
+		const out = new Map<string, SessionItem[]>();
+		for (const s of sorted) {
+			const root = rootOf(s);
+			if (root === s.id) continue;
+			out.set(root, [...(out.get(root) ?? []), s].sort((a, b) => a.created_at - b.created_at));
+		}
+		return out;
+	});
+	/** The conversations listed at the top level, each with its forks under it. */
+	const allRoots = $derived(sorted.filter((s) => rootOf(s) === s.id));
+	// The limit counts top-level rows; the shown conversation's line is always listed.
+	const currentRoot = $derived.by(() => {
+		const current = app.currentSessionId ? byId.get(app.currentSessionId) : undefined;
+		return current ? rootOf(current) : null;
+	});
+	const roots = $derived(
 		showAll || limit === undefined
-			? sorted
-			: sorted.filter((s, i) => i < limit || s.id === app.currentSessionId)
+			? allRoots
+			: allRoots.filter((s, i) => i < limit || s.id === currentRoot)
 	);
+
+	/** Conversations whose forks are folded away. */
+	let folded = $state(new Set<string>());
+	function toggleForks(id: string) {
+		const next = new Set(folded);
+		if (next.has(id)) next.delete(id);
+		else next.add(id);
+		folded = next;
+	}
 
 	// The list element, kept for keyboard navigation and focus restoration (not rendered from).
 	let listEl: HTMLElement | null = null;
@@ -162,116 +201,158 @@
 
 	function confirmDelete() {
 		const target = deleteTarget;
+		// The dialog closes at once: deleting a running conversation waits for its run to stop.
+		deleteOpen = false;
 		if (target) void app.deleteSession(target.id);
 	}
 </script>
 
-<ul {@attach trackList} class="flex flex-col gap-0.5" aria-label={label}>
-	{#each visible as session (session.id)}
-		{@const current = session.id === app.currentSessionId}
-		{@const projectLabel = sessions ? projectName(session) : null}
-		<li>
-			<div
-				class={cn(
-					'group relative flex items-center rounded-lg transition-colors',
-					current
-						? 'bg-background text-foreground shadow-[0_1px_2px_rgb(0_0_0/0.06),0_0_0_1px_var(--border-subtle)]'
-						: 'hover:bg-element-hover'
-				)}
-			>
-				{#if editingId === session.id}
-					<div class={cn('min-w-0 flex-1 py-1 pr-9', nested ? 'pl-7' : 'pl-1.5')}>
-						<Input
-							{@attach focusAndSelect}
-							bind:value={draft}
-							aria-label={t('navigation.newConversationTitle')}
-							maxlength={200}
-							autocomplete="off"
-							class="h-8 text-compact"
-							onkeydown={onRenameKey}
-							onblur={() => void endRename(true, false)}
-						/>
-					</div>
-				{:else}
-					<button
-						type="button"
-						data-session-item={session.id}
-						class={cn(
-							'flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1.5 pr-2 text-left group-focus-within:pr-9 group-hover:pr-9 group-has-[[data-state=open]]:pr-9',
-							nested ? 'pl-8' : 'pl-2'
-						)}
-						aria-current={current ? 'true' : undefined}
-						title={displayTitle(session.title)}
-						onclick={() => void app.openSession(session.id)}
-						ondblclick={() => {
-							keepFocus = false;
-							startRename(session);
-						}}
-						onkeydown={(event) => onItemKeydown(event, session)}
-					>
-						<span class="flex min-w-0 flex-1 flex-col">
-							<span
-								{@attach fadeWhenClipped(session.title)}
-								class="title-fade min-w-0 overflow-hidden text-compact whitespace-nowrap"
-								>{displayTitle(session.title)}</span
-							>
-							{#if projectLabel}
-								<span class="flex min-w-0 items-center gap-1 text-caption text-muted-foreground">
-									<Folder class="size-3 shrink-0" aria-hidden="true" />
-									<span class="truncate">{projectLabel}</span>
-								</span>
-							{/if}
-						</span>
-						{#if session.running}
-							<StatusDot status="running" label={t('navigation.conversationRunning')} />
-						{/if}
-					</button>
-				{/if}
-
-				<DropdownMenu.Root>
-					<DropdownMenu.Trigger>
-						{#snippet child({ props })}
-							<Button
-								{...props}
-								variant="ghost"
-								size="icon-sm"
-								class="absolute top-1/2 right-1 shrink-0 -translate-y-1/2 text-muted-foreground opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
-								aria-label={t('navigation.actionsForConversation', { title: displayTitle(session.title) })}
-							>
-								<EllipsisVertical class="size-4" aria-hidden="true" />
-							</Button>
-						{/snippet}
-					</DropdownMenu.Trigger>
-					<DropdownMenu.Content align="end" class="w-44" onCloseAutoFocus={onMenuClose}>
-						<DropdownMenu.Item
-							onSelect={() => {
-								keepFocus = true;
-								startRename(session);
-							}}
-						>
-							<Pencil class="size-4" aria-hidden="true" />
-							{t('navigation.rename')}
-						</DropdownMenu.Item>
-						<DropdownMenu.Item onSelect={() => app.togglePin(session.id)}>
-							{#if app.isPinned(session.id)}
-								<PinOff class="size-4" aria-hidden="true" />
-								{t('navigation.unpin')}
-							{:else}
-								<Pin class="size-4" aria-hidden="true" />
-								{t('navigation.pin')}
-							{/if}
-						</DropdownMenu.Item>
-						<DropdownMenu.Separator />
-						<DropdownMenu.Item variant="destructive" onSelect={() => askDelete(session)}>
-							<Trash class="size-4" aria-hidden="true" />
-							{t('common.delete')}
-						</DropdownMenu.Item>
-					</DropdownMenu.Content>
-				</DropdownMenu.Root>
+{#snippet row(session: SessionItem, fork: boolean, hasForks: boolean)}
+	{@const current = session.id === app.currentSessionId}
+	{@const projectLabel = sessions ? projectName(session) : null}
+	<div
+		class={cn(
+			'group relative flex items-center rounded-lg transition-colors',
+			current
+				? 'bg-background text-foreground shadow-[0_1px_2px_rgb(0_0_0/0.06),0_0_0_1px_var(--border-subtle)]'
+				: 'hover:bg-element-hover'
+		)}
+	>
+		{#if editingId === session.id}
+			<div class={cn('min-w-0 flex-1 py-1 pr-9', fork ? (nested ? 'pl-13' : 'pl-7') : nested ? 'pl-7' : 'pl-1.5')}>
+				<Input
+					{@attach focusAndSelect}
+					bind:value={draft}
+					aria-label={t('navigation.newConversationTitle')}
+					maxlength={200}
+					autocomplete="off"
+					class="h-8 text-compact"
+					onkeydown={onRenameKey}
+					onblur={() => void endRename(true, false)}
+				/>
 			</div>
-		</li>
+		{:else}
+			<button
+				type="button"
+				data-session-item={session.id}
+				class={cn(
+					'flex min-w-0 items-center gap-2 rounded-lg py-1.5 pr-2 text-left group-focus-within:pr-9 group-hover:pr-9 group-has-[[data-state=open]]:pr-9',
+					hasForks ? 'shrink' : 'flex-1',
+					fork ? (nested ? 'pl-14' : 'pl-8') : nested ? 'pl-8' : 'pl-2'
+				)}
+				aria-current={current ? 'true' : undefined}
+				title={displayTitle(session.title)}
+				onclick={() => void app.openSession(session.id)}
+				ondblclick={() => {
+					keepFocus = false;
+					startRename(session);
+				}}
+				onkeydown={(event) => onItemKeydown(event, session)}
+			>
+				<span class="flex min-w-0 flex-1 flex-col">
+					<span
+						{@attach fadeWhenClipped(session.title)}
+						class="title-fade min-w-0 overflow-hidden text-compact whitespace-nowrap"
+						>{displayTitle(session.title)}</span
+					>
+					{#if projectLabel}
+						<span class="flex min-w-0 items-center gap-1 text-caption text-muted-foreground">
+							<Folder class="size-3 shrink-0" aria-hidden="true" />
+							<span class="truncate">{projectLabel}</span>
+						</span>
+					{/if}
+				</span>
+				{#if session.running}
+					<StatusDot status="running" label={t('navigation.conversationRunning')} />
+				{/if}
+			</button>
+			{#if hasForks}
+				<button
+					type="button"
+					class="-ml-1.5 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
+					aria-expanded={!folded.has(session.id)}
+					aria-label={t(folded.has(session.id) ? 'navigation.showForks' : 'navigation.hideForks', {
+						title: displayTitle(session.title)
+					})}
+					onclick={() => toggleForks(session.id)}
+				>
+					<ChevronDownIcon
+						class={cn('size-3.5 transition-transform', folded.has(session.id) && '-rotate-90')}
+						aria-hidden="true"
+					/>
+				</button>
+				<!-- The rest of the row opens the conversation too (the button above stays the keyboard's). -->
+				<div class="min-w-0 flex-1 self-stretch" aria-hidden="true" onclick={() => void app.openSession(session.id)}></div>
+			{/if}
+		{/if}
+		{#if fork}
+			<span
+				class={cn(
+					'pointer-events-none absolute top-0 h-1/2 w-2.5 rounded-bl-md border-b border-l border-muted-foreground/40',
+					nested ? 'left-[38px]' : 'left-[14px]'
+				)}
+				aria-hidden="true"
+			></span>
+		{/if}
+
+		<DropdownMenu.Root>
+			<DropdownMenu.Trigger>
+				{#snippet child({ props })}
+					<Button
+						{...props}
+						variant="ghost"
+						size="icon-sm"
+						class="absolute top-1/2 right-1 shrink-0 -translate-y-1/2 text-muted-foreground opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
+						aria-label={t('navigation.actionsForConversation', { title: displayTitle(session.title) })}
+					>
+						<EllipsisVertical class="size-4" aria-hidden="true" />
+					</Button>
+				{/snippet}
+			</DropdownMenu.Trigger>
+			<DropdownMenu.Content align="end" class="w-44" onCloseAutoFocus={onMenuClose}>
+				<DropdownMenu.Item
+					onSelect={() => {
+						keepFocus = true;
+						startRename(session);
+					}}
+				>
+					<Pencil class="size-4" aria-hidden="true" />
+					{t('navigation.rename')}
+				</DropdownMenu.Item>
+				<DropdownMenu.Item onSelect={() => void app.forkSession(session.id)}>
+					<GitFork class="size-4" aria-hidden="true" />
+					{t('navigation.fork')}
+				</DropdownMenu.Item>
+				<DropdownMenu.Item onSelect={() => app.togglePin(session.id)}>
+					{#if app.isPinned(session.id)}
+						<PinOff class="size-4" aria-hidden="true" />
+						{t('navigation.unpin')}
+					{:else}
+						<Pin class="size-4" aria-hidden="true" />
+						{t('navigation.pin')}
+					{/if}
+				</DropdownMenu.Item>
+				<DropdownMenu.Separator />
+				<DropdownMenu.Item variant="destructive" onSelect={() => askDelete(session)}>
+					<Trash class="size-4" aria-hidden="true" />
+					{t('common.delete')}
+				</DropdownMenu.Item>
+			</DropdownMenu.Content>
+		</DropdownMenu.Root>
+	</div>
+{/snippet}
+
+<ul {@attach trackList} class="flex flex-col gap-0.5" aria-label={label}>
+	{#each roots as session (session.id)}
+		{@const kids = forks.get(session.id) ?? []}
+		<li>{@render row(session, false, kids.length > 0)}</li>
+		{#if kids.length > 0 && !folded.has(session.id)}
+			{#each kids as kid (kid.id)}
+				<li>{@render row(kid, true, false)}</li>
+			{/each}
+		{/if}
 	{/each}
-	{#if limit !== undefined && sorted.length > limit && (showAll || visible.length < sorted.length)}
+	{#if limit !== undefined && allRoots.length > limit && (showAll || roots.length < allRoots.length)}
 		<li>
 			<button
 				type="button"

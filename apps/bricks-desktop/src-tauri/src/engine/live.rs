@@ -30,6 +30,14 @@ pub const RING_CAPACITY: usize = 4000;
 /// start is kept whatever happens).
 pub const RUNNING_RING_CAPACITY: usize = 50_000;
 
+/// What happens to a run a message from another conversation started
+/// (`tag`: the message's id). Runs without a tag announce nothing here.
+#[derive(Debug, Clone)]
+pub enum RunNotice {
+    Started { tag: String },
+    Finished { tag: String, text: String, outcome: String },
+}
+
 pub struct OpenSession {
     /// The registry key. Fixed for the controller's life: a `resume` command
     /// is refused, so the session never changes under its key.
@@ -53,6 +61,8 @@ pub struct OpenSession {
     /// Completion of the last journal append of this session: the next one
     /// waits for it, so the appends keep the order of the edits.
     journal_tail: parking_lot::Mutex<Option<tokio::sync::oneshot::Receiver<()>>>,
+    /// Starts and ends of the runs messages started.
+    notices: tokio::sync::broadcast::Sender<RunNotice>,
 }
 
 struct Live {
@@ -71,6 +81,8 @@ struct Live {
     running_label: Option<PendingLabel>,
     /// Builds the records of the runs (answer, commands, files).
     recorder: Recorder,
+    /// The message that started the run in progress, if one did.
+    running_tag: Option<String>,
 }
 
 /// A submit accepted by the controller, waiting for the run it starts. The
@@ -89,6 +101,8 @@ struct Expected {
     /// A `revise`: the engine may still refuse it after accepting it (its
     /// context could not be cut), and no run then starts.
     revision: bool,
+    /// The message from another conversation this submit carries.
+    tag: Option<String>,
 }
 
 /// A labelled run, from its start to its end.
@@ -128,12 +142,14 @@ impl OpenSession {
                 expected: VecDeque::new(),
                 running_label: None,
                 recorder: Recorder::default(),
+                running_tag: None,
             }),
             labels,
             run_records,
             records_tail: parking_lot::Mutex::new(None),
             submit_gate: tokio::sync::Mutex::new(()),
             journal_tail: parking_lot::Mutex::new(None),
+            notices: tokio::sync::broadcast::channel(256).0,
         };
         (Arc::new(entry), stop_rx)
     }
@@ -147,6 +163,18 @@ impl OpenSession {
         command: Command,
         label: Option<String>,
         attachments: Vec<AttachmentRef>,
+    ) -> Result<(), String> {
+        self.send_tagged(command, label, attachments, None).await
+    }
+
+    /// As [`OpenSession::send`], for a submit carrying the message `tag`:
+    /// the run it starts is announced to [`OpenSession::notices`].
+    pub async fn send_tagged(
+        &self,
+        command: Command,
+        label: Option<String>,
+        attachments: Vec<AttachmentRef>,
+        tag: Option<String>,
     ) -> Result<(), String> {
         // A revision's run puts its message where the revised one was.
         let revised = match &command {
@@ -173,6 +201,7 @@ impl OpenSession {
                 base,
                 attachments,
                 revision: revised.is_some(),
+                tag,
             });
         let sent = self.controller.send(command);
         if sent.is_err() {
@@ -190,6 +219,16 @@ impl OpenSession {
     /// Anything is active: a run, a compaction, a resume.
     pub fn is_busy(&self) -> bool {
         self.controller.activity() != Activity::Idle
+    }
+
+    /// The starts and ends of the runs messages start, from now on.
+    pub fn notices(&self) -> tokio::sync::broadcast::Receiver<RunNotice> {
+        self.notices.subscribe()
+    }
+
+    /// Turns `true` when the session is closed (or deleted).
+    pub fn closed(&self) -> watch::Receiver<bool> {
+        self.stop.subscribe()
     }
 
     /// Asks the consumer task to finish after the events already queued.
@@ -281,9 +320,9 @@ impl OpenSession {
 pub async fn session_item(entry: &OpenSession) -> SessionItem {
     let snap = entry.controller.snapshot();
     let meta = load_meta(&entry.sessions_dir, &entry.session_id).await;
-    let (created_at, updated_at) = match meta {
-        Some(m) => (m.created_at, m.updated_at),
-        None => (entry.created_at, now_ms()),
+    let (created_at, updated_at, parent_id) = match meta {
+        Some(m) => (m.created_at, m.updated_at, m.parent),
+        None => (entry.created_at, now_ms(), None),
     };
     let message_count = entry.live.lock().message_count;
     SessionItem {
@@ -298,6 +337,7 @@ pub async fn session_item(entry: &OpenSession) -> SessionItem {
         working_dir: Some(path_text(&snap.working_dir)),
         open: true,
         running: matches!(snap.activity, Activity::Running { .. }),
+        parent_id,
     }
 }
 
@@ -379,6 +419,10 @@ pub fn ingest(hub: &Arc<Hub>, entry: &Arc<OpenSession>, env: Envelope) {
                 // typed command labels only the run its own submit started.
                 live.running_label = None;
                 let expected = live.expected.pop_front();
+                live.running_tag = expected.as_ref().and_then(|e| e.tag.clone());
+                if let Some(tag) = live.running_tag.clone() {
+                    let _ = entry.notices.send(RunNotice::Started { tag });
+                }
                 let base = expected.as_ref().and_then(|e| e.base);
                 // The copies the submit carried are kept with the run it started.
                 let copies = expected
@@ -411,7 +455,18 @@ pub fn ingest(hub: &Arc<Hub>, entry: &Arc<OpenSession>, env: Envelope) {
                     });
                 }
             }
-            Event::RunFinished { .. } => {
+            Event::RunFinished { outcome, text, .. } => {
+                if let Some(tag) = live.running_tag.take() {
+                    let outcome = serde_json::to_value(outcome)
+                        .ok()
+                        .and_then(|v| v.as_str().map(str::to_string))
+                        .unwrap_or_default();
+                    let _ = entry.notices.send(RunNotice::Finished {
+                        tag,
+                        text: text.clone(),
+                        outcome,
+                    });
+                }
                 live.running = false;
                 running_changed = Some(false);
                 refresh = true;
@@ -726,6 +781,7 @@ mod tests {
             expected: VecDeque::new(),
             running_label: None,
             recorder: Recorder::default(),
+            running_tag: None,
         }
     }
 
