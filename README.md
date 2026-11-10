@@ -9,6 +9,8 @@
 
 [Features](#features) · [Getting started](#getting-started) · [Settings](#settings) · [CLI](#cli) · [Rust SDK](#rust-sdk) · [Development](#development) · [Documentation](#documentation) · [License](#license)
 
+<img width="1200" height="712" alt="bricks_demo" src="https://github.com/user-attachments/assets/80ce4162-456b-4102-886a-941e47c3d200" />
+
 </div>
 
 Bricks is a desktop coding agent built in Rust. Explore your codebase, edit
