@@ -153,13 +153,6 @@ impl ProviderRegistry {
     }
 }
 
-/// Where a former file put the key. Never printed.
-#[derive(Clone)]
-pub(crate) enum LegacyKey {
-    Inline(Secret),
-    Env(String),
-}
-
 /// A model with every inheritance and override applied.
 #[derive(Clone)]
 pub struct ResolvedModel {
@@ -177,9 +170,8 @@ pub struct ResolvedModel {
     pub count_url: Option<Url>,
     pub auth: AuthMode,
     pub auth_header: String,
-    /// A key a former file still names (inline, or a variable): read last,
-    /// until the file is moved to the secure storage.
-    pub(crate) legacy_key: Option<LegacyKey>,
+    /// The provider's key, as written in the file.
+    pub(crate) api_key: Option<Secret>,
     /// Required protocol headers, overridden by provider then model headers.
     pub(crate) headers: BTreeMap<String, Secret>,
     pub compat: ResolvedCompat,
@@ -283,11 +275,7 @@ impl ResolvedModel {
             count_url,
             auth,
             auth_header,
-            legacy_key: match (&provider.legacy_api_key, &provider.legacy_api_key_env) {
-                (Some(k), _) if !k.is_blank() => Some(LegacyKey::Inline(k.clone())),
-                (_, Some(var)) => Some(LegacyKey::Env(var.clone())),
-                _ => None,
-            },
+            api_key: provider.key().map(Secret::new),
             headers,
             compat: Compat::resolve(&provider.compat, &model.compat),
             limits: model.limits,
@@ -326,8 +314,7 @@ impl ResolvedModel {
         crate::provider::ProviderBuilder::new(self.clone())
     }
 
-    /// Build a provider with defaults (the key from the system keychain, or
-    /// its override variable).
+    /// Build a provider with defaults (the key written in the file).
     pub fn build_provider(&self) -> bricks_types::Result<crate::provider::ConfiguredProvider> {
         self.provider().build()
     }
@@ -489,7 +476,7 @@ mod tests {
             !text
                 .lines()
                 .any(|l| l.trim_start().starts_with("api_key =")),
-            "examples use api_key_env only"
+            "the example holds no key"
         );
         let reg = ProviderRegistry::from_toml_str(text, "providers.example.toml").unwrap();
 
@@ -498,7 +485,7 @@ mod tests {
             let resolved = reg.resolve(&m.selection()).unwrap();
             resolved
                 .provider()
-                .env(|_| Some("test-key".into()))
+                .api_key("test-key")
                 .build()
                 .unwrap_or_else(|e| panic!("{}: {e}", m.selection()));
         }

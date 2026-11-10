@@ -247,12 +247,11 @@ pub struct ProviderConfig {
     /// Header carrying the key when `auth = "api_key_header"`.
     #[serde(default)]
     pub auth_header: Option<String>,
-    /// Former inline key: read only to move it into the secure storage
-    /// (see [`ProviderConfig::legacy_key`]), never used to authenticate.
-    #[serde(default, rename = "api_key")]
-    pub legacy_api_key: Option<Secret>,
-    /// Former name of an environment variable holding the key: same as
-    /// `legacy_api_key`.
+    /// The API key, written in the file (never printed).
+    #[serde(default)]
+    pub api_key: Option<Secret>,
+    /// Former name of an environment variable holding the key: read only so
+    /// that a former file still loads, never used.
     #[serde(default, rename = "api_key_env")]
     pub legacy_api_key_env: Option<String>,
     /// Replaces the protocol's relative path for models using the provider's
@@ -856,23 +855,12 @@ pub(crate) fn pointer_root(p: &str) -> &str {
 }
 
 impl ProviderConfig {
-    /// The key a former file gave this provider (inline, or through the
-    /// variable it named, looked up with `env`), to move into the secure
-    /// storage. `None` when the file named none or the variable is unset.
-    pub fn legacy_key(&self, env: &dyn Fn(&str) -> Option<String>) -> Option<String> {
-        if let Some(k) = self.legacy_api_key.as_ref().filter(|k| !k.is_blank()) {
-            return Some(k.expose().trim().to_string());
-        }
-        self.legacy_api_key_env
-            .as_deref()
-            .and_then(env)
-            .map(|v| v.trim().to_string())
-            .filter(|v| !v.is_empty())
-    }
-
-    /// The file still names a key the former way.
-    pub fn has_legacy_key_fields(&self) -> bool {
-        self.legacy_api_key.is_some() || self.legacy_api_key_env.is_some()
+    /// The key written in the file, `None` when absent or blank.
+    pub fn key(&self) -> Option<&str> {
+        self.api_key
+            .as_ref()
+            .filter(|k| !k.is_blank())
+            .map(|k| k.expose().trim())
     }
 
     fn validate(&self, origin: &str) -> Result<(), ConfigError> {
@@ -1384,27 +1372,17 @@ mod tests {
 
     #[test]
     fn auth_rules() {
-        // The file holds no key: former key fields are read for the move to
-        // the secure storage, never checked or used.
+        // The key is written in the file; a former variable name still loads
+        // and is never used.
         let both = BASIC.replace(
             "api_key_env = \"BRICKS_CUSTOM_API_KEY\"",
-            "api_key_env = \"X\"\napi_key = \"k\"",
+            "api_key_env = \"X\"\napi_key = \" k \"",
         );
         let cfg = ProvidersConfig::from_toml_str(&both, "test.toml").unwrap();
-        let p = &cfg.providers[0];
-        assert!(p.has_legacy_key_fields());
-        assert_eq!(p.legacy_key(&|_| None).as_deref(), Some("k"));
+        assert_eq!(cfg.providers[0].key(), Some("k"));
         let env_only = ProvidersConfig::from_toml_str(BASIC, "test.toml").unwrap();
-        let p = &env_only.providers[0];
-        assert_eq!(p.legacy_key(&|_| None), None);
-        assert_eq!(
-            p.legacy_key(&|n| (n == "BRICKS_CUSTOM_API_KEY").then(|| " v ".into()))
-                .as_deref(),
-            Some("v")
-        );
-        let nokey = BASIC.replace("api_key_env = \"BRICKS_CUSTOM_API_KEY\"\n", "");
-        assert!(!ProvidersConfig::from_toml_str(&nokey, "test.toml").unwrap().providers[0]
-            .has_legacy_key_fields());
+        assert_eq!(env_only.providers[0].key(), None);
+        assert!(env_only.providers[0].legacy_api_key_env.is_some());
         // auth_header only with api_key_header.
         let hdr = BASIC.replace(
             "auth = \"bearer\"",

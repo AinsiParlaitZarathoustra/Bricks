@@ -3,4 +3,8 @@
 /**
  * Fields of a provider the desktop form edits. `None` = unchanged.
  */
-export type ProviderPatch = { name: string | null, endpoint: string | null, protocol: string | null, auth: string | null, auth_header: string | null, };
+export type ProviderPatch = { name: string | null, endpoint: string | null, protocol: string | null, auth: string | null, auth_header: string | null, 
+/**
+ * The API key, written in the file as it is; an empty value removes it.
+ */
+api_key: string | null, };

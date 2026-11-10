@@ -930,8 +930,8 @@ pub struct ProviderView {
     /// `bearer` | `api_key_header` | `none`.
     pub auth: String,
     pub auth_header: Option<String>,
-    /// A key is saved in the system's secure storage (its value never leaves Rust).
-    pub has_key: bool,
+    /// The API key written in the file; the form shows it masked.
+    pub api_key: Option<String>,
     /// The credential is available to this application right now.
     pub has_credentials: bool,
     pub path: Option<String>,
@@ -1004,6 +1004,8 @@ pub struct ProviderPatch {
     pub protocol: Option<String>,
     pub auth: Option<String>,
     pub auth_header: Option<String>,
+    /// The API key, written in the file as it is; an empty value removes it.
+    pub api_key: Option<String>,
 }
 
 /// Fields of a model the desktop form edits. `None` = unchanged.

@@ -9,7 +9,7 @@ use crate::contract::{
     IpcErrorCode, IpcResult, ModelProfileView, ModelView, PricingView, ProviderView, ProvidersFile,
 };
 use crate::i18n::{msg, tr};
-use bricks_provider::config::{ProviderConfig, ProvidersConfig};
+use bricks_provider::config::{AuthMode, ProviderConfig, ProvidersConfig};
 use sha2::{Digest, Sha256};
 use std::io::Write;
 use std::path::Path;
@@ -32,9 +32,8 @@ fn read_file(path: &Path) -> IpcResult<Option<Vec<u8>>> {
 
 /// The providers file as the desktop shows it. An absent file gives an
 /// empty list with no error; an invalid one gives the validator's message
-/// and an empty list. `keys` tells, for a provider, whether a key is saved
-/// and whether it can be called.
-pub fn view(path: &Path, keys: &dyn Fn(&ProviderConfig) -> (bool, bool)) -> ProvidersFile {
+/// and an empty list.
+pub fn view(path: &Path) -> ProvidersFile {
     let path_text = path.display().to_string();
     let bytes = match read_file(path) {
         Ok(bytes) => bytes,
@@ -66,10 +65,7 @@ pub fn view(path: &Path, keys: &dyn Fn(&ProviderConfig) -> (bool, bool)) -> Prov
             providers: config
                 .providers
                 .iter()
-                .map(|p| {
-                    let (has_key, has_credentials) = keys(p);
-                    provider_view(p, has_key, has_credentials)
-                })
+                .map(provider_view)
                 .collect(),
             path: path_text,
             revision,
@@ -84,7 +80,7 @@ pub fn view(path: &Path, keys: &dyn Fn(&ProviderConfig) -> (bool, bool)) -> Prov
     }
 }
 
-fn provider_view(p: &ProviderConfig, has_key: bool, has_credentials: bool) -> ProviderView {
+fn provider_view(p: &ProviderConfig) -> ProviderView {
     ProviderView {
         id: p.id.clone(),
         name: p.name.clone(),
@@ -92,8 +88,8 @@ fn provider_view(p: &ProviderConfig, has_key: bool, has_credentials: bool) -> Pr
         protocol: p.protocol.as_str().to_string(),
         auth: p.auth.as_str().to_string(),
         auth_header: p.auth_header.clone(),
-        has_key,
-        has_credentials,
+        api_key: p.key().map(str::to_string),
+        has_credentials: credentials_available(p),
         path: p.path.clone(),
         header_names: p.headers.keys().cloned().collect(),
         models: p
@@ -160,7 +156,7 @@ pub fn commit(path: &Path, revision: &str, edit: &Edit) -> IpcResult<()> {
 }
 
 /// Replaces `path` with `bytes`: a temporary file in the same folder, with
-/// the same permissions, synced, then renamed over the target. A reader sees
+/// the same permissions less any access by others, synced, then renamed over the target. A reader sees
 /// the old or the new content, never a partial one.
 fn write_replacing(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let dir = path
@@ -183,12 +179,25 @@ fn write_replacing(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         if let Some(p) = permissions {
             std::fs::set_permissions(&tmp, p)?;
         }
+        // The file holds the API keys: only its owner reads it.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&tmp)?.permissions().mode();
+            std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode & 0o700))?;
+        }
         std::fs::rename(&tmp, path)
     })();
     if written.is_err() {
         let _ = std::fs::remove_file(&tmp);
     }
     written
+}
+
+/// Whether a provider can be called: no credential is needed (`auth =
+/// "none"`), or its key is written in the file.
+pub(crate) fn credentials_available(p: &ProviderConfig) -> bool {
+    matches!(p.auth, AuthMode::None) || p.key().is_some()
 }
 
 #[cfg(test)]

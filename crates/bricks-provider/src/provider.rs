@@ -18,8 +18,7 @@ use crate::config::{AuthMode, Secret};
 use crate::modality::validate_messages;
 use crate::protocol::{self, BuildCtx, sse::SseDecoder};
 use crate::reasoning;
-use crate::keys::{self, KeyStore};
-use crate::registry::{LegacyKey, ResolvedModel};
+use crate::registry::ResolvedModel;
 use crate::{CompletionRequest, CompletionStream, Provider};
 use async_trait::async_trait;
 use bricks_types::{BricksError, Modality, Result, StreamEvent, Usage};
@@ -31,15 +30,12 @@ use tokio::sync::mpsc;
 /// Option key a request can use to pick a reasoning profile for that call.
 pub const REASONING_PROFILE_OPTION: &str = "reasoning_profile";
 
-type EnvLookup = Box<dyn Fn(&str) -> Option<String> + Send + Sync>;
-
 /// Builds a [`ConfiguredProvider`], resolving the secret reference.
 pub struct ProviderBuilder {
     model: ResolvedModel,
     profile: Option<String>,
     tariff: Option<String>,
-    env: Option<EnvLookup>,
-    keys: Option<Arc<dyn KeyStore>>,
+    api_key: Option<Secret>,
     client: Option<reqwest::Client>,
 }
 
@@ -49,8 +45,7 @@ impl ProviderBuilder {
             model,
             profile: None,
             tariff: None,
-            env: None,
-            keys: None,
+            api_key: None,
             client: None,
         }
     }
@@ -68,16 +63,9 @@ impl ProviderBuilder {
         self
     }
 
-    /// Where the key's override variable (`BRICKS_API_KEY_<ID>`) is looked
-    /// up (default: the process environment).
-    pub fn env(mut self, lookup: impl Fn(&str) -> Option<String> + Send + Sync + 'static) -> Self {
-        self.env = Some(Box::new(lookup));
-        self
-    }
-
-    /// Where the key is kept (default: the system keychain of this home).
-    pub fn keys(mut self, store: Arc<dyn KeyStore>) -> Self {
-        self.keys = Some(store);
+    /// Uses this key instead of the one written in the file (embedders, tests).
+    pub fn api_key(mut self, key: impl Into<String>) -> Self {
+        self.api_key = Some(Secret::new(key.into().trim()));
         self
     }
 
@@ -116,29 +104,17 @@ impl ProviderBuilder {
         let key = if m.auth == AuthMode::None {
             None
         } else {
-            let env = |name: &str| match &self.env {
-                Some(lookup) => lookup(name),
-                None => std::env::var(name).ok(),
-            };
-            let store = self.keys.clone().unwrap_or_else(keys::default_store);
-            let legacy = || match &m.legacy_key {
-                Some(LegacyKey::Inline(k)) => Some(k.clone()),
-                Some(LegacyKey::Env(var)) => env(var)
-                    .filter(|v| !v.trim().is_empty())
-                    .map(|v| Secret::new(v.trim())),
-                None => None,
-            };
-            match keys::lookup(&m.provider_id, &env, store.as_ref())
-                .map_err(BricksError::Auth)?
-                .map(Secret::new)
-                .or_else(legacy)
+            match self
+                .api_key
+                .clone()
+                .filter(|k| !k.is_blank())
+                .or_else(|| m.api_key.clone())
             {
                 Some(k) => Some(k),
                 None => {
                     return Err(BricksError::Auth(format!(
-                        "provider \"{}\": no API key; add it in the Bricks settings or set {}",
-                        m.provider_id,
-                        keys::override_var(&m.provider_id)
+                        "provider \"{}\": no API key; add it in the Bricks settings",
+                        m.provider_id
                     )));
                 }
             }

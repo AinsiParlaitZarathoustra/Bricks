@@ -47,9 +47,12 @@ pub enum Edit {
     /// Every model without a price for input, output or cache read gets `0`
     /// for it (USD per million tokens). Prices already written are kept.
     FillMissingPrices,
-    /// The former key fields (`api_key`, `api_key_env`) of a provider go:
-    /// its key now lives in the secure storage.
-    StripLegacyKeys { provider_id: String },
+    /// A provider's former key variable (`api_key_env`) goes; `key`, the
+    /// value it held when set, is written as its `api_key` unless it has one.
+    DropKeyVariable {
+        provider_id: String,
+        key: Option<String>,
+    },
     /// Every model's former default level (`reasoning.default`) goes: the
     /// first level applies when none is chosen.
     StripReasoningDefaults,
@@ -94,14 +97,18 @@ pub fn apply(text: &str, edit: &Edit, origin: &str) -> IpcResult<String> {
                 .ok_or_else(|| not_found(tr!(msg::UNKNOWN_MODEL)))?;
             apply_model_patch(model, patch)?;
         }
-        Edit::StripLegacyKeys { provider_id } => {
+        Edit::DropKeyVariable { provider_id, key } => {
             let providers = providers_mut(&mut doc)?;
             let index = provider_index(providers, provider_id)?;
             let table = providers
                 .get_mut(index)
                 .ok_or_else(|| not_found(tr!(msg::UNKNOWN_PROVIDER)))?;
-            table.remove("api_key");
             table.remove("api_key_env");
+            if let Some(key) = key
+                && table.get("api_key").is_none()
+            {
+                set_str(table, "api_key", key.trim());
+            }
         }
         Edit::StripReasoningDefaults => {
             if let Some(providers) = doc.get_mut("providers").and_then(Item::as_array_of_tables_mut) {
@@ -349,9 +356,12 @@ fn apply_provider_patch(table: &mut Table, patch: &ProviderPatch) -> IpcResult<(
     if let Some(v) = &patch.auth {
         set_str(table, "auth", filled("auth", v)?);
     }
-    // The one field an empty value clears: the default header then applies.
+    // An empty value clears these: the default header then applies; no key.
     if let Some(v) = &patch.auth_header {
         set_or_remove(table, "auth_header", v);
+    }
+    if let Some(v) = &patch.api_key {
+        set_or_remove(table, "api_key", v.trim());
     }
     Ok(())
 }
@@ -922,14 +932,21 @@ mod tests {
     }
 
     #[test]
-    fn former_key_fields_are_removed_and_nothing_else() {
-        let edit = Edit::StripLegacyKeys {
-            provider_id: "inline".into(),
+    fn a_former_variable_becomes_the_key_and_its_name_goes() {
+        let edit = Edit::DropKeyVariable {
+            provider_id: "cloud".into(),
+            key: Some("sk-from-var".into()),
         };
         let next = apply(PROVIDERS, &edit, "test").unwrap();
-        assert!(!next.contains("SECRET-KEY-VALUE"), "{next}");
-        assert!(next.contains("api_key_env = \"BRICKS_TEST_CLOUD_KEY\""), "other providers keep theirs");
-        assert!(next.contains("HEADER-SECRET-VALUE"), "headers are kept");
+        assert!(!next.contains("api_key_env"), "{next}");
+        assert!(next.contains("api_key = \"sk-from-var\""), "{next}");
+        assert!(next.contains("SECRET-KEY-VALUE"), "other providers keep theirs");
+        let dropped = Edit::DropKeyVariable {
+            provider_id: "cloud".into(),
+            key: None,
+        };
+        let next = apply(PROVIDERS, &dropped, "test").unwrap();
+        assert_eq!(next, PROVIDERS.replace("api_key_env = \"BRICKS_TEST_CLOUD_KEY\"\n", ""));
     }
 
     #[test]

@@ -7,6 +7,7 @@
   import { theme } from '$lib/theme/theme.svelte'
   import darkTile from '../../../../assets/brand/app-dark.png'
   import lightTile from '../../../../assets/brand/app-light.png'
+  import TypedLine from './TypedLine.svelte'
   import WelcomeField from './WelcomeField.svelte'
   import { STARTERS, starterText } from './starters'
 
@@ -19,20 +20,19 @@
 <div class="relative flex h-full items-center justify-center overflow-hidden px-6">
   <WelcomeField />
   <div class="relative flex w-full max-w-[440px] flex-col items-center text-center">
-    <img
-      src={logo}
-      alt=""
-      width="60"
-      height="60"
-      draggable="false"
-      class="mb-5 size-[60px] rounded-[28%] shadow-[0_12px_50px_-12px_rgb(0_0_0/0.55)] ring-1 ring-element-active"
-    />
+    <!-- The image keeps the margin of the icon grid: the tile is 77% of it, so it is drawn larger
+         and cut to the tile. -->
+    <div
+      class="mb-5 size-[60px] overflow-hidden rounded-[23%] shadow-[0_12px_50px_-12px_rgb(0_0_0/0.55)] ring-1 ring-element-active"
+    >
+      <img src={logo} alt="" width="78" height="78" draggable="false" class="-m-[9px] size-[78px] max-w-none" />
+    </div>
     <h2
       class="mt-1.5 bg-gradient-to-b from-foreground to-foreground/55 bg-clip-text text-[22px] leading-tight font-semibold tracking-tight text-transparent"
     >
       {t('welcome.title')}
     </h2>
-    <p class="mt-1.5 text-base text-muted-foreground">{t('welcome.tagline')}</p>
+    <TypedLine />
     <div role="group" aria-label={t('welcome.suggestions')} class="mt-7 grid w-full grid-cols-2 gap-2.5">
       {#each STARTERS as starter (starter.id)}
         {@const Icon = starter.icon}

@@ -78,7 +78,7 @@ export interface ProviderForm {
 	protocol: string;
 	auth: string;
 	authHeader: string;
-	/** A key pasted to save (empty: the saved key, if any, stays). Never read back. */
+	/** The API key, written in the providers file as it is (empty: none). */
 	apiKey: string;
 }
 
@@ -93,7 +93,7 @@ export function providerForm(provider: ProviderView): ProviderForm {
 		protocol: provider.protocol,
 		auth: provider.auth,
 		authHeader: provider.auth_header ?? '',
-		apiKey: ''
+		apiKey: provider.api_key ?? ''
 	};
 }
 
@@ -289,13 +289,12 @@ export function validateModelForm(form: ModelForm): ModelFormErrors {
 	return errors;
 }
 
-/** `provider` is `null` for a new provider. */
-export function validateProviderForm(form: ProviderForm, provider: ProviderView | null): ProviderFormErrors {
+export function validateProviderForm(form: ProviderForm): ProviderFormErrors {
 	const errors: ProviderFormErrors = {};
 	if (form.name.trim() === '') errors.name = REQUIRED_MESSAGE();
 	if (form.endpoint.trim() === '') errors.endpoint = REQUIRED_MESSAGE();
-	// A provider that needs a key and has none saved gets one now.
-	if (form.auth !== 'none' && !(provider?.has_key ?? false) && form.apiKey.trim() === '') errors.apiKey = REQUIRED_MESSAGE();
+	// A provider that needs a key gets one.
+	if (form.auth !== 'none' && form.apiKey.trim() === '') errors.apiKey = REQUIRED_MESSAGE();
 	return errors;
 }
 
@@ -390,7 +389,8 @@ export function buildProviderPatch(provider: ProviderView, form: ProviderForm): 
 		endpoint: changedRequired(provider.endpoint, form.endpoint),
 		protocol: changedRequired(provider.protocol, form.protocol),
 		auth: changedRequired(provider.auth, form.auth),
-		auth_header: changedOptional(provider.auth_header ?? '', form.authHeader)
+		auth_header: changedOptional(provider.auth_header ?? '', form.authHeader),
+		api_key: changedOptional(provider.api_key ?? '', form.apiKey)
 	};
 }
 
@@ -452,7 +452,8 @@ export function buildProviderCreatePatch(form: ProviderForm): ProviderPatch {
 		endpoint: form.endpoint.trim(),
 		protocol: form.protocol,
 		auth: form.auth,
-		auth_header: header === '' ? null : header
+		auth_header: header === '' ? null : header,
+		api_key: form.auth === 'none' || form.apiKey.trim() === '' ? null : form.apiKey.trim()
 	};
 }
 
@@ -496,9 +497,6 @@ export function providerDeletionDetail(provider: ProviderView): string {
 }
 
 export type WriteOutcome = { ok: true } | { ok: false; message: string; conflict: boolean };
-
-/** What the provider form does with the saved key. */
-export type KeyChange = { kind: 'keep' } | { kind: 'set'; value: string } | { kind: 'remove' };
 
 function isConflictError(error: unknown): boolean {
 	return typeof error === 'object' && error !== null && 'code' in error && error.code === 'conflict';

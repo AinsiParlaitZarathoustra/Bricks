@@ -220,8 +220,6 @@ messages! {
     ZIP_ARCHIVE: "ZIP archive", "archive ZIP";
     NO_IMAGE_INPUT: "This model doesn’t accept images: remove this attachment.", "Ce modèle n’accepte pas les images : retirez cette pièce jointe.";
     UNKNOWN_PROVIDER: "unknown provider in providers.toml", "fournisseur inconnu dans providers.toml";
-    API_KEY_EMPTY: "the API key is empty", "la clé API est vide";
-    KEYCHAIN_UNAVAILABLE: "the system's secure storage refused the key", "le stockage sécurisé du système a refusé la clé";
     UNKNOWN_MODEL: "unknown model in this provider", "modèle inconnu dans ce fournisseur";
     AN_EMPTY_POINTER_WOULD_REMOVE_THE: "an empty pointer would remove the whole request", "un pointeur vide supprimerait toute la requête";
     AN_EMPTY_VALUE_NULL_CANT_BE: "an empty value (null) can’t be written to providers.toml", "une valeur vide (null) ne peut pas être écrite dans providers.toml";

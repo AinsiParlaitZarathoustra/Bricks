@@ -1,64 +1,54 @@
-//! The move of former files to the current form, at startup: keys written in
-//! `providers.toml` (inline, or named through an environment variable) go to
-//! the secure storage, and the former default levels go. Nothing here prints
-//! or returns a key.
+//! The move of former files to the current form, at startup: a key named
+//! through an environment variable (`api_key_env`) is written in the file as
+//! its `api_key` when the variable is set here, and the variable's name goes
+//! either way; the former default levels go too. Nothing here prints or
+//! returns a key.
 
 use super::providers::{self, revision_of};
 use super::providers_toml::Edit;
 use bricks_provider::config::ProvidersConfig;
-use bricks_provider::keys::KeyStore;
 use std::path::Path;
 
 /// What the move did, by provider id.
 #[derive(Debug, Default, PartialEq)]
 pub struct Migration {
-    /// Keys now in the secure storage.
+    /// Keys read from their variable and written in the file.
     pub moved: Vec<String>,
-    /// Former key fields left in place: the variable they name is not set
-    /// here, so there is no key to move (it is still read from there).
-    pub left: Vec<String>,
+    /// Variable names removed with no key to write (the variable was unset).
+    pub dropped: Vec<String>,
     /// Former default levels were removed.
     pub defaults_removed: bool,
 }
 
 /// Moves what a former file holds. A file that is absent, unreadable or
 /// invalid is left as it is (the registry reports it).
-pub fn migrate(path: &Path, keys: &dyn KeyStore) -> Migration {
-    migrate_with(path, keys, &|name| std::env::var(name).ok())
+pub fn migrate(path: &Path) -> Migration {
+    migrate_with(path, &|name| std::env::var(name).ok())
 }
 
-pub(crate) fn migrate_with(
-    path: &Path,
-    keys: &dyn KeyStore,
-    env: &dyn Fn(&str) -> Option<String>,
-) -> Migration {
+pub(crate) fn migrate_with(path: &Path, env: &dyn Fn(&str) -> Option<String>) -> Migration {
     let mut out = Migration::default();
     let Some(config) = read(path) else {
         return out;
     };
-    for p in config.providers.iter().filter(|p| p.has_legacy_key_fields()) {
-        let stored = keys.get(&p.id).ok().flatten().is_some_and(|k| !k.trim().is_empty());
-        let kept = if stored {
-            true
-        } else {
-            match p.legacy_key(env) {
-                // A key the storage refuses stays in the file.
-                Some(key) => match keys.set(&p.id, &key) {
-                    Ok(()) => true,
-                    Err(_) => continue,
-                },
-                None => false,
-            }
-        };
-        if !kept {
-            out.left.push(p.id.clone());
+    for p in &config.providers {
+        let Some(var) = &p.legacy_api_key_env else {
             continue;
-        }
-        let edit = Edit::StripLegacyKeys {
+        };
+        let key = env(var)
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty() && p.key().is_none());
+        let wrote = key.is_some();
+        let edit = Edit::DropKeyVariable {
             provider_id: p.id.clone(),
+            key,
         };
         if commit(path, &edit) {
-            out.moved.push(p.id.clone());
+            if wrote {
+                out.moved.push(p.id.clone());
+            } else {
+                out.dropped.push(p.id.clone());
+            }
         }
     }
     let has_defaults = read(path).is_some_and(|c| {
@@ -89,7 +79,6 @@ fn commit(path: &Path, edit: &Edit) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bricks_provider::keys::MemoryKeys;
 
     const FILE: &str = r#"schema_version = 1
 
@@ -139,47 +128,44 @@ auth = "none"
 "#;
 
     #[test]
-    fn keys_move_to_the_storage_and_leave_the_file() {
+    fn variables_become_keys_in_the_file_and_their_names_go() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("providers.toml");
         std::fs::write(&path, FILE).unwrap();
-        let keys = MemoryKeys::default();
-        let env = |name: &str| (name == "SOME_SET_VAR").then(|| "sk-env-456".to_string());
-        let report = migrate_with(&path, &keys, &env);
-        assert_eq!(report.moved, vec!["inline".to_string(), "env".to_string()]);
-        assert_eq!(report.left, vec!["unset".to_string()]);
+        let env = |name: &str| (name == "SOME_SET_VAR").then(|| " sk-env-456 ".to_string());
+        let report = migrate_with(&path, &env);
+        assert_eq!(report.moved, vec!["env".to_string()]);
+        assert_eq!(report.dropped, vec!["unset".to_string()]);
         assert!(report.defaults_removed);
-        assert_eq!(keys.get("inline").unwrap().as_deref(), Some("sk-inline-123"));
-        assert_eq!(keys.get("env").unwrap().as_deref(), Some("sk-env-456"));
-        assert_eq!(keys.get("unset").unwrap(), None);
         let text = std::fs::read_to_string(&path).unwrap();
-        assert!(!text.contains("api_key ="), "{text}");
-        assert!(!text.contains("SOME_SET_VAR"), "{text}");
-        // An unset variable keeps its reference: nothing to move, nothing lost.
-        assert!(text.contains("api_key_env = \"SOME_UNSET_VAR\""), "{text}");
-        assert!(!text.contains("sk-inline-123"));
+        assert!(text.contains("api_key = \"sk-inline-123\""), "{text}");
+        assert!(text.contains("api_key = \"sk-env-456\""), "{text}");
+        assert!(!text.contains("api_key_env"), "{text}");
         assert!(!text.contains("default = "), "{text}");
         assert!(text.contains("id = \"low\""));
-        // A second pass moves nothing more.
-        let again = migrate_with(&path, &keys, &env);
-        assert!(again.moved.is_empty() && !again.defaults_removed);
+        // A second pass changes nothing.
+        let again = migrate_with(&path, &env);
+        assert_eq!(again, Migration::default());
     }
 
     #[test]
-    fn a_key_already_stored_is_kept() {
+    fn a_key_already_written_is_kept() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("providers.toml");
-        std::fs::write(&path, FILE).unwrap();
-        let keys = MemoryKeys::default();
-        keys.set("inline", "sk-newer").unwrap();
-        migrate_with(&path, &keys, &|_| None);
-        assert_eq!(keys.get("inline").unwrap().as_deref(), Some("sk-newer"));
+        let both = FILE.replace(
+            "api_key_env = \"SOME_SET_VAR\"",
+            "api_key = \"sk-newer\"\napi_key_env = \"SOME_SET_VAR\"",
+        );
+        std::fs::write(&path, both).unwrap();
+        migrate_with(&path, &|n| (n == "SOME_SET_VAR").then(|| "sk-older".into()));
+        let text = std::fs::read_to_string(&path).unwrap();
+        assert!(text.contains("api_key = \"sk-newer\"") && !text.contains("sk-older"), "{text}");
     }
 
     #[test]
     fn an_absent_file_is_left_alone() {
         let dir = tempfile::tempdir().unwrap();
-        let report = migrate_with(&dir.path().join("none.toml"), &MemoryKeys::default(), &|_| None);
+        let report = migrate_with(&dir.path().join("none.toml"), &|_| None);
         assert_eq!(report, Migration::default());
     }
 }

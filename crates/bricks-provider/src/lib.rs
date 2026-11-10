@@ -14,7 +14,7 @@
 //!
 //! let registry = ProviderRegistry::load(None)?;              // ~/.bricks/providers.toml
 //! let model = registry.resolve("custom/flash")?;             // explicit selection
-//! let provider = model.build_provider()?;                    // reads api_key_env now
+//! let provider = model.build_provider()?;                    // the key written in the file
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
@@ -25,7 +25,6 @@ pub mod endpoint;
 pub mod modality;
 pub mod pricing;
 pub mod protocol;
-pub mod keys;
 pub mod provider;
 pub mod reasoning;
 pub mod registry;

@@ -8,7 +8,8 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
-	import KeyRound from '@lucide/svelte/icons/key-round';
+	import Eye from '@lucide/svelte/icons/eye';
+	import EyeOff from '@lucide/svelte/icons/eye-off';
 	import type { ProviderPatch } from '$lib/ipc/bindings/ProviderPatch';
 	import type { ProviderView } from '$lib/ipc/bindings/ProviderView';
 	import {
@@ -25,7 +26,6 @@
 		providerForm,
 		validateNewId,
 		validateProviderForm,
-		type KeyChange,
 		type ProviderForm,
 		type WriteOutcome
 	} from './models';
@@ -43,11 +43,8 @@
 		takenIds?: readonly string[];
 		/** Set when the dialog was reopened after the file changed elsewhere. */
 		notice?: string | null;
-		/**
-		 * Writes the patch (every field for a new provider, else only the changed ones; `null` when
-		 * none changed), then the key change.
-		 */
-		onSave: (patch: ProviderPatch | null, id: string, key: KeyChange) => Promise<WriteOutcome>;
+		/** Writes the patch: every field for a new provider, else only the changed ones. */
+		onSave: (patch: ProviderPatch, id: string) => Promise<WriteOutcome>;
 		/** The dialog must go: closed by the user, or after a successful save. */
 		onClose: () => void;
 	} = $props();
@@ -59,15 +56,12 @@
 	let attempted = $state(false);
 	let saving = $state(false);
 	let error = $state<string | null>(null);
-	/** The saved key is being replaced: the field shows instead of the saved state. */
-	let replacing = $state(false);
-	/** The saved key goes when the form is saved. */
-	let removing = $state(false);
+	/** The key shows in clear while this is on. */
+	let revealed = $state(false);
 
-	const hasSavedKey = $derived((original?.has_key ?? false) && !removing);
 	const needsKey = $derived(form.auth !== 'none');
 
-	const errors = $derived(validateProviderForm(form, original));
+	const errors = $derived(validateProviderForm(form));
 	const idError = $derived(original ? undefined : validateNewId(id, takenIds));
 	/** Field messages show once the user tried to save. */
 	const shown = $derived(attempted ? errors : {});
@@ -77,22 +71,14 @@
 		if (saving) return;
 		attempted = true;
 		if (hasFormErrors(errors) || idError) return;
-		const built = original ? buildProviderPatch(original, form) : buildProviderCreatePatch(form);
-		const patch = original && isEmptyProviderPatch(built) ? null : built;
-		const typed = form.apiKey.trim();
-		const key: KeyChange =
-			needsKey && typed !== ''
-				? { kind: 'set', value: typed }
-				: removing
-					? { kind: 'remove' }
-					: { kind: 'keep' };
-		if (patch === null && key.kind === 'keep') {
+		const patch = original ? buildProviderPatch(original, form) : buildProviderCreatePatch(form);
+		if (original && isEmptyProviderPatch(patch)) {
 			onClose();
 			return;
 		}
 		saving = true;
 		error = null;
-		const outcome = await onSave(patch, original ? original.id : id.trim(), key);
+		const outcome = await onSave(patch, original ? original.id : id.trim());
 		saving = false;
 		if (outcome.ok) onClose();
 		else error = outcome.message;
@@ -218,40 +204,35 @@
 			{#if needsKey}
 				<div class="flex flex-col gap-2">
 					<Label for={`${uid}-key`}>{t('settings.apiKey')}</Label>
-					{#if hasSavedKey && !replacing}
-						<div class="flex h-9 items-center gap-2 rounded-lg border border-input bg-background pr-1 pl-3">
-							<KeyRound class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-							<span id={`${uid}-key`} class="min-w-0 flex-1 truncate text-sm">{t('settings.keySaved')}</span>
-							<Button type="button" variant="ghost" size="sm" onclick={() => (replacing = true)}>
-								{t('settings.replaceKey')}
-							</Button>
-							<Button
-								type="button"
-								variant="ghost"
-								size="sm"
-								class="text-destructive hover:text-destructive"
-								onclick={() => {
-									removing = true;
-									form.apiKey = '';
-								}}
-							>
-								{t('common.delete')}
-							</Button>
-						</div>
-					{:else}
+					<div class="relative">
 						<Input
 							id={`${uid}-key`}
-							type="password"
+							type={revealed ? 'text' : 'password'}
 							bind:value={form.apiKey}
 							autocomplete="off"
 							spellcheck={false}
-							class="font-mono text-sm"
+							class="pr-9 font-mono text-sm"
 							aria-invalid={shown.apiKey ? 'true' : undefined}
 							aria-describedby={shown.apiKey ? `${uid}-key-error` : undefined}
 						/>
-						{#if shown.apiKey}
-							<p id={`${uid}-key-error`} role="alert" class="text-xs text-destructive">{shown.apiKey}</p>
-						{/if}
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon-xs"
+							class="absolute top-1/2 right-1.5 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+							aria-label={revealed ? t('settings.hideKey') : t('settings.showKey')}
+							aria-pressed={revealed}
+							onclick={() => (revealed = !revealed)}
+						>
+							{#if revealed}
+								<EyeOff class="size-3.5" aria-hidden="true" />
+							{:else}
+								<Eye class="size-3.5" aria-hidden="true" />
+							{/if}
+						</Button>
+					</div>
+					{#if shown.apiKey}
+						<p id={`${uid}-key-error`} role="alert" class="text-xs text-destructive">{shown.apiKey}</p>
 					{/if}
 				</div>
 			{/if}

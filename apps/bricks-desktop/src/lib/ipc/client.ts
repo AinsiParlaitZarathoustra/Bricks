@@ -361,12 +361,6 @@ export const providerCreate = (providerId: string, patch: ProviderPatch, revisio
   call<ProvidersFile>('provider_create', { providerId, patch, revision })
 export const modelCreate = (providerId: string, modelId: string, patch: ModelPatch, revision: string) =>
   call<ProvidersFile>('model_create', { providerId, modelId, patch, revision })
-/** Saves a provider's API key in the system's secure storage (never in the file, never read back). */
-export const providerKeySet = (providerId: string, key: string) =>
-  call<ProvidersFile>('provider_key_set', { providerId, key })
-/** Removes a provider's saved API key. */
-export const providerKeyDelete = (providerId: string) =>
-  call<ProvidersFile>('provider_key_delete', { providerId })
 /** Writes 0 for every missing input, output and cache-read price, in one edit. */
 export const providersFillMissingPrices = (revision: string) =>
   call<ProvidersFile>('providers_fill_missing_prices', { revision })

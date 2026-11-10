@@ -10,7 +10,7 @@
 </script>
 
 <div role="status" aria-label={t('layout.startingBricks')} class="grid h-screen place-items-center">
-  <img {src} alt="" width="96" height="96" draggable="false" class="logo size-24 select-none" />
+  <img {src} alt="" width="106" height="106" draggable="false" class="logo size-[106px] select-none" />
 </div>
 
 <style>

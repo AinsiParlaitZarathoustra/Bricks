@@ -11,9 +11,9 @@ protocol: string,
  */
 auth: string, auth_header: string | null, 
 /**
- * A key is saved in the system's secure storage (its value never leaves Rust).
+ * The API key written in the file; the form shows it masked.
  */
-has_key: boolean, 
+api_key: string | null, 
 /**
  * The credential is available to this application right now.
  */

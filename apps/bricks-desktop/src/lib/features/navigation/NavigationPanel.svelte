@@ -41,17 +41,19 @@
 		<NewConversationButton class="w-full justify-start px-2 text-ui" />
 	</div>
 
-	<ScrollArea class="min-h-0 flex-1">
-		<div class="flex flex-col gap-4 pb-3">
+	<ScrollArea
+		class="min-h-0 flex-1 [mask-image:linear-gradient(to_bottom,#000_calc(100%-24px),transparent)]"
+	>
+		<div class="flex flex-col gap-4 pb-6">
 			{#if app.pinnedSessions.length > 0}
 				<section class="flex flex-col gap-1 px-2">
-					<h2 class="px-2 text-xs font-medium text-muted-foreground">{t('navigation.pinned')}</h2>
+					<h2 class="sticky top-0 z-10 bg-sidebar flex h-6 items-center px-2 text-xs font-medium text-muted-foreground">{t('navigation.pinned')}</h2>
 					<ConversationList sessions={app.pinnedSessions} label={t('navigation.pinned')} />
 				</section>
 			{/if}
 
 			<section class="flex flex-col gap-1 px-2">
-				<div class="flex h-6 items-center justify-between pr-0.5 pl-2">
+				<div class="sticky top-0 z-10 bg-sidebar flex h-6 items-center justify-between pr-0.5 pl-2">
 					<h2 class="text-xs font-medium text-muted-foreground">{t('navigation.projects')}</h2>
 					<Button
 						variant="ghost"
@@ -72,14 +74,14 @@
 
 			{#if chats && app.sessionsOf(chats.id).some((s) => !app.isPinned(s.id))}
 				<section class="flex flex-col gap-1 px-2">
-					<h2 class="px-2 text-xs font-medium text-muted-foreground">{t('navigation.conversations')}</h2>
+					<h2 class="sticky top-0 z-10 bg-sidebar flex h-6 items-center px-2 text-xs font-medium text-muted-foreground">{t('navigation.conversations')}</h2>
 					<ConversationList projectId={chats.id} label={t('navigation.conversations')} />
 				</section>
 			{/if}
 		</div>
 	</ScrollArea>
 
-	<div class="p-2">
+	<div class="px-2 pt-2 pb-1">
 		<Button
 			variant="ghost"
 			class="w-full justify-start text-ui"
