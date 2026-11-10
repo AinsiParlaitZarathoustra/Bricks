@@ -19,19 +19,13 @@ export const PROTOCOL_OPTIONS: readonly { value: string; label: string }[] = [
 ];
 
 export const AUTH_OPTIONS: readonly { value: string; label: string }[] = [
-	{ value: 'bearer', get label() { return t('settings.bearerToken') } },
-	{ value: 'api_key_header', get label() { return t('settings.keyInAHeader') } },
-	{ value: 'none', get label() { return t('common.none') } }
+	{ value: 'bearer', get label() { return t('settings.authBearer') } },
+	{ value: 'api_key_header', get label() { return t('settings.authHeader') } },
+	{ value: 'none', get label() { return t('settings.authNone') } }
 ];
 
 /** Input modalities the form offers, in display order (unknown ones are kept as they are). */
 export const MODALITY_OPTIONS: readonly string[] = ['text', 'image', 'audio', 'video', 'document'];
-
-/** Accepted file types offered with the document input. */
-export const DOCUMENT_TYPE_PRESETS: readonly { value: string; label: string }[] = [
-	{ value: 'application/pdf', label: 'PDF' },
-	{ value: '*/*', get label() { return t('settings.anyFile') } }
-];
 
 export const CONFLICT_MESSAGE = (): string =>
 	t('settings.theProvidersFileWasChangedElsewhere');
@@ -41,19 +35,12 @@ export const PRICE_ERROR = (): string => t('settings.typeAPositiveNumberOrZero')
 export const ID_ERROR = (): string => t('settings.lettersDigitsAndStartingWithA');
 export const ID_DUPLICATE = (): string => t('settings.thisIdentifierAlreadyExists');
 export const MODALITY_REQUIRED = (): string => t('settings.tickAtLeastOneInput');
-export const DOCUMENT_TYPES_REQUIRED = (): string => t('settings.giveAtLeastOneFileType');
-export const DOCUMENT_TYPE_INVALID = (): string => t('settings.eachTypeIsWrittenTypeSubtype');
 export const REQUIRED_MESSAGE = (): string => t('settings.thisFieldIsRequired');
-export const API_KEY_ENV_REQUIRED_MESSAGE = (): string =>
-	t('settings.giveTheVariableHoldingTheKey');
-export const API_KEY_ENV_CLEAR_MESSAGE = (): string => t('settings.thisVariableCantBeClearedFrom');
 
 export const PROFILE_ID_REQUIRED = (): string => t('settings.typeAnIdentifier');
 export const PROFILE_ID_DUPLICATE = (): string => t('settings.thisIdentifierAlreadyExistsForThis');
 export const PROFILE_PARAMETERS_OBJECT = (): string => t('settings.parametersMustBeAJsonObject');
 export const PROFILE_POINTER = (): string => t('settings.eachPathStartsWithForExample');
-export const DEFAULT_PROFILE_PENDING = (): string =>
-	t('settings.theDefaultProfileWasRemovedOr');
 
 /** The name to show: the name when it has text, else the id (an empty label would render blank). */
 export function displayName(name: string | null | undefined, id: string): string {
@@ -91,11 +78,12 @@ export interface ProviderForm {
 	protocol: string;
 	auth: string;
 	authHeader: string;
-	apiKeyEnv: string;
+	/** A key pasted to save (empty: the saved key, if any, stays). Never read back. */
+	apiKey: string;
 }
 
 export function newProviderForm(): ProviderForm {
-	return { name: '', endpoint: '', protocol: 'chat_completions', auth: 'bearer', authHeader: '', apiKeyEnv: '' };
+	return { name: '', endpoint: '', protocol: 'chat_completions', auth: 'bearer', authHeader: '', apiKey: '' };
 }
 
 export function providerForm(provider: ProviderView): ProviderForm {
@@ -105,7 +93,7 @@ export function providerForm(provider: ProviderView): ProviderForm {
 		protocol: provider.protocol,
 		auth: provider.auth,
 		authHeader: provider.auth_header ?? '',
-		apiKeyEnv: provider.api_key_env ?? ''
+		apiKey: ''
 	};
 }
 
@@ -133,6 +121,21 @@ export function profileDraft(profile: ModelProfileView): ProfileDraft {
 
 export function newProfileDraft(): ProfileDraft {
 	return { id: '', label: '', parameters: '{}', remove: '' };
+}
+
+/**
+ * A new level, from its name alone: the request field that carries a reasoning effort in the
+ * model's protocol, set to the name (`low`, `high`…).
+ */
+export function newLevelDraft(level: string, protocol: string): ProfileDraft {
+	const id = level.trim();
+	const parameters =
+		protocol === 'responses'
+			? { reasoning: { effort: id } }
+			: protocol === 'anthropic_messages'
+				? { output_config: { effort: id } }
+				: { reasoning_effort: id };
+	return { id, label: '', parameters: JSON.stringify(parameters, null, 2), remove: '' };
 }
 
 /** Label of a draft in the form: its label when it has text, else its id. */
@@ -190,20 +193,12 @@ export interface ModelForm {
 	maxInput: string;
 	maxOutput: string;
 	modalities: string[];
-	/** Accepted document types, separated by commas or spaces. */
-	documentTypes: string;
 	/** USD per million tokens, as typed. */
 	priceInput: string;
 	priceOutput: string;
 	priceCache: string;
+	/** The reasoning levels, in order: the first applies until another is chosen. */
 	profiles: ProfileDraft[];
-	/** Default profile id, `null` for none. */
-	reasoningDefault: string | null;
-	/**
-	 * The default profile was removed or renamed: the user must choose again. `null` (none) is a
-	 * valid choice; leaving the choice open is not.
-	 */
-	defaultPending: boolean;
 	/** Tools start while the answer still streams. */
 	asyncToolCalls: boolean;
 }
@@ -215,13 +210,10 @@ export function modelForm(model: ModelView): ModelForm {
 		maxInput: String(model.max_input_tokens),
 		maxOutput: String(model.max_output_tokens),
 		modalities: [...model.input_modalities],
-		documentTypes: model.document_mime_types.join(', '),
 		priceInput: model.pricing?.input ?? '',
 		priceOutput: model.pricing?.output ?? '',
 		priceCache: model.pricing?.cache_read ?? '',
 		profiles: model.profiles.map(profileDraft),
-		reasoningDefault: model.reasoning_default,
-		defaultPending: false,
 		asyncToolCalls: model.async_tool_calls
 	};
 }
@@ -233,13 +225,10 @@ export function newModelForm(): ModelForm {
 		maxInput: '',
 		maxOutput: '',
 		modalities: ['text'],
-		documentTypes: '',
 		priceInput: '',
 		priceOutput: '',
 		priceCache: '',
 		profiles: [],
-		reasoningDefault: null,
-		defaultPending: false,
 		asyncToolCalls: false
 	};
 }
@@ -260,13 +249,6 @@ export function parsePrice(text: string): string | null {
 	return /^\d+(\.\d+)?$/.test(value) ? value : null;
 }
 
-/** The document types typed, in order, without repeats. */
-export function documentTypes(text: string): string[] {
-	return [...new Set(text.split(/[\s,;]+/).filter((t) => t !== ''))];
-}
-
-const MIME = /^[^\s/]+\/[^\s/]+$/;
-
 /** A new id: letters, digits, `.`, `_` and `-`, starting with a letter or a digit. */
 export function validateNewId(id: string, taken: readonly string[]): string | undefined {
 	const value = id.trim();
@@ -279,26 +261,21 @@ export function validateNewId(id: string, taken: readonly string[]): string | un
 export interface ModelFormErrors {
 	name?: string;
 	modalities?: string;
-	documentTypes?: string;
 	priceInput?: string;
 	priceOutput?: string;
 	priceCache?: string;
 	apiModel?: string;
 	maxInput?: string;
 	maxOutput?: string;
-	defaultProfile?: string;
 }
 
 export interface ProviderFormErrors {
 	name?: string;
 	endpoint?: string;
-	apiKeyEnv?: string;
+	apiKey?: string;
 }
 
-/**
- * Client checks: required texts are filled, token counts are whole numbers above zero, and the
- * default profile is one of the profiles (or none). Rust checks the rest.
- */
+/** Client checks: required texts are filled, token counts are whole numbers above zero. Rust checks the rest. */
 export function validateModelForm(form: ModelForm): ModelFormErrors {
 	const errors: ModelFormErrors = {};
 	if (form.name.trim() === '') errors.name = REQUIRED_MESSAGE();
@@ -306,18 +283,9 @@ export function validateModelForm(form: ModelForm): ModelFormErrors {
 	if (parseCount(form.maxInput) === null) errors.maxInput = COUNT_ERROR();
 	if (parseCount(form.maxOutput) === null) errors.maxOutput = COUNT_ERROR();
 	if (form.modalities.length === 0) errors.modalities = MODALITY_REQUIRED();
-	if (form.modalities.includes('document')) {
-		const types = documentTypes(form.documentTypes);
-		if (types.length === 0) errors.documentTypes = DOCUMENT_TYPES_REQUIRED();
-		else if (!types.every((t) => MIME.test(t))) errors.documentTypes = DOCUMENT_TYPE_INVALID();
-	}
 	if (parsePrice(form.priceInput) === null) errors.priceInput = PRICE_ERROR();
 	if (parsePrice(form.priceOutput) === null) errors.priceOutput = PRICE_ERROR();
 	if (parsePrice(form.priceCache) === null) errors.priceCache = PRICE_ERROR();
-	const ids = form.profiles.map((p) => p.id.trim());
-	if (form.defaultPending || (form.reasoningDefault !== null && !ids.includes(form.reasoningDefault))) {
-		errors.defaultProfile = DEFAULT_PROFILE_PENDING();
-	}
 	return errors;
 }
 
@@ -326,18 +294,8 @@ export function validateProviderForm(form: ProviderForm, provider: ProviderView 
 	const errors: ProviderFormErrors = {};
 	if (form.name.trim() === '') errors.name = REQUIRED_MESSAGE();
 	if (form.endpoint.trim() === '') errors.endpoint = REQUIRED_MESSAGE();
-	// A provider with an inline key has no variable to name: the field is disabled there.
-	if (provider === null) {
-		if (form.apiKeyEnv.trim() === '' && form.auth !== 'none') errors.apiKeyEnv = API_KEY_ENV_REQUIRED_MESSAGE();
-	} else if (!provider.has_inline_key) {
-		const variable = form.apiKeyEnv.trim();
-		if (variable === '' && form.auth !== 'none') {
-			errors.apiKeyEnv = API_KEY_ENV_REQUIRED_MESSAGE();
-		} else if (variable === '' && (provider.api_key_env ?? '') !== '') {
-			// Removing a variable is not expressible in the patch (`null` means unchanged).
-			errors.apiKeyEnv = API_KEY_ENV_CLEAR_MESSAGE();
-		}
-	}
+	// A provider that needs a key and has none saved gets one now.
+	if (form.auth !== 'none' && !(provider?.has_key ?? false) && form.apiKey.trim() === '') errors.apiKey = REQUIRED_MESSAGE();
 	return errors;
 }
 
@@ -432,9 +390,7 @@ export function buildProviderPatch(provider: ProviderView, form: ProviderForm): 
 		endpoint: changedRequired(provider.endpoint, form.endpoint),
 		protocol: changedRequired(provider.protocol, form.protocol),
 		auth: changedRequired(provider.auth, form.auth),
-		auth_header: changedOptional(provider.auth_header ?? '', form.authHeader),
-		// The engine refuses a variable on a provider that has an inline key: it is left alone there.
-		api_key_env: provider.has_inline_key ? null : changedRequired(provider.api_key_env ?? '', form.apiKeyEnv)
+		auth_header: changedOptional(provider.auth_header ?? '', form.authHeader)
 	};
 }
 
@@ -449,26 +405,16 @@ export function buildModelPatch(
 ): ModelPatch {
 	const modalitiesNow = orderedModalities(form.modalities);
 	const modalitiesBefore = orderedModalities(model.input_modalities);
-	const reasoningChanged = form.reasoningDefault !== model.reasoning_default;
 	return {
 		name: changedRequired(model.name, form.name),
 		api_model: changedRequired(model.api_model, form.apiModel),
 		max_input_tokens: changedCount(model.max_input_tokens, form.maxInput),
 		max_output_tokens: changedCount(model.max_output_tokens, form.maxOutput),
 		input_modalities: modalitiesNow.join('|') === modalitiesBefore.join('|') ? null : modalitiesNow,
-		document_mime_types: changedDocumentTypes(model, form),
 		pricing: changedPricing(model, form),
-		reasoning_default: reasoningChanged && form.reasoningDefault !== null ? form.reasoningDefault : null,
-		clear_reasoning_default: reasoningChanged && form.reasoningDefault === null,
 		profiles,
 		async_tool_calls: form.asyncToolCalls === model.async_tool_calls ? null : form.asyncToolCalls
 	};
-}
-
-/** The accepted document types when they changed; `[]` removes them with the document input. */
-function changedDocumentTypes(model: ModelView, form: ModelForm): string[] | null {
-	const next = form.modalities.includes('document') ? documentTypes(form.documentTypes) : [];
-	return next.join('|') === model.document_mime_types.join('|') ? null : next;
 }
 
 function pricingOf(form: ModelForm): PricingEdit | null {
@@ -501,30 +447,24 @@ function changedPricing(model: ModelView, form: ModelForm): PricingEdit | null {
 /** Every field of a new provider (the file has none of them yet). */
 export function buildProviderCreatePatch(form: ProviderForm): ProviderPatch {
 	const header = form.authHeader.trim();
-	const variable = form.apiKeyEnv.trim();
 	return {
 		name: form.name.trim(),
 		endpoint: form.endpoint.trim(),
 		protocol: form.protocol,
 		auth: form.auth,
-		auth_header: header === '' ? null : header,
-		api_key_env: variable === '' ? null : variable
+		auth_header: header === '' ? null : header
 	};
 }
 
 /** Every field of a new model. Validate first: the counts and prices must parse. */
 export function buildModelCreatePatch(form: ModelForm, profiles: ReasoningProfileEdit[] | null = null): ModelPatch {
-	const types = form.modalities.includes('document') ? documentTypes(form.documentTypes) : [];
 	return {
 		name: form.name.trim(),
 		api_model: form.apiModel.trim(),
 		max_input_tokens: parseCount(form.maxInput),
 		max_output_tokens: parseCount(form.maxOutput),
 		input_modalities: orderedModalities(form.modalities),
-		document_mime_types: types.length === 0 ? null : types,
 		pricing: pricingOf(form),
-		reasoning_default: form.reasoningDefault,
-		clear_reasoning_default: false,
 		profiles: profiles && profiles.length > 0 ? profiles : null,
 		async_tool_calls: form.asyncToolCalls ? true : null
 	};
@@ -543,9 +483,7 @@ export function isEmptyProviderPatch(patch: ProviderPatch): boolean {
 }
 
 export function isEmptyModelPatch(patch: ModelPatch): boolean {
-	// `false` turns asynchronous tool calls off: a change, unlike the other flags.
-	const { async_tool_calls, ...rest } = patch;
-	return async_tool_calls === null && Object.values(rest).every((value) => value === null || value === false);
+	return Object.values(patch).every((value) => value === null);
 }
 
 // ─── Deletion and write outcomes ─────────────────────────────────────────────
@@ -558,6 +496,9 @@ export function providerDeletionDetail(provider: ProviderView): string {
 }
 
 export type WriteOutcome = { ok: true } | { ok: false; message: string; conflict: boolean };
+
+/** What the provider form does with the saved key. */
+export type KeyChange = { kind: 'keep' } | { kind: 'set'; value: string } | { kind: 'remove' };
 
 function isConflictError(error: unknown): boolean {
 	return typeof error === 'object' && error !== null && 'code' in error && error.code === 'conflict';

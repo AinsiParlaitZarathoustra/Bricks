@@ -25,6 +25,7 @@ pub mod endpoint;
 pub mod modality;
 pub mod pricing;
 pub mod protocol;
+pub mod keys;
 pub mod provider;
 pub mod reasoning;
 pub mod registry;

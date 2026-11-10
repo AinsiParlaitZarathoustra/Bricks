@@ -11,13 +11,9 @@ protocol: string,
  */
 auth: string, auth_header: string | null, 
 /**
- * Name of the environment variable holding the key (never its value).
+ * A key is saved in the system's secure storage (its value never leaves Rust).
  */
-api_key_env: string | null, 
-/**
- * A key is written in the file (its value never leaves Rust).
- */
-has_inline_key: boolean, 
+has_key: boolean, 
 /**
  * The credential is available to this application right now.
  */

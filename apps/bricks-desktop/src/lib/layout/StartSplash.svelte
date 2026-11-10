@@ -22,18 +22,18 @@
     0%,
     100% {
       transform: scale(1);
-      filter: drop-shadow(0 2px 6px rgb(0 0 0 / 0.08)) drop-shadow(0 4px 14px rgb(0 113 227 / 0.12));
+      filter: drop-shadow(0 2px 6px rgb(0 0 0 / 0.08)) drop-shadow(0 4px 14px color-mix(in oklch, var(--primary) 12%, transparent));
     }
     50% {
       transform: scale(1.03);
-      filter: drop-shadow(0 4px 10px rgb(0 0 0 / 0.1)) drop-shadow(0 8px 28px rgb(0 113 227 / 0.28));
+      filter: drop-shadow(0 4px 10px rgb(0 0 0 / 0.1)) drop-shadow(0 8px 28px color-mix(in oklch, var(--primary) 28%, transparent));
     }
   }
 
   @media (prefers-reduced-motion: reduce) {
     .logo {
       animation: none;
-      filter: drop-shadow(0 4px 14px rgb(0 113 227 / 0.18));
+      filter: drop-shadow(0 4px 14px color-mix(in oklch, var(--primary) 18%, transparent));
     }
   }
 </style>

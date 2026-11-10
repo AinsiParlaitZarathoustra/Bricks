@@ -121,8 +121,16 @@ fn sanitize(mut p: Preferences) -> Preferences {
         .terminal_ratio
         .filter(|r| r.is_finite())
         .map(|r| r.clamp(*TERMINAL_RATIO.start(), *TERMINAL_RATIO.end()));
+    // Pinned conversations: non-empty ids, each once, at most `PINNED_MAX`.
+    let mut seen = std::collections::HashSet::new();
+    p.pinned_sessions
+        .retain(|id| !id.trim().is_empty() && seen.insert(id.clone()));
+    p.pinned_sessions.truncate(PINNED_MAX);
     p
 }
+
+/// How many conversations can be pinned.
+const PINNED_MAX: usize = 50;
 
 fn sanitize_colors(c: ColorSet) -> ColorSet {
     ColorSet {
@@ -491,6 +499,21 @@ mod tests {
         let p = PrefsStore::at(file).get();
         assert_eq!(p.ask_timer, AskTimerPrefs::default(), "an unknown mode is ignored");
         assert_eq!(p.left_width, 310, "the other preferences are kept");
+    }
+
+    #[test]
+    fn pinned_conversations_are_kept_once_in_order_and_capped() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = PrefsStore::at(dir.path().join("prefs.json"));
+        let mut p = Preferences::default();
+        assert!(p.pinned_sessions.is_empty());
+        p.pinned_sessions = vec!["s_2".into(), "".into(), "s_1".into(), "s_2".into()];
+        store.set(p).unwrap();
+        assert_eq!(store.get().pinned_sessions, vec!["s_2", "s_1"]);
+        let mut many = Preferences::default();
+        many.pinned_sessions = (0..80).map(|i| format!("s_{i}")).collect();
+        store.set(many).unwrap();
+        assert_eq!(store.get().pinned_sessions.len(), PINNED_MAX);
     }
 
     #[test]

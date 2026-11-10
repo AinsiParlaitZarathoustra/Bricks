@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { cn } from '$lib/utils'
   import { t } from '$lib/i18n/i18n.svelte'
   import { open } from '@tauri-apps/plugin-dialog'
   import { buttonVariants } from '$lib/components/ui/button'
@@ -49,7 +50,10 @@
 
 <DropdownMenu.Root>
   <DropdownMenu.Trigger
-    class={buttonVariants({ variant: 'ghost', size: 'icon-sm' })}
+    class={cn(
+      buttonVariants({ variant: 'ghost', size: 'icon-compact' }),
+      'rounded-full border border-border bg-card text-muted-foreground hover:bg-element-hover hover:text-foreground data-[state=open]:border-border-strong data-[state=open]:bg-element-selected',
+    )}
     {disabled}
     aria-label={t('composer.attachAFileOrFolder')}
     title={t('composer.attach')}

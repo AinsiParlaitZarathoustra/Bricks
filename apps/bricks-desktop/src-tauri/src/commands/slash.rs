@@ -114,8 +114,8 @@ mod tests {
     #[test]
     fn engine_commands_travel_as_the_engine_json() {
         assert_eq!(
-            engine("/effort default"),
-            json!({"type": "set_reasoning", "profile": null})
+            engine("/effort high"),
+            json!({"type": "set_reasoning", "profile": "high"})
         );
         assert_eq!(
             engine("/effort deep"),

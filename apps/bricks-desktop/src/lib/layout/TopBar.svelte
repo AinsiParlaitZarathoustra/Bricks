@@ -66,7 +66,7 @@
 <header
 	data-tauri-drag-region
 	class={cn(
-		'grid shrink-0 grid-cols-[minmax(0,1fr)_minmax(0,min(28rem,50%))_minmax(0,1fr)] items-center gap-2 border-b border-transparent bg-background px-3',
+		'grid shrink-0 grid-cols-[minmax(0,1fr)_minmax(0,min(28rem,50%))_minmax(0,1fr)] items-center gap-2 bg-sidebar px-3',
 		className
 	)}
 	style:height="{TOP_BAR.height}px"

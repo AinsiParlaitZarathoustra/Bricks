@@ -4,6 +4,7 @@
 	// new value to the parent, which stores it per mode.
 	import { numberFormat, t } from '$lib/i18n/i18n.svelte';
 	import { Input } from '$lib/components/ui/input';
+	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import {
 		hexToHsv,
 		hsvToHex,
@@ -33,6 +34,8 @@
 		checks: ColorCheck[];
 		onChange: (hex: Hex) => void;
 	} = $props();
+
+	const failing = $derived(checks.filter((c) => c.ratio < c.min));
 
 	const uid = $props.id();
 	const fromValue = $derived(hexToHsv(value));
@@ -224,17 +227,13 @@
 		</div>
 	</div>
 
-	<ul class="flex flex-col gap-1 text-xs" aria-label={t('settings.contrasts', { label })}>
-		{#each checks as check (check.label)}
-			{@const passes = check.ratio >= check.min}
-			<li class="flex items-center justify-between gap-2">
-				<span class="text-muted-foreground">{check.label}</span>
-				<span class={passes ? 'tabular-nums text-foreground' : 'tabular-nums text-warning'}>
-					{ratioText(check.ratio)}, {passes ? t('settings.compliant') : t('settings.insufficientMinimum', { min: ratioText(check.min) })}
-				</span>
-			</li>
-		{/each}
-	</ul>
+	<!-- Only a real problem is shown: a contrast below its minimum. -->
+	{#if failing.length > 0}
+		<p role="status" class="flex items-center gap-1.5 text-xs text-warning" title={failing.map((c) => `${c.label} ${ratioText(c.ratio)}`).join('\n')}>
+			<TriangleAlert class="size-3.5 shrink-0" aria-hidden="true" />
+			{t('settings.lowContrast')}
+		</p>
+	{/if}
 </div>
 
 <style>

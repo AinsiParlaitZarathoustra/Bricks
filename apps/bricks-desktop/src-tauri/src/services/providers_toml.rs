@@ -47,6 +47,12 @@ pub enum Edit {
     /// Every model without a price for input, output or cache read gets `0`
     /// for it (USD per million tokens). Prices already written are kept.
     FillMissingPrices,
+    /// The former key fields (`api_key`, `api_key_env`) of a provider go:
+    /// its key now lives in the secure storage.
+    StripLegacyKeys { provider_id: String },
+    /// Every model's former default level (`reasoning.default`) goes: the
+    /// first level applies when none is chosen.
+    StripReasoningDefaults,
 }
 
 /// The text after `edit`, validated as a whole. `origin` labels the errors
@@ -87,6 +93,34 @@ pub fn apply(text: &str, edit: &Edit, origin: &str) -> IpcResult<String> {
                 .get_mut(index)
                 .ok_or_else(|| not_found(tr!(msg::UNKNOWN_MODEL)))?;
             apply_model_patch(model, patch)?;
+        }
+        Edit::StripLegacyKeys { provider_id } => {
+            let providers = providers_mut(&mut doc)?;
+            let index = provider_index(providers, provider_id)?;
+            let table = providers
+                .get_mut(index)
+                .ok_or_else(|| not_found(tr!(msg::UNKNOWN_PROVIDER)))?;
+            table.remove("api_key");
+            table.remove("api_key_env");
+        }
+        Edit::StripReasoningDefaults => {
+            if let Some(providers) = doc.get_mut("providers").and_then(Item::as_array_of_tables_mut) {
+                for provider in providers.iter_mut() {
+                    let Some(models) = provider
+                        .get_mut("models")
+                        .and_then(Item::as_array_of_tables_mut)
+                    else {
+                        continue;
+                    };
+                    for model in models.iter_mut() {
+                        if let Some(reasoning) =
+                            model.get_mut("reasoning").and_then(Item::as_table_like_mut)
+                        {
+                            reasoning.remove("default");
+                        }
+                    }
+                }
+            }
         }
         Edit::ProviderDelete { provider_id } => {
             let providers = providers_mut(&mut doc)?;
@@ -293,12 +327,6 @@ fn set_count(table: &mut dyn TableLike, key: &str, value: u64) -> IpcResult<()> 
     Ok(())
 }
 
-fn valid_env_name(name: &str) -> bool {
-    let mut chars = name.chars();
-    matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-}
-
 /// A text field the form sends: never empty (the form validates required
 /// fields before sending; an empty value here is a refusal, not a removal).
 fn filled<'a>(field: &str, value: &'a str) -> IpcResult<&'a str> {
@@ -325,16 +353,6 @@ fn apply_provider_patch(table: &mut Table, patch: &ProviderPatch) -> IpcResult<(
     if let Some(v) = &patch.auth_header {
         set_or_remove(table, "auth_header", v);
     }
-    if let Some(v) = &patch.api_key_env {
-        let v = filled(&tr!(msg::KEY_ENVIRONMENT_VARIABLE), v)?;
-        if table.contains_key("api_key") {
-            return Err(invalid(tr!(msg::INLINE_KEY_BLOCKS_VARIABLE)));
-        }
-        if !valid_env_name(v) {
-            return Err(invalid(tr!(msg::INVALID_ENV_NAME)));
-        }
-        set_str(table, "api_key_env", v);
-    }
     Ok(())
 }
 
@@ -351,21 +369,14 @@ fn apply_model_patch(table: &mut Table, patch: &ModelPatch) -> IpcResult<()> {
             list.push(m.as_str());
         }
         set_value(table, "input_modalities", Value::Array(list));
-        // Without the `document` input, the accepted types have no meaning
-        // (and the engine refuses them).
-        if !mods.iter().any(|m| m == "document") && patch.document_mime_types.is_none() {
-            table.remove("document_mime_types");
-        }
-    }
-    if let Some(types) = &patch.document_mime_types {
-        if types.is_empty() {
-            table.remove("document_mime_types");
+        // With the `document` input, every document type is accepted; without
+        // it, the accepted types have no meaning (and the engine refuses them).
+        if mods.iter().any(|m| m == "document") {
+            let mut all = Array::new();
+            all.push("*/*");
+            set_value(table, "document_mime_types", Value::Array(all));
         } else {
-            let mut list = Array::new();
-            for t in types {
-                list.push(filled(&tr!(msg::ACCEPTED_FILE_TYPES), t.trim())?);
-            }
-            set_value(table, "document_mime_types", Value::Array(list));
+            table.remove("document_mime_types");
         }
     }
     if let Some(prices) = &patch.pricing {
@@ -418,50 +429,13 @@ fn apply_model_patch(table: &mut Table, patch: &ModelPatch) -> IpcResult<()> {
             }
         }
     }
-    // The profile list is replaced as a whole. The default must still name a
-    // profile of the list: a patch that drops or renames it must say what
-    // the default becomes (another profile, or none).
+    // The list of levels is replaced as a whole; a former default goes.
     if let Some(profiles) = &patch.profiles {
         check_profiles(profiles)?;
-        let sets_default = patch.reasoning_default.is_some() || patch.clear_reasoning_default;
-        if !sets_default
-            && let Some(current) = default_profile(table)
-            && !profiles.iter().any(|p| p.id == current)
-        {
-            return Err(invalid(tr!(
-                msg::DEFAULT_PROFILE_REMOVED,
-                current = current
-            )));
-        }
-        if let Some(v) = &patch.reasoning_default
-            && !profiles.iter().any(|p| &p.id == v)
-        {
-            return Err(invalid(tr!(msg::THE_DEFAULT_PROFILE_ISNT_IN_THE, v = v)));
-        }
         write_profiles(table, profiles)?;
-    }
-    if patch.clear_reasoning_default && patch.reasoning_default.is_some() {
-        return Err(invalid(tr!(msg::DEFAULT_PROFILE_A_VALUE_AND_A)));
-    }
-    if patch.clear_reasoning_default {
         if let Some(reasoning) = table.get_mut("reasoning").and_then(Item::as_table_like_mut) {
             reasoning.remove("default");
         }
-    } else if let Some(v) = &patch.reasoning_default {
-        let v = filled(&tr!(msg::DEFAULT_PROFILE), v)?;
-        if !table.contains_key("reasoning") {
-            table.insert("reasoning", Item::Table(Table::new()));
-        }
-        let reasoning = table
-            .get_mut("reasoning")
-            .and_then(Item::as_table_like_mut)
-            .ok_or_else(|| {
-                error(
-                    IpcErrorCode::Config,
-                    tr!(msg::THIS_MODEL_REASONING_ISNT_A_TABLE),
-                )
-            })?;
-        set_str(reasoning, "default", v);
     }
     Ok(())
 }
@@ -535,16 +509,6 @@ fn fill_missing_prices(model: &mut Table) -> IpcResult<()> {
         set_str(pricing, key, "0");
     }
     Ok(())
-}
-
-/// The default profile a model names, if any.
-fn default_profile(model: &Table) -> Option<String> {
-    model
-        .get("reasoning")
-        .and_then(Item::as_table_like)
-        .and_then(|r| r.get("default"))
-        .and_then(Item::as_str)
-        .map(str::to_string)
 }
 
 /// The checks the desktop makes before writing a profile list, in French:
@@ -951,52 +915,45 @@ mod tests {
     }
 
     #[test]
-    fn a_cleared_reasoning_default_is_removed_and_the_profiles_stay() {
-        let edit = model_update(
-            "local",
-            "small",
-            ModelPatch {
-                clear_reasoning_default: true,
-                ..Default::default()
-            },
-        );
-        let next = apply(PROVIDERS, &edit, "test").unwrap();
-        assert!(!next.contains("default = \"fast\""));
+    fn former_default_levels_are_removed_and_the_levels_stay() {
+        let next = apply(PROVIDERS, &Edit::StripReasoningDefaults, "test").unwrap();
         assert!(next.contains("[[providers.models.reasoning.profiles]]"));
         assert_eq!(next, PROVIDERS.replace("default = \"fast\"\n", ""));
     }
 
     #[test]
-    fn an_environment_variable_name_is_checked_and_refused_beside_an_inline_key() {
-        for name in ["bad name", "1STARTS_WITH_DIGIT", "A-DASH"] {
-            let err = apply(
-                PROVIDERS,
-                &provider_update(
-                    "cloud",
-                    ProviderPatch {
-                        api_key_env: Some(name.into()),
-                        ..Default::default()
-                    },
-                ),
-                "test",
-            )
-            .unwrap_err();
-            assert_eq!(err.code, IpcErrorCode::Invalid, "{name}");
-        }
-        let err = apply(
-            PROVIDERS,
-            &provider_update(
-                "inline",
-                ProviderPatch {
-                    api_key_env: Some("BRICKS_OK".into()),
-                    ..Default::default()
-                },
-            ),
-            "test",
-        )
-        .unwrap_err();
-        assert_eq!(err.code, IpcErrorCode::Invalid);
-        assert!(!err.message.contains("SECRET-KEY-VALUE"));
+    fn former_key_fields_are_removed_and_nothing_else() {
+        let edit = Edit::StripLegacyKeys {
+            provider_id: "inline".into(),
+        };
+        let next = apply(PROVIDERS, &edit, "test").unwrap();
+        assert!(!next.contains("SECRET-KEY-VALUE"), "{next}");
+        assert!(next.contains("api_key_env = \"BRICKS_TEST_CLOUD_KEY\""), "other providers keep theirs");
+        assert!(next.contains("HEADER-SECRET-VALUE"), "headers are kept");
+    }
+
+    #[test]
+    fn checking_documents_accepts_every_type_and_unchecking_removes_them() {
+        let on = model_update(
+            "local",
+            "small",
+            ModelPatch {
+                input_modalities: Some(vec!["text".into(), "document".into()]),
+                ..Default::default()
+            },
+        );
+        let next = apply(PROVIDERS, &on, "test").unwrap();
+        assert!(next.contains("document_mime_types = [\"*/*\"]"), "{next}");
+        let off = model_update(
+            "local",
+            "small",
+            ModelPatch {
+                input_modalities: Some(vec!["text".into()]),
+                ..Default::default()
+            },
+        );
+        let next = apply(&next, &off, "test").unwrap();
+        assert!(!next.contains("document_mime_types"), "{next}");
     }
 
     #[test]
@@ -1019,14 +976,14 @@ mod tests {
 
     #[test]
     fn a_change_valid_alone_but_not_as_a_whole_is_refused() {
-        // `local` has no key: asking for an api_key_header auth without a
-        // header and without a key is refused by the validator of the file.
+        // A key header without the header auth is refused by the validator
+        // of the whole file.
         let err = apply(
             PROVIDERS,
             &provider_update(
                 "local",
                 ProviderPatch {
-                    auth: Some("api_key_header".into()),
+                    auth_header: Some("x-key".into()),
                     ..Default::default()
                 },
             ),
@@ -1147,16 +1104,6 @@ mod tests {
                 "auth",
             ),
             (
-                provider_update(
-                    "cloud",
-                    ProviderPatch {
-                        api_key_env: Some(empty("")),
-                        ..Default::default()
-                    },
-                ),
-                "variable",
-            ),
-            (
                 model_update(
                     "local",
                     "small",
@@ -1177,17 +1124,6 @@ mod tests {
                     },
                 ),
                 "api_model",
-            ),
-            (
-                model_update(
-                    "local",
-                    "small",
-                    ModelPatch {
-                        reasoning_default: Some(empty("")),
-                        ..Default::default()
-                    },
-                ),
-                "profile",
             ),
         ];
         for (edit, field) in cases {
@@ -1262,7 +1198,8 @@ mod tests {
             "small",
             vec![profile("fast", Some("Rapide"), json!({}), &[])],
         );
-        assert_eq!(apply(PROVIDERS, &same, "test").unwrap(), PROVIDERS);
+        let text = PROVIDERS.replace("default = \"fast\"\n", "");
+        assert_eq!(apply(&text, &same, "test").unwrap(), text);
     }
 
     #[test]
@@ -1288,7 +1225,6 @@ mod tests {
                     ),
                     profile("rapide", None, json!({}), &[]),
                 ]),
-                reasoning_default: Some("approfondi".into()),
                 ..Default::default()
             },
         };
@@ -1348,57 +1284,16 @@ mod tests {
     }
 
     #[test]
-    fn dropping_the_default_profile_is_refused_unless_the_patch_says_what_replaces_it() {
-        // `small` defaults to `fast`: a list without `fast` must say what the default becomes.
-        let without_default = profiles_update(
+    fn a_new_level_list_drops_the_former_default() {
+        let edit = profiles_update(
             "local",
             "small",
             vec![profile("deep", None, json!({"x": 1}), &[])],
         );
-        let err = apply(PROVIDERS, &without_default, "test").unwrap_err();
-        assert_eq!(err.code, IpcErrorCode::Invalid);
-        assert!(err.message.contains("“fast”"), "{}", err.message);
-
-        let replaced = Edit::ModelUpdate {
-            provider_id: "local".into(),
-            model_id: "small".into(),
-            patch: ModelPatch {
-                profiles: Some(vec![profile("deep", None, json!({"x": 1}), &[])]),
-                reasoning_default: Some("deep".into()),
-                ..Default::default()
-            },
-        };
-        let next = apply(PROVIDERS, &replaced, "test").unwrap();
-        assert!(next.contains("default = \"deep\""), "{next}");
-        assert!(!next.contains("id = \"fast\""), "{next}");
-
-        let cleared = Edit::ModelUpdate {
-            provider_id: "local".into(),
-            model_id: "small".into(),
-            patch: ModelPatch {
-                profiles: Some(vec![]),
-                clear_reasoning_default: true,
-                ..Default::default()
-            },
-        };
-        let next = apply(PROVIDERS, &cleared, "test").unwrap();
+        let next = apply(PROVIDERS, &edit, "test").unwrap();
         assert!(!next.contains("default ="), "{next}");
-    }
-
-    #[test]
-    fn a_default_outside_the_new_list_is_refused_in_english() {
-        let edit = Edit::ModelUpdate {
-            provider_id: "local".into(),
-            model_id: "small".into(),
-            patch: ModelPatch {
-                profiles: Some(vec![profile("fast", None, json!({}), &[])]),
-                reasoning_default: Some("ghost".into()),
-                ..Default::default()
-            },
-        };
-        let err = apply(PROVIDERS, &edit, "test").unwrap_err();
-        assert_eq!(err.code, IpcErrorCode::Invalid);
-        assert!(err.message.contains("“ghost”"), "{}", err.message);
+        assert!(!next.contains("id = \"fast\""), "{next}");
+        assert!(ProvidersConfig::from_toml_str(&next, "test").is_ok());
     }
 
     #[test]
@@ -1679,15 +1574,14 @@ mod tests {
     }
 
     #[test]
-    fn documents_are_declared_with_their_types_and_removed_with_the_modality() {
+    fn documents_accept_every_type_and_go_with_the_modality() {
         let patch = ModelPatch {
             input_modalities: Some(vec!["text".into(), "document".into()]),
-            document_mime_types: Some(vec!["application/pdf".into()]),
             ..Default::default()
         };
         let next = apply(PROVIDERS, &model_update("local", "small", patch), "test").unwrap();
         let m = config(&next).providers[0].models[0].clone();
-        assert_eq!(m.document_mime_types, vec!["application/pdf".to_string()]);
+        assert_eq!(m.document_mime_types, vec!["*/*".to_string()]);
         let off = ModelPatch {
             input_modalities: Some(vec!["text".into()]),
             ..Default::default()
@@ -1699,15 +1593,6 @@ mod tests {
                 .is_empty()
         );
         assert!(!next.contains("document_mime_types"));
-    }
-
-    #[test]
-    fn a_document_input_without_types_is_refused() {
-        let patch = ModelPatch {
-            input_modalities: Some(vec!["text".into(), "document".into()]),
-            ..Default::default()
-        };
-        assert!(apply(PROVIDERS, &model_update("local", "small", patch), "test").is_err());
     }
 
     #[test]

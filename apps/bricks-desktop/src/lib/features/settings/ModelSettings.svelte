@@ -12,6 +12,8 @@
 		modelUpdate,
 		providerCreate,
 		providerDelete,
+		providerKeyDelete,
+		providerKeySet,
 		providerUpdate,
 		providersConfig,
 		providersFillMissingPrices
@@ -34,6 +36,7 @@
 		providerDeletionDetail,
 		unpricedModels,
 		writeFailure,
+		type KeyChange,
 		type WriteOutcome
 	} from './models';
 
@@ -152,16 +155,37 @@
 		dialog = { kind: open.kind, provider, model, notice: CONFLICT_MESSAGE() };
 	}
 
-	function saveProvider(provider: ProviderView, patch: ProviderPatch): Promise<WriteOutcome> {
-		return write((revision) => providerUpdate(provider.id, patch, revision));
+	/** The provider's fields (when they changed), then its key (when one was pasted or removed). */
+	async function saveProvider(provider: ProviderView, patch: ProviderPatch | null, key: KeyChange): Promise<WriteOutcome> {
+		if (patch) {
+			const outcome = await write((revision) => providerUpdate(provider.id, patch, revision));
+			if (!outcome.ok) return outcome;
+		}
+		return saveKey(provider.id, key);
+	}
+
+	async function saveKey(id: string, key: KeyChange): Promise<WriteOutcome> {
+		if (key.kind === 'keep') return { ok: true };
+		try {
+			file = key.kind === 'set' ? await providerKeySet(id, key.value) : await providerKeyDelete(id);
+			void app.reloadModels();
+			return { ok: true };
+		} catch (e) {
+			return writeFailure(e);
+		}
 	}
 
 	function saveModel(provider: ProviderView, model: ModelView, patch: ModelPatch): Promise<WriteOutcome> {
 		return write((revision) => modelUpdate(provider.id, model.id, patch, revision));
 	}
 
-	function createProvider(id: string, patch: ProviderPatch): Promise<WriteOutcome> {
-		return write((revision) => providerCreate(id, patch, revision));
+	async function createProvider(id: string, patch: ProviderPatch, key: KeyChange): Promise<WriteOutcome> {
+		const outcome = await write((revision) => providerCreate(id, patch, revision));
+		if (!outcome.ok) return outcome;
+		// The provider exists now: a refused key is said on the page, where its form can be reopened.
+		const saved = await saveKey(id, key);
+		if (!saved.ok) pageNotice = saved.message;
+		return { ok: true };
 	}
 
 	function createModel(provider: ProviderView, id: string, patch: ModelPatch): Promise<WriteOutcome> {
@@ -271,13 +295,14 @@
 				provider={null}
 				takenIds={providers.map((p) => p.id)}
 				notice={dialog.notice}
-				onSave={(patch, id) => createProvider(id, patch)}
+				onSave={(patch, id, key) => (patch ? createProvider(id, patch, key) : saveKey(id, key))}
 				onClose={closeDialog}
 			/>
 		{:else if dialog?.kind === 'create-model'}
 			{@const owner = dialog.provider}
 			<ModelFormDialog
 				model={null}
+				protocol={owner.protocol}
 				takenIds={(providers.find((p) => p.id === owner.id) ?? owner).models.map((m) => m.id)}
 				notice={dialog.notice}
 				onSave={(patch, id) => createModel(owner, id, patch)}
@@ -288,7 +313,7 @@
 			<ProviderFormDialog
 				provider={target}
 				notice={dialog.notice}
-				onSave={(patch) => saveProvider(target, patch)}
+				onSave={(patch, _id, key) => saveProvider(target, patch, key)}
 				onClose={closeDialog}
 			/>
 		{:else if dialog?.kind === 'edit-model'}
@@ -296,6 +321,7 @@
 			{@const target = dialog.model}
 			<ModelFormDialog
 				model={target}
+				protocol={target.protocol ?? owner.protocol}
 				notice={dialog.notice}
 				onSave={(patch) => saveModel(owner, target, patch)}
 				onClose={closeDialog}

@@ -131,7 +131,5 @@
         {t('conversation.theLinkCouldNotBeOpened', { linkError })}
       </p>
     {/if}
-  {:else if item.streaming}
-    <span class="inline-block h-4 w-0.5 animate-pulse rounded-sm bg-muted-foreground" aria-hidden="true"></span>
   {/if}
 </article>

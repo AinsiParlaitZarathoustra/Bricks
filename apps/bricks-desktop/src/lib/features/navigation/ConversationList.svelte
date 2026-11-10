@@ -3,7 +3,10 @@
 	import { tick } from 'svelte';
 	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import EllipsisVertical from '@lucide/svelte/icons/ellipsis-vertical';
+	import Folder from '@lucide/svelte/icons/folder';
 	import Pencil from '@lucide/svelte/icons/pencil';
+	import Pin from '@lucide/svelte/icons/pin';
+	import PinOff from '@lucide/svelte/icons/pin-off';
 	import Trash from '@lucide/svelte/icons/trash';
 	import type { SessionItem } from '$lib/ipc/client';
 	import { app } from '$lib/state/app.svelte';
@@ -16,7 +19,10 @@
 	import { displayTitle } from './format';
 
 	interface Props {
-		projectId: string;
+		/** The project whose conversations are listed (pinned ones left out). */
+		projectId?: string;
+		/** An explicit list instead, shown as given (the pinned conversations). */
+		sessions?: SessionItem[];
 		/** Accessible name of the list. */
 		label: string;
 		/** Conversations shown before « Afficher plus » (all when absent). */
@@ -25,11 +31,22 @@
 		nested?: boolean;
 	}
 
-	let { projectId, label, limit, nested = false }: Props = $props();
+	let { projectId, sessions, label, limit, nested = false }: Props = $props();
 
 	let showAll = $state(false);
 
-	const sorted = $derived([...app.sessionsOf(projectId)].sort((a, b) => b.updated_at - a.updated_at));
+	const sorted = $derived(
+		sessions ??
+			[...app.sessionsOf(projectId ?? '')]
+				.filter((s) => !app.isPinned(s.id))
+				.sort((a, b) => b.updated_at - a.updated_at)
+	);
+
+	/** The project a pinned conversation belongs to, shown under its title (none for the chats project). */
+	function projectName(session: SessionItem): string | null {
+		const project = app.projects.find((p) => p.id === session.project_id);
+		return project && !project.chats ? project.name : null;
+	}
 	// The shown conversation is always listed, even past the limit.
 	const visible = $derived(
 		showAll || limit === undefined
@@ -152,11 +169,14 @@
 <ul {@attach trackList} class="flex flex-col gap-0.5" aria-label={label}>
 	{#each visible as session (session.id)}
 		{@const current = session.id === app.currentSessionId}
+		{@const projectLabel = sessions ? projectName(session) : null}
 		<li>
 			<div
 				class={cn(
-					'group relative flex items-center rounded-md transition-colors',
-					current ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'hover:bg-sidebar-accent/60'
+					'group relative flex items-center rounded-lg transition-colors',
+					current
+						? 'bg-background text-foreground shadow-[0_1px_2px_rgb(0_0_0/0.06),0_0_0_1px_var(--border-subtle)]'
+						: 'hover:bg-element-hover'
 				)}
 			>
 				{#if editingId === session.id}
@@ -177,7 +197,7 @@
 						type="button"
 						data-session-item={session.id}
 						class={cn(
-							'flex min-w-0 flex-1 items-center gap-2 rounded-md py-1.5 pr-2 text-left group-focus-within:pr-9 group-hover:pr-9 group-has-[[data-state=open]]:pr-9',
+							'flex min-w-0 flex-1 items-center gap-2 rounded-lg py-1.5 pr-2 text-left group-focus-within:pr-9 group-hover:pr-9 group-has-[[data-state=open]]:pr-9',
 							nested ? 'pl-8' : 'pl-2'
 						)}
 						aria-current={current ? 'true' : undefined}
@@ -189,11 +209,19 @@
 						}}
 						onkeydown={(event) => onItemKeydown(event, session)}
 					>
-						<span
-							{@attach fadeWhenClipped(session.title)}
-							class="title-fade min-w-0 flex-1 overflow-hidden text-compact whitespace-nowrap"
-							>{displayTitle(session.title)}</span
-						>
+						<span class="flex min-w-0 flex-1 flex-col">
+							<span
+								{@attach fadeWhenClipped(session.title)}
+								class="title-fade min-w-0 overflow-hidden text-compact whitespace-nowrap"
+								>{displayTitle(session.title)}</span
+							>
+							{#if projectLabel}
+								<span class="flex min-w-0 items-center gap-1 text-caption text-muted-foreground">
+									<Folder class="size-3 shrink-0" aria-hidden="true" />
+									<span class="truncate">{projectLabel}</span>
+								</span>
+							{/if}
+						</span>
 						{#if session.running}
 							<StatusDot status="running" label={t('navigation.conversationRunning')} />
 						{/if}
@@ -224,6 +252,15 @@
 							<Pencil class="size-4" aria-hidden="true" />
 							{t('navigation.rename')}
 						</DropdownMenu.Item>
+						<DropdownMenu.Item onSelect={() => app.togglePin(session.id)}>
+							{#if app.isPinned(session.id)}
+								<PinOff class="size-4" aria-hidden="true" />
+								{t('navigation.unpin')}
+							{:else}
+								<Pin class="size-4" aria-hidden="true" />
+								{t('navigation.pin')}
+							{/if}
+						</DropdownMenu.Item>
 						<DropdownMenu.Separator />
 						<DropdownMenu.Item variant="destructive" onSelect={() => askDelete(session)}>
 							<Trash class="size-4" aria-hidden="true" />
@@ -239,7 +276,7 @@
 			<button
 				type="button"
 				class={cn(
-					'flex w-full items-center gap-1 rounded-md py-1.5 pr-2 text-left text-xs font-medium text-foreground/70 transition-colors hover:bg-sidebar-accent/60 hover:text-foreground',
+					'flex w-full items-center gap-1 rounded-lg py-1.5 pr-2 text-left text-xs font-medium text-foreground/70 transition-colors hover:bg-element-hover hover:text-foreground',
 					nested ? 'pl-8' : 'pl-2'
 				)}
 				aria-expanded={showAll}

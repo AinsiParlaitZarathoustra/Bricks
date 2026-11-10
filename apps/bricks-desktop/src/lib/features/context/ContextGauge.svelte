@@ -23,7 +23,7 @@
 
 <Tooltip.Root delayDuration={150}>
   <Tooltip.Trigger
-    class="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+    class="inline-flex size-control-md shrink-0 items-center justify-center rounded-full border border-border bg-card text-muted-foreground hover:bg-element-hover hover:text-foreground data-[state=open]:border-border-strong data-[state=open]:bg-element-selected focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
     aria-label={label}
   >
     <svg viewBox="0 0 16 16" class="size-3.5 -rotate-90" aria-hidden="true">

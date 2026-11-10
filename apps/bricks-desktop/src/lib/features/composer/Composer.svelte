@@ -33,7 +33,6 @@
   import AttachmentChip from './AttachmentChip.svelte'
   import ModelSelect from './ModelSelect.svelte'
   import ContextGauge from '$lib/features/context/ContextGauge.svelte'
-  import EffortSelect from './EffortSelect.svelte'
   import CommandPalette from '$lib/features/commands/CommandPalette.svelte'
   import QuitDialog from '$lib/features/commands/QuitDialog.svelte'
   import MentionPalette from './MentionPalette.svelte'
@@ -99,7 +98,6 @@
   let pickedEffort = $state<string | null>(null)
   // Set by `/model`, `/effort` (through `ui.picker`) to open the selects.
   let modelOpen = $state(false)
-  let effortOpen = $state(false)
   /** The skills choice of the `+` menu. */
   let skillsOpen = $state(false)
 
@@ -429,17 +427,19 @@
     return null
   }
 
-  /** Returns the refusal (the selects revert their display), or null when accepted. */
-  async function chooseModel(next: string): Promise<string | null> {
+  /** A model and its level picked together; the level alone when the model stays. */
+  async function pickModel(next: string, level: string | null): Promise<string | null> {
+    if (next === selection) return level === null ? null : chooseEffort(level)
     refusal = null
     if (!conversation) {
-      refusal = applyLocalModel(next, null)
+      refusal = applyLocalModel(next, level)
       return refusal
     }
-    const profiles = app.model(next)?.profiles ?? []
-    const effort = conversation.reasoning
-    const keep = effort && profiles.some((p) => p.id === effort) ? effort : undefined
-    const error = await app.command(conversation.sessionId, { type: 'set_model', model: next, reasoning: keep })
+    const error = await app.command(conversation.sessionId, {
+      type: 'set_model',
+      model: next,
+      reasoning: level ?? undefined,
+    })
     refusal = error
     return error
   }
@@ -1068,7 +1068,7 @@
         refusal = t('composer.thisModelHasNoEffortProfile')
         return
       }
-      effortOpen = true
+      modelOpen = true
     })
   })
 
@@ -1087,33 +1087,38 @@
   aria-label={t('common.messageInput')}
   class="shrink-0 px-4 pt-1 pb-3"
 >
-  <div class="mx-auto flex max-w-3xl flex-col gap-2">
-    {#if rejection && rejectionLabel}
-      <div role="alert" class="flex items-start justify-between gap-2 text-sm text-destructive">
-        <p>{rejectionLabel} : {rejection.reason}</p>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          aria-label={t('composer.hideThisMessage')}
-          onclick={() => (dismissedRejectionAt = rejection.at)}
-        >
-          <XIcon aria-hidden="true" />
-        </Button>
+  <div class="mx-auto flex max-w-3xl flex-col">
+    <!-- Notices sit on a strip tucked under the card: the card overlaps its lower edge. -->
+    {#if (rejection && rejectionLabel) || (refusal && refusal !== rejection?.reason) || compactStatus}
+      <div class="relative z-0 mx-2 -mb-3.5 flex flex-col gap-1 rounded-t-2xl bg-popover px-3.5 pt-1.5 pb-5 text-xs">
+        {#if rejection && rejectionLabel}
+          <div role="alert" class="flex items-start justify-between gap-2 text-destructive">
+            <p class="py-0.5">{rejectionLabel} : {rejection.reason}</p>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              aria-label={t('composer.hideThisMessage')}
+              onclick={() => (dismissedRejectionAt = rejection.at)}
+            >
+              <XIcon aria-hidden="true" />
+            </Button>
+          </div>
+        {/if}
+
+        {#if refusal && refusal !== rejection?.reason}
+          <p role="alert" class="py-0.5 text-destructive">{refusal}</p>
+        {/if}
+
+        {#if compactStatus}
+          <p class="py-0.5 text-muted-foreground" role="status">{compactStatus}</p>
+        {/if}
       </div>
-    {/if}
-
-    {#if refusal && refusal !== rejection?.reason}
-      <p role="alert" class="text-sm text-destructive">{refusal}</p>
-    {/if}
-
-    {#if compactStatus}
-      <p class="px-1 text-xs text-muted-foreground" role="status">{compactStatus}</p>
     {/if}
 
     <div
       class={[
-        'relative mt-1 flex flex-col gap-2 rounded-2xl border bg-card px-4 py-2 shadow-[0_1px_2px_rgb(0_0_0/0.05),0_6px_20px_-6px_rgb(0_0_0/0.14)] transition-colors dark:shadow-[0_1px_2px_rgb(0_0_0/0.4),0_8px_24px_-8px_rgb(0_0_0/0.6)] focus-within:border-ring/60 focus-within:ring-2 focus-within:ring-ring/20',
-        dragging && 'border-ring bg-accent',
+        'relative z-10 mx-1 mt-1 flex flex-col rounded-xl border border-border bg-background shadow-sm transition-[border-color,box-shadow] duration-200 focus-within:border-border-strong',
+        dragging && 'border-ring bg-element-hover',
       ]}
     >
       {#if paletteOpen}
@@ -1154,11 +1159,11 @@
       {/if}
 
       {#if dragging}
-        <p class="px-1 text-sm text-muted-foreground">{t('composer.dropTheFilesToAttachThem')}</p>
+        <p class="px-4 pt-3 text-sm text-muted-foreground">{t('composer.dropTheFilesToAttachThem')}</p>
       {/if}
 
       {#if draft.attachments.length > 0}
-        <ul class="flex flex-wrap gap-1.5" aria-label={t('common.attachments')}>
+        <ul class="flex flex-wrap gap-1.5 px-3 pt-2.5 pr-12" aria-label={t('common.attachments')}>
           {#each draft.attachments as attachment (attachment.id)}
             <li>
               <AttachmentChip
@@ -1172,7 +1177,7 @@
       {/if}
 
       {#if draft.skills.length > 0}
-        <ul class="flex flex-wrap gap-1.5" aria-label={t('composer.skillsForTheNextMessage')}>
+        <ul class="flex flex-wrap gap-1.5 px-3 pt-2.5 pr-12" aria-label={t('composer.skillsForTheNextMessage')}>
           {#each draft.skills as name (name)}
             <li class="inline-flex max-w-full items-center gap-1.5 rounded-md border border-transparent bg-muted/60 py-1 pr-1 pl-1.5 text-sm">
               <SparklesIcon class="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -1186,7 +1191,7 @@
       {/if}
 
       {#if saving > 0}
-        <p class="px-1 text-xs text-muted-foreground" role="status">{t('composer.copyingAttachments')}</p>
+        <p class="px-4 pt-2 text-xs text-muted-foreground" role="status">{t('composer.copyingAttachments')}</p>
       {/if}
 
       <Textarea
@@ -1210,70 +1215,66 @@
         onclick={syncCaret}
         onselect={syncCaret}
         dir="auto"
-        class="max-h-[40vh] min-h-0 resize-none overflow-y-auto border-0 bg-transparent px-2 py-2 leading-5 text-start shadow-none focus-visible:ring-0 dark:bg-transparent"
+        class="max-h-[200px] min-h-[44px] resize-none overflow-y-auto rounded-xl border-0 bg-transparent py-3 pr-12 pl-4 text-ui leading-[1.55] text-start shadow-none focus-visible:ring-0 dark:bg-transparent"
       />
 
-      <div class="flex flex-wrap items-center gap-1">
-        <AttachMenu
-          disabled={!editable || sending}
-          onPick={(paths, kind) => addPicked(paths, kind === 'folder')}
-          onError={(message) => (refusal = message)}
-          onSkills={openSkills}
-        />
-        <ContextGauge {conversation} />
-        <ModelSelect
-          bind:open={modelOpen}
-          value={selection}
-          models={app.models}
-          disabled={!editable}
-          onChange={chooseModel}
-        />
-        {#if choice && choice.profiles.length > 0}
-          <EffortSelect
-            bind:open={effortOpen}
-            value={effortValue}
-            effective={effortEffective}
-            profiles={choice.profiles}
-            defaultProfile={choice.default_profile}
-            disabled={!editable}
-            onChange={chooseEffort}
-          />
+      <!-- Send or stop: one square in the card's top right corner. -->
+      <div class="absolute top-2 right-2">
+        {#if running && !isSlashLine}
+          <Button
+            variant="outline"
+            size="icon-compact"
+            class="size-7 rounded-lg border-border bg-background p-0 text-foreground shadow-none hover:bg-element-hover"
+            aria-label={t('composer.stopGenerating')}
+            title={t('common.stop')}
+            onclick={cancel}
+          >
+            <SquareIcon class="size-2.5 fill-current" aria-hidden="true" />
+          </Button>
+        {:else}
+          <Tooltip.Root>
+            <Tooltip.Trigger>
+              {#snippet child({ props })}
+                <Button
+                  {...props}
+                  variant="outline"
+                  size="icon-compact"
+                  class="size-7 rounded-lg border-border bg-background p-0 text-foreground shadow-none hover:bg-element-hover disabled:border-transparent disabled:text-muted-foreground"
+                  aria-label={t('composer.sendMessage')}
+                  disabled={!canSend && !slashReady}
+                  onclick={send}
+                >
+                  <ArrowUpIcon class="size-3.5" stroke-width={2.5} aria-hidden="true" />
+                </Button>
+              {/snippet}
+            </Tooltip.Trigger>
+            <Tooltip.Content side="top">{t('common.send')}</Tooltip.Content>
+          </Tooltip.Root>
         {/if}
-        {#if pendingText}
-          <span class="text-xs text-muted-foreground" role="status">{pendingText}</span>
-        {/if}
+      </div>
+    </div>
 
-        <div class="ml-auto flex items-center gap-1">
-          {#if running && !isSlashLine}
-            <Button
-              size="icon"
-              class="relative -top-1 -left-1 rounded-full bg-destructive text-white hover:bg-destructive/90"
-              aria-label={t('composer.stopGenerating')}
-              title={t('common.stop')}
-              onclick={cancel}
-            >
-              <SquareIcon aria-hidden="true" />
-            </Button>
-          {:else}
-            <Tooltip.Root>
-              <Tooltip.Trigger>
-                {#snippet child({ props })}
-                  <Button
-                    {...props}
-                    size="icon"
-                    class="relative -top-1 -left-1 rounded-full"
-                    aria-label={t('composer.sendMessage')}
-                    disabled={!canSend && !slashReady}
-                    onclick={send}
-                  >
-                    <ArrowUpIcon aria-hidden="true" />
-                  </Button>
-                {/snippet}
-              </Tooltip.Trigger>
-              <Tooltip.Content side="top">{t('common.send')}</Tooltip.Content>
-            </Tooltip.Root>
-          {/if}
-        </div>
+    <!-- The tray, attached under the card. -->
+    <div class="mx-5 flex flex-wrap items-center gap-1.5 rounded-b-xl border border-t-0 border-border bg-panel-input px-2 pt-2 pb-1.5">
+      <AttachMenu
+        disabled={!editable || sending}
+        onPick={(paths, kind) => addPicked(paths, kind === 'folder')}
+        onError={(message) => (refusal = message)}
+        onSkills={openSkills}
+      />
+      <ModelSelect
+        bind:open={modelOpen}
+        value={selection}
+        level={effortEffective}
+        models={app.models}
+        disabled={!editable}
+        onPick={pickModel}
+      />
+      {#if pendingText}
+        <span class="text-xs text-muted-foreground" role="status">{pendingText}</span>
+      {/if}
+      <div class="ml-auto flex items-center gap-1.5">
+        <ContextGauge {conversation} />
       </div>
     </div>
   </div>

@@ -303,7 +303,7 @@
 	});
 </script>
 
-<div class="flex h-dvh min-h-0 w-full flex-col overflow-hidden bg-background text-foreground">
+<div class="flex h-dvh min-h-0 w-full flex-col overflow-hidden bg-sidebar text-foreground">
 	<h1 class="sr-only">Bricks</h1>
 	{#if topbar}
 		{@render topbar(controls)}
@@ -311,7 +311,10 @@
 		<TopBar {...controls} />
 	{/if}
 
-	<div class="min-h-0 flex-1" bind:clientWidth={bodyWidth}>
+	<!-- The frame (top bar and left panel) shares one colour; the conversation and the right panel
+	     sit on one rounded surface inset in it. -->
+	<div class={['min-h-0 flex-1 pr-2 pb-2', !(leftInline && left) && 'pl-2']}>
+		<div class="h-full w-full" bind:clientWidth={bodyWidth}>
 		<PaneGroup direction="horizontal" bind:this={hGroup} onLayoutChange={onHorizontalLayout} class="flex h-full w-full">
 			{#if leftInline && left}
 				<Pane id="bricks-left" order={1} defaultSize={leftPct} minSize={sideMinPct} maxSize={leftMaxPct}>
@@ -319,11 +322,17 @@
 						{@render left()}
 					</div>
 				</Pane>
-				<Resizable.Handle class="bg-border/50" aria-label={t('layout.resizeTheLeftPanel')} onDraggingChange={onHandleDragging} />
+				<Resizable.Handle class="bg-transparent" aria-label={t('layout.resizeTheLeftPanel')} onDraggingChange={onHandleDragging} />
 			{/if}
 
 			<Pane id="bricks-center" order={2} defaultSize={centerPct} minSize={centerMinPct}>
-				<div class="flex h-full min-w-0 flex-col" bind:clientHeight={centerHeight}>
+				<div
+						class={[
+							'flex h-full min-w-0 flex-col overflow-hidden border-y border-l border-border-subtle bg-background',
+							rightInline && right ? 'rounded-l-xl' : 'rounded-xl border-r'
+						]}
+						bind:clientHeight={centerHeight}
+					>
 					<PaneGroup direction="vertical" bind:this={vGroup} onLayoutChange={onVerticalLayout} class="flex h-full w-full flex-col">
 						<Pane id="bricks-conversation" order={1} defaultSize={convPct} minSize={convMinPct}>
 							<main aria-label={t('common.conversation')} class="flex h-full min-h-0 min-w-0 flex-col bg-background">
@@ -331,7 +340,7 @@
 							</main>
 						</Pane>
 						{#if terminalInline && terminal}
-							<Resizable.Handle class="bg-border/50" aria-label={t('layout.resizeTheTerminal')} onDraggingChange={onHandleDragging} />
+							<Resizable.Handle class="bg-border-subtle" aria-label={t('layout.resizeTheTerminal')} onDraggingChange={onHandleDragging} />
 							<Pane id="bricks-terminal" order={2} defaultSize={termPct} minSize={termMinPct} maxSize={termMaxPct}>
 								<section aria-label={t('common.terminal')} class="flex h-full min-h-0 flex-col bg-background">
 									{@render terminal(hideTerminal)}
@@ -343,14 +352,15 @@
 			</Pane>
 
 			{#if rightInline && right}
-				<Resizable.Handle class="bg-border/50" aria-label={t('layout.resizeTheRightPanel')} onDraggingChange={onHandleDragging} />
+				<Resizable.Handle class="border-y border-border-subtle bg-background" aria-label={t('layout.resizeTheRightPanel')} onDraggingChange={onHandleDragging} />
 				<Pane id="bricks-right" order={3} defaultSize={rightPct} minSize={sideMinPct} maxSize={rightMaxPct}>
-					<aside aria-label={t('common.context')} class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-sidebar text-sidebar-foreground">
+					<aside aria-label={t('common.context')} class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-r-xl border-y border-r border-border-subtle bg-background text-foreground">
 						{@render right()}
 					</aside>
 				</Pane>
 			{/if}
 		</PaneGroup>
+		</div>
 	</div>
 </div>
 

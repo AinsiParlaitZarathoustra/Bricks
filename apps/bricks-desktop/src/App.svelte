@@ -33,6 +33,8 @@
   import FolderMissingDialog from '$lib/features/navigation/FolderMissingDialog.svelte'
   import InspectorHost from '$lib/features/commands/InspectorHost.svelte'
   import { ui } from '$lib/state/ui.svelte'
+  import WelcomeView from '$lib/features/conversation/welcome/WelcomeView.svelte'
+  import { prefillDraft } from '$lib/features/conversation/welcome/starters'
   import { Button } from '$lib/components/ui/button'
 
 
@@ -148,6 +150,20 @@
     }
   })
 
+  /** A suggestion of the welcome screen fills the composer; a draft it replaces can be given back. */
+  function pickStarter(text: string) {
+    const project = app.currentProject
+    if (!project) return
+    const draft = app.draftFor(project.id)
+    const previous = prefillDraft(draft, text)
+    app.composerFocus += 1
+    if (previous !== null) {
+      toast(t('welcome.draftReplaced'), {
+        action: { label: t('welcome.undo'), onClick: () => (draft.text = previous) },
+      })
+    }
+  }
+
   function toggleReader() {
     if (app.rightView === 'reader' && rightOpen) {
       app.rightView = 'context'
@@ -215,16 +231,16 @@
               {#key app.current.sessionId}
                 <ConversationView conversation={app.current} />
               {/key}
-            {:else}
+            {:else if !app.hasProviders}
               <div class="grid h-full place-items-center p-6">
-                {#if !app.hasProviders}
-                  <EmptyState title={t('app.noProviderConfigured')}>
-                    {#snippet action()}
-                      <Button variant="ghost" size="sm" onclick={() => (ui.settingsOpen = true)}>{t('app.openSettings')}</Button>
-                    {/snippet}
-                  </EmptyState>
-                {/if}
+                <EmptyState title={t('app.noProviderConfigured')}>
+                  {#snippet action()}
+                    <Button variant="ghost" size="sm" onclick={() => (ui.settingsOpen = true)}>{t('app.openSettings')}</Button>
+                  {/snippet}
+                </EmptyState>
               </div>
+            {:else if app.currentProject}
+              <WelcomeView onPick={pickStarter} />
             {/if}
           </div>
           <PermissionChoice conversation={app.current} />

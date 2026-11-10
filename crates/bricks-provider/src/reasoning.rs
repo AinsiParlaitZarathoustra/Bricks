@@ -23,8 +23,8 @@
 use crate::config::{Protocol, ReasoningConfig, ReasoningProfile, pointer_root};
 use serde_json::{Map, Value};
 
-/// Pick the profile for a request: an explicit id, else the model's default,
-/// else none. An unknown id is an error — a refused profile is never replaced
+/// Pick the profile for a request: an explicit id, else the model's first
+/// level, else none. An unknown id is an error — a refused profile is never replaced
 /// silently by another one.
 pub fn select_profile<'a>(
     reasoning: &'a ReasoningConfig,
@@ -53,10 +53,7 @@ pub fn select_profile<'a>(
                     )
                 }
             }),
-        None => Ok(reasoning
-            .default
-            .as_deref()
-            .and_then(|d| reasoning.profiles.iter().find(|p| p.id == d))),
+        None => Ok(reasoning.initial()),
     }
 }
 
@@ -171,7 +168,7 @@ mod tests {
 
     fn cfg(default: Option<&str>, profiles: Vec<ReasoningProfile>) -> ReasoningConfig {
         ReasoningConfig {
-            default: default.map(String::from),
+            legacy_default: default.map(String::from),
             profiles,
         }
     }
@@ -337,16 +334,17 @@ mod tests {
                 profile("deep", json!({}), &[]),
             ],
         );
-        assert_eq!(select_profile(&c, None).unwrap().unwrap().id, "deep");
+        // A former default is ignored: the first level applies.
+        assert_eq!(select_profile(&c, None).unwrap().unwrap().id, "fast");
         assert_eq!(
             select_profile(&c, Some("fast")).unwrap().unwrap().id,
             "fast"
         );
         let err = select_profile(&c, Some("ultra")).unwrap_err();
         assert!(err.contains("unknown reasoning profile `ultra`") && err.contains("fast, deep"));
-        // No default and no request -> no profile (not an implicit "off").
+        // No request -> the first level.
         let c2 = cfg(None, vec![profile("fast", json!({}), &[])]);
-        assert!(select_profile(&c2, None).unwrap().is_none());
+        assert_eq!(select_profile(&c2, None).unwrap().unwrap().id, "fast");
         // Empty list exposes nothing.
         let empty = cfg(None, vec![]);
         assert!(select_profile(&empty, None).unwrap().is_none());

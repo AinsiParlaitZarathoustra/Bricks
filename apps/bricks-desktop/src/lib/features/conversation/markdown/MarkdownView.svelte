@@ -332,24 +332,4 @@
   .md > :global(:last-child) {
     margin-bottom: 0;
   }
-  .md.streaming > :global(:last-child)::after {
-    content: '';
-    display: inline-block;
-    width: 0.125rem;
-    height: 1em;
-    margin-left: 0.125rem;
-    vertical-align: text-bottom;
-    background: var(--muted-foreground);
-    animation: caret 1s steps(2, start) infinite;
-  }
-  @keyframes caret {
-    to {
-      visibility: hidden;
-    }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .md.streaming > :global(:last-child)::after {
-      animation: none;
-    }
-  }
 </style>

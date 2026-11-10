@@ -627,6 +627,8 @@ pub struct Preferences {
     pub keep_awake: bool,
     /// The interface language; conversations and files keep their own.
     pub language: Language,
+    /// Conversations pinned above the projects, most recently pinned first.
+    pub pinned_sessions: Vec<String>,
 }
 
 impl Default for Preferences {
@@ -650,6 +652,7 @@ impl Default for Preferences {
             computer_use_enabled: false,
             keep_awake: false,
             language: Language::En,
+            pinned_sessions: Vec::new(),
         }
     }
 }
@@ -927,10 +930,8 @@ pub struct ProviderView {
     /// `bearer` | `api_key_header` | `none`.
     pub auth: String,
     pub auth_header: Option<String>,
-    /// Name of the environment variable holding the key (never its value).
-    pub api_key_env: Option<String>,
-    /// A key is written in the file (its value never leaves Rust).
-    pub has_inline_key: bool,
+    /// A key is saved in the system's secure storage (its value never leaves Rust).
+    pub has_key: bool,
     /// The credential is available to this application right now.
     pub has_credentials: bool,
     pub path: Option<String>,
@@ -958,7 +959,6 @@ pub struct ModelView {
     pub max_input_tokens: u64,
     #[ts(type = "number")]
     pub max_output_tokens: u64,
-    pub reasoning_default: Option<String>,
     pub profiles: Vec<ModelProfileView>,
     pub priced: bool,
     /// MIME types of the documents the model accepts (`document` input).
@@ -1004,10 +1004,6 @@ pub struct ProviderPatch {
     pub protocol: Option<String>,
     pub auth: Option<String>,
     pub auth_header: Option<String>,
-    /// Environment variable name of the key. Setting it on a provider that
-    /// had an inline key is refused (the two are exclusive; the form only
-    /// edits the variable name).
-    pub api_key_env: Option<String>,
 }
 
 /// Fields of a model the desktop form edits. `None` = unchanged.
@@ -1020,16 +1016,12 @@ pub struct ModelPatch {
     pub max_input_tokens: Option<u64>,
     #[ts(type = "number | null")]
     pub max_output_tokens: Option<u64>,
+    /// With `document`, every document type is accepted (any MIME type); without
+    /// it, the accepted types go.
     pub input_modalities: Option<Vec<String>>,
-    /// MIME types of the accepted documents; empty removes the key. Leaving
-    /// `document` out of `input_modalities` removes it too.
-    pub document_mime_types: Option<Vec<String>>,
     pub pricing: Option<PricingEdit>,
-    /// Default reasoning profile id (must be one of the model's profiles).
-    pub reasoning_default: Option<String>,
-    pub clear_reasoning_default: bool,
-    ///.3: replaces the whole profile list (ids unique; the
-    /// default must stay one of them or be cleared in the same patch).
+    /// Replaces the whole list of reasoning levels (ids unique). The first
+    /// applies when none is chosen.
     pub profiles: Option<Vec<ReasoningProfileEdit>>,
     /// Tools start while the answer still streams; `false` removes the key.
     pub async_tool_calls: Option<bool>,

@@ -101,13 +101,13 @@
 		<li>
 			<div
 				class={cn(
-					'group flex items-center gap-1 rounded-md pr-1 transition-colors',
-					drafting ? 'bg-sidebar-accent text-sidebar-accent-foreground' : 'hover:bg-sidebar-accent/60'
+					'group flex items-center gap-1 rounded-lg pr-1 transition-colors',
+					drafting ? 'bg-element-selected text-foreground' : 'hover:bg-element-hover'
 				)}
 			>
 				<button
 					type="button"
-					class="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left"
+					class="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left"
 					aria-expanded={expanded}
 					aria-describedby={project.missing ? `${uid}-${project.id}-missing` : undefined}
 					title={project.path}
@@ -163,7 +163,7 @@
 					</DropdownMenu.Content>
 				</DropdownMenu.Root>
 			</div>
-			{#if expanded && app.sessionsOf(project.id).length > 0}
+			{#if expanded && app.sessionsOf(project.id).some((s) => !app.isPinned(s.id))}
 				<div class="mt-0.5">
 					<ConversationList
 						projectId={project.id}

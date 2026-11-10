@@ -220,8 +220,9 @@ messages! {
     ZIP_ARCHIVE: "ZIP archive", "archive ZIP";
     NO_IMAGE_INPUT: "This model doesn’t accept images: remove this attachment.", "Ce modèle n’accepte pas les images : retirez cette pièce jointe.";
     UNKNOWN_PROVIDER: "unknown provider in providers.toml", "fournisseur inconnu dans providers.toml";
+    API_KEY_EMPTY: "the API key is empty", "la clé API est vide";
+    KEYCHAIN_UNAVAILABLE: "the system's secure storage refused the key", "le stockage sécurisé du système a refusé la clé";
     UNKNOWN_MODEL: "unknown model in this provider", "modèle inconnu dans ce fournisseur";
-    ACCEPTED_FILE_TYPES: "accepted file types", "types de fichiers acceptés";
     AN_EMPTY_POINTER_WOULD_REMOVE_THE: "an empty pointer would remove the whole request", "un pointeur vide supprimerait toute la requête";
     AN_EMPTY_VALUE_NULL_CANT_BE: "an empty value (null) can’t be written to providers.toml", "une valeur vide (null) ne peut pas être écrite dans providers.toml";
     A_POSITIVE_NUMBER_OR_ZERO_IS: "“{field}”: a positive number or zero is expected (for example 0.30)", "« {field} » : un nombre positif ou nul est attendu (par exemple 0.30)";
@@ -230,13 +231,10 @@ messages! {
     CHANGE_LOG: "change log", "journal des modifications";
     CHANGE_LOG_PATCHES: "change log (patches)", "journal des modifications (correctifs)";
     CONVERSATION_FOLDER: "conversation folder", "dossier de la conversation";
-    DEFAULT_PROFILE: "default profile", "profil par défaut";
-    DEFAULT_PROFILE_A_VALUE_AND_A: "default profile: a value and a removal asked together", "profil par défaut : valeur et suppression demandées ensemble";
     FIELD_CANT_BE_EMPTY: "field “{field}” can’t be empty", "le champ « {field} » ne peut pas être vide";
     INPUT_COST: "input cost", "coût d'entrée";
     ISNT_A_JSON_POINTER_IT_MUST: "“{pointer}” isn’t a JSON pointer (it must start with /)", "« {pointer} » n'est pas un pointeur JSON (il doit commencer par /)";
     IS_TOO_LARGE: "`{key}` is too large", "`{key}` est trop grand";
-    KEY_ENVIRONMENT_VARIABLE: "key environment variable", "variable d'environnement de la clé";
     NO_FOLDER_GIVEN: "no folder given", "aucun dossier indiqué";
     NO_FREE_FOLDER_FOR_THE_CONVERSATION: "no free folder for the conversation", "aucun dossier libre pour la conversation";
     NO_PATCH_SAVED_FOR_THIS_CHANGE: "no patch saved for this change", "aucun correctif enregistré pour cette modification";
@@ -247,7 +245,6 @@ messages! {
     PROFILE_PARAMETERS_THAT_CANT_BE_WRITTEN: "profile “{id}”: parameters that can’t be written: {m}", "profil « {id} » : paramètres non écrivables : {m}";
     PROJECTS_FILE_IS_UNREADABLE: "projects file {file} is unreadable: {e}", "fichier de projets {file} illisible : {e}";
     THE_CHARACTER_MUST_BE_WRITTEN_0: "“{pointer}”: the ~ character must be written ~0 or ~1", "« {pointer} » : le caractère ~ doit être écrit ~0 ou ~1";
-    THE_DEFAULT_PROFILE_ISNT_IN_THE: "the default profile “{v}” isn’t in the model’s profile list", "le profil par défaut « {v} » n'est pas dans la liste des profils du modèle";
     THE_NAME_CANT_BE_EMPTY: "the name can’t be empty", "le nom ne peut pas être vide";
     THE_NAME_EXCEEDS_CHARACTERS: "the name exceeds {MAX_NAME_CHARS} characters", "le nom dépasse {MAX_NAME_CHARS} caractères";
     THIS_FILE_HAS_NO_SAVED_PATCH: "this file has no saved patch", "ce fichier n'a pas de correctif enregistré";
@@ -269,9 +266,6 @@ messages! {
     PROVIDERS_FILE_CHANGED: "the providers.toml file changed since it was loaded: reload the list before editing", "le fichier providers.toml a changé depuis son chargement : rechargez la liste avant de modifier";
     INVALID_ID_CHARACTERS: "“{field}”: letters, digits, “.”, “_” and “-” only, starting with a letter or digit", "« {field} » : lettres, chiffres, « . », « _ » et « - » seulement, en commençant par une lettre ou un chiffre";
     INLINE_PROVIDERS_UNSUPPORTED: "providers.toml: providers and models must be written as [[providers]] and [[providers.models]] tables to be edited from the app", "providers.toml : les fournisseurs et les modèles doivent être écrits en tables [[providers]] et [[providers.models]] pour être modifiés depuis l'application";
-    INLINE_KEY_BLOCKS_VARIABLE: "this key is written in the file: an environment variable can’t be added to it (the inline key must first be removed by hand)", "cette clé est écrite dans le fichier : une variable d'environnement ne peut pas lui être ajoutée (la clé inline doit d'abord être retirée à la main)";
-    INVALID_ENV_NAME: "the environment variable name must be an identifier (letters, digits and _)", "le nom de la variable d'environnement doit être un identifiant (lettres, chiffres et _)";
-    DEFAULT_PROFILE_REMOVED: "the default profile “{current}” is removed or renamed: choose another default profile, or clear it in the same change", "le profil par défaut « {current} » est retiré ou renommé : choisissez un autre profil par défaut, ou effacez-le dans la même modification";
     DUPLICATE_PROFILE_ID: "duplicate profile identifier: “{id}”", "identifiant de profil en double : « {id} »";
     UNKNOWN_LIMIT: "unknown", "inconnu";
     UNKNOWN_CONVERSATION: "unknown conversation", "conversation inconnue";

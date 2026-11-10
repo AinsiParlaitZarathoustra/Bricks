@@ -11,6 +11,7 @@ pub mod keep_awake;
 pub mod paths;
 pub mod prefs;
 pub mod projects;
+pub mod provider_keys;
 pub mod providers;
 pub mod providers_toml;
 pub mod run_labels;

@@ -4,6 +4,7 @@
 use super::*;
 use crate::services::providers_toml::fixtures::PROVIDERS;
 use bricks_agent::control::ModelCatalog;
+use bricks_provider::keys::{KeyStore, MemoryKeys};
 use tempfile::tempdir;
 
 /// A providers file in a temporary folder, its catalog and its lock.
@@ -22,7 +23,7 @@ fn setup() -> (
 }
 
 fn revision(path: &Path) -> String {
-    current_file(path).revision
+    current_file(path, &MemoryKeys::default()).revision
 }
 
 #[test]
@@ -36,6 +37,7 @@ fn a_removed_model_is_unselectable_and_the_catalog_reflects_the_file() {
         &path,
         &lock,
         &catalog,
+        &MemoryKeys::default(),
         &revision(&path),
         &Edit::ModelDelete {
             provider_id: "local".into(),
@@ -72,6 +74,7 @@ fn a_provider_update_reaches_the_catalog_and_keeps_the_rest_of_the_file() {
         &path,
         &lock,
         &catalog,
+        &MemoryKeys::default(),
         &revision(&path),
         &Edit::ProviderUpdate {
             provider_id: "local".into(),
@@ -107,6 +110,7 @@ fn a_stale_revision_is_a_conflict_and_changes_nothing() {
         &path,
         &lock,
         &catalog,
+        &MemoryKeys::default(),
         "not-the-revision",
         &Edit::ProviderDelete {
             provider_id: "cloud".into(),
@@ -143,24 +147,9 @@ fn a_refused_patch_leaves_the_file_and_the_catalog_as_they_were() {
                 ..Default::default()
             },
         },
-        Edit::ModelUpdate {
-            provider_id: "local".into(),
-            model_id: "small".into(),
-            patch: ModelPatch {
-                reasoning_default: Some("missing-profile".into()),
-                ..Default::default()
-            },
-        },
-        Edit::ProviderUpdate {
-            provider_id: "inline".into(),
-            patch: ProviderPatch {
-                api_key_env: Some("BRICKS_TEST_OTHER".into()),
-                ..Default::default()
-            },
-        },
     ];
     for edit in &refusals {
-        let err = apply_edit(&path, &lock, &catalog, &revision(&path), edit).expect_err("refused");
+        let err = apply_edit(&path, &lock, &catalog, &MemoryKeys::default(), &revision(&path), edit).expect_err("refused");
         assert_eq!(err.code, IpcErrorCode::Invalid, "{edit:?}: {}", err.message);
         assert!(!err.message.contains("SECRET"), "no secret in the message");
         assert_eq!(
@@ -179,6 +168,7 @@ fn a_deleted_provider_takes_its_models_with_it() {
         &path,
         &lock,
         &catalog,
+        &MemoryKeys::default(),
         &revision(&path),
         &Edit::ProviderDelete {
             provider_id: "cloud".into(),
@@ -203,12 +193,18 @@ fn a_deleted_provider_takes_its_models_with_it() {
 #[test]
 fn the_view_never_carries_a_secret_value() {
     let (_dir, path, _catalog, _lock) = setup();
-    let file = current_file(&path);
+    let keys = MemoryKeys::default();
+    keys.set("inline", "STORED-KEY-VALUE").unwrap();
+    let file = current_file(&path, &keys);
     let json = serde_json::to_string(&file).unwrap();
-    assert!(!json.contains("SECRET-KEY-VALUE"), "inline key value");
+    assert!(!json.contains("SECRET-KEY-VALUE"), "former inline key value");
+    assert!(!json.contains("STORED-KEY-VALUE"), "stored key value");
     assert!(!json.contains("HEADER-SECRET-VALUE"), "header value");
     let inline = file.providers.iter().find(|p| p.id == "inline").unwrap();
-    assert!(inline.has_inline_key, "the presence of a key is reported");
+    assert!(inline.has_key, "the presence of a key is reported");
+    assert!(inline.has_credentials);
+    let cloud = file.providers.iter().find(|p| p.id == "cloud").unwrap();
+    assert!(!cloud.has_key);
     assert_eq!(
         inline.header_names,
         vec!["X-Tenant".to_string()],
@@ -221,13 +217,13 @@ fn the_view_never_carries_a_secret_value() {
 fn a_missing_file_is_an_empty_list_and_a_broken_one_says_why() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("providers.toml");
-    let missing = current_file(&path);
+    let missing = current_file(&path, &MemoryKeys::default());
     assert!(missing.providers.is_empty());
     assert!(missing.error.is_none());
     assert_eq!(missing.path, path.display().to_string());
 
     std::fs::write(&path, "[[providers\napi_key = \"SECRET-IN-BROKEN-LINE\"\n").unwrap();
-    let broken = current_file(&path);
+    let broken = current_file(&path, &MemoryKeys::default());
     assert!(broken.providers.is_empty());
     let message = broken.error.expect("the broken file is reported");
     assert!(
@@ -332,6 +328,7 @@ id = "rapide"
         &path,
         &lock,
         &catalog,
+        &MemoryKeys::default(),
         &revision(&path),
         &Edit::ModelUpdate {
             provider_id: "local".into(),
@@ -393,4 +390,43 @@ id = "rapide"
     assert_eq!(body["ratio"], serde_json::json!(0.5));
     assert!(body.get("temperature").is_none(), "removed by the profile: {body}");
     assert!(body.get("approfondi").is_none(), "the id itself is never sent");
+}
+
+#[test]
+fn a_key_is_saved_replaced_and_removed_outside_the_file() {
+    let (_dir, path, catalog, lock) = setup();
+    let before = std::fs::read(&path).unwrap();
+    let keys = MemoryKeys::default();
+    let file = write_key(&path, &keys, "cloud", Some("  sk-pasted-1  ")).expect("saved");
+    assert!(file.providers.iter().find(|p| p.id == "cloud").unwrap().has_key);
+    assert_eq!(keys.get("cloud").unwrap().as_deref(), Some("sk-pasted-1"));
+    assert!(!serde_json::to_string(&file).unwrap().contains("sk-pasted-1"));
+    write_key(&path, &keys, "cloud", Some("sk-pasted-2")).expect("replaced");
+    assert_eq!(keys.get("cloud").unwrap().as_deref(), Some("sk-pasted-2"));
+    assert_eq!(
+        write_key(&path, &keys, "cloud", Some("   ")).unwrap_err().code,
+        IpcErrorCode::Invalid
+    );
+    assert_eq!(
+        write_key(&path, &keys, "ghost", Some("k")).unwrap_err().code,
+        IpcErrorCode::NotFound
+    );
+    let file = write_key(&path, &keys, "cloud", None).expect("removed");
+    assert!(!file.providers.iter().find(|p| p.id == "cloud").unwrap().has_key);
+    assert_eq!(std::fs::read(&path).unwrap(), before, "the file is untouched");
+
+    // A deleted provider's key goes with it.
+    keys.set("cloud", "sk-again").unwrap();
+    apply_edit(
+        &path,
+        &lock,
+        &catalog,
+        &keys,
+        &revision(&path),
+        &Edit::ProviderDelete {
+            provider_id: "cloud".into(),
+        },
+    )
+    .expect("delete");
+    assert_eq!(keys.get("cloud").unwrap(), None);
 }

@@ -23,6 +23,9 @@
 				"icon-xs": "size-6 rounded-[min(var(--radius-md),8px)] in-data-[slot=button-group]:rounded-md [&_svg:not([class*='size-'])]:size-3",
 				"icon-sm": "size-8 rounded-[min(var(--radius-md),10px)] in-data-[slot=button-group]:rounded-md",
 				"icon-lg": "size-10",
+				// Atlas's control height (26px, in px whatever the root size): rows, bars and pills.
+				compact: "h-control-md gap-1 rounded-md px-2 text-ui [&_svg:not([class*='size-'])]:size-3.5",
+				"icon-compact": "size-control-md rounded-md [&_svg:not([class*='size-'])]:size-3.5",
 			},
 		},
 		defaultVariants: {

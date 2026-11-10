@@ -32,8 +32,9 @@ fn read_file(path: &Path) -> IpcResult<Option<Vec<u8>>> {
 
 /// The providers file as the desktop shows it. An absent file gives an
 /// empty list with no error; an invalid one gives the validator's message
-/// and an empty list. `has_credentials` decides the credential flag.
-pub fn view(path: &Path, has_credentials: &dyn Fn(&ProviderConfig) -> bool) -> ProvidersFile {
+/// and an empty list. `keys` tells, for a provider, whether a key is saved
+/// and whether it can be called.
+pub fn view(path: &Path, keys: &dyn Fn(&ProviderConfig) -> (bool, bool)) -> ProvidersFile {
     let path_text = path.display().to_string();
     let bytes = match read_file(path) {
         Ok(bytes) => bytes,
@@ -65,7 +66,10 @@ pub fn view(path: &Path, has_credentials: &dyn Fn(&ProviderConfig) -> bool) -> P
             providers: config
                 .providers
                 .iter()
-                .map(|p| provider_view(p, has_credentials(p)))
+                .map(|p| {
+                    let (has_key, has_credentials) = keys(p);
+                    provider_view(p, has_key, has_credentials)
+                })
                 .collect(),
             path: path_text,
             revision,
@@ -80,7 +84,7 @@ pub fn view(path: &Path, has_credentials: &dyn Fn(&ProviderConfig) -> bool) -> P
     }
 }
 
-fn provider_view(p: &ProviderConfig, has_credentials: bool) -> ProviderView {
+fn provider_view(p: &ProviderConfig, has_key: bool, has_credentials: bool) -> ProviderView {
     ProviderView {
         id: p.id.clone(),
         name: p.name.clone(),
@@ -88,8 +92,7 @@ fn provider_view(p: &ProviderConfig, has_credentials: bool) -> ProviderView {
         protocol: p.protocol.as_str().to_string(),
         auth: p.auth.as_str().to_string(),
         auth_header: p.auth_header.clone(),
-        api_key_env: p.api_key_env.clone(),
-        has_inline_key: p.api_key.as_ref().is_some_and(|k| !k.is_blank()),
+        has_key,
         has_credentials,
         path: p.path.clone(),
         header_names: p.headers.keys().cloned().collect(),
@@ -109,7 +112,6 @@ fn provider_view(p: &ProviderConfig, has_credentials: bool) -> ProviderView {
                 async_tool_calls: m.async_tool_calls,
                 max_input_tokens: m.limits.max_input_tokens,
                 max_output_tokens: m.limits.max_output_tokens,
-                reasoning_default: m.reasoning.default.clone(),
                 profiles: m
                     .reasoning
                     .profiles

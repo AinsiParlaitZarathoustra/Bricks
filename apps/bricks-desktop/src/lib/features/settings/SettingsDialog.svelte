@@ -47,7 +47,7 @@
 	<Dialog.Content
 		class="flex h-[min(44rem,calc(100dvh-2rem))] w-[min(60rem,calc(100vw-2rem))] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none"
 	>
-		<div class="flex flex-col gap-1 border-b border-border px-6 py-4 pr-14">
+		<div class="flex flex-col gap-1 px-6 pt-5 pb-2 pr-14">
 			<Dialog.Title class="text-base font-semibold text-foreground">{t('common.bricksSettings')}</Dialog.Title>
 			<Dialog.Description class="sr-only">
 				{t('settings.applicationPreferencesChangesAreSavedAutomatically')}
@@ -62,13 +62,13 @@
 			<Tabs.List
 				variant="line"
 				aria-label={t('settings.settingsSections')}
-				class="w-full shrink-0 justify-start gap-1 overflow-x-auto rounded-none border-b border-border bg-muted/40 p-2 sm:w-56 sm:gap-0.5 sm:border-r sm:border-b-0 sm:p-3"
+				class="w-full shrink-0 justify-start gap-1 overflow-x-auto rounded-none bg-transparent p-2 sm:w-56 sm:gap-0.5 sm:p-3"
 			>
 				{#each SECTIONS as item (item.id)}
 					{@const Icon = item.icon}
 					<Tabs.Trigger
 						value={item.id}
-						class="h-9 flex-none justify-start gap-2 rounded-md px-3 text-ui text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs"
+						class="h-8 flex-none justify-start gap-2 rounded-lg px-2.5 text-ui text-muted-foreground after:hidden hover:bg-element-hover hover:text-foreground data-[state=active]:bg-element-selected data-[state=active]:text-foreground data-[state=active]:shadow-none"
 					>
 						<Icon class="size-4" aria-hidden="true" />
 						{item.label}

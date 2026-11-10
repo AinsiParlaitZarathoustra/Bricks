@@ -28,12 +28,12 @@
 		shares && gauge.used !== null && gauge.total !== null ? Math.max(0, gauge.total - gauge.used) : null
 	);
 
-	// Bricks' blue for the messages, then vivid hues of its palette; lighter in the dark theme.
+	// The accent for the messages, then the theme's chart hues: they follow light, dark and custom colours.
 	const COLOR: Record<ContextSource, string> = {
-		conversation: 'bg-primary dark:bg-[oklch(0.62_0.22_264)]',
-		tool_results: 'bg-[oklch(0.65_0.19_42)] dark:bg-[oklch(0.73_0.17_42)]',
-		tool_definitions: 'bg-[oklch(0.63_0.16_160)] dark:bg-[oklch(0.76_0.15_160)]',
-		instructions: 'bg-[oklch(0.75_0.16_80)] dark:bg-[oklch(0.83_0.15_85)]',
+		conversation: 'bg-primary',
+		tool_results: 'bg-chart-1',
+		tool_definitions: 'bg-chart-3',
+		instructions: 'bg-chart-4',
 		other: 'bg-chart-5'
 	};
 </script>

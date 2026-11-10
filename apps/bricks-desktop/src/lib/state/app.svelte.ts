@@ -28,6 +28,9 @@ import { Conversation, type Draft, type UserItem } from './conversation.svelte'
 import { defaultDiagramSettings } from '$lib/features/diagrams/settings'
 import { reader } from './reader.svelte'
 
+/** How many conversations can be pinned (the same cap as the preferences file). */
+const PINNED_MAX = 50
+
 export const DEFAULT_PREFERENCES: Preferences = {
   theme: 'system',
   left_open: true,
@@ -47,6 +50,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   computer_use_enabled: false,
   keep_awake: false,
   language: 'en',
+  pinned_sessions: [],
 }
 
 /** An IPC refusal because a project's folder is missing. */
@@ -132,6 +136,27 @@ class AppStore {
   /** The conversations of a project, most recent first (as loaded). */
   sessionsOf(projectId: string): SessionItem[] {
     return this.sessionsByProject.get(projectId) ?? []
+  }
+
+  /** The pinned conversations that still exist, most recently pinned first. */
+  get pinnedSessions(): SessionItem[] {
+    const byId = new Map<string, SessionItem>()
+    for (const list of this.sessionsByProject.values()) for (const s of list) byId.set(s.id, s)
+    return (this.prefs.pinned_sessions ?? []).flatMap((id) => byId.get(id) ?? [])
+  }
+
+  isPinned(sessionId: string): boolean {
+    return (this.prefs.pinned_sessions ?? []).includes(sessionId)
+  }
+
+  /** Pins a conversation above the projects, or unpins it. Saved with the preferences. */
+  togglePin(sessionId: string) {
+    const pinned = this.prefs.pinned_sessions ?? []
+    this.setPrefs({
+      pinned_sessions: pinned.includes(sessionId)
+        ? pinned.filter((id) => id !== sessionId)
+        : [sessionId, ...pinned].slice(0, PINNED_MAX),
+    })
   }
 
   get current(): Conversation | null {
@@ -721,6 +746,8 @@ class AppStore {
 
   private forget(sessionId: string) {
     this.conversations.delete(sessionId)
+    // Deleted here or elsewhere (another window, the CLI): it leaves the pins too.
+    if (this.isPinned(sessionId)) this.togglePin(sessionId)
     for (const [pid, list] of this.sessionsByProject)
       this.sessionsByProject.set(
         pid,

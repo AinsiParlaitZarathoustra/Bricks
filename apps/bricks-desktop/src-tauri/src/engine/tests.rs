@@ -357,11 +357,13 @@ async fn a_run_after_its_model_was_removed_is_refused_with_the_reason() {
     .await
     .expect("the model is configured when the session opens");
 
-    let revision = current_file(&providers).revision;
+    let keys = bricks_provider::keys::MemoryKeys::default();
+    let revision = current_file(&providers, &keys).revision;
     apply_edit(
         &providers,
         &parking_lot::Mutex::new(()),
         &catalog,
+        &keys,
         &revision,
         &Edit::ModelDelete {
             provider_id: "local".into(),

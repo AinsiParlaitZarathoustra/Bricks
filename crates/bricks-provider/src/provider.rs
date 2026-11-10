@@ -18,7 +18,8 @@ use crate::config::{AuthMode, Secret};
 use crate::modality::validate_messages;
 use crate::protocol::{self, BuildCtx, sse::SseDecoder};
 use crate::reasoning;
-use crate::registry::{KeySource, ResolvedModel};
+use crate::keys::{self, KeyStore};
+use crate::registry::{LegacyKey, ResolvedModel};
 use crate::{CompletionRequest, CompletionStream, Provider};
 use async_trait::async_trait;
 use bricks_types::{BricksError, Modality, Result, StreamEvent, Usage};
@@ -38,6 +39,7 @@ pub struct ProviderBuilder {
     profile: Option<String>,
     tariff: Option<String>,
     env: Option<EnvLookup>,
+    keys: Option<Arc<dyn KeyStore>>,
     client: Option<reqwest::Client>,
 }
 
@@ -48,6 +50,7 @@ impl ProviderBuilder {
             profile: None,
             tariff: None,
             env: None,
+            keys: None,
             client: None,
         }
     }
@@ -65,9 +68,16 @@ impl ProviderBuilder {
         self
     }
 
-    /// Where `api_key_env` is looked up (default: the process environment).
+    /// Where the key's override variable (`BRICKS_API_KEY_<ID>`) is looked
+    /// up (default: the process environment).
     pub fn env(mut self, lookup: impl Fn(&str) -> Option<String> + Send + Sync + 'static) -> Self {
         self.env = Some(Box::new(lookup));
+        self
+    }
+
+    /// Where the key is kept (default: the system keychain of this home).
+    pub fn keys(mut self, store: Arc<dyn KeyStore>) -> Self {
+        self.keys = Some(store);
         self
     }
 
@@ -106,29 +116,29 @@ impl ProviderBuilder {
         let key = if m.auth == AuthMode::None {
             None
         } else {
-            match &m.key_source {
-                KeySource::Inline(k) => Some(k.clone()),
-                KeySource::Env(var) => {
-                    let value = match &self.env {
-                        Some(lookup) => lookup(var),
-                        None => std::env::var(var).ok(),
-                    };
-                    match value.filter(|v| !v.trim().is_empty()) {
-                        Some(v) => Some(Secret::new(v.trim())),
-                        None => {
-                            return Err(BricksError::Auth(format!(
-                                "provider \"{}\": environment variable `{var}` (api_key_env) is \
-                                 not set or empty",
-                                m.provider_id
-                            )));
-                        }
-                    }
-                }
-                KeySource::None => {
+            let env = |name: &str| match &self.env {
+                Some(lookup) => lookup(name),
+                None => std::env::var(name).ok(),
+            };
+            let store = self.keys.clone().unwrap_or_else(keys::default_store);
+            let legacy = || match &m.legacy_key {
+                Some(LegacyKey::Inline(k)) => Some(k.clone()),
+                Some(LegacyKey::Env(var)) => env(var)
+                    .filter(|v| !v.trim().is_empty())
+                    .map(|v| Secret::new(v.trim())),
+                None => None,
+            };
+            match keys::lookup(&m.provider_id, &env, store.as_ref())
+                .map_err(BricksError::Auth)?
+                .map(Secret::new)
+                .or_else(legacy)
+            {
+                Some(k) => Some(k),
+                None => {
                     return Err(BricksError::Auth(format!(
-                        "provider \"{}\": auth = \"{}\" but no key source is configured",
+                        "provider \"{}\": no API key; add it in the Bricks settings or set {}",
                         m.provider_id,
-                        m.auth.as_str()
+                        keys::override_var(&m.provider_id)
                     )));
                 }
             }

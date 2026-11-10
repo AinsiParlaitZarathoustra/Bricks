@@ -146,12 +146,11 @@ pub const COMMANDS: &[SlashCommand] = &[
     SlashCommand {
         name: "effort",
         aliases: &[],
-        args: "[profile id | default]",
-        description: "reasoning effort of the current model: its configured profiles; `default` = the model's own default",
-        description_fr: "effort de raisonnement du modèle courant : ses profils configurés ; `default` = le défaut du modèle",
+        args: "[level]",
+        description: "reasoning level of the current model, one of its configured levels",
+        description_fr: "niveau de raisonnement du modèle courant, parmi ses niveaux configurés",
         build: |arg| match arg.trim() {
             "" => present(Present::EffortPicker),
-            "default" => Ok(Action::Engine(Command::SetReasoning { profile: None })),
             id => Ok(Action::Engine(Command::SetReasoning {
                 profile: Some(id.to_string()),
             })),
@@ -703,10 +702,13 @@ mod tests {
     }
 
     #[test]
-    fn effort_default_resets_the_profile() {
+    fn effort_names_a_level() {
+        // `default` is no longer a keyword: it is a level name like any other.
         assert_eq!(
             parse("/effort default").unwrap(),
-            Action::Engine(Command::SetReasoning { profile: None })
+            Action::Engine(Command::SetReasoning {
+                profile: Some("default".into())
+            })
         );
         assert_eq!(
             parse("/effort deep").unwrap(),

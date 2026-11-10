@@ -45,4 +45,8 @@ keep_awake: boolean,
 /**
  * The interface language; conversations and files keep their own.
  */
-language: Language, };
+language: Language, 
+/**
+ * Conversations pinned above the projects, most recently pinned first.
+ */
+pinned_sessions: Array<string>, };

@@ -30,6 +30,7 @@ use bricks_agent::control::ModelCatalog;
 use bricks_agent::permission::PermissionStore;
 use bricks_provider::ProviderRegistry;
 use bricks_provider::config::{AuthMode, ProviderConfig};
+use bricks_provider::keys::{KeyStore, SystemKeychain};
 use catalog::DesktopCatalog;
 use hub::Hub;
 use live::OpenSession;
@@ -51,6 +52,8 @@ pub struct AppState {
     pub(crate) providers_path: PathBuf,
     /// Serialises the edits of the providers file (check, write, reload).
     pub(crate) providers_lock: Arc<parking_lot::Mutex<()>>,
+    /// Where the API keys are kept: the system keychain of this home.
+    pub(crate) keys: Arc<dyn KeyStore>,
     /// The permission policy new sessions start from.
     pub(crate) permissions: PermissionStore,
     /// Configuration problems of the projects and stores, to show.
@@ -91,6 +94,8 @@ impl AppState {
         let prefs = PrefsStore::at(home.join("desktop").join("preferences.json"));
         crate::i18n::set_language(prefs.get().language);
         let providers_path = providers_file();
+        // Keys of former files move to the keychain before the first read.
+        crate::services::provider_keys::migrate(&providers_path, &SystemKeychain::for_home(&home));
         let registry = bricks_config::load_registry(Some(&providers_path)).map(Arc::new);
         Self::assemble_at(bricks_config::bricks_home(), registry, providers_path)
     }
@@ -113,10 +118,14 @@ impl AppState {
         let projects = ProjectStore::load(desktop.join("projects.json"));
         let prefs = Arc::new(PrefsStore::at(desktop.join("preferences.json")));
         let journal = Arc::new(ChangeJournal::at(desktop.join("changes")));
+        let keys: Arc<dyn KeyStore> = Arc::new(SystemKeychain::for_home(&home));
+        let catalog = DesktopCatalog::new(registry);
+        catalog.use_keys(Arc::clone(&keys));
         Self {
-            catalog: DesktopCatalog::new(registry),
+            catalog,
             providers_path,
             providers_lock: Arc::new(parking_lot::Mutex::new(())),
+            keys,
             permissions: PermissionStore::in_home(&home),
             config_errors: projects.notes().to_vec(),
             sessions_dir: home.join("sessions"),
@@ -136,6 +145,13 @@ impl AppState {
         }
     }
 
+    /// Reads and writes the providers' keys in `keys` (tests, embedders).
+    pub fn with_keys(mut self, keys: Arc<dyn KeyStore>) -> Self {
+        self.catalog.use_keys(Arc::clone(&keys));
+        self.keys = keys;
+        self
+    }
+
     pub fn app_info(&self) -> AppInfo {
         let registry = self.catalog.registry();
         let providers = match &registry {
@@ -146,7 +162,7 @@ impl AppState {
                 .map(|p| ProviderInfo {
                     id: p.id.clone(),
                     name: p.name.clone(),
-                    has_credentials: credentials_available(p),
+                    has_credentials: credentials_available(p, self.keys.as_ref()),
                     model_count: u32::try_from(p.models.len()).unwrap_or(u32::MAX),
                 })
                 .collect(),
@@ -246,19 +262,23 @@ pub fn providers_file() -> PathBuf {
 }
 
 /// Whether a provider can be called: no credential is needed (`auth =
-/// "none"`), or one is configured inline or in the named environment
-/// variable. The value itself never leaves Rust.
-pub(crate) fn credentials_available(p: &ProviderConfig) -> bool {
+/// "none"`), or a key is stored (or its override variable is set). The value
+/// itself never leaves Rust.
+pub(crate) fn credentials_available(p: &ProviderConfig, keys: &dyn KeyStore) -> bool {
     if matches!(p.auth, AuthMode::None) {
         return true;
     }
-    let inline = p.api_key.as_ref().is_some_and(|k| !k.is_blank());
-    let from_env = p
-        .api_key_env
-        .as_deref()
-        .and_then(|name| std::env::var(name).ok())
-        .is_some_and(|v| !v.trim().is_empty());
-    inline || from_env
+    let env = |name: &str| std::env::var(name).ok();
+    matches!(bricks_provider::keys::lookup(&p.id, &env, keys), Ok(Some(_)))
+        || p.legacy_key(&env).is_some()
+}
+
+/// Whether a key of `p` is saved in the secure storage.
+pub(crate) fn key_saved(p: &ProviderConfig, keys: &dyn KeyStore) -> bool {
+    keys.get(&p.id)
+        .ok()
+        .flatten()
+        .is_some_and(|k| !k.trim().is_empty())
 }
 
 pub fn setup(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {

@@ -125,6 +125,8 @@ pub fn run() {
             commands::providers::provider_create,
             commands::providers::model_create,
             commands::providers::providers_fill_missing_prices,
+            commands::providers::provider_key_set,
+            commands::providers::provider_key_delete,
             // Skills of the settings: catalogue and changes to the store
             commands::skills::skills_catalog,
             commands::skills::skills_create,

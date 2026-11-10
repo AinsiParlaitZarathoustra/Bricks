@@ -39,22 +39,38 @@
 			<SearchDialog />
 		</div>
 		<NewConversationButton class="w-full justify-start px-2 text-ui" />
-		<Button variant="ghost" class="w-full justify-start px-2 text-ui" onclick={addProject} disabled={adding}>
-			<FolderPlus class="size-4" aria-hidden="true" />
-			{t('navigation.newProject')}
-		</Button>
 	</div>
 
 	<ScrollArea class="min-h-0 flex-1">
 		<div class="flex flex-col gap-4 pb-3">
-			{#if app.folders.length > 0}
+			{#if app.pinnedSessions.length > 0}
 				<section class="flex flex-col gap-1 px-2">
-					<h2 class="px-2 text-xs font-medium text-muted-foreground">{t('navigation.projects')}</h2>
-					<ProjectList />
+					<h2 class="px-2 text-xs font-medium text-muted-foreground">{t('navigation.pinned')}</h2>
+					<ConversationList sessions={app.pinnedSessions} label={t('navigation.pinned')} />
 				</section>
 			{/if}
 
-			{#if chats && app.sessionsOf(chats.id).length > 0}
+			<section class="flex flex-col gap-1 px-2">
+				<div class="flex h-6 items-center justify-between pr-0.5 pl-2">
+					<h2 class="text-xs font-medium text-muted-foreground">{t('navigation.projects')}</h2>
+					<Button
+						variant="ghost"
+						size="icon-xs"
+						class="text-muted-foreground hover:text-foreground"
+						aria-label={t('navigation.newProject')}
+						title={t('navigation.newProject')}
+						onclick={addProject}
+						disabled={adding}
+					>
+						<FolderPlus class="size-3.5" aria-hidden="true" />
+					</Button>
+				</div>
+				{#if app.folders.length > 0}
+					<ProjectList />
+				{/if}
+			</section>
+
+			{#if chats && app.sessionsOf(chats.id).some((s) => !app.isPinned(s.id))}
 				<section class="flex flex-col gap-1 px-2">
 					<h2 class="px-2 text-xs font-medium text-muted-foreground">{t('navigation.conversations')}</h2>
 					<ConversationList projectId={chats.id} label={t('navigation.conversations')} />
@@ -63,7 +79,7 @@
 		</div>
 	</ScrollArea>
 
-	<div class="border-t border-sidebar-border/50 p-2">
+	<div class="p-2">
 		<Button
 			variant="ghost"
 			class="w-full justify-start text-ui"

@@ -54,6 +54,24 @@
 	--color-code-foreground: var(--code-foreground);
 	--color-status-idle: var(--status-idle);
 
+	/* Interaction surfaces and lines, in the grammar of Atlas: an overlay of the text colour,
+	   so they follow light, dark and the custom colours. */
+	--color-element-hover: var(--element-hover);
+	--color-element-selected: var(--element-selected);
+	--color-element-active: var(--element-active);
+	--color-border-subtle: var(--border-subtle);
+	--color-border-strong: var(--border-strong);
+	--color-panel-input: var(--panel-input);
+
+	/* Control heights, in px whatever the root size: h-control-md, size-control-sm... */
+	--spacing-control-xs: 20px;
+	--spacing-control-sm: 24px;
+	--spacing-control-md: 26px;
+	--spacing-control-lg: 32px;
+	--radius-composer: 23px;
+	/* Floating surfaces (cards of the right panel, the selected row): one shadow, per theme. */
+	--shadow-float: var(--elevation-float);
+
 	--radius-sm: calc(var(--radius) * 0.6);
 	--radius-md: calc(var(--radius) * 0.8);
 	--radius-lg: var(--radius);

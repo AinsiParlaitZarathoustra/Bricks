@@ -19,6 +19,7 @@
  * refits after it).
  */
 
+import { flushSync } from 'svelte';
 import { app } from '$lib/state/app.svelte';
 import { applyPaletteVariables, paletteVariables } from './palette';
 import tokens from './tokens.json';
@@ -113,11 +114,42 @@ async function loadBundledFonts(): Promise<void> {
 	}
 }
 
-/** Sets the user's theme mode and updates <html> immediately. Does not persist. */
-export function setTheme(mode: ThemeMode): void {
-	state.mode = mode;
-	applyToDocument(state.resolved);
+/**
+ * Runs `change` as a short cross-fade between the old and the new look. Falls back to an
+ * instant change without the View Transitions API, with reduced motion, or while hidden.
+ * `flushSync` lets the custom colours (an effect) land before the new look is captured.
+ */
+function fade(change: () => void): void {
+	const reduced =
+		typeof window !== 'undefined' &&
+		typeof window.matchMedia === 'function' &&
+		window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+	if (typeof document === 'undefined' || !document.startViewTransition || reduced || document.hidden) {
+		change();
+		return;
+	}
+	document.startViewTransition(() => {
+		change();
+		flushSync();
+	});
 }
+
+/** Sets the user's theme mode and updates <html> (with a cross-fade when it changes what is shown). Does not persist. */
+export function setTheme(mode: ThemeMode): void {
+	// The mode asked last wins, even if an earlier fade has not applied its own yet.
+	wanted = mode;
+	const apply = () => {
+		if (wanted !== null) state.mode = wanted;
+		wanted = null;
+		applyToDocument(state.resolved);
+	};
+	const after = mode === 'system' ? (systemPrefersDark() ? 'dark' : 'light') : mode;
+	if (after === state.resolved) return apply();
+	fade(apply);
+}
+
+/** The mode a pending fade will apply. */
+let wanted: ThemeMode | null = null;
 
 /**
  * Starts following the operating system colour scheme and applies the initial
@@ -133,14 +165,20 @@ export function initTheme(initial: ThemeMode = 'system'): () => void {
 		state.systemDark = mediaQuery.matches;
 
 		const onChange = (event: MediaQueryListEvent) => {
-			state.systemDark = event.matches;
-			applyToDocument(state.resolved);
+			const apply = () => {
+				state.systemDark = event.matches;
+				applyToDocument(state.resolved);
+			};
+			if (state.mode === 'system') fade(apply);
+			else apply();
 		};
 		mediaQuery.addEventListener('change', onChange);
 		disposeListener = () => mediaQuery?.removeEventListener('change', onChange);
 	}
 
-	setTheme(initial);
+	// Start-up: no fade, the window is only just showing.
+	state.mode = initial;
+	applyToDocument(state.resolved);
 	return () => {
 		disposeListener?.();
 		disposeListener = null;

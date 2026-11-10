@@ -61,9 +61,23 @@
   }
 </script>
 
-<div class="flex min-w-0 max-w-full items-center justify-center gap-2">
+<!--
+  « Project / Conversation ». The project opens a new conversation in it; the conversation's name
+  is where you already are (double-click or the pencil to rename it).
+-->
+<div class="group/title flex min-w-0 max-w-full items-center justify-center gap-1">
+  {#if projectName && project}
+    <button
+      type="button"
+      class="min-w-0 max-w-[40%] shrink truncate rounded-md px-1.5 py-0.5 text-ui text-muted-foreground transition-colors hover:bg-element-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+      title={t('conversation.newConversationIn', { project: projectName })}
+      onclick={() => void app.newConversation(project.id)}>{projectName}</button
+    >
+    <span aria-hidden="true" class="text-muted-foreground/60">/</span>
+  {/if}
+
   <!-- The page's h1 is the sr-only « Bricks » (AppShell): the conversation title is its h2. -->
-  <h2 class="flex min-w-0 items-center text-ui font-medium text-foreground">
+  <h2 class="flex min-w-0 items-center gap-1 text-ui font-medium text-foreground">
     {#if editing && conversation}
       <Input
         bind:ref={inputEl}
@@ -81,22 +95,24 @@
         {title}
         onclick={() => ui.closeAgent()}>{title}</button
       >
-      <span aria-hidden="true" class="text-muted-foreground">/</span>
+      <span aria-hidden="true" class="text-muted-foreground/60">/</span>
       <span class="min-w-0 truncate px-1.5 py-0.5" data-tauri-drag-region>{agentName(branch)}</span>
     {:else}
-      <!-- Plain text: renaming is the pencil button beside it (the single rename control). -->
-      <span class="min-w-0 truncate px-1.5 py-0.5" title={title} data-tauri-drag-region>{title}</span>
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <span class="min-w-0 truncate px-1.5 py-0.5" {title} ondblclick={startEdit}>{title}</span>
     {/if}
   </h2>
 
   {#if conversation && !editing && !branch}
-    <Button variant="ghost" size="icon-xs" aria-label={t('conversation.editTheTitle')} onclick={startEdit}>
+    <Button
+      variant="ghost"
+      size="icon-xs"
+      class="opacity-0 transition-opacity group-hover/title:opacity-100 focus-visible:opacity-100"
+      aria-label={t('conversation.editTheTitle')}
+      onclick={startEdit}
+    >
       <Pencil aria-hidden="true" />
     </Button>
-  {/if}
-
-  {#if projectName}
-    <span class="min-w-0 truncate text-xs text-muted-foreground" data-tauri-drag-region>{projectName}</span>
   {/if}
 
   {#if branch ? !branch.endedAt : conversation?.running}

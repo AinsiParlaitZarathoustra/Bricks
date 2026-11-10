@@ -91,7 +91,7 @@ impl ModelCatalog for bricks_provider::ProviderRegistry {
                             label: p.label().to_string(),
                         })
                         .collect(),
-                    default_profile: r.reasoning.default.clone(),
+                    default_profile: r.reasoning.initial().map(|p| p.id.clone()),
                     max_input_tokens: r.limits.max_input_tokens,
                     input: r.declared.input.iter().map(|m| m.to_string()).collect(),
                     priced: r.pricing.is_some(),
@@ -1754,7 +1754,7 @@ impl Controller {
                         return self.reject(
                             &cmd,
                             format!(
-                                "unknown reasoning profile `{p}` for {model}; choose one of: {} (or `default`)",
+                                "unknown reasoning level `{p}` for {model}; choose one of: {}",
                                 ids.join(", ")
                             ),
                         );

@@ -36,12 +36,7 @@
 </script>
 
 <div class="flex items-center justify-between gap-3 p-3">
-	<div class="flex min-w-0 flex-col gap-0.5">
-		<span class="text-ui font-medium text-foreground">{label}</span>
-		<span class="font-mono text-xs text-muted-foreground tabular-nums">
-			{custom ? value : t('settings.themeColor', { value })}
-		</span>
-	</div>
+	<span class="min-w-0 truncate text-ui font-medium text-foreground">{label}</span>
 
 	<div class="flex shrink-0 items-center gap-1">
 		<Button variant="ghost" size="sm" disabled={!custom} onclick={onReset} aria-label={t('settings.reset', { label })}>

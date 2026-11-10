@@ -5,19 +5,15 @@ import type { ReasoningProfileEdit } from "./ReasoningProfileEdit";
 /**
  * Fields of a model the desktop form edits. `None` = unchanged.
  */
-export type ModelPatch = { name: string | null, api_model: string | null, max_input_tokens: number | null, max_output_tokens: number | null, input_modalities: Array<string> | null, 
+export type ModelPatch = { name: string | null, api_model: string | null, max_input_tokens: number | null, max_output_tokens: number | null, 
 /**
- * MIME types of the accepted documents; empty removes the key. Leaving
- * `document` out of `input_modalities` removes it too.
+ * With `document`, every document type is accepted (any MIME type); without
+ * it, the accepted types go.
  */
-document_mime_types: Array<string> | null, pricing: PricingEdit | null, 
+input_modalities: Array<string> | null, pricing: PricingEdit | null, 
 /**
- * Default reasoning profile id (must be one of the model's profiles).
- */
-reasoning_default: string | null, clear_reasoning_default: boolean, 
-/**
- *.3: replaces the whole profile list (ids unique; the
- * default must stay one of them or be cleared in the same patch).
+ * Replaces the whole list of reasoning levels (ids unique). The first
+ * applies when none is chosen.
  */
 profiles: Array<ReasoningProfileEdit> | null, 
 /**

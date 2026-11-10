@@ -91,25 +91,16 @@
 			<dt class="text-muted-foreground">{t('settings.acceptedInputs')}</dt>
 			<dd class="text-foreground">{formatModalities(model.input_modalities)}</dd>
 
-			<dt class="text-muted-foreground">{t('settings.effortProfiles')}</dt>
+			<dt class="text-muted-foreground">{t('settings.reasoningLevels')}</dt>
 			<dd class="text-foreground">
 				{#if model.profiles.length === 0}
 					{t('settings.none')}
 				{:else}
-					<ul class="flex flex-col gap-0.5">
-						{#each model.profiles as profile (profile.id)}
-							<li>
-								{profileLabel(profile)}
-								{#if profile.id === model.reasoning_default}
-									<span class="text-muted-foreground">{t('settings.default2')}</span>
-								{/if}
-							</li>
-						{/each}
-					</ul>
+					{model.profiles.map(profileLabel).join(', ')}
 				{/if}
 			</dd>
 
-			<dt class="text-muted-foreground">{t('settings.costsMTokens')}</dt>
+			<dt class="text-muted-foreground">{t('settings.costPerMtok')}</dt>
 			<dd class="tabular-nums text-foreground">
 				{#if model.pricing}
 					{t('settings.inputOutputCache', { input: formatPrice(model.pricing.input), output: formatPrice(model.pricing.output), cacheRead: formatPrice(model.pricing.cache_read) })}

@@ -3,8 +3,9 @@
 //!
 //! The file is TOML (`~/.bricks/providers.toml`) or JSON — both deserialize
 //! into the same Serde types, with the same defaults and the same validation.
-//! Nothing here talks to the network and nothing reads the environment: secret
-//! references (`api_key_env`) are only *resolved* when a provider is built.
+//! Nothing here talks to the network and nothing reads the environment. The
+//! file holds no key: keys live in the system's secure storage (see
+//! [`crate::keys`]) and are read when a provider is built.
 //!
 //! Errors always name the provider, the model and the field at fault, and never
 //! echo a value that could be a secret.
@@ -246,12 +247,14 @@ pub struct ProviderConfig {
     /// Header carrying the key when `auth = "api_key_header"`.
     #[serde(default)]
     pub auth_header: Option<String>,
-    /// Inline key. Prefer `api_key_env`; never commit a file containing this.
-    #[serde(default)]
-    pub api_key: Option<Secret>,
-    /// Name of the environment variable holding the key.
-    #[serde(default)]
-    pub api_key_env: Option<String>,
+    /// Former inline key: read only to move it into the secure storage
+    /// (see [`ProviderConfig::legacy_key`]), never used to authenticate.
+    #[serde(default, rename = "api_key")]
+    pub legacy_api_key: Option<Secret>,
+    /// Former name of an environment variable holding the key: same as
+    /// `legacy_api_key`.
+    #[serde(default, rename = "api_key_env")]
+    pub legacy_api_key_env: Option<String>,
     /// Replaces the protocol's relative path for models using the provider's
     /// default protocol.
     #[serde(default)]
@@ -394,12 +397,21 @@ impl TryFrom<FileLimits> for Limits {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ReasoningConfig {
-    /// Profile applied when none is selected. Must name one of `profiles`.
-    #[serde(default)]
-    pub default: Option<String>,
-    /// Ordered, fully user-defined profiles. Empty = no choice is exposed.
+    /// Former « default » profile: read so older files still load, never
+    /// used. A model with no choice made uses its first level.
+    #[serde(default, rename = "default")]
+    pub legacy_default: Option<String>,
+    /// Ordered, fully user-defined levels. The first applies when none is
+    /// chosen. Empty = no choice is exposed.
     #[serde(default)]
     pub profiles: Vec<ReasoningProfile>,
+}
+
+impl ReasoningConfig {
+    /// The level applied when none is chosen: the first one.
+    pub fn initial(&self) -> Option<&ReasoningProfile> {
+        self.profiles.first()
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -809,15 +821,6 @@ fn valid_selector_part(s: &str, allow_slash: bool) -> bool {
         && (allow_slash || !s.contains('/'))
 }
 
-fn valid_env_name(s: &str) -> bool {
-    let mut chars = s.chars();
-    match chars.next() {
-        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
-        _ => return false,
-    }
-    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
-}
-
 fn valid_mime(s: &str) -> bool {
     match s.split_once('/') {
         Some((a, b)) => {
@@ -853,6 +856,25 @@ pub(crate) fn pointer_root(p: &str) -> &str {
 }
 
 impl ProviderConfig {
+    /// The key a former file gave this provider (inline, or through the
+    /// variable it named, looked up with `env`), to move into the secure
+    /// storage. `None` when the file named none or the variable is unset.
+    pub fn legacy_key(&self, env: &dyn Fn(&str) -> Option<String>) -> Option<String> {
+        if let Some(k) = self.legacy_api_key.as_ref().filter(|k| !k.is_blank()) {
+            return Some(k.expose().trim().to_string());
+        }
+        self.legacy_api_key_env
+            .as_deref()
+            .and_then(env)
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+    }
+
+    /// The file still names a key the former way.
+    pub fn has_legacy_key_fields(&self) -> bool {
+        self.legacy_api_key.is_some() || self.legacy_api_key_env.is_some()
+    }
+
     fn validate(&self, origin: &str) -> Result<(), ConfigError> {
         let e =
             |field: &str, msg: String| ConfigError::new(origin, field, msg).at_provider(&self.id);
@@ -868,13 +890,7 @@ impl ProviderConfig {
             return Err(e("name", "must not be empty".into()));
         }
         validate_endpoint(&self.endpoint).map_err(|m| e("endpoint", m))?;
-        validate_auth(
-            self.auth,
-            self.auth_header.as_deref(),
-            self.api_key.as_ref(),
-            self.api_key_env.as_deref(),
-        )
-        .map_err(|(f, m)| e(f, m))?;
+        validate_auth(self.auth, self.auth_header.as_deref()).map_err(|(f, m)| e(f, m))?;
         validate_headers(&self.headers).map_err(|(f, m)| e(&f, m))?;
         if let Some(path) = &self.path {
             crate::endpoint::validate_path_override(path).map_err(|m| e("path", m))?;
@@ -907,17 +923,12 @@ fn validate_endpoint(endpoint: &str) -> Result<(), String> {
         return Err("URL has no host".into());
     }
     if !url.username().is_empty() || url.password().is_some() {
-        return Err("must not embed credentials; use api_key_env".into());
+        return Err("must not embed credentials".into());
     }
     Ok(())
 }
 
-fn validate_auth(
-    auth: AuthMode,
-    auth_header: Option<&str>,
-    api_key: Option<&Secret>,
-    api_key_env: Option<&str>,
-) -> Result<(), (&'static str, String)> {
+fn validate_auth(auth: AuthMode, auth_header: Option<&str>) -> Result<(), (&'static str, String)> {
     if let Some(h) = auth_header {
         if auth != AuthMode::ApiKeyHeader {
             return Err((
@@ -927,46 +938,6 @@ fn validate_auth(
         }
         reqwest::header::HeaderName::from_bytes(h.as_bytes())
             .map_err(|_| ("auth_header", "not a valid HTTP header name".to_string()))?;
-    }
-    match auth {
-        AuthMode::None => {
-            if api_key.is_some() || api_key_env.is_some() {
-                return Err((
-                    "auth",
-                    "auth = \"none\" cannot be combined with api_key or api_key_env".into(),
-                ));
-            }
-        }
-        AuthMode::Bearer | AuthMode::ApiKeyHeader => match (api_key, api_key_env) {
-            (Some(_), Some(_)) => {
-                return Err((
-                    "api_key",
-                    "api_key and api_key_env are mutually exclusive".into(),
-                ));
-            }
-            (None, None) => {
-                return Err((
-                    "api_key_env",
-                    format!(
-                        "auth = \"{}\" needs a key source: set api_key_env (recommended) or api_key",
-                        auth.as_str()
-                    ),
-                ));
-            }
-            (Some(k), None) => {
-                if k.is_blank() {
-                    return Err(("api_key", "must not be empty".into()));
-                }
-            }
-            (None, Some(name)) => {
-                if !valid_env_name(name) {
-                    return Err((
-                        "api_key_env",
-                        "must be an environment variable name (letters, digits, `_`)".into(),
-                    ));
-                }
-            }
-        },
     }
     Ok(())
 }
@@ -1193,15 +1164,6 @@ impl ModelConfig {
                 }
             }
         }
-        if let Some(def) = &self.reasoning.default
-            && !profile_ids.contains(def.as_str())
-        {
-            return Err(e(
-                "reasoning.default",
-                format!("`{def}` is not one of this model's reasoning profiles"),
-            ));
-        }
-
         // The endpoint must assemble.
         crate::endpoint::assemble(
             self.endpoint.as_deref().unwrap_or(&provider.endpoint),
@@ -1422,21 +1384,27 @@ mod tests {
 
     #[test]
     fn auth_rules() {
-        // Both key sources.
+        // The file holds no key: former key fields are read for the move to
+        // the secure storage, never checked or used.
         let both = BASIC.replace(
             "api_key_env = \"BRICKS_CUSTOM_API_KEY\"",
             "api_key_env = \"X\"\napi_key = \"k\"",
         );
-        assert!(err(&both).message.contains("mutually exclusive"));
-        // None with a key.
-        let none = BASIC.replace("auth = \"bearer\"", "auth = \"none\"");
-        assert!(err(&none).message.contains("cannot be combined"));
-        // Bearer without a key.
+        let cfg = ProvidersConfig::from_toml_str(&both, "test.toml").unwrap();
+        let p = &cfg.providers[0];
+        assert!(p.has_legacy_key_fields());
+        assert_eq!(p.legacy_key(&|_| None).as_deref(), Some("k"));
+        let env_only = ProvidersConfig::from_toml_str(BASIC, "test.toml").unwrap();
+        let p = &env_only.providers[0];
+        assert_eq!(p.legacy_key(&|_| None), None);
+        assert_eq!(
+            p.legacy_key(&|n| (n == "BRICKS_CUSTOM_API_KEY").then(|| " v ".into()))
+                .as_deref(),
+            Some("v")
+        );
         let nokey = BASIC.replace("api_key_env = \"BRICKS_CUSTOM_API_KEY\"\n", "");
-        assert!(err(&nokey).message.contains("needs a key source"));
-        // Bad env name.
-        let bad = BASIC.replace("BRICKS_CUSTOM_API_KEY", "not a name");
-        assert_eq!(err(&bad).field, "api_key_env");
+        assert!(!ProvidersConfig::from_toml_str(&nokey, "test.toml").unwrap().providers[0]
+            .has_legacy_key_fields());
         // auth_header only with api_key_header.
         let hdr = BASIC.replace(
             "auth = \"bearer\"",
@@ -1556,16 +1524,11 @@ mod tests {
 
     #[test]
     fn reasoning_rules() {
-        let e = err(&BASIC.replace("default = \"approfondi\"", "default = \"ultra\""));
-        assert_eq!(e.field, "reasoning.default");
+        // A former default, even unknown, is read and ignored.
+        let text = BASIC.replace("default = \"approfondi\"", "default = \"ultra\"");
+        assert!(ProvidersConfig::from_toml_str(&text, "test.toml").is_ok());
         let dup = BASIC.replace("id = \"rapide\"", "id = \"approfondi\"");
         assert!(err(&dup).message.contains("duplicate profile id"));
-        // A default with no profiles at all.
-        let none = BASIC.replace(
-            "[providers.models.reasoning]\nprofiles = []",
-            "[providers.models.reasoning]\ndefault = \"x\"\nprofiles = []",
-        );
-        assert_eq!(err(&none).field, "reasoning.default");
     }
 
     #[test]

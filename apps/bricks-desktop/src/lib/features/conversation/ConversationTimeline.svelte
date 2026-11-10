@@ -10,12 +10,13 @@
   import SkillsTrustBanner from './timeline/SkillsTrustBanner.svelte'
   import TimelineEntry from './timeline/TimelineEntry.svelte'
   import WorkBlock from './timeline/WorkBlock.svelte'
+  import MessageRail from './MessageRail.svelte'
   import { timelineBlocks } from './runBlocks'
 
   let { conversation }: { conversation: Conversation } = $props()
 
-  /** Items rendered at once; earlier ones load on request. */
-  const WINDOW = 200
+  /** Items rendered at once; earlier ones load on request (keeps long conversations light). */
+  const WINDOW = 120
   const NEAR_BOTTOM_PX = 80
 
   let scrollEl = $state<HTMLDivElement | null>(null)
@@ -31,6 +32,14 @@
   const visible = $derived(hiddenCount > 0 ? conversation.items.slice(hiddenCount) : conversation.items)
   const blocks = $derived(
     timelineBlocks(visible, conversation.items, conversation.runs, conversation.runningRunId),
+  )
+  /** One grain per message sent, among the rendered ones. */
+  const marks = $derived(
+    blocks.flatMap((block) =>
+      block.kind === 'item' && block.item.kind === 'user'
+        ? [{ key: block.key, label: truncate(block.item.text.trim() || t('conversation.message'), 80) }]
+        : [],
+    ),
   )
   /** The run at work has no block when none of its items is in the view (it started elsewhere). */
   const runningWithoutBlock = $derived(
@@ -179,7 +188,7 @@
   })
 </script>
 
-<div class="relative flex h-full min-h-0 flex-1 flex-col">
+<div class="@container relative flex h-full min-h-0 flex-1 flex-col">
   <!-- The timeline scrolls: keyboard users must be able to focus it (WCAG 2.1.1). -->
   <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
   <div
@@ -209,6 +218,10 @@
       {#each blocks as block (block.key)}
         {#if block.kind === 'work'}
           <WorkBlock {conversation} runId={block.runId} items={block.items} answerReasoning={block.answerReasoning} />
+        {:else if block.item.kind === 'user'}
+          <div data-turn={block.key} class="scroll-mt-8">
+            <TimelineEntry item={block.item} {conversation} answer={block.answer} />
+          </div>
         {:else}
           <TimelineEntry item={block.item} {conversation} answer={block.answer} />
         {/if}
@@ -232,6 +245,8 @@
       {/if}
     </div>
   </div>
+
+  <MessageRail {marks} scroller={scrollEl} />
 
   {#if !nearBottom}
     <div class="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">

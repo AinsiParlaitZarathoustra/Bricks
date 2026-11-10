@@ -153,12 +153,11 @@ impl ProviderRegistry {
     }
 }
 
-/// Where the API key comes from. Never printed.
+/// Where a former file put the key. Never printed.
 #[derive(Clone)]
-pub(crate) enum KeySource {
+pub(crate) enum LegacyKey {
     Inline(Secret),
     Env(String),
-    None,
 }
 
 /// A model with every inheritance and override applied.
@@ -178,7 +177,9 @@ pub struct ResolvedModel {
     pub count_url: Option<Url>,
     pub auth: AuthMode,
     pub auth_header: String,
-    pub(crate) key_source: KeySource,
+    /// A key a former file still names (inline, or a variable): read last,
+    /// until the file is moved to the secure storage.
+    pub(crate) legacy_key: Option<LegacyKey>,
     /// Required protocol headers, overridden by provider then model headers.
     pub(crate) headers: BTreeMap<String, Secret>,
     pub compat: ResolvedCompat,
@@ -260,12 +261,6 @@ impl ResolvedModel {
             })
             .unwrap_or_else(|| DEFAULT_API_KEY_HEADER.to_string());
 
-        let key_source = match (&provider.api_key, &provider.api_key_env) {
-            (Some(k), _) => KeySource::Inline(k.clone()),
-            (None, Some(env)) => KeySource::Env(env.clone()),
-            (None, None) => KeySource::None,
-        };
-
         // Required headers < provider headers < model headers (by name).
         let mut headers: BTreeMap<String, Secret> = protocol
             .required_headers()
@@ -288,7 +283,11 @@ impl ResolvedModel {
             count_url,
             auth,
             auth_header,
-            key_source,
+            legacy_key: match (&provider.legacy_api_key, &provider.legacy_api_key_env) {
+                (Some(k), _) if !k.is_blank() => Some(LegacyKey::Inline(k.clone())),
+                (_, Some(var)) => Some(LegacyKey::Env(var.clone())),
+                _ => None,
+            },
             headers,
             compat: Compat::resolve(&provider.compat, &model.compat),
             limits: model.limits,
@@ -322,20 +321,13 @@ impl ResolvedModel {
         self.declared.effective(self.protocol)
     }
 
-    /// Name of the environment variable holding the key, if one is referenced.
-    pub fn api_key_env(&self) -> Option<&str> {
-        match &self.key_source {
-            KeySource::Env(n) => Some(n),
-            _ => None,
-        }
-    }
-
     /// Start building a provider for this model.
     pub fn provider(&self) -> crate::provider::ProviderBuilder {
         crate::provider::ProviderBuilder::new(self.clone())
     }
 
-    /// Build a provider with defaults (secrets from the process environment).
+    /// Build a provider with defaults (the key from the system keychain, or
+    /// its override variable).
     pub fn build_provider(&self) -> bricks_types::Result<crate::provider::ConfiguredProvider> {
         self.provider().build()
     }
@@ -590,7 +582,6 @@ mod tests {
         assert!(m.pricing.is_some());
         assert!(m.declared.streaming);
         assert_eq!(m.limits.max_input_tokens, 96000);
-        assert_eq!(m.api_key_env(), Some("BRICKS_CUSTOM_API_KEY"));
     }
 
     fn counting_config(protocol: &str, table: &str) -> String {

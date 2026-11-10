@@ -5,6 +5,7 @@
 //! mid-run).
 
 use bricks_agent::control::{ModelCatalog, ModelChoice};
+use bricks_provider::keys::KeyStore;
 use bricks_provider::{Provider, ProviderRegistry};
 use parking_lot::RwLock;
 use std::sync::Arc;
@@ -19,6 +20,9 @@ struct Current {
 
 pub struct DesktopCatalog {
     current: RwLock<Current>,
+    /// Where the providers' keys are read (`None`: the system keychain of
+    /// this home).
+    keys: RwLock<Option<Arc<dyn KeyStore>>>,
 }
 
 impl DesktopCatalog {
@@ -28,7 +32,18 @@ impl DesktopCatalog {
                 registry: initial,
                 revision: 0,
             }),
+            keys: RwLock::new(None),
         })
+    }
+
+    /// Reads the keys from `keys` from now on.
+    pub fn use_keys(&self, keys: Arc<dyn KeyStore>) {
+        *self.keys.write() = Some(keys);
+    }
+
+    /// A key changed: sessions rebuild their provider at their next run.
+    pub fn touch(&self) {
+        self.current.write().revision += 1;
     }
 
     /// The registry in force now, or why there is none.
@@ -55,7 +70,18 @@ impl ModelCatalog for DesktopCatalog {
     /// A removed model is an error here: nothing substitutes it.
     fn build(&self, selection: &str, reasoning: Option<&str>) -> Result<Box<dyn Provider>, String> {
         let registry = self.registry()?;
-        <ProviderRegistry as ModelCatalog>::build(&registry, selection, reasoning)
+        let Some(keys) = self.keys.read().clone() else {
+            return <ProviderRegistry as ModelCatalog>::build(&registry, selection, reasoning);
+        };
+        let r = registry.resolve(selection).map_err(|e| e.to_string())?;
+        if let Some(p) = reasoning
+            && !r.reasoning.profiles.iter().any(|x| x.id == p)
+        {
+            return <ProviderRegistry as ModelCatalog>::build(&registry, selection, reasoning);
+        }
+        Ok(Box::new(
+            r.provider().keys(keys).build().map_err(|e| e.to_string())?,
+        ))
     }
 
     fn revision(&self) -> u64 {

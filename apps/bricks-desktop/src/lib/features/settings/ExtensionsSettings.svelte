@@ -7,13 +7,14 @@
 	import * as ipc from '$lib/ipc/client';
 	import type { ComputerUseStatus } from '$lib/ipc/bindings/ComputerUseStatus';
 	import type { ComputerUsePermission } from '$lib/ipc/bindings/ComputerUsePermission';
-	import type { PermissionState } from '$lib/ipc/bindings/PermissionState';
 	import { app } from '$lib/state/app.svelte';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import { Switch } from '$lib/components/ui/switch';
 	import MousePointerClick from '@lucide/svelte/icons/mouse-pointer-click';
 	import RefreshCw from '@lucide/svelte/icons/refresh-cw';
+	import CircleCheck from '@lucide/svelte/icons/circle-check';
+	import CircleX from '@lucide/svelte/icons/circle-x';
 	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import SettingsGroup from './SettingsGroup.svelte';
 	import { computerUseLabel, permissionLabel } from './extensions';
@@ -64,12 +65,6 @@
 		} catch (e) {
 			actionError = ipc.errorMessage(e);
 		}
-	}
-
-	function variant(state: PermissionState) {
-		if (state === 'granted') return 'secondary';
-		if (state === 'missing') return 'destructive';
-		return 'outline';
 	}
 
 	onMount(() => {
@@ -135,11 +130,36 @@
 
 	{#if available && status}
 		<SettingsGroup title={t('settings.computerUsePermissions')}>
+			{#snippet action()}
+				<Button
+					size="icon-xs"
+					variant="ghost"
+					class="text-muted-foreground hover:text-foreground"
+					disabled={checking}
+					aria-label={t('settings.checkAgain')}
+					title={t('settings.checkAgain')}
+					onclick={() => void refresh()}
+				>
+					<RefreshCw class={['size-3.5', checking && 'animate-spin']} aria-hidden="true" />
+				</Button>
+			{/snippet}
 			{#each PERMISSIONS as permission (permission.id)}
 				{@const state = status[permission.key]}
 				<div class="flex items-center gap-3 p-3" data-testid="permission-{permission.id}">
 					<span class="flex-1 text-ui text-foreground">{permission.label}</span>
-					<Badge variant={variant(state)}>{permissionLabel(state)}</Badge>
+					<span
+						class={[
+							'inline-flex items-center gap-1.5 text-ui',
+							state === 'granted' ? 'text-success' : state === 'missing' ? 'text-destructive' : 'text-muted-foreground'
+						]}
+					>
+						{#if state === 'granted'}
+							<CircleCheck class="size-4" aria-hidden="true" />
+						{:else if state === 'missing'}
+							<CircleX class="size-4" aria-hidden="true" />
+						{/if}
+						{permissionLabel(state)}
+					</span>
 					{#if state === 'missing'}
 						<Button size="sm" variant="secondary" onclick={() => void request(permission.id)}>
 							<ExternalLink class="size-3.5" aria-hidden="true" />
@@ -148,12 +168,6 @@
 					{/if}
 				</div>
 			{/each}
-			<div class="flex justify-end p-3">
-				<Button size="sm" variant="ghost" disabled={checking} onclick={() => void refresh()}>
-					<RefreshCw class={['size-3.5', checking && 'animate-spin']} aria-hidden="true" />
-					{t('settings.checkAgain')}
-				</Button>
-			</div>
 		</SettingsGroup>
 	{/if}
 	{#if actionError}

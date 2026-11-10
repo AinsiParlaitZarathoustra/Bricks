@@ -523,7 +523,9 @@ max_output_tokens = 8000
         .unwrap();
         let registry = ProviderRegistry::load(Some(&providers)).expect("providers file");
         let origin = registry.origin().to_string();
-        let state = AppState::assemble(fx.home.clone(), Ok(Arc::new(registry)));
+        let keys = Arc::new(bricks_provider::keys::MemoryKeys::default());
+        bricks_provider::keys::KeyStore::set(keys.as_ref(), "p", SECRET).unwrap();
+        let state = AppState::assemble(fx.home.clone(), Ok(Arc::new(registry))).with_keys(keys);
         let project = state.projects.add(fx.wd.to_str().unwrap()).unwrap().id;
         let opened = state
             .open_session(OpenSessionRequest {

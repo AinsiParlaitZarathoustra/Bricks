@@ -56,7 +56,6 @@
 	const current = $derived(app.prefs.theme);
 	/** The mode whose colours are being edited: the one on screen (system resolves to light or dark). */
 	const mode = $derived<ResolvedMode>(theme.resolved);
-	const modeName = $derived(mode === 'dark' ? t('settings.modeDark') : t('settings.modeLight'));
 
 	/** Applies the mode at once and saves it with the other preferences. */
 	function choose(next: ThemeMode) {
@@ -99,7 +98,7 @@
 		</fieldset>
 	</SettingsGroup>
 
-	<SettingsGroup title={t('settings.colorsMode', { modeName })}>
+	<SettingsGroup title={t('settings.colors')}>
 		{#each COLOR_ROLES as role (role)}
 			<ColorChoice
 				label={COLOR_ROLE_LABELS[role]}

@@ -36,12 +36,12 @@
 
 <Collapsible.Root
 	bind:open
-	class={cn('rounded-lg border border-border bg-card text-card-foreground', className)}
+	class={cn('rounded-2xl border border-border-subtle bg-card text-card-foreground shadow-float', className)}
 >
 	<div class="flex items-center gap-1 pr-1">
 		<svelte:element this={headingTag} class="min-w-0 flex-1 text-ui font-medium">
 			<Collapsible.Trigger
-				class="group flex w-full min-w-0 items-center gap-2 rounded-lg px-3 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+				class="group flex w-full min-w-0 items-center gap-2 rounded-2xl px-3.5 py-2.5 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
 			>
 				<ChevronDownIcon
 					class="size-4 shrink-0 text-muted-foreground transition-transform duration-150 group-data-[state=open]:rotate-180"
@@ -61,9 +61,9 @@
 	</div>
 	<Collapsible.Content>
 		{#if description}
-			<p class="px-3 pb-1 text-xs text-pretty text-muted-foreground">{description}</p>
+			<p class="px-3.5 pb-1 text-xs text-pretty text-muted-foreground">{description}</p>
 		{/if}
-		<div class="border-t border-border px-3 py-2">
+		<div class="border-t border-border-subtle px-3.5 py-2.5">
 			{@render children()}
 		</div>
 	</Collapsible.Content>
