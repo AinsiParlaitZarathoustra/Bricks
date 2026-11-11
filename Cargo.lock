@@ -902,6 +902,7 @@ dependencies = [
  "glob",
  "grep",
  "ignore",
+ "kodestats",
  "libc",
  "nix 0.29.0",
  "notify",
@@ -918,7 +919,6 @@ dependencies = [
  "similar",
  "tantivy",
  "tempfile",
- "tokei",
  "tokio",
  "tracing",
  "tree-sitter",
@@ -3705,6 +3705,34 @@ checksum = "0fbe853b403ae61a04233030ae8a79d94975281ed9770a1f9e246732b534b28d"
 dependencies = [
  "bitflags 2.13.2",
  "serde",
+]
+
+[[package]]
+name = "kodestats"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9f51361ab47f043f892cb4c2be952c91acf3be0d9b687e043e1959b437847da5"
+dependencies = [
+ "aho-corasick",
+ "arbitrary",
+ "clap-cargo",
+ "dashmap",
+ "encoding_rs_io",
+ "etcetera",
+ "grep-searcher",
+ "ignore",
+ "json5",
+ "log",
+ "once_cell",
+ "parking_lot 0.12.5",
+ "rayon",
+ "regex",
+ "serde",
+ "serde_json",
+ "table_formatter",
+ "tera",
+ "term_size",
+ "toml 0.9.12+spec-1.1.0",
 ]
 
 [[package]]
@@ -6883,35 +6911,6 @@ name = "tinyvec"
 version = "1.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
-
-[[package]]
-name = "tokei"
-version = "15.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cee2d8d958bbbe166867f95c85eb95ce0c67cdf6377ef8cd3186ce843c3f752c"
-dependencies = [
- "aho-corasick",
- "arbitrary",
- "clap-cargo",
- "crossbeam-channel",
- "dashmap",
- "encoding_rs_io",
- "etcetera",
- "grep-searcher",
- "ignore",
- "json5",
- "log",
- "once_cell",
- "parking_lot 0.12.5",
- "rayon",
- "regex",
- "serde",
- "serde_json",
- "table_formatter",
- "tera",
- "term_size",
- "toml 0.9.12+spec-1.1.0",
-]
 
 [[package]]
 name = "tokio"

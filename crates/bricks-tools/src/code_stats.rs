@@ -1,5 +1,5 @@
 //! CodeStats: the code, comment and blank lines of a file or a tree, counted
-//! in process with Tokei.
+//! in process with KodeStats.
 //!
 //! The walk is the one Grep and the semantic engine share (`.gitignore` and
 //! `.ignore` rules, also outside a git checkout and nested), plus
@@ -30,11 +30,11 @@ use std::fs::{File, Metadata};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
-use tokei::{Config, LanguageType};
+use kodestats::{Config, LanguageType};
 
-/// The ignore file read for this tool only, as Tokei does.
+/// The ignore file read for this tool only, as KodeStats does.
 const TOKEIGNORE: &str = ".tokeignore";
-/// Bytes a shebang is looked for in (Tokei's own limit).
+/// Bytes a shebang is looked for in (KodeStats's own limit).
 const SHEBANG_BYTES: usize = 128;
 /// Paths quoted per warning cause.
 const EXAMPLES: usize = 3;
@@ -92,6 +92,9 @@ struct Input {
     top_n: Option<i64>,
     #[serde(default)]
     exclude: Vec<String>,
+    min_lines: Option<i64>,
+    max_lines: Option<i64>,
+    format: Option<String>,
 }
 
 /// A validated request: what identifies an analysis.
@@ -105,6 +108,12 @@ struct Params {
     top_n: usize,
     /// Sorted and deduplicated.
     exclude: Vec<String>,
+    /// Files whose lines (code, comments and blanks) are outside these
+    /// bounds are left out of the analysis, as KodeStats does.
+    min_lines: Option<u64>,
+    max_lines: Option<u64>,
+    /// The answer as a Markdown table instead of JSON.
+    markdown: bool,
 }
 
 /// Session, the directory paths are shown from, and the request.
@@ -174,11 +183,15 @@ impl Tool for CodeStatsTool {
 
     fn description(&self) -> &str {
         "Code statistics: count the lines of code, comments and blank lines of a file or a \
-         directory tree, in total, per language or per file (Tokei, in process). Follows \
+         directory tree, in total, per language or per file (KodeStats, in process). Follows \
          .gitignore, .ignore and .tokeignore, counts hidden files, never follows directory \
-         links; a file mixing languages counts for its primary language. `top_n` only limits \
-         the rows shown: totals always cover the whole analysis. Check `partial` (and \
-         `warnings`) before presenting totals as complete."
+         links, and leaves out what .gitattributes marks linguist-generated, -vendored or \
+         -documentation; a file mixing languages counts for its primary language. Each row \
+         gives its share of the code (`percent`). `detail: \"files\"` with `top_n` gives the \
+         largest files. `min_lines`/`max_lines` leave out files outside those bounds. \
+         `format: \"markdown\"` answers with a table. `top_n` only limits the rows shown: totals \
+         always cover the whole analysis. Check `partial` (and `warnings`) before presenting \
+         totals as complete."
     }
 
     fn permission_level(&self) -> PermissionLevel {
@@ -195,9 +208,12 @@ impl Tool for CodeStatsTool {
             "properties": {
                 "path": { "type": "string", "description": "File or directory, relative to the working directory (default: the working directory)." },
                 "detail": { "type": "string", "enum": ["summary", "languages", "files"], "description": "summary: totals only; languages (default): one row per language; files: one row per file." },
-                "language": { "type": "string", "description": "Count only the files of this primary language (Tokei name: `Rust`, `TypeScript`, `Jupyter Notebooks`)." },
+                "language": { "type": "string", "description": "Count only the files of this primary language (KodeStats name: `Rust`, `TypeScript`, `Jupyter Notebooks`)." },
                 "top_n": { "type": "integer", "minimum": 1, "maximum": 100, "default": 20, "description": "Rows shown, sorted by code lines. Does not limit the analysis." },
-                "exclude": { "type": "array", "items": { "type": "string" }, "description": "Gitignore-style globs to leave out, relative to the analysed directory. Exclusions only: no `!`." }
+                "exclude": { "type": "array", "items": { "type": "string" }, "description": "Gitignore-style globs to leave out, relative to the analysed directory. Exclusions only: no `!`." },
+                "min_lines": { "type": "integer", "minimum": 0, "description": "Leave out files with fewer lines (code, comments and blanks)." },
+                "max_lines": { "type": "integer", "minimum": 0, "description": "Leave out files with more lines (code, comments and blanks)." },
+                "format": { "type": "string", "enum": ["json", "markdown"], "default": "json", "description": "json: structured answer; markdown: the same as a table." }
             }
         })
     }
@@ -211,6 +227,7 @@ impl Tool for CodeStatsTool {
             Ok(p) => p,
             Err(msg) => return crate::tool_feedback::invalid_input(self, &raw, msg),
         };
+        let markdown_wanted = params.markdown;
         let run_cancel = ctx.extensions.get::<RunCancel>().map(|c| c.0.clone());
         if run_cancel.as_ref().is_some_and(|c| c.is_cancelled()) {
             return cancelled();
@@ -257,6 +274,9 @@ impl Tool for CodeStatsTool {
             None => Some(fut.await),
         };
         match outcome.as_deref() {
+            Some(Outcome::Done(v)) if markdown_wanted => {
+                ToolResult::success(markdown(v)).with_metadata(v.clone())
+            }
             Some(Outcome::Done(v)) => ToolResult::success(v.to_string()).with_metadata(v.clone()),
             Some(Outcome::Failed(e)) => ToolResult::error(format!("CodeStats failed: {e}")),
             Some(Outcome::Cancelled) | None => cancelled(),
@@ -309,6 +329,23 @@ fn validate(input: Input, working_dir: &Path) -> std::result::Result<Params, Str
         None => 20,
         Some(n) if (1..=100).contains(&n) => n as usize,
         Some(n) => return Err(format!("`top_n` must be between 1 and 100, got {n}")),
+    };
+    let bound = |name: &str, v: Option<i64>| match v {
+        None => Ok(None),
+        Some(n) if n >= 0 => Ok(Some(n as u64)),
+        Some(n) => Err(format!("`{name}` must be 0 or more, got {n}")),
+    };
+    let min_lines = bound("min_lines", input.min_lines)?;
+    let max_lines = bound("max_lines", input.max_lines)?;
+    if let (Some(min), Some(max)) = (min_lines, max_lines)
+        && min > max
+    {
+        return Err(format!("`min_lines` ({min}) is more than `max_lines` ({max})"));
+    }
+    let markdown = match input.format.as_deref().map(str::trim) {
+        None | Some("") | Some("json") => false,
+        Some("markdown") => true,
+        Some(other) => return Err(format!("`format` is json or markdown, not `{other}`")),
     };
     let language = match input.language.as_deref().map(str::trim) {
         None | Some("") => None,
@@ -363,10 +400,13 @@ fn validate(input: Input, working_dir: &Path) -> std::result::Result<Params, Str
         language,
         top_n,
         exclude,
+        min_lines,
+        max_lines,
+        markdown,
     })
 }
 
-/// A Tokei language from its display name or its identifier, any case.
+/// A KodeStats language from its display name or its identifier, any case.
 fn language_named(name: &str) -> std::result::Result<LanguageType, String> {
     let found = LanguageType::list().iter().map(|(l, _)| *l).find(|l| {
         l.name().eq_ignore_ascii_case(name) || format!("{l:?}").eq_ignore_ascii_case(name)
@@ -380,7 +420,7 @@ fn language_named(name: &str) -> std::result::Result<LanguageType, String> {
             .take(5)
             .collect();
         if close.is_empty() {
-            format!("unknown language `{name}` (Tokei names: `Rust`, `TypeScript`, `Python`…)")
+            format!("unknown language `{name}` (KodeStats names: `Rust`, `TypeScript`, `Python`…)")
         } else {
             format!(
                 "unknown language `{name}`; did you mean {}?",
@@ -566,7 +606,7 @@ fn analyse(
     let root = analysis_root(&params.target, params.is_file).to_path_buf();
     let mut warnings = Warnings::default();
     // An empty private directory: language detection by name looks at a
-    // path that does not exist, so Tokei never opens anything itself.
+    // path that does not exist, so KodeStats never opens anything itself.
     let scratch = match tempfile::Builder::new()
         .prefix("bricks-codestats")
         .tempdir()
@@ -576,6 +616,11 @@ fn analyse(
     };
     let absent = scratch.path().join("absent");
 
+    // What .gitattributes marks generated, vendored or documentation is
+    // left out, as KodeStats does, with git's rules: each file's patterns
+    // are relative to its own folder, a deeper file wins over its parents,
+    // and the last matching line wins.
+    let attributes = GitAttributes::read(&root, &mut warnings);
     let filters = WalkFilters {
         exclude: params.exclude.clone(),
         hidden: true,
@@ -621,6 +666,9 @@ fn analyse(
         }
         requested_seen = true;
         let path = entry.path();
+        if attributes.excludes(path) {
+            continue;
+        }
         let shown_path = shown(path, base);
         let detect = match detect_by_name(&absent, path) {
             Some(d) => d,
@@ -709,8 +757,9 @@ fn analyse(
     let mut languages: BTreeMap<LanguageType, Tally> = BTreeMap::new();
     let mut files: Vec<(String, LanguageType, Tally)> = Vec::new();
     let mut generated: (u64, Vec<String>) = (0, Vec::new());
+    let mut out_of_bounds: u64 = 0;
     for (c, o) in candidates.iter().zip(outcomes) {
-        let (lang, code, comments, blanks) = match o {
+        let (lang, code, comments, blanks, changed) = match o {
             FileOutcome::Cancelled => return Outcome::Cancelled,
             FileOutcome::NotCode => {
                 if params.is_file {
@@ -729,12 +778,19 @@ fn analyse(
                 blanks,
                 changed,
             } => {
-                if changed {
-                    warnings.add("changed_during_read", Some(&c.shown));
-                }
-                (lang, code, comments, blanks)
+                (lang, code, comments, blanks, changed)
             }
         };
+        let lines = code.saturating_add(comments).saturating_add(blanks);
+        if params.min_lines.is_some_and(|min| lines < min)
+            || params.max_lines.is_some_and(|max| lines > max)
+        {
+            out_of_bounds += 1;
+            continue;
+        }
+        if changed {
+            warnings.add("changed_during_read", Some(&c.shown));
+        }
         let ok = totals.add(code, comments, blanks)
             & languages
                 .entry(lang)
@@ -790,8 +846,25 @@ fn analyse(
         }
     };
     let omitted = rows - results.len();
+    // Each row's share of all the code counted, to one decimal.
+    let all_code = totals.code;
+    let results: Vec<Value> = results
+        .into_iter()
+        .map(|mut row| {
+            let code = row.get("code").and_then(Value::as_u64).unwrap_or(0);
+            let percent = if all_code == 0 {
+                0.0
+            } else {
+                (code as f64 * 1000.0 / all_code as f64).round() / 10.0
+            };
+            if let Some(m) = row.as_object_mut() {
+                m.insert("percent".into(), percent.into());
+            }
+            row
+        })
+        .collect();
     let totals = totals.json(&mut warnings);
-    Outcome::Done(serde_json::json!({
+    let mut out = serde_json::json!({
         "path": shown(&params.target, base),
         "detail": params.detail.as_str(),
         "language": params.language.map(|l| l.name()),
@@ -801,7 +874,166 @@ fn analyse(
         "omitted": omitted,
         "partial": warnings.partial(),
         "warnings": warnings.json(),
-    }))
+    });
+    if let Some(m) = out.as_object_mut() {
+        if params.min_lines.is_some() || params.max_lines.is_some() {
+            m.insert("min_lines".into(), params.min_lines.into());
+            m.insert("max_lines".into(), params.max_lines.into());
+            m.insert("outside_line_bounds".into(), out_of_bounds.into());
+        }
+        if !attributes.patterns.is_empty() {
+            m.insert("gitattributes_excluded".into(), attributes.patterns.clone().into());
+        }
+    }
+    Outcome::Done(out)
+}
+
+/// What the `.gitattributes` files of the analysed folder and of its
+/// parents (up to the folder holding `.git`) mark `linguist-generated`,
+/// `linguist-vendored` or `linguist-documentation`, read with git's rules.
+struct GitAttributes {
+    /// Outermost first: a deeper file decides over its parents.
+    matchers: Vec<ignore::gitignore::Gitignore>,
+    /// The patterns that leave files out, as written.
+    patterns: Vec<String>,
+}
+
+impl GitAttributes {
+    fn read(root: &Path, warnings: &mut Warnings) -> Self {
+        let mut dirs = Vec::new();
+        let mut dir = Some(root);
+        while let Some(d) = dir {
+            dirs.push(d.to_path_buf());
+            if d.join(".git").exists() {
+                break;
+            }
+            dir = d.parent();
+        }
+        dirs.reverse();
+        let mut matchers = Vec::new();
+        let mut patterns = Vec::new();
+        for d in dirs {
+            let Ok(text) = std::fs::read_to_string(d.join(".gitattributes")) else {
+                continue;
+            };
+            // Patterns are relative to this folder; `!` re-includes, and the
+            // last matching line wins, as in a .gitignore.
+            let mut builder = ignore::gitignore::GitignoreBuilder::new(&d);
+            let mut any = false;
+            for line in text.lines().map(str::trim) {
+                if line.is_empty() || line.starts_with('#') {
+                    continue;
+                }
+                let mut parts = line.split_whitespace();
+                let Some(pattern) = parts.next() else { continue };
+                let mut decided: Option<bool> = None;
+                for attr in parts {
+                    let (name, value) = match attr.split_once('=') {
+                        Some((k, v)) => (k, Some(v)),
+                        None => (attr, None),
+                    };
+                    let (unset, key) = match name.strip_prefix('-') {
+                        Some(rest) => (true, rest),
+                        None => (false, name),
+                    };
+                    if matches!(key, "linguist-generated" | "linguist-vendored" | "linguist-documentation") {
+                        decided = Some(!unset && !matches!(value, Some("false" | "0")));
+                    }
+                }
+                let Some(excluded) = decided else { continue };
+                let rule = if excluded { pattern.to_string() } else { format!("!{pattern}") };
+                if builder.add_line(None, &rule).is_err() {
+                    warnings.add("gitattributes_pattern", Some(pattern));
+                    continue;
+                }
+                any = true;
+                if excluded && !patterns.iter().any(|p| p == pattern) {
+                    patterns.push(pattern.to_string());
+                }
+            }
+            if any {
+                match builder.build() {
+                    Ok(m) => matchers.push(m),
+                    Err(e) => warnings.add("gitattributes_pattern", Some(&e.to_string())),
+                }
+            }
+        }
+        Self { matchers, patterns }
+    }
+
+    /// Whether `path` (a file) is left out: the deepest file that says
+    /// something about it decides.
+    fn excludes(&self, path: &Path) -> bool {
+        for m in self.matchers.iter().rev() {
+            match m.matched_path_or_any_parents(path, false) {
+                ignore::Match::Ignore(_) => return true,
+                ignore::Match::Whitelist(_) => return false,
+                ignore::Match::None => {}
+            }
+        }
+        false
+    }
+}
+
+/// The answer as Markdown: the totals, then a table of the rows shown.
+fn markdown(out: &Value) -> String {
+    let n = |v: &Value, k: &str| v.get(k).and_then(Value::as_u64).unwrap_or(0);
+    let totals = &out["totals"];
+    let mut text = format!(
+        "**{}** — {} files, {} lines: {} code, {} comments, {} blanks.\n",
+        out["path"].as_str().unwrap_or("."),
+        n(totals, "files"),
+        n(totals, "lines"),
+        n(totals, "code"),
+        n(totals, "comments"),
+        n(totals, "blanks"),
+    );
+    let rows = out["results"].as_array().cloned().unwrap_or_default();
+    if !rows.is_empty() {
+        let by_file = out["detail"] == "files";
+        text.push('\n');
+        text.push_str(if by_file {
+            "| File | Language | Code | Comments | Blanks | Lines | % |\n|---|---|---:|---:|---:|---:|---:|\n"
+        } else {
+            "| Language | Files | Code | Comments | Blanks | Lines | % |\n|---|---:|---:|---:|---:|---:|---:|\n"
+        });
+        for r in &rows {
+            let percent = r.get("percent").and_then(Value::as_f64).unwrap_or(0.0);
+            let cell = |v: &Value| v.as_str().unwrap_or("").replace('|', "\\|");
+            let first = if by_file {
+                format!("{} | {}", cell(&r["path"]), cell(&r["language"]))
+            } else {
+                format!("{} | {}", cell(&r["language"]), n(r, "files"))
+            };
+            text.push_str(&format!(
+                "| {first} | {} | {} | {} | {} | {percent:.1} |\n",
+                n(r, "code"),
+                n(r, "comments"),
+                n(r, "blanks"),
+                n(r, "lines"),
+            ));
+        }
+    }
+    if n(out, "omitted") > 0 {
+        text.push_str(&format!("\n{} more rows not shown.\n", n(out, "omitted")));
+    }
+    if let Some(patterns) = out["gitattributes_excluded"].as_array() {
+        let list: Vec<&str> = patterns.iter().filter_map(Value::as_str).collect();
+        text.push_str(&format!("\nLeft out by .gitattributes: {}.\n", list.join(", ")));
+    }
+    if out.get("outside_line_bounds").is_some() {
+        text.push_str(&format!("\n{} files outside the line bounds left out.\n", n(out, "outside_line_bounds")));
+    }
+    if out["partial"] == true {
+        let causes: Vec<String> = out["warnings"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|w| format!("{} ({})", w["cause"].as_str().unwrap_or("?"), n(w, "count")))
+            .collect();
+        text.push_str(&format!("\n**Partial:** {}.\n", causes.join(", ")));
+    }
+    text
 }
 
 /// The first usually generated directory a counted path goes through.
@@ -821,7 +1053,7 @@ fn generated_dir(shown: &str) -> Option<String> {
 /// extension is unknown (the file is not counted).
 fn detect_by_name(absent: &Path, path: &Path) -> Option<Detect> {
     let name = path.file_name()?;
-    // `absent` never exists: when the name says nothing, Tokei's shebang
+    // `absent` never exists: when the name says nothing, KodeStats's shebang
     // probe on it finds no file.
     if let Some(l) = LanguageType::from_path(absent.join(name), &Config::default()) {
         return Some(Detect::Lang(l));
@@ -880,14 +1112,14 @@ fn count_file(
     }
     let stats = lang.parse_from_slice(&text, config);
     let (code, comments, blanks) = if lang == LanguageType::Jupyter {
-        // Tokei reads an invalid notebook as an empty one: say so instead.
+        // KodeStats reads an invalid notebook as an empty one: say so instead.
         let Ok(notebook) = serde_json::from_slice::<Notebook>(&text) else {
             return FileOutcome::Skipped("invalid_notebook");
         };
         // The root counters already add up every cell, and the entries of
         // the cell languages repeat them: only the blocks nested inside the
         // cells (code in a Markdown cell) come on top, taken from the cell
-        // languages' entries alone (Tokei also copies them to the top).
+        // languages' entries alone (KodeStats also copies them to the top).
         let mut sum = (stats.code, stats.comments, stats.blanks);
         let mut cell_languages = vec![LanguageType::Markdown, notebook.language()];
         cell_languages.dedup();
@@ -913,7 +1145,7 @@ fn count_file(
     }
 }
 
-/// The shape Tokei requires of a notebook (its own `parse_jupyter`).
+/// The shape KodeStats requires of a notebook (its own `parse_jupyter`).
 #[derive(Deserialize)]
 #[allow(dead_code)]
 struct Notebook {
@@ -942,7 +1174,7 @@ struct NotebookMetadata {
 }
 
 impl Notebook {
-    /// The language of the code cells, chosen as Tokei chooses it.
+    /// The language of the code cells, chosen as KodeStats chooses it.
     fn language(&self) -> LanguageType {
         self.metadata
             .kernelspec
@@ -961,7 +1193,7 @@ impl Notebook {
 }
 
 /// The language a shebang names, read from the validated descriptor: its
-/// first bytes are copied to a private file for Tokei's probe.
+/// first bytes are copied to a private file for KodeStats's probe.
 fn shebang_language(file: &File, scratch: &Path) -> Option<LanguageType> {
     let mut head = [0u8; SHEBANG_BYTES];
     let len = read_head(file, &mut head)?;
