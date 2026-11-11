@@ -6,6 +6,7 @@ pub mod changes;
 pub mod computer_use;
 pub mod files;
 pub mod inspect;
+pub mod mcp;
 pub mod memory;
 pub mod project_file;
 pub mod projects;

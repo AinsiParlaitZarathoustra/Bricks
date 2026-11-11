@@ -754,6 +754,7 @@
       // The right panel's visibility is owned by the shell: see the report.
       app.rightView = 'changes'
     },
+    openSettings: (section) => ui.openSettings(section),
     attach: attachByPath,
     quit: requestQuit,
   }

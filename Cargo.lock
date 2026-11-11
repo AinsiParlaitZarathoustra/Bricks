@@ -600,6 +600,7 @@ dependencies = [
  "bricks-agent",
  "bricks-config",
  "bricks-embeddings",
+ "bricks-mcp",
  "bricks-memory",
  "bricks-provider",
  "bricks-tools",
@@ -645,6 +646,7 @@ version = "1.0.0-alpha.1"
 dependencies = [
  "bricks-agent",
  "bricks-embeddings",
+ "bricks-mcp",
  "bricks-memory",
  "bricks-provider",
  "bricks-tools",
@@ -654,6 +656,8 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "toml 0.8.23",
+ "tracing",
 ]
 
 [[package]]

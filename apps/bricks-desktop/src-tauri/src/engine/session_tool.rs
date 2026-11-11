@@ -120,14 +120,14 @@ impl AppState {
         if text.chars().count() > MAIL_CHARS {
             return Err(invalid(format!("the message is longer than {MAIL_CHARS} characters")));
         }
-        if self.open_entry(from).is_none() && load_meta(self.sessions_dir(), from).await.is_none() {
-            return Err(not_found(format!("no conversation {from}")));
-        }
         if self.mail.is_replying(from) {
             return Err(rejected(
                 "this conversation is answering a message: its final answer is the reply, \
                  and it cannot write to another conversation during this turn",
             ));
+        }
+        if self.open_entry(from).is_none() && load_meta(self.sessions_dir(), from).await.is_none() {
+            return Err(not_found(format!("no conversation {from}")));
         }
         let entry = self.entry_for_mail(to).await?;
         let from_title = match self.open_entry(from) {

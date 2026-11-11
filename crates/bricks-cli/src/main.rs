@@ -5,6 +5,7 @@
 mod args;
 mod exit;
 mod headless;
+mod mcp;
 mod sessions;
 mod setup;
 
@@ -40,6 +41,7 @@ fn main() {
     let code = runtime.block_on(async move {
         match command {
             args::Cmd::Run(run) => headless::run(&global, &launch, run).await,
+            args::Cmd::Mcp { action } => mcp::run(&global, &launch, action).await,
             args::Cmd::Sessions { json, all } => {
                 sessions::run(&global, &launch, json, all).await
             }

@@ -78,6 +78,8 @@ pub struct McpManager {
     errors: parking_lot::Mutex<HashMap<String, String>>,
     /// Closed for good ([`Self::close`]): no connection is re-opened.
     closed: std::sync::atomic::AtomicBool,
+    /// Connections re-opened: a new connection brings its own tool list.
+    reconnects: std::sync::atomic::AtomicU64,
 }
 
 impl McpManager {
@@ -105,6 +107,7 @@ impl McpManager {
             clients: tokio::sync::RwLock::new(clients),
             errors: parking_lot::Mutex::new(errors),
             closed: Default::default(),
+            reconnects: Default::default(),
         }
     }
 
@@ -120,6 +123,7 @@ impl McpManager {
             ),
             errors: parking_lot::Mutex::new(HashMap::new()),
             closed: Default::default(),
+            reconnects: Default::default(),
         }
     }
 
@@ -133,6 +137,33 @@ impl McpManager {
             .into_iter()
             .flat_map(|n| clients[n].tools().into_iter().map(move |t| (n.clone(), t)))
             .collect()
+    }
+
+    /// Re-reads the tool list of every server that announced a change
+    /// (`notifications/tools/list_changed`). Returns whether any list was
+    /// re-read; a server that fails to answer keeps its former list.
+    pub async fn refresh_changed(&self) -> bool {
+        let clients: Vec<Arc<McpClient>> = self.clients.read().await.values().cloned().collect();
+        let mut refreshed = false;
+        for client in clients {
+            if client.tools_changed() && client.refresh_tools().await.is_ok() {
+                refreshed = true;
+            }
+        }
+        refreshed
+    }
+
+    /// Changes whenever any server's tool list may have changed (re-read,
+    /// or a connection re-opened): consumers compare it with the value they
+    /// last saw, whoever did the re-reading.
+    pub async fn tools_generation(&self) -> u64 {
+        let clients = self.clients.read().await;
+        let read: u64 = clients.values().map(|c| c.tools_generation()).fold(0, u64::wrapping_add);
+        read.wrapping_add(
+            self.reconnects
+                .load(std::sync::atomic::Ordering::SeqCst)
+                .wrapping_mul(1 << 32),
+        )
     }
 
     pub async fn tool_definitions(&self) -> Vec<ToolDefinition> {
@@ -188,6 +219,8 @@ impl McpManager {
                     self.errors.lock().insert(server.to_string(), e.to_string());
                 })?);
                 self.errors.lock().remove(server);
+                self.reconnects
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 self.clients
                     .write()
                     .await

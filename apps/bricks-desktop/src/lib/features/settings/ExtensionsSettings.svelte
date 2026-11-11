@@ -17,6 +17,7 @@
 	import CircleX from '@lucide/svelte/icons/circle-x';
 	import ExternalLink from '@lucide/svelte/icons/external-link';
 	import SettingsGroup from './SettingsGroup.svelte';
+	import McpServers from './McpServers.svelte';
 	import { computerUseLabel, permissionLabel } from './extensions';
 
 	let status = $state<ComputerUseStatus | null>(null);
@@ -91,6 +92,8 @@
 </script>
 
 <div class="flex flex-col gap-6">
+	<McpServers />
+
 	<SettingsGroup title={t('common.mcpServers')}>
 		<div class="flex items-center gap-3 p-3">
 			<MousePointerClick class="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />

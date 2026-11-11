@@ -19,6 +19,7 @@
 	import ApplicationSettings from './ApplicationSettings.svelte';
 	import MemorySettings from './MemorySettings.svelte';
 	import ExtensionsSettings from './ExtensionsSettings.svelte';
+	import { ui } from '$lib/state/ui.svelte';
 
 	let { open = $bindable(false) }: { open?: boolean } = $props();
 
@@ -39,6 +40,14 @@
 	];
 
 	let section = $state<SectionId>('appearance');
+	// Opened on a section (`/mcp`: the extensions): taken once, then reset.
+	$effect(() => {
+		const wanted = ui.settingsSection;
+		if (open && wanted && SECTIONS.some((s) => s.id === wanted)) {
+			section = wanted as SectionId;
+			ui.settingsSection = null;
+		}
+	});
 	/** Wide windows put the section list on the left; narrow ones put it on top. Matches Tailwind `sm`. */
 	const wide = new MediaQuery('min-width: 40rem');
 </script>

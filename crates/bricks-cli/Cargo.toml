@@ -15,6 +15,7 @@ doc = false
 [dependencies]
 bricks-agent = { workspace = true }
 bricks-config = { workspace = true }
+bricks-mcp = { workspace = true }
 bricks-types = { workspace = true }
 bricks-provider = { workspace = true }
 bricks-tools = { workspace = true }

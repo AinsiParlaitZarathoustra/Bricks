@@ -1257,3 +1257,67 @@ pub struct RunCommand {
     #[serde(default)]
     pub job_id: Option<String>,
 }
+
+// ─── MCP servers ─────────────────────────────────────────────────────────────
+
+/// A server as the settings list it.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct McpServerItem {
+    pub name: String,
+    /// `user` (`~/.bricks/mcp.toml`) or `project` (the project's `bricks.toml`).
+    pub source: String,
+    /// `stdio` or `http`.
+    pub transport: String,
+    /// The command line, or the URL.
+    pub target: String,
+    pub enabled: bool,
+    /// A project's server: `pending`, `approved` or `denied`.
+    pub decision: Option<String>,
+    /// Connected by the conversations opened from now on.
+    pub active: bool,
+    /// Hidden by a server of the person's with the same name.
+    pub shadowed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct McpServersView {
+    /// The folder of the project whose servers are listed.
+    pub project: Option<String>,
+    pub servers: Vec<McpServerItem>,
+    /// Files that could not be read, servers that are not valid.
+    pub errors: Vec<String>,
+}
+
+/// A server to add: a command line (`stdio`) or a URL (`http`).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct McpServerInput {
+    pub name: String,
+    pub transport: String,
+    pub command: String,
+    pub url: String,
+    /// `NAME=VALUE` lines.
+    pub headers: Vec<String>,
+    pub env: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct McpTestResult {
+    pub ok: bool,
+    pub tools: Vec<String>,
+    /// The tools that have an interface (MCP Apps).
+    pub apps: Vec<String>,
+    pub error: Option<String>,
+}
+
+/// The interface of a tool: its `ui://` resource and the HTML it holds.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct McpAppView {
+    pub uri: String,
+    pub html: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+pub struct McpAppCallResult {
+    pub is_error: bool,
+    pub text: String,
+}

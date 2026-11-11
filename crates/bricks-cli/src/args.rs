@@ -55,6 +55,11 @@ pub struct Global {
 pub enum Cmd {
     /// Run one prompt (`--session <id>` continues a stored session).
     Run(RunArgs),
+    /// MCP servers: yours (~/.bricks/mcp.toml) and the project's (bricks.toml).
+    Mcp {
+        #[command(subcommand)]
+        action: McpCmd,
+    },
     /// List the stored sessions of the project (`--all`: every project).
     Sessions {
         /// One JSON object per line (same selection as the text listing).
@@ -126,4 +131,46 @@ impl From<PermissionsArg> for bricks_agent::permission::PermissionProfile {
             PermissionsArg::Execute => Self::Execute,
         }
     }
+}
+
+#[derive(Debug, Subcommand)]
+pub enum McpCmd {
+    /// Your servers and the project's, with their state.
+    List {
+        /// One JSON object per line.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Add a server: `bricks mcp add files -- npx -y @modelcontextprotocol/server-filesystem .`
+    /// or `bricks mcp add docs --url https://example.com/mcp`.
+    Add {
+        name: String,
+        /// Streamable HTTP endpoint (instead of a command).
+        #[arg(long)]
+        url: Option<String>,
+        /// HTTP header, `NAME=VALUE` (`${VAR}` is read from the environment).
+        #[arg(long, value_name = "NAME=VALUE")]
+        header: Vec<String>,
+        /// Environment variable of the command, `NAME=VALUE`.
+        #[arg(long, value_name = "NAME=VALUE")]
+        env: Vec<String>,
+        /// Working folder of the command.
+        #[arg(long, value_name = "DIR")]
+        cwd: Option<PathBuf>,
+        /// The command and its arguments, after `--`.
+        #[arg(last = true)]
+        command: Vec<String>,
+    },
+    /// Connect to a server and list its tools.
+    Test { name: String },
+    /// Remove one of your servers.
+    Remove { name: String },
+    /// Turn one of your servers on.
+    Enable { name: String },
+    /// Turn one of your servers off (kept in the file).
+    Disable { name: String },
+    /// Approve a server the project declares, as declared now.
+    Approve { name: String },
+    /// Refuse a server the project declares.
+    Deny { name: String },
 }

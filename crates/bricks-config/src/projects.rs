@@ -92,7 +92,14 @@ impl ProjectLoader for Projects {
             prompt_options: Some(options),
             long_term_memory,
             memory_space,
-            mcp_servers: Vec::new(),
+            // The person's servers, and the project's once approved.
+            mcp_servers: {
+                let selection = crate::mcp::select(&crate::paths::bricks_home(), Some(wd));
+                for error in &selection.errors {
+                    tracing::warn!("MCP configuration: {error}");
+                }
+                selection.active()
+            },
             agent_profile_sources: None,
         })
     }

@@ -337,6 +337,9 @@ pub async fn run(global: &Global, launch: &std::path::Path, args: RunArgs) -> i3
     if let Some(skills) = cfg.skills.as_mut() {
         skills.trust_project = args.trust_project_skills;
     }
+    if let Ok(project) = setup::workspace(global, launch) {
+        crate::mcp::notices(&project);
+    }
     let (ctl, mut events) =
         match Controller::open(cfg, setup::open_options(global, args.session.clone())).await {
             Ok(x) => x,

@@ -11,10 +11,13 @@ bricks-provider = { workspace = true }
 bricks-tools = { workspace = true }
 bricks-memory = { workspace = true, features = ["structured"] }
 bricks-embeddings = { workspace = true }
+bricks-mcp = { workspace = true }
 dirs = { workspace = true }
 parking_lot = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

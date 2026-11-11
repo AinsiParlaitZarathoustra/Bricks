@@ -34,6 +34,14 @@ class UiStore {
   picker = $state<ComposerPicker>(null)
   /** The settings dialog (opened from the left panel footer). */
   settingsOpen = $state(false)
+  /** The section the settings open on, taken (and reset) by the dialog. */
+  settingsSection = $state<string | null>(null)
+
+  /** Opens the settings, on `section` when given. */
+  openSettings(section?: string) {
+    this.settingsSection = section ?? null
+    this.settingsOpen = true
+  }
   /** The sub-agent whose read-only branch is shown in the centre (from its line in the thread). */
   agentId = $state<string | null>(null)
 

@@ -33,13 +33,43 @@
   const blocks = $derived(
     timelineBlocks(visible, conversation.items, conversation.runs, conversation.runningRunId),
   )
-  /** One grain per message sent, among the rendered ones. */
+  /** The place of each message sent in the whole conversation, and how many there are. */
+  const userOrder = $derived.by(() => {
+    const places = new Map<string, number>()
+    for (const item of conversation.items) if (item.kind === 'user') places.set(item.id, places.size + 1)
+    return places
+  })
+  /** The answer of each ended run: its last message with text, found in one pass from the end. */
+  const lastAnswers = $derived.by(() => {
+    const out = new Map<string, string>()
+    const items = conversation.items
+    for (let i = items.length - 1; i >= 0; i--) {
+      const item = items[i]
+      if (item.kind === 'assistant' && item.runId && !out.has(item.runId) && item.text.trim()) {
+        out.set(item.runId, item.text)
+      }
+    }
+    return out
+  })
+  /** One grain per message sent, among the rendered ones: the message, its answer, its time. */
   const marks = $derived(
-    blocks.flatMap((block) =>
-      block.kind === 'item' && block.item.kind === 'user'
-        ? [{ key: block.key, label: truncate(block.item.text.trim() || t('conversation.message'), 80) }]
-        : [],
-    ),
+    blocks.flatMap((block) => {
+      if (block.kind !== 'item' || block.item.kind !== 'user') return []
+      const item = block.item
+      const run = item.runId ? conversation.runs.get(item.runId) : undefined
+      const ended = item.runId !== undefined && item.runId !== conversation.runningRunId
+      const answer = ended ? (run?.finalText ?? lastAnswers.get(item.runId!) ?? '') : ''
+      return [
+        {
+          key: block.key,
+          label: truncate(item.text.trim() || t('conversation.message'), 80),
+          answer: truncate(answer.trim(), 400),
+          at: item.at ?? run?.startedAt ?? null,
+          place: userOrder.get(item.id) ?? 0,
+          total: userOrder.size,
+        },
+      ]
+    }),
   )
   /** The run at work has no block when none of its items is in the view (it started elsewhere). */
   const runningWithoutBlock = $derived(

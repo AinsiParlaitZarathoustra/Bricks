@@ -62,6 +62,8 @@ export interface SlashHost {
   attachmentBlocks(): { blocks: PromptBlock[] } | { error: string }
   resume(sessionId: string): Promise<string | null>
   showChanges(): void
+  /** Opens the settings on `section` (`/mcp`: the MCP servers). */
+  openSettings(section: string): void
   attach(kind: AttachKind, path: string): Promise<string | null>
   quit(): Promise<string | null>
 }
@@ -137,7 +139,7 @@ async function runPresent(p: SlashPresent, host: SlashHost): Promise<SlashOutcom
       host.open('tools')
       return DONE
     case 'mcp':
-      host.open('mcp')
+      host.openSettings('extensions')
       return DONE
     case 'config':
       host.open('config')

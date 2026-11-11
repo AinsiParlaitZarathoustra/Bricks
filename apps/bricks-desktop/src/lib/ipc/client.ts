@@ -401,3 +401,30 @@ export type * from './bindings/RunLabel'
 export type * from './bindings/RunRecord'
 export type * from './bindings/RunFile'
 export type * from './bindings/RunCommand'
+
+// ─── MCP servers ─────────────────────────────────────────────────────────────
+import type { McpServersView } from './bindings/McpServersView'
+import type { McpServerInput } from './bindings/McpServerInput'
+import type { McpTestResult } from './bindings/McpTestResult'
+export type { McpServersView, McpServerInput, McpTestResult }
+export type { McpServerItem } from './bindings/McpServerItem'
+
+/** Your servers (~/.bricks/mcp.toml) and those of the project `projectId`. */
+export const mcpServers = (projectId: string | null) => call<McpServersView>('mcp_servers', { projectId })
+export const mcpAdd = (input: McpServerInput, projectId: string | null) =>
+  call<McpServersView>('mcp_add', { input, projectId })
+export const mcpRemove = (name: string, projectId: string | null) =>
+  call<McpServersView>('mcp_remove', { name, projectId })
+export const mcpSetEnabled = (name: string, enabled: boolean, projectId: string | null) =>
+  call<McpServersView>('mcp_set_enabled', { name, enabled, projectId })
+/** Approves or refuses a server the project declares, as declared now. */
+export const mcpDecide = (projectId: string, name: string, approve: boolean) =>
+  call<McpServersView>('mcp_decide', { projectId, name, approve })
+/** The interface (MCP Apps) of a tool: its `ui://` resource and HTML. */
+export const mcpAppLoad = (name: string, tool: string, projectId: string | null) =>
+  call<import('./bindings/McpAppView').McpAppView>('mcp_app_load', { name, tool, projectId })
+/** A call made by an interface, to a tool of its own server only. */
+export const mcpAppCall = (name: string, tool: string, args: Record<string, unknown>, projectId: string | null) =>
+  call<import('./bindings/McpAppCallResult').McpAppCallResult>('mcp_app_call', { name, tool, arguments: args, projectId })
+/** Connects to a server and lists its tools. */
+export const mcpTest = (name: string, projectId: string | null) => call<McpTestResult>('mcp_test', { name, projectId })

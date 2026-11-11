@@ -5,6 +5,7 @@
 //! resolves its own options into plain paths and flags first.
 
 mod engine;
+pub mod mcp;
 mod memory;
 mod paths;
 mod projects;

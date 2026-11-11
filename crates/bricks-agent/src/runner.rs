@@ -538,6 +538,8 @@ async fn run_loop(
         if cancel.is_cancelled() {
             return Err(BricksError::Cancelled);
         }
+        // A server that changed its tools is re-read: this turn offers them.
+        agent.refresh_mcp_tools().await;
 
         let _ = event_tx.send(AgentEvent::TurnStart { turn }).await;
         agent.emit(AgentEvent::TurnStart { turn });

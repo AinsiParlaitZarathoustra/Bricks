@@ -79,6 +79,21 @@ pub struct McpToolDef {
     /// `readOnlyHint`, `destructiveHint`… as announced (hints, not
     /// guarantees).
     pub annotations: Option<Value>,
+    /// The tool's `_meta`, as announced (MCP Apps: `ui.resourceUri`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meta: Option<Value>,
+}
+
+impl McpToolDef {
+    /// The `ui://` resource of the tool's interface (MCP Apps), when it has one.
+    pub fn ui_resource(&self) -> Option<&str> {
+        let meta = self.meta.as_ref()?;
+        meta.get("ui")
+            .and_then(|ui| ui.get("resourceUri"))
+            .or_else(|| meta.get("ui/resourceUri"))
+            .and_then(Value::as_str)
+            .filter(|uri| uri.starts_with("ui://"))
+    }
 }
 
 impl From<&McpToolDef> for bricks_types::ToolDefinition {
@@ -148,6 +163,9 @@ struct Handler {
     info: ClientConfig,
     progress: Arc<parking_lot::Mutex<HashMap<ProgressToken, ProgressFn>>>,
     tools_changed: Arc<AtomicBool>,
+    /// Counts the tool lists read after the first: lets every consumer
+    /// notice a change, whoever re-read it.
+    tools_generation: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl ClientHandler for Handler {
@@ -313,6 +331,7 @@ impl McpClient {
             info: client_config(&cfg),
             progress: Arc::default(),
             tools_changed: Arc::default(),
+            tools_generation: Arc::default(),
         };
         let lifecycle = match cfg.protocol {
             ProtocolMode::Auto => ClientLifecycleMode::Auto {
@@ -396,12 +415,16 @@ impl McpClient {
         if self.info.capabilities.get("tools").is_none() && !self.info.capabilities.is_null() {
             return Ok(());
         }
-        let list = self
-            .service
-            .peer()
-            .list_all_tools()
-            .await
-            .map_err(|e| self.service_error(e, false))?;
+        // Cleared before reading: a change announced while the list is read
+        // is read again next time.
+        self.handler.tools_changed.store(false, Ordering::SeqCst);
+        let list = match self.service.peer().list_all_tools().await {
+            Ok(list) => list,
+            Err(e) => {
+                self.handler.tools_changed.store(true, Ordering::SeqCst);
+                return Err(self.service_error(e, false));
+            }
+        };
         let defs = list
             .into_iter()
             .map(|t| McpToolDef {
@@ -417,11 +440,17 @@ impl McpClient {
                     .annotations
                     .as_ref()
                     .and_then(|a| serde_json::to_value(a).ok()),
+                meta: t.meta.as_ref().and_then(|m| serde_json::to_value(m).ok()),
             })
             .collect();
         *self.tools.write() = defs;
-        self.handler.tools_changed.store(false, Ordering::SeqCst);
+        self.handler.tools_generation.fetch_add(1, Ordering::SeqCst);
         Ok(())
+    }
+
+    /// How many times the tool list was read again since the connection.
+    pub fn tools_generation(&self) -> u64 {
+        self.handler.tools_generation.load(Ordering::SeqCst)
     }
 
     pub fn tools_changed(&self) -> bool {

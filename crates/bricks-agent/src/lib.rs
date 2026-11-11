@@ -745,10 +745,12 @@ impl Agent {
         let _ = self
             .mcp
             .get_or_init(|| async {
-                let tools = bricks_tools::mcp_tool::tools_of(&manager).await;
+                let tools = mcp_tools(&manager).await;
+                let seen = manager.tools_generation().await;
                 McpState {
                     manager: Some(manager),
-                    tools,
+                    tools: parking_lot::RwLock::new(tools),
+                    seen: std::sync::atomic::AtomicU64::new(seen),
                     shared: true,
                 }
             })
@@ -770,10 +772,12 @@ impl Agent {
             .mcp
             .get_or_init(|| async {
                 let manager = Arc::new(bricks_mcp::McpManager::connect(&self.mcp_servers).await);
-                let tools = bricks_tools::mcp_tool::tools_of(&manager).await;
+                let tools = mcp_tools(&manager).await;
+                let seen = manager.tools_generation().await;
                 McpState {
                     manager: Some(manager),
-                    tools,
+                    tools: parking_lot::RwLock::new(tools),
+                    seen: std::sync::atomic::AtomicU64::new(seen),
                     shared: false,
                 }
             })
@@ -781,11 +785,34 @@ impl Agent {
         if let Some(m) = &state.manager {
             for (name, status) in m.statuses().await {
                 if let bricks_mcp::McpServerStatus::Error(e) = status {
-                    notes.push(format!("MCP server '{name}' unavailable: {e}"));
+                    // The error usually names the server already.
+                    notes.push(if e.contains(&format!("'{name}'")) {
+                        e
+                    } else {
+                        format!("MCP server '{name}' unavailable: {e}")
+                    });
                 }
             }
         }
         notes
+    }
+
+    /// The MCP tools again, when a server announced its list changed: the
+    /// next request offers the new list.
+    pub(crate) async fn refresh_mcp_tools(&self) {
+        let Some(state) = self.mcp.get() else {
+            return;
+        };
+        let Some(manager) = &state.manager else {
+            return;
+        };
+        manager.refresh_changed().await;
+        // Whoever re-read a list (a call, a sub-agent), this agent rebuilds
+        // its tools once it sees the new generation.
+        let generation = manager.tools_generation().await;
+        if state.seen.swap(generation, std::sync::atomic::Ordering::SeqCst) != generation {
+            *state.tools.write() = mcp_tools(manager).await;
+        }
     }
 
     /// The system prompt of the last request built ([`Self::request_system`]),
@@ -950,7 +977,8 @@ impl Agent {
                 self.mcp
                     .get()
                     .into_iter()
-                    .flat_map(|s| s.tools.iter().map(|t| ToolRef::Own(t.as_ref()))),
+                    .flat_map(|s| s.tools.read().clone())
+                    .map(ToolRef::Lent),
             )
             .chain(lent.iter().map(|t| ToolRef::Lent(Arc::clone(t))))
             .chain(load_tools.map(ToolRef::Lent))
@@ -995,7 +1023,7 @@ impl Agent {
                 self.mcp
                     .get()
                     .into_iter()
-                    .flat_map(|s| s.tools.iter().map(|t| t.name().to_string())),
+                    .flat_map(|s| s.tools.read().iter().map(|t| t.name().to_string()).collect::<Vec<_>>()),
             )
             .collect();
         lent.retain(|t| taken.insert(t.name().to_string()));
@@ -1081,10 +1109,22 @@ impl std::ops::Deref for ToolRef<'_> {
     }
 }
 
+/// The tools of the connected MCP servers, as the agent offers them.
+async fn mcp_tools(manager: &Arc<bricks_mcp::McpManager>) -> Vec<Arc<dyn Tool>> {
+    bricks_tools::mcp_tool::tools_of(manager)
+        .await
+        .into_iter()
+        .map(Arc::from)
+        .collect()
+}
+
 /// Connected MCP servers and their tools.
 pub(crate) struct McpState {
     manager: Option<Arc<bricks_mcp::McpManager>>,
-    tools: Vec<Box<dyn Tool>>,
+    /// Re-read when a server announces its tools changed.
+    tools: parking_lot::RwLock<Vec<Arc<dyn Tool>>>,
+    /// The manager's tool generation these tools were built from.
+    seen: std::sync::atomic::AtomicU64,
     /// Connections owned by another agent (a sub-agent uses its parent's):
     /// not closed with this one.
     shared: bool,
