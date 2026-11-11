@@ -141,33 +141,48 @@ impl StreamCapture {
             return;
         }
         let room = self.limits.head_bytes.saturating_sub(self.head.len());
-        if self.tail.is_empty() && text.len() <= room {
+        // The head is the start of the stream: once the tail took something,
+        // even if it was since dropped, the head is closed.
+        let head_open = self.tail.is_empty() && self.omitted_bytes == 0;
+        if head_open && text.len() <= room {
             self.head.push_str(text);
             return;
         }
         let mut rest = text;
-        if self.tail.is_empty() && room > 0 {
+        if head_open && room > 0 {
             let cut = floor_boundary(text, room);
             self.head.push_str(&text[..cut]);
             rest = &text[cut..];
         }
         self.tail.push_str(rest);
+        // Compacted by halves while the stream goes on: the exact bound is
+        // applied by `view` and `finish`.
         if self.tail.len() > self.limits.tail_bytes * 2 {
-            let drop = floor_boundary(&self.tail, self.tail.len() - self.limits.tail_bytes);
-            // Prefer to restart the tail on a line boundary.
-            let drop = self.tail[drop..]
-                .find('\n')
-                .map(|p| drop + p + 1)
-                .filter(|&d| d < self.tail.len())
-                .unwrap_or(drop);
+            self.compact_tail();
+        }
+    }
+
+    /// Keeps at most `tail_bytes` of the tail, counting what goes as omitted.
+    fn compact_tail(&mut self) {
+        let drop = tail_excess(&self.tail, self.limits.tail_bytes);
+        if drop > 0 {
             self.omitted_bytes += drop as u64;
             self.tail.drain(..drop);
         }
     }
 
+    /// Drops the capture and the raw file it spilled to, if any. Nothing
+    /// reads them afterwards: used once a command was handed over as a job.
+    pub fn discard(mut self) {
+        self.spill = None;
+        self.raw_memory = Vec::new();
+        let _ = std::fs::remove_file(&self.spill_path);
+    }
+
     pub fn finish(mut self) -> Captured {
         let rest = self.cleaner.finish();
         self.add_text(&rest);
+        self.compact_tail();
         if let Some(f) = &mut self.spill {
             let _ = f.flush();
         }
@@ -178,8 +193,11 @@ impl StreamCapture {
     /// in it, it is not finished yet).
     pub fn view(&self) -> Captured {
         let raw_path = self.spill.as_ref().map(|_| self.spill_path.clone());
+        // The tail within its bound, whatever the compaction left.
+        let drop = tail_excess(&self.tail, self.limits.tail_bytes);
+        let omitted_bytes = self.omitted_bytes + drop as u64;
         let mut text = self.head.clone();
-        if self.omitted_bytes > 0 {
+        if omitted_bytes > 0 {
             if !text.ends_with('\n') {
                 text.push('\n');
             }
@@ -189,18 +207,37 @@ impl StreamCapture {
                 (None, None) => "the raw output was not saved".to_string(),
             };
             text.push_str(&format!(
-                "[… {} bytes of output omitted here; {where_}]\n",
-                self.omitted_bytes
+                "[… {omitted_bytes} bytes of output omitted here; {where_}]\n"
             ));
         }
-        text.push_str(&self.tail);
+        text.push_str(&self.tail[drop..]);
         Captured {
             text,
             raw_bytes: self.raw_bytes,
-            omitted_bytes: self.omitted_bytes,
+            omitted_bytes,
             raw_path,
         }
     }
+}
+
+/// The bytes to drop at the start of `tail` so that at most `keep` remain:
+/// cut on a character boundary, and, when there is one, just after a line end.
+fn tail_excess(tail: &str, keep: usize) -> usize {
+    if tail.len() <= keep {
+        return 0;
+    }
+    // At least the excess goes: rounded up to a character boundary.
+    let mut drop = tail.len() - keep;
+    while drop < tail.len() && !tail.is_char_boundary(drop) {
+        drop += 1;
+    }
+    // Prefer to restart the tail on a line boundary, if one comes soon enough
+    // to keep most of it.
+    tail[drop..]
+        .find('\n')
+        .map(|p| drop + p + 1)
+        .filter(|&d| d < tail.len() && d - drop <= keep / 2)
+        .unwrap_or(drop)
 }
 
 fn floor_boundary(s: &str, mut i: usize) -> usize {
@@ -256,5 +293,85 @@ mod tests {
             raw, all,
             "the raw file is the exact stream, escapes included"
         );
+    }
+
+    /// The tail of the text, after the omitted marker.
+    fn shown_tail(text: &str) -> &str {
+        text.split_once("]\n").map_or(text, |(_, t)| t)
+    }
+
+    #[test]
+    fn the_tail_never_exceeds_its_bound() {
+        let dir = tempfile::tempdir().unwrap();
+        // 55 bytes, one line: the head takes 20, the tail would take 35.
+        let input = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQR\n";
+        assert_eq!(input.len(), 55);
+        let mut c = small(dir.path());
+        c.push(input.as_bytes());
+        let live = c.view();
+        assert_eq!(live.omitted_bytes, 15, "{live:?}");
+        assert!(shown_tail(&live.text).len() <= 20, "{}", live.text);
+        let out = c.finish();
+        assert_eq!(out.omitted_bytes, 15);
+        assert!(out.text.starts_with("abcdefghijklmnopqrst"), "{}", out.text);
+        assert_eq!(shown_tail(&out.text), &input[35..]);
+        let marker = out.text.lines().nth(1).unwrap();
+        assert!(marker.contains("15 bytes of output omitted"), "{marker}");
+        // The head, the line end that closes it, the marker line, the tail.
+        assert_eq!(out.text.len(), 20 + 1 + marker.len() + 1 + 20);
+    }
+
+    #[test]
+    fn the_tail_is_cut_on_a_character_and_prefers_a_line_end() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = small(dir.path());
+        // The head, then "é" (2 bytes) straddling the cut, then two lines.
+        c.push("01234567890123456789".as_bytes());
+        c.push("ééééé\nlast line\n".as_bytes());
+        let out = c.finish();
+        let tail = shown_tail(&out.text);
+        assert!(tail.len() <= 20, "{tail:?}");
+        assert_eq!(tail, "last line\n");
+        assert_eq!(out.omitted_bytes as usize, "ééééé\n".len());
+    }
+
+    #[test]
+    fn the_head_stays_the_start_of_the_stream_when_the_tail_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut c = StreamCapture::new(
+            CaptureLimits {
+                head_bytes: 4,
+                tail_bytes: 0,
+                raw_memory_bytes: 64,
+            },
+            dir.path().join("raw.out"),
+        );
+        for piece in ["ab\n", "é\n", "z\n"] {
+            c.push(piece.as_bytes());
+        }
+        let out = c.finish();
+        assert!(out.text.starts_with("ab\n["), "{}", out.text);
+        assert_eq!(out.omitted_bytes, 5);
+    }
+
+    #[test]
+    fn discard_removes_the_spilled_raw_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("raw.out");
+        let mut c = StreamCapture::new(
+            CaptureLimits {
+                head_bytes: 20,
+                tail_bytes: 20,
+                raw_memory_bytes: 64,
+            },
+            path.clone(),
+        );
+        for i in 0..100 {
+            c.push(format!("line {i}\n").as_bytes());
+        }
+        assert!(path.exists(), "the raw stream spilled to its file");
+        assert!(c.view().raw_path.is_some());
+        c.discard();
+        assert!(!path.exists(), "discard removes the spilled raw file");
     }
 }

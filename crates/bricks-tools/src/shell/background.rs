@@ -143,7 +143,12 @@ struct Log {
 
 impl Log {
     fn new(raw_path: PathBuf, limits: TaskLimits) -> Self {
-        let raw = std::fs::File::create(&raw_path).ok();
+        // A failed creation is kept as the raw log's error, so a reader is
+        // told the file is missing rather than shown an empty or absent log.
+        let (raw, raw_error) = match std::fs::File::create(&raw_path) {
+            Ok(f) => (Some(f), None),
+            Err(e) => (None, Some(e.to_string())),
+        };
         Self {
             lines: VecDeque::new(),
             bytes: 0,
@@ -156,7 +161,7 @@ impl Log {
             raw_path,
             raw_written: 0,
             raw_capped: false,
-            raw_error: None,
+            raw_error,
             limits,
         }
     }
@@ -299,6 +304,9 @@ pub struct TaskSpec<'a> {
     pub prelude: &'a [u8],
     /// Directory the task starts in.
     pub cwd: &'a Path,
+    /// Facts about the launch to report with the task (e.g. the session's
+    /// directory was gone and reset).
+    pub notes: &'a [String],
     /// The task's whole environment.
     pub env: &'a [(OsString, OsString)],
     pub stdin: Option<&'a str>,
@@ -314,6 +322,11 @@ pub struct TaskSpec<'a> {
 pub struct Task {
     pub id: String,
     pub command: String,
+    /// The directory the task started in: the session's when it was launched,
+    /// after the earlier commands' `cd`s.
+    pub cwd: PathBuf,
+    /// Facts about the launch, reported with the task.
+    pub launch_notes: Vec<String>,
     pub pid: u32,
     pub started_at: SystemTime,
     started: Instant,
@@ -321,8 +334,10 @@ pub struct Task {
     ready: parking_lot::Mutex<Readiness>,
     ready_pattern: Option<regex::Regex>,
     logs: [Arc<parking_lot::Mutex<Log>>; 2],
-    /// Output kept for the result of an ordinary command.
-    captures: Option<[Arc<parking_lot::Mutex<StreamCapture>>; 2]>,
+    /// Output kept for the result of an ordinary command. Each stream's
+    /// capture is taken out under its lock once the command is released
+    /// (handed over as a job), so no byte is read or written after that.
+    captures: Option<[parking_lot::Mutex<Option<StreamCapture>>; 2]>,
     /// The captures, once the task ended.
     captured: parking_lot::Mutex<Option<[Captured; 2]>>,
     /// Processes left in the group by an ordinary command, and stopped.
@@ -352,11 +367,11 @@ pub struct TaskStatus {
     pub stderr_bytes: u64,
 }
 
-/// Replaces a capture by an empty one and returns the old one, finished.
-fn take(cap: Arc<parking_lot::Mutex<StreamCapture>>) -> Captured {
-    let placeholder = StreamCapture::new(CaptureLimits::default(), PathBuf::new());
-    let inner = std::mem::replace(&mut *cap.lock(), placeholder);
-    inner.finish()
+/// Takes a capture out (under its lock) and returns it finished; `None` once
+/// it was released.
+fn finish_capture(cap: &parking_lot::Mutex<Option<StreamCapture>>) -> Option<Captured> {
+    let taken = cap.lock().take();
+    taken.map(StreamCapture::finish)
 }
 
 /// The recording wrapper: restores the prelude and the command, and writes
@@ -400,6 +415,7 @@ impl Task {
             command,
             prelude,
             cwd,
+            notes,
             env,
             stdin,
             ready_pattern,
@@ -464,11 +480,8 @@ impl Task {
             Some(o) => {
                 let [out, err] = o.spill;
                 let caps = [
-                    Arc::new(parking_lot::Mutex::new(StreamCapture::new(
-                        o.capture.clone(),
-                        out,
-                    ))),
-                    Arc::new(parking_lot::Mutex::new(StreamCapture::new(o.capture, err))),
+                    parking_lot::Mutex::new(Some(StreamCapture::new(o.capture.clone(), out))),
+                    parking_lot::Mutex::new(Some(StreamCapture::new(o.capture, err))),
                 ];
                 (Some(caps), Some(o.grace), Some(dir.join(STATE_FILE)))
             }
@@ -489,6 +502,8 @@ impl Task {
         let task = Arc::new(Task {
             id,
             command: command.to_string(),
+            cwd: cwd.to_path_buf(),
+            launch_notes: notes.to_vec(),
             pid,
             started_at: SystemTime::now(),
             started: Instant::now(),
@@ -500,7 +515,7 @@ impl Task {
             }),
             ready_pattern,
             logs,
-            captures: captures.clone(),
+            captures,
             captured: parking_lot::Mutex::new(None),
             leftovers: parking_lot::Mutex::new(None),
             state_file: state_file.clone(),
@@ -524,8 +539,10 @@ impl Task {
                     match stream.read(&mut buf).await {
                         Ok(0) | Err(_) => break,
                         Ok(n) => {
-                            if let Some(c) = &t.captures {
-                                c[i].lock().push(&buf[..n]);
+                            if let Some(c) = &t.captures
+                                && let Some(cap) = c[i].lock().as_mut()
+                            {
+                                cap.push(&buf[..n]);
                             }
                             let new = t.logs[i].lock().push(&buf[..n]);
                             t.check_ready(&new);
@@ -556,9 +573,9 @@ impl Task {
                 // Complete (the shell ended): then, and only then, published.
                 let _ = std::fs::rename(tmp, done);
             }
-            if let Some(caps) = &t.captures {
-                let out = take(caps[0].clone());
-                let err = take(caps[1].clone());
+            if let Some(caps) = &t.captures
+                && let (Some(out), Some(err)) = (finish_capture(&caps[0]), finish_capture(&caps[1]))
+            {
                 *t.captured.lock() = Some([out, err]);
             }
             let state = if t.stop_requested.load(std::sync::atomic::Ordering::SeqCst) {
@@ -708,9 +725,29 @@ impl Task {
         if let Some(done) = self.captured.lock().clone() {
             return Some(done);
         }
-        self.captures
-            .as_ref()
-            .map(|c| [c[0].lock().view(), c[1].lock().view()])
+        let caps = self.captures.as_ref()?;
+        let view = |c: &parking_lot::Mutex<Option<StreamCapture>>| {
+            c.lock().as_ref().map(StreamCapture::view)
+        };
+        Some([view(&caps[0])?, view(&caps[1])?])
+    }
+
+    /// Stops keeping the output of an ordinary command, for a command handed
+    /// over as a job: its captures are dropped (and their raw files removed),
+    /// so nothing is read, cleaned or written for it any more. Call after
+    /// [`Self::output`] has been read; afterwards `output` is `None`.
+    pub fn release_capture(&self) {
+        let Some(caps) = &self.captures else {
+            return;
+        };
+        for c in caps {
+            // Taken under the lock the reader pushes under: no byte arrives
+            // after this, so the spill file is not recreated.
+            let taken = c.lock().take();
+            if let Some(cap) = taken {
+                cap.discard();
+            }
+        }
     }
 
     /// The final state file of an ordinary command (complete once it ended).
@@ -814,6 +851,32 @@ mod log_limits {
         // The raw log stopped at its cap, said so.
         assert!(l.raw_capped);
         assert!(l.raw_written <= 1_000);
+    }
+
+    #[test]
+    fn a_raw_file_that_cannot_be_created_is_reported() {
+        let d = tempfile::tempdir().unwrap();
+        let raw = d.path().join("missing-dir").join("raw");
+        let mut l = Log::new(
+            raw.clone(),
+            TaskLimits {
+                memory_lines: 1_000,
+                memory_bytes: 4_096,
+                max_line_bytes: 256,
+                raw_log_bytes: 1_000,
+            },
+        );
+        assert!(l.raw_error.is_some(), "the failed creation is kept");
+        assert!(l.raw.is_none());
+        assert!(!raw.exists());
+        l.push(b"first line\nsecond line\n");
+        assert!(l.raw.is_none(), "the raw log does not write");
+        assert_eq!(l.raw_written, 0);
+        assert!(
+            l.raw_error.is_some(),
+            "the error is still reported after output"
+        );
+        assert!(!raw.exists());
     }
 
     #[test]

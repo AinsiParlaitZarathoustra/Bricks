@@ -243,6 +243,7 @@ impl ShellSessions {
             command,
             prelude: &launch.prelude,
             cwd: &launch.base.cwd.pwd,
+            notes: &launch.notes,
             env: &launch.env,
             stdin,
             ready_pattern: None,
@@ -302,7 +303,7 @@ impl ShellSessions {
 
     /// Makes a yielded command's task visible to the task tools.
     pub(crate) fn adopt(&self, task: Arc<Task>) {
-        self.tasks.lock().push(task);
+        self.keep_task(task);
     }
 
     /// Remembers what a command was described as for an approval.

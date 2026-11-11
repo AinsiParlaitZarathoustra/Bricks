@@ -365,6 +365,7 @@ impl ShellSessions {
             command,
             prelude: &launch.prelude,
             cwd: &launch.base.cwd.pwd,
+            notes: &launch.notes,
             env: &launch.env,
             stdin,
             ready_pattern,
@@ -376,7 +377,7 @@ impl ShellSessions {
         .await
         {
             Ok(task) => {
-                self.tasks.lock().push(task.clone());
+                self.keep_task(task.clone());
                 Ok(task)
             }
             Err(e) => {
@@ -385,6 +386,15 @@ impl ShellSessions {
                 Err(e)
             }
         }
+    }
+
+    /// Keeps a task among the session's, and lets the finished ones go: the
+    /// jobs that report them hold their own reference.
+    #[cfg(unix)]
+    fn keep_task(&self, task: Arc<background::Task>) {
+        let mut tasks = self.tasks.lock();
+        tasks.retain(|t| !t.state().is_finished());
+        tasks.push(task);
     }
 
     /// A task of this session (and only of this session).

@@ -377,14 +377,28 @@ async fn run_foreground(
     let Some((registry, owner)) = jobs else {
         unreachable!("a command is handed over only with a registry");
     };
-    let job_id = registry.register(slot, owner, Arc::clone(&task), &ctx.working_dir, false);
-    let partial = task
+    // The job runs where the command started: the session's directory.
+    let job_id = registry.register(slot, owner, Arc::clone(&task), &task.cwd, false);
+    let mut partial = task
         .output()
         .unwrap_or_else(|| [Default::default(), Default::default()]);
     sessions.adopt(Arc::clone(&task));
+    // From now on the job is read through its logs: the command's captures
+    // are released, and their raw files with them. The partial output points
+    // to the job's raw logs instead, which hold the whole stream (their path
+    // changes once the job ends and they are kept: Job status gives it).
+    task.release_capture();
+    for captured in &mut partial {
+        if let Some(spill) = captured.raw_path.take() {
+            captured.text = captured.text.replace(
+                &format!("complete raw output: {}", spill.display()),
+                "complete raw output: the job's raw log (Job action status)",
+            );
+        }
+    }
     // The command goes on: its watcher keeps its deadline and publishes its end.
     drop(cmd.detach());
-    handed_over_result(&task, job_id, started, &ctx.working_dir, partial)
+    handed_over_result(&task, job_id, started, partial)
 }
 
 /// The result of a command that ended (in the call or after the hand-over).
@@ -468,17 +482,18 @@ fn handed_over_result(
     task: &shell::background::Task,
     job_id: String,
     started: std::time::Instant,
-    cwd: &std::path::Path,
     partial: [crate::shell::capture::Captured; 2],
 ) -> ToolResult {
     let st = task.status();
+    let cwd = &task.cwd;
     let cursor_out = task
         .read(shell::background::Stream::Stdout, shell::background::OutputPosition::Offset(0), 0)
         .total_lines;
     let cursor_err = task
         .read(shell::background::Stream::Stderr, shell::background::OutputPosition::Offset(0), 0)
         .total_lines;
-    let notes = vec![
+    let mut notes = task.launch_notes.clone();
+    notes.extend([
         format!(
             "Still running after {}, handed over as job {job_id} (pid {}) in {}: {}",
             bricks_types::duration::display_ms(started.elapsed()),
@@ -489,9 +504,10 @@ fn handed_over_result(
         format!(
             "Follow it with Job: action output, job_id \"{job_id}\", offset {cursor_out} for new \
              stdout lines ({cursor_err} for stderr); wait to wait for its end; stop to end it. \
-             It is a job like a background command, and its timeout still ends it."
+             Unlike a background command, it is stopped when this run ends: wait for it with \
+             Job (action wait) before you answer; its timeout still ends it."
         ),
-    ];
+    ]);
     let mut report = ToolReport::new(
         ToolStatus::Running,
         ToolBody::Streams {
@@ -510,6 +526,11 @@ fn handed_over_result(
     }));
     ToolResult::from_report(report)
 }
+
+/// The lines of each stream shown when a started job has already ended or is
+/// not ready yet.
+#[cfg(unix)]
+const START_TAIL_LINES: usize = 50;
 
 #[cfg(unix)]
 async fn start_background(
@@ -557,7 +578,7 @@ async fn start_background(
     // A job as soon as it runs, never out of reach while it starts. If the
     // call is abandoned before it reports (the run is cancelled), nobody got
     // its id: it is stopped.
-    let job_id = registry.register(slot, owner, Arc::clone(&task), &ctx.working_dir, true);
+    let job_id = registry.register(slot, owner, Arc::clone(&task), &task.cwd, true);
     let mut unreported = StopIfUnreported(Some(Arc::clone(&task)));
     let wait = match (input.ready_pattern.is_some(), input.ready_timeout) {
         (true, Some(ms)) => Duration::from_millis(ms).min(config.max_timeout),
@@ -575,7 +596,7 @@ async fn start_background(
     let mut lines = vec![format!(
         "Started job {job_id} (pid {}) in {}: {}",
         st.pid,
-        ctx.working_dir.display(),
+        task.cwd.display(),
         st.command
     )];
     let status = match &st.state {
@@ -601,6 +622,18 @@ async fn start_background(
     lines.push(format!(
         "Follow it with Job (job_id \"{job_id}\"): status, output, wait, stop."
     ));
+    // What it wrote, when that tells why it ended or is not ready yet.
+    if status != ToolStatus::Running || matches!(st.readiness, Readiness::Waiting) {
+        let budget = registry.settings.max_page_bytes / 2;
+        for stream in [
+            shell::background::Stream::Stdout,
+            shell::background::Stream::Stderr,
+        ] {
+            if let Some(page) = crate::jobs::tail_preview(&task, stream, START_TAIL_LINES, budget) {
+                lines.push(page.trim_end().to_string());
+            }
+        }
+    }
     let mut report = ToolReport::new(status, ToolBody::Text(lines.join("\n")));
     if let TaskState::Completed { code } = st.state {
         report.exit_code = Some(code);
@@ -610,9 +643,10 @@ async fn start_background(
         report.termination = signal.map(|s| format!("signal {s}"));
     }
     report.duration = Some(started.elapsed());
+    report.notes = task.launch_notes.clone();
     report.data = Some(serde_json::json!({
         "job_id": job_id,
-        "cwd": ctx.working_dir.display().to_string(),
+        "cwd": task.cwd.display().to_string(),
         "pid": st.pid,
         "state": st.state.label(),
         "ready": matches!(st.readiness, Readiness::Ready { .. }),
@@ -845,6 +879,79 @@ mod tests {
         );
         let task = reg.view(&id, None).expect("the job").task;
         assert!(task.wait_finished(Duration::from_secs(5)).await);
+        let out = JobTool::new(Arc::clone(&reg))
+            .execute(serde_json::json!({ "action": "output", "job_id": id }), &c)
+            .await;
+        assert!(out.content.contains("last"), "{}", out.content);
+        crate::shell::close_session(&c.session_id).await;
+    }
+
+    /// A yielded command whose output already spilled to its raw file: the
+    /// hand-over drops that file and points to the job's raw log, and the job
+    /// goes on being read through its logs without writing it again.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_yielded_command_releases_its_spilled_raw_file() {
+        fn raw_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+            let mut found = Vec::new();
+            let mut todo = vec![dir.to_path_buf()];
+            while let Some(d) = todo.pop() {
+                let Ok(entries) = std::fs::read_dir(&d) else {
+                    continue;
+                };
+                for e in entries.flatten() {
+                    let p = e.path();
+                    if p.is_dir() {
+                        todo.push(p);
+                    } else if p
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|n| n.starts_with("raw-"))
+                    {
+                        found.push(p);
+                    }
+                }
+            }
+            found
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let (bash, reg, c) = with_jobs(dir.path());
+        c.extensions.insert(ShellConfig {
+            base_dir: dir.path().join("shell"),
+            capture: shell::capture::CaptureLimits {
+                head_bytes: 256,
+                tail_bytes: 256,
+                raw_memory_bytes: 64,
+            },
+            ..ShellConfig::default()
+        });
+        let r = bash
+            .execute(
+                serde_json::json!({
+                    "command": "head -c 4000 /dev/zero | tr '\\0' x; echo; sleep 0.8; echo last",
+                    "yield_time_ms": 150
+                }),
+                &c,
+            )
+            .await;
+        let rep = r.report.clone().unwrap();
+        assert_eq!(rep.status, ToolStatus::Running, "{}", r.content);
+        let id = job_id_of(&r);
+        let stdout = match &rep.body {
+            ToolBody::Streams { stdout, .. } => stdout.clone(),
+            other => panic!("{other:?}"),
+        };
+        assert!(
+            stdout.contains("complete raw output: the job's raw log (Job action status)"),
+            "the partial output points to the job's raw log: {stdout}"
+        );
+        assert!(
+            raw_files(&dir.path().join("shell")).is_empty(),
+            "the hand-over drops the spill"
+        );
+        let task = reg.view(&id, None).expect("the job").task;
+        assert!(task.wait_finished(Duration::from_secs(5)).await);
+        assert!(raw_files(&dir.path().join("shell")).is_empty(), "not written again");
         let out = JobTool::new(Arc::clone(&reg))
             .execute(serde_json::json!({ "action": "output", "job_id": id }), &c)
             .await;

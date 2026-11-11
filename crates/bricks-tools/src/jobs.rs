@@ -738,7 +738,19 @@ impl Tool for JobTool {
                 let ended = job.task.wait_finished(limit).await;
                 let view = reg.view(id, Some(&viewer)).unwrap_or(job);
                 if ended {
-                    ToolResult::success(view.line())
+                    // The end of what it wrote, so that one call tells how it
+                    // ended; the offsets lead to the rest.
+                    let budget = reg.settings.max_page_bytes / 2;
+                    let mut text = view.line();
+                    for stream in [Stream::Stdout, Stream::Stderr] {
+                        if let Some(page) =
+                            tail_preview(&view.task, stream, WAIT_TAIL_LINES, budget)
+                        {
+                            text.push('\n');
+                            text.push_str(&page);
+                        }
+                    }
+                    ToolResult::success(text.trim_end().to_string())
                 } else {
                     ToolResult::success(format!(
                         "{}\nStill running after {}: the wait timed out, and the job was not \
@@ -757,6 +769,45 @@ impl Tool for JobTool {
             }
         }
     }
+}
+
+/// The line that sets a line in progress apart on a page.
+const PAGE_PARTIAL_MARKER: &str =
+    "[line in progress, not yet complete; it does not move the offset]";
+
+/// The lines of each stream shown when a wait sees the job end.
+const WAIT_TAIL_LINES: usize = 100;
+
+/// The last `lines` lines of a stream, as many as fit in `budget` (the last
+/// one at least, cut by the page when longer): `None` when it wrote nothing.
+pub(crate) fn tail_preview(
+    task: &crate::shell::background::Task,
+    stream: Stream,
+    lines: usize,
+    budget: usize,
+) -> Option<String> {
+    let mut page = task.read(
+        stream,
+        crate::shell::background::OutputPosition::Tail,
+        lines,
+    );
+    if page.lines.is_empty() && page.partial.is_none() {
+        return None;
+    }
+    // The latest lines first: the oldest go until the rest fits, with the
+    // room the page gives a line in progress.
+    let lines_budget = match &page.partial {
+        Some(p) => budget.saturating_sub(p.len().min(256) + PAGE_PARTIAL_MARKER.len()),
+        None => budget,
+    };
+    let mut size: usize = page.lines.iter().map(|(_, l)| l.len() + 1).sum();
+    let mut drop = 0;
+    while size > lines_budget && drop + 1 < page.lines.len() {
+        size -= page.lines[drop].1.len() + 1;
+        drop += 1;
+    }
+    page.lines.drain(..drop);
+    Some(render_page(&page, budget))
 }
 
 /// A page of output: a header (range, totals, losses, raw log, next offset),
@@ -844,7 +895,7 @@ fn render_page(page: &crate::shell::background::Page, budget: usize) -> String {
             end -= 1;
         }
         out.push_str(&format!(
-            "[line in progress, not yet complete; it does not move the offset]\n{}{}\n",
+            "{PAGE_PARTIAL_MARKER}\n{}{}\n",
             &p[..end],
             if end < p.len() { marker } else { "" }
         ));
