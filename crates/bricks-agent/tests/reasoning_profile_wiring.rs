@@ -94,7 +94,7 @@ parameters = {{ effort_knob = "low" }}
         .resolve("p/m")
         .unwrap()
         .provider()
-        .env(|_| Some("k".into()))
+        .api_key("k")
         .build()
         .unwrap()
 }

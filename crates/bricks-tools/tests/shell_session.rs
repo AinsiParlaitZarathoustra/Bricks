@@ -787,3 +787,66 @@ async fn a_readiness_wait_ends_with_the_task_when_the_line_never_comes() {
     );
     assert!(task.state().is_finished());
 }
+
+#[tokio::test]
+async fn jobs_report_the_directory_they_started_in() {
+    use bricks_tools::bash::BashTool;
+    use bricks_tools::jobs::{JobOwner, JobRegistry, JobSettings, JobTool, JobsHandle};
+    use bricks_tools::{CostTracker, Extensions, Tool, ToolContext};
+    use serde_json::json;
+
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir(dir.path().join("subdir")).unwrap();
+    let reg = JobRegistry::new(JobSettings::default(), None);
+    let extensions = Extensions::default();
+    extensions.insert(JobsHandle(Arc::clone(&reg)));
+    extensions.insert(JobOwner {
+        agent_id: "agent".into(),
+        root_run_id: "run".into(),
+        workspace: dir.path().to_path_buf(),
+    });
+    let session_id = format!("test-{}", uuid::Uuid::new_v4());
+    let ctx = ToolContext {
+        working_dir: dir.path().to_path_buf(),
+        session_id: session_id.clone(),
+        permissions: Arc::new(bricks_tools::permissions::AllowAll),
+        cost_tracker: Arc::new(CostTracker::new()),
+        mcp_manager: None,
+        extensions,
+    };
+    let bash = BashTool::with_jobs(Arc::clone(&reg));
+    let cd = bash.execute(json!({ "command": "cd subdir" }), &ctx).await;
+    assert!(!cd.is_error, "{}", cd.content);
+
+    let background = bash
+        .execute(json!({ "command": "sleep 30", "background": true }), &ctx)
+        .await;
+    let yielded = bash
+        .execute(json!({ "command": "sleep 30", "yield_time_ms": 100 }), &ctx)
+        .await;
+    let mut ids = Vec::new();
+    for r in [&background, &yielded] {
+        let data = r.metadata.as_ref().unwrap_or_else(|| panic!("{}", r.content));
+        let cwd = data["cwd"].as_str().unwrap();
+        assert!(cwd.ends_with("/subdir"), "{cwd}: {}", r.content);
+        assert!(r.content.contains("/subdir"), "{}", r.content);
+        ids.push(data["job_id"].as_str().unwrap().to_string());
+    }
+    let list = JobTool::new(Arc::clone(&reg))
+        .execute(json!({ "action": "list" }), &ctx)
+        .await;
+    for id in &ids {
+        let line = list
+            .content
+            .lines()
+            .find(|l| l.contains(id.as_str()))
+            .unwrap_or_else(|| panic!("{id} not listed: {}", list.content));
+        assert!(line.contains("/subdir"), "{line}");
+    }
+    for id in ids {
+        JobTool::new(Arc::clone(&reg))
+            .execute(json!({ "action": "stop", "job_id": id }), &ctx)
+            .await;
+    }
+    shell::close_session_now(&session_id);
+}

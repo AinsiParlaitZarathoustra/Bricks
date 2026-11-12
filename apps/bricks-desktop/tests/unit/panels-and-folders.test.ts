@@ -8,9 +8,12 @@ import { bound, call } from './french-keys';
 
 const source = (path: string) => readFileSync(new URL(`../../src/${path}`, import.meta.url), 'utf8');
 
-describe('theme: no step between the panels and the main area', () => {
-	it.each(['light', 'dark'] as const)('the %s panels use the background colour', (mode) => {
-		expect(tokens.colors[mode].sidebar).toEqual(tokens.colors[mode].background);
+describe('theme: a frame around one inset surface', () => {
+	it.each(['light', 'dark'] as const)('the %s frame (top bar and left panel) is darker than the surface', (mode) => {
+		const [frame] = tokens.colors[mode].sidebar as number[];
+		const [surface] = tokens.colors[mode].background as number[];
+		expect(surface - frame).toBeGreaterThanOrEqual(0.015);
+		expect(surface - frame).toBeLessThanOrEqual(0.04);
 	});
 
 	it('the dark background is a deep black under a light text', () => {

@@ -5,9 +5,10 @@
 //!
 //! Covered here: a free-named profile with nested parameters is saved, read
 //! back after a restart and listed by the composer's catalogue; duplicate ids,
-//! a parameter that is not a JSON object and a removed default are refused
-//! with the file unchanged; a model edit from the form keeps the context
-//! window the form does not show.
+//! a parameter that is not a JSON object and a protected field are refused
+//! with the file unchanged; the first level applies when none is chosen, so
+//! a former default is only legacy; a model edit from the form keeps the
+//! context window the form does not show.
 //!
 //! Nothing touches `~/.bricks`: every file is in a temporary folder.
 
@@ -22,7 +23,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// One provider, one model with a context window inside its limits, and one
-/// profile that is the default. Comments must survive every write.
+/// profile. A former `default` key is still in the file: it is legacy and
+/// ignored, the first level applies. Comments must survive every write.
 const FILE: &str = r#"# Fournisseur de test : en-tête à conserver
 schema_version = 1
 
@@ -55,18 +57,18 @@ struct Setup {
 }
 
 fn setup() -> Setup {
+    setup_with(FILE)
+}
+
+fn setup_with(text: &str) -> Setup {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("providers.toml");
-    std::fs::write(&path, FILE).unwrap();
+    std::fs::write(&path, text).unwrap();
     Setup { _dir: dir, path }
 }
 
-fn no_credentials(_: &ProviderConfig) -> bool {
-    false
-}
-
 fn current(path: &Path) -> ProvidersFile {
-    view(path, &no_credentials)
+    view(path)
 }
 
 fn revision(path: &Path) -> String {
@@ -87,8 +89,6 @@ fn form_patch(changes: Json) -> ModelPatch {
         "max_input_tokens": null,
         "max_output_tokens": null,
         "input_modalities": null,
-        "reasoning_default": null,
-        "clear_reasoning_default": false,
         "profiles": null
     });
     for (key, value) in changes.as_object().unwrap() {
@@ -137,7 +137,6 @@ fn a_model_edit_from_the_form_drops_the_former_window_and_keeps_the_profiles() {
             .contains("context_window_tokens"),
         "the former window leaves the file"
     );
-    assert_eq!(model.reasoning_default.as_deref(), Some("fast"));
     assert_eq!(model.profiles.len(), 1, "a null list leaves the profiles alone");
     assert_eq!(model.profiles[0].id, "fast");
     assert_eq!(model.profiles[0].label.as_deref(), Some("Rapide"));
@@ -194,7 +193,11 @@ fn a_free_named_profile_with_nested_values_is_read_back_after_a_restart() {
         .find(|p| p.id == "approfondi")
         .expect("the composer offers the saved profile");
     assert_eq!(listed.label, "Approfondi");
-    assert_eq!(choice.default_profile.as_deref(), Some("fast"));
+    assert_eq!(
+        choice.default_profile.as_deref(),
+        Some("fast"),
+        "the first level applies"
+    );
     assert_eq!(choice.max_input_tokens, 7500);
 }
 
@@ -259,74 +262,79 @@ fn a_protected_request_field_in_a_profile_is_refused_by_the_engine_rules() {
 }
 
 #[test]
-fn a_removed_default_profile_without_a_replacement_is_refused_and_nothing_is_written() {
+fn a_list_without_the_former_default_is_saved_and_its_first_level_applies() {
     let s = setup();
-    let before = std::fs::read_to_string(&s.path).unwrap();
     let rev = revision(&s.path);
-    // `fast` is the default: a list without it must say what the default becomes.
-    let err = save(
+    // `fast` leaves the list: no default has to be named any more.
+    save(
         &s.path,
         &rev,
         form_patch(json!({
             "profiles": [{ "id": "approfondi", "label": null, "parameters": {"temperature": 0.2}, "remove": [] }]
         })),
     )
-    .expect_err("the default cannot silently disappear");
-    assert_eq!(err.code, IpcErrorCode::Invalid);
-    assert!(err.message.contains("“fast”"), "{}", err.message);
-    assert_eq!(std::fs::read_to_string(&s.path).unwrap(), before, "nothing written");
+    .expect("a list without the former default is accepted");
+    let model = model_view(&s.path);
+    assert_eq!(model.profiles.len(), 1);
+    assert_eq!(model.profiles[0].id, "approfondi");
+    assert!(
+        !std::fs::read_to_string(&s.path)
+            .unwrap()
+            .contains("default = \"fast\""),
+        "the former default key leaves the file with the list"
+    );
+    let catalog = fresh_catalog(&s.path);
+    let choice = catalog
+        .models()
+        .into_iter()
+        .find(|m| m.selection == "local/small")
+        .expect("the model is listed");
+    assert_eq!(choice.default_profile.as_deref(), Some("approfondi"));
 }
 
 #[test]
-fn a_removed_default_is_replaced_in_the_same_patch_or_cleared() {
+fn an_emptied_list_leaves_no_level_and_the_window_budget_stays() {
     let s = setup();
     let rev = revision(&s.path);
     save(
         &s.path,
         &rev,
         form_patch(json!({
-            "profiles": [{ "id": "approfondi", "label": null, "parameters": {"temperature": 0.2}, "remove": [] }],
-            "reasoning_default": "approfondi"
+            "profiles": [{ "id": "approfondi", "label": null, "parameters": {"temperature": 0.2}, "remove": [] }]
         })),
     )
-    .expect("the default is named in the same patch");
-    let model = model_view(&s.path);
-    assert_eq!(model.reasoning_default.as_deref(), Some("approfondi"));
-    assert_eq!(model.profiles.len(), 1);
+    .expect("the list is written");
 
     let rev = revision(&s.path);
-    save(
-        &s.path,
-        &rev,
-        form_patch(json!({
-            "profiles": [],
-            "clear_reasoning_default": true
-        })),
-    )
-    .expect("the default is cleared with the list");
+    save(&s.path, &rev, form_patch(json!({ "profiles": [] }))).expect("the list is emptied");
     let model = model_view(&s.path);
-    assert_eq!(model.reasoning_default, None);
     assert!(model.profiles.is_empty());
     assert_eq!(model.max_input_tokens, 7500);
+    let catalog = fresh_catalog(&s.path);
+    let choice = catalog
+        .models()
+        .into_iter()
+        .find(|m| m.selection == "local/small")
+        .expect("the model is listed");
+    assert_eq!(choice.default_profile, None, "no level is exposed");
 }
 
 #[test]
-fn a_default_outside_the_list_is_refused_and_nothing_is_written() {
-    let s = setup();
-    let before = std::fs::read_to_string(&s.path).unwrap();
-    let rev = revision(&s.path);
-    let err = save(
-        &s.path,
-        &rev,
-        form_patch(json!({
-            "profiles": [{ "id": "fast", "label": null, "parameters": {}, "remove": [] }],
-            "reasoning_default": "fantome"
-        })),
-    )
-    .expect_err("a default must be one of the profiles");
-    assert_eq!(err.code, IpcErrorCode::Invalid);
-    assert!(err.message.contains("“fantome”"), "{}", err.message);
-    assert_eq!(std::fs::read_to_string(&s.path).unwrap(), before, "nothing written");
+fn a_former_default_outside_the_list_is_ignored_and_the_first_level_applies() {
+    // A file written before the change: the former default names no level.
+    let s = setup_with(
+        &FILE
+            .replace("default = \"fast\"", "default = \"fantome\"")
+            .replace("id = \"fast\"", "id = \"rapide\""),
+    );
+    let catalog = fresh_catalog(&s.path);
+    let choice = catalog
+        .models()
+        .into_iter()
+        .find(|m| m.selection == "local/small")
+        .expect("the file still loads");
+    assert_eq!(choice.default_profile.as_deref(), Some("rapide"));
+    assert_eq!(model_view(&s.path).profiles[0].id, "rapide");
 }
 
 #[test]

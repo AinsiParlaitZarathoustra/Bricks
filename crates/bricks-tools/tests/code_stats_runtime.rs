@@ -132,7 +132,7 @@ async fn cancelled_between_files() {
     assert_eq!(waiting_in_session(session), 0);
     settle(|| analyses_running() == 0).await;
     // Each pool thread may finish the file it holds (and one it picked up
-    // while Tokei waited inside the first); none goes further.
+    // while KodeStats waited inside the first); none goes further.
     let threads = std::thread::available_parallelism()
         .map_or(1, |n| n.get())
         .max(rayon::current_num_threads());

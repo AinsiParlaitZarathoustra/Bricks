@@ -103,7 +103,7 @@ describe('ReaderPanel: the tabs share the width', () => {
 
 describe('Composer: a rounded card, with no project strip', () => {
 	const composer = source('lib/features/composer/Composer.svelte');
-	const shell = composer.split('\n').find((line) => line.includes('mt-1 flex flex-col gap-2 rounded-2xl'));
+	const shell = composer.split('\n').find((line) => line.includes('relative z-10 mx-1 mt-1 flex flex-col rounded-xl'));
 
 	it('the project strip is gone: its file is deleted and no source imports it', () => {
 		expect(existsSync(join(SRC, 'lib/features/composer/ProjectStrip.svelte'))).toBe(false);
@@ -114,7 +114,7 @@ describe('Composer: a rounded card, with no project strip', () => {
 
 	it('the card is rounded as a rectangle with soft corners, not a pill', () => {
 		expect(shell).toBeDefined();
-		expect(shell).toContain('rounded-2xl');
+		expect(shell).toContain('rounded-xl');
 		expect(shell).not.toContain('rounded-full');
 	});
 });
@@ -140,5 +140,24 @@ describe('StartSplash: only the logo, the one that contrasts with the theme last
 		setTheme('dark');
 		expect(render(StartSplash).body).toContain('app-light.png');
 		expect(render(StartSplash).body).not.toContain('app-dark.png');
+	});
+});
+
+describe('The page itself never scrolls nor drags', () => {
+	const base = source('styles/base.css');
+
+	it('pins html and body to the window: no overflow, no rubber band', () => {
+		expect(base).toMatch(/html,\s*body\s*\{[^}]*height:\s*100%;[^}]*overflow:\s*hidden;[^}]*overscroll-behavior:\s*none;/);
+		expect(base).not.toContain('min-height: 100dvh');
+	});
+
+	it('keeps scrolling inside the panes', () => {
+		expect(base).toMatch(/\.overflow-y-auto[^{]*\{[^}]*overscroll-behavior:\s*contain;/);
+	});
+
+	it('makes the window chrome unselectable and images and links undraggable, not the content', () => {
+		expect(base).toMatch(/\[data-tauri-drag-region\],\s*button,[^{]*\{[^}]*user-select:\s*none;/);
+		expect(base).toMatch(/img,\s*a\s*\{[^}]*-webkit-user-drag:\s*none;/);
+		expect(base).not.toMatch(/^\s*(html|body|\*)\s*\{[^}]*user-select:\s*none/m);
 	});
 });

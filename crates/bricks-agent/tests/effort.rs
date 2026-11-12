@@ -156,9 +156,9 @@ fn serve(answers: Vec<Answer>) -> Server {
 // ─── Configuration ───────────────────────────────────────────────────────────
 
 /// Three models: `a` (chat completions; labels differ from ids; a profile
-/// literally named `default`; declared default `high`), `c` (Anthropic
-/// messages, thinking parameters, no declared default), `plain` (no
-/// profiles).
+/// literally named `default`; `high` is the first level, so it applies when
+/// none is chosen), `c` (Anthropic messages, thinking parameters, one level
+/// that is therefore its default), `plain` (no profiles).
 fn registry(url: &str) -> Arc<ProviderRegistry> {
     let toml = format!(
         r#"
@@ -180,7 +180,10 @@ streaming = true
 max_input_tokens = 100000
 max_output_tokens = 4096
 [providers.models.reasoning]
-default = "high"
+[[providers.models.reasoning.profiles]]
+id = "high"
+label = "High"
+parameters = {{ reasoning_effort = "high" }}
 [[providers.models.reasoning.profiles]]
 id = "low"
 label = "Low"
@@ -189,10 +192,6 @@ parameters = {{ reasoning_effort = "low" }}
 id = "medium"
 label = "Medium"
 parameters = {{ reasoning_effort = "medium" }}
-[[providers.models.reasoning.profiles]]
-id = "high"
-label = "High"
-parameters = {{ reasoning_effort = "high" }}
 [[providers.models.reasoning.profiles]]
 id = "default"
 label = "Profile named default"
@@ -272,7 +271,7 @@ async fn open(answers: Vec<Answer>) -> Env {
     assert_eq!(
         effective_reasoning.as_deref(),
         Some("high"),
-        "the declared default"
+        "the first level applies when none is chosen"
     );
     Env {
         ctl,
@@ -325,7 +324,7 @@ fn bodies(env: &Env) -> Vec<Value> {
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 #[tokio::test]
-async fn the_declared_default_is_sent_then_a_switch_and_the_reset_reach_the_wire() {
+async fn the_first_level_is_sent_then_a_switch_and_the_reset_reach_the_wire() {
     let mut env = open(vec![]).await;
     run(&mut env, "one").await;
     assert_eq!(effort(&bodies(&env)[0]).as_deref(), Some("high"));
@@ -402,7 +401,7 @@ async fn unknown_profiles_and_models_without_profiles_change_nothing() {
         })
         .unwrap_err();
     assert!(
-        e.contains("ultra") && e.contains("low, medium, high, default"),
+        e.contains("ultra") && e.contains("high, low, medium, default"),
         "{e}"
     );
     until(&mut env.events, "command_rejected").await;

@@ -18,8 +18,7 @@ function providerWith(names: string[]): ProviderView {
 		protocol: 'responses',
 		auth: 'none',
 		auth_header: null,
-		api_key_env: null,
-		has_inline_key: false,
+		api_key: null,
 		has_credentials: false,
 		path: null,
 		header_names: [],
@@ -36,7 +35,6 @@ function providerWith(names: string[]): ProviderView {
 			async_tool_calls: false,
 			max_input_tokens: 1,
 			max_output_tokens: 1,
-			reasoning_default: null,
 			profiles: [],
 			priced: false,
 			document_mime_types: [],
@@ -49,11 +47,16 @@ describe('protocol and auth labels', () => {
 	it('names the known values and keeps unknown ones as they are', () => {
 		expect(protocolLabel('anthropic_messages')).toBe('Anthropic Messages');
 		expect(protocolLabel('exotic')).toBe('exotic');
-		expect(authLabel('api_key_header')).toBe('Clé dans un en-tête');
+		expect(authLabel('api_key_header')).toBe('Clé dans un en-tête (non recommandé)');
+		expect(authLabel('exotic')).toBe('exotic');
 	});
 
-	it('the auth label none agrees with « authentification » (feminine)', () => {
-		expect(authLabel('none')).toBe('Aucune');
+	it('the bearer label is the recommended one', () => {
+		expect(authLabel('bearer')).toBe('Bearer (recommandé)');
+	});
+
+	it('the none label names a local model, and agrees with « authentification » (feminine)', () => {
+		expect(authLabel('none')).toBe('Aucune (modèle local)');
 	});
 });
 

@@ -1,18 +1,19 @@
 <script lang="ts">
 	import { t } from '$lib/i18n/i18n.svelte';
 	import type { Snippet } from 'svelte';
-	import ChevronDownIcon from '@lucide/svelte/icons/chevron-down';
 	import { Badge } from '$lib/components/ui/badge';
+	import { Button } from '$lib/components/ui/button';
 	import DiffStat from '$lib/layout/DiffStat.svelte';
 	import FileIcon from '$lib/features/file-icons/FileIcon.svelte';
 	import { errorMessage, type FileDiff } from '$lib/ipc/client';
-	import { cn } from '$lib/utils.js';
 	import DiffView from './DiffView.svelte';
 	import { baseName, dirName } from './format';
 	import type { PatchSource } from './types';
 
 	interface Props {
 		path: string;
+		/** Name shown for the file. Default: the path, its folder dimmed. In a tree: the last part. */
+		name?: string;
 		/** Change label shown beside the path, e.g. « Modifié ». */
 		status?: string;
 		/** Added and removed counts. `null` or absent: not known, nothing is shown. */
@@ -33,6 +34,7 @@
 
 	let {
 		path,
+		name,
 		status,
 		added,
 		removed,
@@ -72,51 +74,45 @@
 	});
 </script>
 
-<div class="border-b border-border last:border-b-0">
-	<div class="flex min-w-0 items-start gap-2">
-		<button
-			type="button"
-			class="flex min-w-0 flex-1 items-start gap-2 rounded-sm px-1 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default"
+<div class="min-w-0">
+	<div class="flex min-w-0 items-center gap-1">
+		<Button
+			variant="ghost"
+			size="sm"
+			class="h-auto min-h-7 min-w-0 flex-1 justify-start py-1 text-ui font-normal disabled:opacity-100 aria-expanded:bg-element-selected"
 			aria-expanded={expandable ? expanded : undefined}
 			disabled={!expandable}
+			title={path}
 			onclick={() => (expanded = !expanded)}
 		>
-			{#if expandable}
-				<ChevronDownIcon
-					class={cn('mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform duration-150', expanded && 'rotate-180')}
-					aria-hidden="true"
-				/>
-			{:else}
-				<span class="size-4 shrink-0" aria-hidden="true"></span>
-			{/if}
-			<span class="flex min-w-0 flex-1 flex-col gap-0.5">
-				<span class="flex min-w-0 items-center gap-1.5 font-mono text-xs" title={path}>
-					<FileIcon {path} />
+			<FileIcon {path} />
+			<span class="flex min-w-0 flex-1 flex-col items-start gap-0.5">
+				<span class="flex w-full min-w-0 items-center gap-2">
 					<span class="min-w-0 truncate">
-						{#if dirName(path)}<span class="text-muted-foreground">{dirName(path)}/</span>{/if}{baseName(path)}
+						{#if name}{name}{:else}{#if dirName(path)}<span class="text-muted-foreground">{dirName(path)}/</span>{/if}{baseName(path)}{/if}
+					</span>
+					<span class="ml-auto flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+						{#if status}<span>{status}</span>{/if}
+						{#if agents.length > 0}<span class="max-w-32 truncate">{agents.join(', ')}</span>{/if}
+						{#if binary}
+							<Badge variant="outline">{t('changes.binary')}</Badge>
+						{:else if hasCounts}
+							<DiffStat additions={added ?? 0} deletions={removed ?? 0} label={countLabel} />
+						{/if}
 					</span>
 				</span>
-				<span class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-					{#if status}<span>{status}</span>{/if}
-					{#if agents.length > 0}<span>{agents.join(', ')}</span>{/if}
-					{#if binary}
-						<Badge variant="outline">{t('changes.binary')}</Badge>
-					{:else if hasCounts}
-						<DiffStat additions={added ?? 0} deletions={removed ?? 0} label={countLabel} />
-					{/if}
-				</span>
-				{#if note}<span class="truncate text-xs text-muted-foreground">{note}</span>{/if}
+				{#if note}<span class="max-w-full truncate text-xs text-muted-foreground">{note}</span>{/if}
 			</span>
-		</button>
+		</Button>
 		{#if actions}
-			<div class="shrink-0 py-1.5 pr-1">
+			<div class="shrink-0">
 				{@render actions()}
 			</div>
 		{/if}
 	</div>
 
 	{#if expanded}
-		<div class="flex flex-col gap-3 pr-1 pb-3 pl-6">
+		<div class="flex flex-col gap-3 pt-1 pr-1 pb-3 pl-6">
 			{#each patches as source (source.key)}
 				{@const entry = loaded[source.key]}
 				<div class="flex flex-col gap-1">

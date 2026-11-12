@@ -6,7 +6,7 @@
 	import { buttonVariants } from '$lib/components/ui/button';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
 	import { DropdownMenu as DropdownMenuPrimitive } from 'bits-ui';
-	import EllipsisIcon from '@lucide/svelte/icons/ellipsis';
+	import EllipsisVerticalIcon from '@lucide/svelte/icons/ellipsis-vertical';
 	import { ADK_ACCESS_GROUPS } from './adkAccess';
 
 	// The menu opens inspectors that read the shown conversation: none without one.
@@ -20,11 +20,12 @@
 
 <DropdownMenu.Root>
 	<DropdownMenu.Trigger
-		class={[buttonVariants({ variant: 'ghost', size: 'sm' }), 'h-7 px-2 text-ui']}
+		class={[buttonVariants({ variant: 'ghost', size: 'icon-sm' }), 'text-muted-foreground']}
 		disabled={!enabled}
+		aria-label={t('context.more')}
+		title={t('context.more')}
 	>
-		<EllipsisIcon aria-hidden="true" />
-		{t('context.more')}
+		<EllipsisVerticalIcon aria-hidden="true" />
 	</DropdownMenu.Trigger>
 	<DropdownMenu.Content align="end" class="min-w-64">
 		{#each ADK_ACCESS_GROUPS as group, i (group.label)}

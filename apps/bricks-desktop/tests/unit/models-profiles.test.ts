@@ -1,23 +1,20 @@
-// Unit tests for the reasoning profiles of the model form: free ids, JSON parameters, JSON Pointers,
-// duplicates, the default profile, and the whole list sent only when it changed.
+// Unit tests for the reasoning levels of the model form: free ids, JSON parameters, JSON Pointers,
+// duplicates, the level created from its name alone, and the whole list sent only when it changed.
 import { describe, expect, it } from 'vitest';
 import type { ModelView } from '../../src/lib/ipc/bindings/ModelView';
 import {
-	DEFAULT_PROFILE_PENDING,
 	PROFILE_ID_DUPLICATE,
 	PROFILE_ID_REQUIRED,
 	PROFILE_PARAMETERS_OBJECT,
 	buildModelPatch,
 	draftLabel,
-	hasFormErrors,
 	isEmptyModelPatch,
 	modelForm,
+	newLevelDraft,
 	newProfileDraft,
 	parseProfileDraft,
 	profileDraft,
 	profilesPatch,
-	validateModelForm,
-	type ModelForm,
 	type ProfileDraft
 } from '../../src/lib/features/settings/models';
 
@@ -34,7 +31,6 @@ const model: ModelView = {
 	async_tool_calls: false,
 	max_input_tokens: 128000,
 	max_output_tokens: 8192,
-	reasoning_default: 'low',
 	profiles: [
 		{ id: 'low', label: 'Léger', parameters: { budget: 1024 }, remove: ['/thinking'] },
 		{ id: 'high', label: null, parameters: {}, remove: [] }
@@ -100,6 +96,28 @@ describe('parseProfileDraft', () => {
 	});
 });
 
+describe('newLevelDraft', () => {
+	it('names the reasoning effort in the request field of the protocol', () => {
+		expect(JSON.parse(newLevelDraft('low', 'chat_completions').parameters)).toEqual({ reasoning_effort: 'low' });
+		expect(JSON.parse(newLevelDraft('high', 'responses').parameters)).toEqual({ reasoning: { effort: 'high' } });
+		expect(JSON.parse(newLevelDraft('max', 'anthropic_messages').parameters)).toEqual({ output_config: { effort: 'max' } });
+	});
+
+	it('takes the trimmed level as the id, with no label and no removed pointer', () => {
+		const level = newLevelDraft('  max ', 'chat_completions');
+		expect(level.id).toBe('max');
+		expect(level.label).toBe('');
+		expect(level.remove).toBe('');
+	});
+
+	it('gives a level that parses as it is, in the shape of the engine', () => {
+		expect(parseProfileDraft(newLevelDraft('low', 'responses'), [])).toEqual({
+			ok: true,
+			value: { id: 'low', label: null, parameters: { reasoning: { effort: 'low' } }, remove: [] }
+		});
+	});
+});
+
 describe('profilesPatch', () => {
 	it('sends nothing when the list is the one that was read', () => {
 		const drafts = model.profiles.map(profileDraft);
@@ -112,7 +130,7 @@ describe('profilesPatch', () => {
 		expect(profilesPatch(original, reordered)).toEqual({ ok: true, edits: null });
 	});
 
-	it('sends the whole list when a profile was added, edited, removed or reordered', () => {
+	it('sends the whole list when a level was added, edited, removed or reordered', () => {
 		const drafts = model.profiles.map(profileDraft);
 		const added = profilesPatch(model.profiles, [...drafts, draft({ id: 'max' })]);
 		expect(added.ok && added.edits?.map((e) => e.id)).toEqual(['low', 'high', 'max']);
@@ -127,11 +145,11 @@ describe('profilesPatch', () => {
 		expect(reordered.ok && reordered.edits?.map((e) => e.id)).toEqual(['high', 'low']);
 	});
 
-	it('sends an empty list when every profile is removed', () => {
+	it('sends an empty list when every level is removed', () => {
 		expect(profilesPatch(model.profiles, [])).toEqual({ ok: true, edits: [] });
 	});
 
-	it('refuses the list as a whole when one profile is invalid, naming it', () => {
+	it('refuses the list as a whole when one level is invalid, naming it', () => {
 		const drafts = [...model.profiles.map(profileDraft), draft({ id: 'broken', parameters: '{' })];
 		const result = profilesPatch(model.profiles, drafts);
 		expect(result.ok).toBe(false);
@@ -146,48 +164,22 @@ describe('profilesPatch', () => {
 	});
 });
 
-describe('default profile', () => {
-	function formWith(overrides: Partial<ModelForm>): ModelForm {
-		return { ...modelForm(model), ...overrides };
-	}
-
-	it('accepts a default among the profiles, or none', () => {
-		expect(hasFormErrors(validateModelForm(formWith({ reasoningDefault: 'high' })))).toBe(false);
-		expect(hasFormErrors(validateModelForm(formWith({ reasoningDefault: null })))).toBe(false);
+describe('profile list in the model patch', () => {
+	it('keeps the order of the levels in the patch', () => {
+		const drafts = [profileDraft(model.profiles[1]), profileDraft(model.profiles[0])];
+		const outcome = profilesPatch(model.profiles, drafts);
+		const patch = buildModelPatch(model, modelForm(model), outcome.ok ? outcome.edits : null);
+		expect(patch.profiles?.map((p) => p.id)).toEqual(['high', 'low']);
 	});
 
-	it('refuses a default that is no longer among the profiles', () => {
-		const errors = validateModelForm(formWith({ profiles: [profileDraft(model.profiles[1])] }));
-		expect(errors.defaultProfile).toBe(DEFAULT_PROFILE_PENDING());
-	});
-
-	it('refuses the form while the removed or renamed default has no new choice', () => {
-		expect(validateModelForm(formWith({ defaultPending: true })).defaultProfile).toBe(DEFAULT_PROFILE_PENDING());
-	});
-
-	it('clears the default in the same patch when the profile list loses it', () => {
-		const form = formWith({
-			profiles: [profileDraft(model.profiles[1])],
-			reasoningDefault: null,
-			defaultPending: false
-		});
-		const outcome = profilesPatch(model.profiles, form.profiles);
-		expect(outcome.ok).toBe(true);
-		const patch = buildModelPatch(model, form, outcome.ok ? outcome.edits : null);
-		expect(patch).toMatchObject({ clear_reasoning_default: true, reasoning_default: null });
-		expect(patch.profiles?.map((p) => p.id)).toEqual(['high']);
-	});
-
-	it('sends the new default with the list when the user picks another profile', () => {
-		const form = formWith({ profiles: [profileDraft(model.profiles[1])], reasoningDefault: 'high' });
-		const outcome = profilesPatch(model.profiles, form.profiles);
-		const patch = buildModelPatch(model, form, outcome.ok ? outcome.edits : null);
-		expect(patch).toMatchObject({ reasoning_default: 'high', clear_reasoning_default: false });
-	});
-
-	it('sends nothing for profiles when neither the list nor the default changed', () => {
+	it('sends no profiles when the list did not change', () => {
 		const patch = buildModelPatch(model, modelForm(model), null);
 		expect(patch.profiles).toBeNull();
+	});
+
+	it('an untouched form with its levels read back gives an empty patch', () => {
+		const outcome = profilesPatch(model.profiles, model.profiles.map(profileDraft));
+		const patch = buildModelPatch(model, modelForm(model), outcome.ok ? outcome.edits : null);
 		expect(isEmptyModelPatch(patch)).toBe(true);
 	});
 });

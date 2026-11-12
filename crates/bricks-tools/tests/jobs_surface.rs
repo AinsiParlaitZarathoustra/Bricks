@@ -528,3 +528,102 @@ fn the_three_old_task_tools_are_gone_from_every_set() {
         assert!(set.contains(&"Bash".to_string()), "{set_name}: {set:?}");
     }
 }
+
+// ─── Previews of output, and the tasks a session keeps ───────────────────────
+
+#[tokio::test]
+async fn a_started_job_that_ended_or_is_not_ready_shows_its_last_lines() {
+    let dir = tempfile::tempdir().unwrap();
+    let reg = JobRegistry::new(settings(), None);
+    let c = ctx(dir.path(), &reg, "agent_a");
+
+    let ended = background(&reg, &c, "echo out-line; echo err-line >&2; exit 3").await;
+    assert!(ended.content.contains("stdout: lines 1–1 of 1"), "{}", ended.content);
+    assert!(ended.content.contains("out-line"), "{}", ended.content);
+    assert!(ended.content.contains("stderr: lines 1–1 of 1"), "{}", ended.content);
+    assert!(ended.content.contains("err-line"), "{}", ended.content);
+
+    let waiting = BashTool::with_jobs(Arc::clone(&reg))
+        .execute(
+            json!({ "command": "echo booting; sleep 30", "background": true,
+                    "ready_pattern": "listening", "ready_timeout": 300 }),
+            &c,
+        )
+        .await;
+    assert!(waiting.content.contains("ready: not yet"), "{}", waiting.content);
+    assert!(waiting.content.contains("booting"), "{}", waiting.content);
+    assert!(!waiting.content.contains("stderr:"), "an empty stream is not shown: {}", waiting.content);
+
+    let running = background(&reg, &c, "echo quiet; sleep 30").await;
+    assert!(!running.content.contains("stdout:"), "{}", running.content);
+    for id in [id_of(&waiting), id_of(&running)] {
+        job(&reg, &c, json!({ "action": "stop", "job_id": id })).await;
+    }
+}
+
+#[tokio::test]
+async fn a_wait_that_sees_the_end_shows_the_last_lines_and_where_the_rest_is() {
+    let dir = tempfile::tempdir().unwrap();
+    let reg = JobRegistry::new(settings(), None);
+    let c = ctx(dir.path(), &reg, "agent_a");
+
+    let y = yielded(&reg, &c, "sleep 0.3; seq 1 500; echo oops >&2", 50).await;
+    let id = id_of(&y);
+    let w = job(&reg, &c, json!({ "action": "wait", "job_id": id })).await;
+    assert!(!w.is_error, "{}", w.content);
+    assert!(w.content.contains("stdout: lines 401–500 of 500"), "{}", w.content);
+    assert!(w.content.contains("next offset 500"), "{}", w.content);
+    assert!(w.content.contains("\n500"), "{}", w.content);
+    assert!(!w.content.contains("\n400\n"), "{}", w.content);
+    assert!(w.content.contains("stderr: lines 1–1 of 1"), "{}", w.content);
+    assert!(w.content.contains("oops"), "{}", w.content);
+
+    // A job that wrote nothing: its line alone.
+    let quiet = id_of(&background(&reg, &c, "sleep 0.2").await);
+    let w = job(&reg, &c, json!({ "action": "wait", "job_id": quiet })).await;
+    assert!(!w.content.contains("stdout:") && !w.content.contains("stderr:"), "{}", w.content);
+}
+
+#[tokio::test]
+async fn the_wait_preview_stays_within_the_page() {
+    let dir = tempfile::tempdir().unwrap();
+    let reg = JobRegistry::new(
+        JobSettings {
+            max_page_bytes: 2048,
+            ..settings()
+        },
+        None,
+    );
+    let c = ctx(dir.path(), &reg, "agent_a");
+    // 100-byte lines on both streams: 100 lines would be 10 KB each.
+    let cmd = "for i in $(seq 1 200); do printf '%099d\\n' $i; printf '%099d\\n' $i >&2; done";
+    let id = id_of(&background(&reg, &c, cmd).await);
+    let w = job(&reg, &c, json!({ "action": "wait", "job_id": id })).await;
+    let body: usize = w
+        .content
+        .lines()
+        .filter(|l| l.len() == 99)
+        .map(|l| l.len() + 1)
+        .sum();
+    assert!(body > 0 && body <= 2048, "{body}: {}", w.content);
+    assert!(w.content.contains(&format!("{:099}", 200)), "the last line is kept: {}", w.content);
+}
+
+#[tokio::test]
+async fn a_session_lets_its_finished_tasks_go_when_it_takes_a_new_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let reg = JobRegistry::new(settings(), None);
+    let c = ctx(dir.path(), &reg, "agent_a");
+    let sessions = bricks_tools::shell::session(&c.session_id, &Default::default());
+
+    let first = id_of(&background(&reg, &c, "true").await);
+    job(&reg, &c, json!({ "action": "wait", "job_id": first })).await;
+    let long = id_of(&background(&reg, &c, "sleep 30").await);
+    let kept = sessions.tasks();
+    assert_eq!(kept.len(), 1, "only the running task is kept");
+    // The finished job is still reported by the registry.
+    let status = job(&reg, &c, json!({ "action": "status", "job_id": first })).await;
+    assert!(status.content.contains("completed"), "{}", status.content);
+    job(&reg, &c, json!({ "action": "stop", "job_id": long })).await;
+    bricks_tools::shell::close_session_now(&c.session_id);
+}

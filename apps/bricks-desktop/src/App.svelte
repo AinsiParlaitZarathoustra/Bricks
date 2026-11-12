@@ -2,7 +2,7 @@
   // Root: wires the shell, the global state and the feature entry points.
   // Owner: orchestrator.
   import { t } from '$lib/i18n/i18n.svelte'
-  import { onMount } from 'svelte'
+  import { onMount, untrack } from 'svelte'
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import { toast } from 'svelte-sonner'
   import { Toaster } from '$lib/components/ui/sonner'
@@ -28,6 +28,8 @@
   import ChangesPanel from '$lib/features/changes/ChangesPanel.svelte'
   import ReaderPanel from '$lib/features/reader/ReaderPanel.svelte'
   import { reader } from '$lib/state/reader.svelte'
+  import { conversationHistory } from '$lib/state/history.svelte'
+  import SearchDialog from '$lib/features/navigation/SearchDialog.svelte'
   import TerminalPanel from '$lib/features/terminal/TerminalPanel.svelte'
   import SettingsDialog from '$lib/features/settings/SettingsDialog.svelte'
   import FolderMissingDialog from '$lib/features/navigation/FolderMissingDialog.svelte'
@@ -50,6 +52,12 @@
   // macOS draws its window buttons over the top bar, except in full screen.
   let fullscreen = $state(false)
   const systemButtons = $derived(app.info?.platform === 'macos' && !fullscreen)
+
+  // Every conversation shown is a stop of the history (« Précédent » / « Suivant »).
+  $effect(() => {
+    const shown = app.currentSessionId
+    untrack(() => conversationHistory.visit(shown))
+  })
 
   /** Follows the window's full-screen state; a no-op outside Tauri. */
   function watchFullscreen(): Promise<() => void> {
@@ -204,7 +212,17 @@
       {onLayoutChange}
     >
       {#snippet topbar(controls)}
-        <TopBar {...controls} {systemButtons} changesPressed={app.rightView === 'changes' && rightOpen} onToggleChanges={toggleChanges} readerPressed={app.rightView === 'reader' && rightOpen} onToggleReader={toggleReader}>
+        <TopBar
+          {...controls}
+          {systemButtons}
+          onBack={() => void conversationHistory.back()}
+          onForward={() => void conversationHistory.forward()}
+          canGoBack={conversationHistory.canGoBack}
+          canGoForward={conversationHistory.canGoForward}
+          changesPressed={app.rightView === 'changes' && rightOpen} onToggleChanges={toggleChanges} readerPressed={app.rightView === 'reader' && rightOpen} onToggleReader={toggleReader}>
+          {#snippet search()}
+            <SearchDialog />
+          {/snippet}
           {#snippet title()}
             <ConversationTitle conversation={app.current} />
           {/snippet}

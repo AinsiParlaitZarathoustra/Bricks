@@ -174,11 +174,15 @@ A `Bash` call returns one of two ways when a command is still running:
 
 * **At once**, with `background: true`: the call returns as soon as the job is
   started, with its `job_id` (`job_` followed by 12 hexadecimal characters), its
-  pid, its state, its readiness and its working directory.
+  pid, its state, its readiness and its working directory. When the job has
+  already ended, or its `ready_pattern` was not seen in time, the last 50 lines
+  of stdout and stderr follow, as `output` shows them.
 * **After `yield_time_ms`**, for a foreground command that is still running: the
   call returns status `Running` with its `job_id`, pid, state, working directory
   and the stdout and stderr cursors (the line counts to read from). The command
-  is not restarted and not killed; its `timeout` still applies.
+  is not restarted and not killed; its `timeout` still applies. Unlike a
+  background job, it is stopped when the run that started it ends: a `Job`
+  `wait` lets it finish first.
 
 Both are jobs: a separate `bash` started from a **snapshot** of the session state
 taken at launch (§1). A job never publishes into the session, so what it changes
@@ -203,7 +207,8 @@ with theirs.
   it. Another agent's id gets the same answer as an unknown id. A frontend sees
   every job of its session.
 * **Lifetime**: a background job (`background: true`) survives the turn that
-  started it and ends with the session. A yielded command is not durable: it
+  started it and ends with the session. Both kinds report the working directory
+  the command started in and the notes of its launch. A yielded command is not durable: it
   ends with the run that started it. A sub-agent's jobs stop when it ends.
 * **Bounded capture**: per stream, 5 000 lines and 1 MiB
   (`[background] output_buffer_bytes`) are kept in memory; a line longer than
@@ -239,8 +244,11 @@ ReadOnly.
   longer than the page (`[background] max_page_bytes`, 64 KiB by default) is
   shown cut and marked, and the offset moves past it. A line still in progress
   is shown apart and marked; it does not move the offset.
-* **`wait`**: returns when the job ends or after `timeout_ms`. A timeout says
-  the job is still running and stops nothing.
+* **`wait`**: returns when the job ends or after `timeout_ms`. Once ended, the
+  job's line is followed by the last 100 lines of stdout and of stderr (those
+  that wrote something), each under the `output` header, whose range and next
+  offset tell when the output is longer; the two together stay within
+  `max_page_bytes`. A timeout says the job is still running and stops nothing.
 * **`stop`**: TERM to the process group and its tree, a grace period
   (`stop_grace_ms`, 2 s by default), then KILL. Idempotent: a job that already
   ended is a success, and the answer gives its state.

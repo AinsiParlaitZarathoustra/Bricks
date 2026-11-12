@@ -3,7 +3,6 @@
 	// occupation of the shown conversation. Its sub-agents are in the thread.
 	import { t } from '$lib/i18n/i18n.svelte';
 	import { app } from '$lib/state/app.svelte';
-	import { ScrollArea } from '$lib/components/ui/scroll-area';
 	import EmptyState from '$lib/layout/EmptyState.svelte';
 	import ContextCard from './ContextCard.svelte';
 	import PendingApprovals from './PendingApprovals.svelte';
@@ -29,7 +28,7 @@
 	{#if !project}
 		<EmptyState title={t('common.noOpenProject')} icon={FolderOpenIcon} />
 	{:else}
-		<ScrollArea class="h-full" bind:viewportRef={viewport}>
+		<div bind:this={viewport} class="scrollbar-subtle h-full overflow-y-auto overscroll-contain">
 			<div class="flex flex-col gap-3 px-3 pt-5 pb-3">
 				{#if conversation}
 					<PendingApprovals {approvals} />
@@ -44,6 +43,6 @@
 					<ContextCard {conversation} />
 				{/if}
 			</div>
-		</ScrollArea>
+		</div>
 	{/if}
 </div>

@@ -69,7 +69,7 @@ fn provider(reg: &ProviderRegistry, sel: &str) -> ConfiguredProvider {
     // The key comes through an injected lookup: no key is written anywhere.
     model(reg, sel)
         .provider()
-        .env(|_| Some(KEY.to_string()))
+        .api_key(KEY)
         .build()
         .unwrap()
 }
@@ -121,15 +121,15 @@ fn identity(api_model: &str, profile: Option<&str>) -> RequestIdentity {
 }
 
 #[tokio::test]
-async fn without_an_option_the_model_default_profile_is_the_one_sent() {
+async fn without_an_option_the_model_first_level_is_the_one_sent() {
     let (mock, reg) = setup(vec![answer()]);
     let p = provider(&reg, "mock/think");
     let (id, body) = send(&mock, &p, None).await;
-    assert_eq!(id, Some(identity("vendor-think", Some("deep"))));
+    assert_eq!(id, Some(identity("vendor-think", Some("fast"))));
     assert_eq!(body["model"], "vendor-think");
     assert_eq!(
-        body["reasoning"]["effort"], "high",
-        "the profile `deep` was applied"
+        body["reasoning"]["effort"], "low",
+        "the first level `fast` was applied"
     );
 }
 
@@ -159,7 +159,7 @@ async fn an_instance_profile_applies_without_an_option_and_the_option_wins() {
     let (mock, reg) = setup(vec![answer(), answer()]);
     let p = model(&reg, "mock/think")
         .provider()
-        .env(|_| Some(KEY.to_string()))
+        .api_key(KEY)
         .reasoning_profile("fast")
         .build()
         .unwrap();

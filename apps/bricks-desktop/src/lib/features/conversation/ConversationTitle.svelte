@@ -26,7 +26,9 @@
     (conversation && app.projects.find((p) => p.id === conversation.projectId)) ?? app.currentProject,
   )
   const projectName = $derived(project && !project.chats ? project.name : null)
-  const title = $derived(conversation ? conversation.title.trim() || t('common.newConversation') : 'Bricks')
+  const title = $derived(conversation ? conversation.title.trim() || t('common.newConversation') : '')
+  /** A new conversation, still empty, shows nothing: neither its project nor a name. */
+  const shown = $derived(conversation !== null && (conversation.title.trim() !== '' || conversation.items.length > 0))
   /** The sub-agent whose branch is shown, after the conversation's title. */
   const branch = $derived(ui.agentId ? (conversation?.agents.get(ui.agentId) ?? null) : null)
 
@@ -72,7 +74,8 @@
   conversation's name is where you are (double-click or the pencil to rename it). In a sub-agent's
   branch, the conversation's name leads back to it.
 -->
-<div class="group/title flex min-w-0 max-w-full items-center justify-center gap-1">
+{#if shown || branch}
+<div class="group/title flex min-w-0 max-w-full items-center gap-1">
   <Breadcrumb.Root class="min-w-0" aria-label={t('conversation.breadcrumb')}>
     <Breadcrumb.List class="flex-nowrap gap-1 text-ui">
       {#if projectName && project}
@@ -89,7 +92,7 @@
             {/snippet}
           </Breadcrumb.Link>
         </Breadcrumb.Item>
-        <Breadcrumb.Separator />
+        <Breadcrumb.Separator class="text-muted-foreground/60">/</Breadcrumb.Separator>
       {/if}
 
       {#if branch}
@@ -100,7 +103,7 @@
             {/snippet}
           </Breadcrumb.Link>
         </Breadcrumb.Item>
-        <Breadcrumb.Separator />
+        <Breadcrumb.Separator class="text-muted-foreground/60">/</Breadcrumb.Separator>
       {/if}
 
       <!-- The page's h1 is the sr-only « Bricks » (AppShell): where you are is its h2. -->
@@ -142,3 +145,4 @@
     <StatusDot status="running" label={t('common.running')} />
   {/if}
 </div>
+{/if}

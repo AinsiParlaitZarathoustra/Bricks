@@ -72,6 +72,7 @@ function fakeHost(options: Options = {}) {
 			return options.resumeError ?? null;
 		},
 		showChanges: () => rec('showChanges'),
+		openSettings: (section) => rec('openSettings', section),
 		async attach(kind, path) {
 			rec('attach', kind, path);
 			return null;

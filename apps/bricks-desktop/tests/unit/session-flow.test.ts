@@ -265,6 +265,7 @@ function appHost(action: SlashAction) {
 		attachmentBlocks: () => ({ blocks: [] }),
 		resume: async () => null,
 		showChanges: () => {},
+		openSettings: () => {},
 		attach: async () => null,
 		quit: async () => null
 	};

@@ -83,10 +83,12 @@ describe('theme tokens in hex', () => {
 		expect(oklchToHex(0, 0, 0)).toBe('#000000');
 	});
 
-	it('the default accent is the same blue in both modes: #002aff', () => {
+	it('the default accent is #002aff in light, and a lighter blue in dark that a focus ring can be seen on', () => {
 		expect(oklchToHex(0.4755, 0.2973, 264.2)).toBe('#002aff');
 		expect(TOKENS.light.accent).toBe('#002aff');
-		expect(TOKENS.dark.accent).toBe('#002aff');
+		expect(TOKENS.dark.accent).toBe('#225bf7');
+		expect(contrastRatio(TOKENS.dark.accent, TOKENS.dark.background)).toBeGreaterThanOrEqual(3);
+		expect(contrastRatio('#fcfaf6', TOKENS.dark.accent)).toBeGreaterThanOrEqual(4.5);
 	});
 
 	it('keeps the light and dark defaults readable as they are', () => {

@@ -476,7 +476,7 @@ max_output_tokens = 4000
         .resolve("a/m")
         .unwrap()
         .provider()
-        .env(|_| Some("test-key".into()))
+        .api_key("test-key")
         .build()
         .unwrap();
     let (log, on_event) = events();

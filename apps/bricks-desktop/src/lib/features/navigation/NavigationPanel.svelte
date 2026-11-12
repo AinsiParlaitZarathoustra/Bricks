@@ -5,13 +5,11 @@
 	import FolderPlus from '@lucide/svelte/icons/folder-plus';
 	import Settings from '@lucide/svelte/icons/settings';
 	import { Button } from '$lib/components/ui/button';
-	import { ScrollArea } from '$lib/components/ui/scroll-area';
 	import { app } from '$lib/state/app.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import ConversationList from './ConversationList.svelte';
 	import NewConversationButton from './NewConversationButton.svelte';
 	import ProjectList from './ProjectList.svelte';
-	import SearchDialog from './SearchDialog.svelte';
 
 	let adding = $state(false);
 
@@ -34,15 +32,13 @@
 	aria-label={t('navigation.projectsAndConversations')}
 	class="flex h-full min-h-0 flex-col bg-sidebar text-sidebar-foreground"
 >
-	<div class="relative flex flex-col gap-0.5 px-2 pt-7 pb-3">
-		<div class="absolute top-1 right-2">
-			<SearchDialog />
-		</div>
+	<div class="flex flex-col gap-0.5 px-2 pt-1 pb-3">
 		<NewConversationButton class="w-full justify-start px-2 text-ui" />
 	</div>
 
-	<ScrollArea
-		class="min-h-0 flex-1 [mask-image:linear-gradient(to_bottom,#000_calc(100%-24px),transparent)]"
+	<!-- Native scrolling, like shadcn's Sidebar.Content, and scroll-fade: an edge fades only where there is more to see. -->
+	<div
+		class="scrollbar-subtle scroll-fade scroll-fade-6 min-h-0 flex-1 overflow-y-auto overscroll-contain"
 	>
 		<div class="flex flex-col gap-4 pb-6">
 			{#if app.pinnedSessions.length > 0}
@@ -79,7 +75,7 @@
 				</section>
 			{/if}
 		</div>
-	</ScrollArea>
+	</div>
 
 	<div class="px-2 pt-2 pb-1">
 		<Button

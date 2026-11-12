@@ -9,6 +9,8 @@
 	import { errorMessage, gitDiff, gitShow, type FileDiff, type GitArea, type GitCommit } from '$lib/ipc/client';
 	import { app } from '$lib/state/app.svelte';
 	import FileChangeRow from './FileChangeRow.svelte';
+	import ChangeTree from './ChangeTree.svelte';
+	import { buildFileTree } from './tree';
 	import { gitState, type GitState } from './git.svelte';
 	import { countPatch } from './patch';
 	import { formatDateTime, gitCodeLabel, shortId } from './format';
@@ -142,8 +144,10 @@
 		{:else}
 			{#each sections as section (section.area)}
 				<SectionCard title={section.title} count={section.entries.length}>
-					{#each section.entries as entry (`${entry.area}:${entry.path}`)}
+					<ChangeTree nodes={buildFileTree(section.entries, (entry) => entry.path)}>
+					{#snippet file(entry, name)}
 						<FileChangeRow
+							name={name}
 							path={entry.path}
 							status={gitCodeLabel(entry.code)}
 							added={entry.added}
@@ -153,7 +157,8 @@
 							note={entry.orig_path ? t('changes.from', { origPath: entry.orig_path }) : undefined}
 							patches={diffSource(entry.path, entry.area)}
 						/>
-					{/each}
+					{/snippet}
+					</ChangeTree>
 				</SectionCard>
 			{/each}
 		{/if}
@@ -191,18 +196,21 @@
 									{:else if detail.files.length === 0}
 										<p class="text-xs text-muted-foreground">{t('changes.noFileOfThisProjectIn')}</p>
 									{:else}
-										{#each detail.files as file (file.diff.path)}
+										<ChangeTree nodes={buildFileTree(detail.files, (entry) => entry.diff.path)}>
+										{#snippet file(entry, name)}
 											<FileChangeRow
-												path={file.diff.path}
-												added={file.added}
-												removed={file.removed}
-												binary={file.diff.binary}
+												name={name}
+												path={entry.diff.path}
+												added={entry.added}
+												removed={entry.removed}
+												binary={entry.diff.binary}
 												countLabel={t('common.lines')}
 												patches={[
-													{ key: 'diff', title: t('changes.diff', { hash: shortId(commit.hash) }), load: async () => file.diff },
+													{ key: 'diff', title: t('changes.diff', { hash: shortId(commit.hash) }), load: async () => entry.diff },
 												]}
 											/>
-										{/each}
+										{/snippet}
+										</ChangeTree>
 									{/if}
 								</div>
 							{/if}

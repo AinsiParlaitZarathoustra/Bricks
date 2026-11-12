@@ -39,7 +39,7 @@ max_output_tokens = 16384
         .resolve("test/m")
         .expect("test model resolves")
         .provider()
-        .env(|_| Some("test-key".to_string()))
+        .api_key("test-key")
         .build()
         .expect("provider builds")
 }

@@ -8,6 +8,8 @@
 	import { ui } from '$lib/state/ui.svelte';
 	import { changesetIdsOf, changesetLinkLabel } from '$lib/features/catalog/changeset-links';
 	import FileChangeRow from './FileChangeRow.svelte';
+	import ChangeTree from './ChangeTree.svelte';
+	import { buildFileTree } from './tree';
 	import { projectJournal, type ProjectJournal } from './journal.svelte';
 	import { formatDateTime, kindLabel, shortId } from './format';
 	import { historyView } from './history-state';
@@ -96,17 +98,20 @@
 						{/each}
 					</div>
 				</header>
-				<div class="mt-1 border-t border-border px-3">
-					{#each record.files as file (file.path)}
+				<div class="mt-1 border-t border-border p-1">
+					<ChangeTree nodes={buildFileTree(record.files, (entry) => entry.path)}>
+					{#snippet file(entry, name)}
 						<FileChangeRow
-							path={file.path}
-							status={kindLabel(file.kind)}
-							added={file.added}
-							removed={file.removed}
-							binary={file.binary}
-							patches={patchesOf(record, file.path, file.has_patch)}
+							name={name}
+							path={entry.path}
+							status={kindLabel(entry.kind)}
+							added={entry.added}
+							removed={entry.removed}
+							binary={entry.binary}
+							patches={patchesOf(record, entry.path, entry.has_patch)}
 						/>
-					{/each}
+					{/snippet}
+					</ChangeTree>
 				</div>
 			</article>
 		{/each}

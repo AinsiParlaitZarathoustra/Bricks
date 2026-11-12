@@ -62,7 +62,6 @@ fn the_built_in_surface_is_exactly_the_kept_tools() {
         all,
         [
             "Read",
-            "ViewImage",
             "Write",
             "Edit",
             "ApplyPatch",
@@ -81,7 +80,7 @@ fn the_built_in_surface_is_exactly_the_kept_tools() {
     );
     // `all()` is the coding tools plus the plan.
     let mut coding_and_plan = names(&bricks_tools::coding());
-    assert_eq!(coding_and_plan.len(), 15);
+    assert_eq!(coding_and_plan.len(), 14);
     coding_and_plan.extend(names(&bricks_tools::planning()));
     assert_eq!(all, coding_and_plan);
     // Job follows the jobs Bash records: it comes with a registry, not alone.

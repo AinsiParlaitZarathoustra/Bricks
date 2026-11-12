@@ -9,6 +9,8 @@
 	import { changesetIdsOf, changesetLinkLabel } from '$lib/features/catalog/changeset-links';
 	import { conversationChanges, type FileView } from './conversation-changes';
 	import FileChangeRow from './FileChangeRow.svelte';
+	import ChangeTree from './ChangeTree.svelte';
+	import { buildFileTree } from './tree';
 	import { sessionJournal, type SessionJournal } from './journal.svelte';
 	import { formatDateTime, kindLabel, shortId } from './format';
 	import type { PatchSource } from './types';
@@ -86,19 +88,21 @@
 						<time class="shrink-0 tabular-nums">{formatDateTime(group.startedAt)}</time>
 					{/if}
 				</header>
-				<div class="rounded-lg border border-border bg-card px-3">
-					{#each group.files as file (file.path)}
+				<div class="rounded-lg border border-border bg-card p-1">
+					<ChangeTree nodes={buildFileTree(group.files, (entry) => entry.path)}>
+					{#snippet file(entry, name)}
 						<FileChangeRow
-							path={file.path}
-							status={kindLabel(file.kind)}
-							added={file.added}
-							removed={file.removed}
-							binary={file.binary}
-							agents={file.agents.map((id) => t('common.agent', { profile: shortId(id) }))}
-							patches={patchesOf(file)}
+							name={name}
+							path={entry.path}
+							status={kindLabel(entry.kind)}
+							added={entry.added}
+							removed={entry.removed}
+							binary={entry.binary}
+							agents={entry.agents.map((id) => t('common.agent', { profile: shortId(id) }))}
+							patches={patchesOf(entry)}
 						>
 							{#snippet actions()}
-								{@const ids = changesetIdsOf(file.operations)}
+								{@const ids = changesetIdsOf(entry.operations)}
 								{#each ids as id (id)}
 									<Button
 										variant="ghost"
@@ -110,7 +114,8 @@
 								{/each}
 							{/snippet}
 						</FileChangeRow>
-					{/each}
+					{/snippet}
+					</ChangeTree>
 				</div>
 			</section>
 		{/each}

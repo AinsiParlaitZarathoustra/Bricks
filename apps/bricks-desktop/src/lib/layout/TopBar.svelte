@@ -8,14 +8,25 @@
 	import TerminalIcon from '@lucide/svelte/icons/terminal';
 	import GitCompareIcon from '@lucide/svelte/icons/git-compare';
 	import BookOpenIcon from '@lucide/svelte/icons/book-open';
+	import MoveLeftIcon from '@lucide/svelte/icons/move-left';
+	import MoveRightIcon from '@lucide/svelte/icons/move-right';
+	import { Button } from '$lib/components/ui/button';
+	import * as Tooltip from '$lib/components/ui/tooltip';
 	import { Separator } from '$lib/components/ui/separator';
 	import PanelToggle from './PanelToggle.svelte';
 	import { TOP_BAR } from './constants.js';
 	import { cn } from '$lib/utils.js';
 
 	interface Props {
-		/** Centre slot: the conversation title and its project. Truncated when long. */
+		/** Where you are: the conversation and its project, left-aligned after the navigation. Truncated when long. */
 		title?: Snippet;
+		/** After the history arrows: the search of conversations. */
+		search?: Snippet;
+		/** History of the conversations visited. The arrows show only when onBack is set. */
+		onBack?: () => void;
+		onForward?: () => void;
+		canGoBack?: boolean;
+		canGoForward?: boolean;
 		/** Right slot: actions, rendered before the panel toggles. */
 		actions?: Snippet;
 		/** Last slot, after the panel toggles (the « Plus » menu). */
@@ -40,6 +51,11 @@
 
 	let {
 		title,
+		search,
+		onBack,
+		onForward,
+		canGoBack = false,
+		canGoForward = false,
 		actions,
 		trailing,
 		leftPressed = false,
@@ -59,21 +75,31 @@
 	const hasRightToggles = $derived(Boolean(onToggleRight || onToggleTerminal || onToggleChanges || onToggleReader));
 </script>
 
+{#snippet arrow(label: string, Icon: typeof MoveLeftIcon, enabled: boolean, onclick?: () => void)}
+	<Tooltip.Root>
+		<Tooltip.Trigger>
+			{#snippet child({ props })}
+				<Button {...props} variant="ghost" size="icon-sm" class="text-muted-foreground" aria-label={label} disabled={!enabled} {onclick}>
+					<Icon aria-hidden="true" />
+				</Button>
+			{/snippet}
+		</Tooltip.Trigger>
+		<Tooltip.Content side="bottom" sideOffset={6}>{label}</Tooltip.Content>
+	</Tooltip.Root>
+{/snippet}
+
 <!--
-	Three columns: the side columns are equal whatever the right side holds, so the
-	centre (title and project) stays in the middle. The centre is capped at 28 rem or
-	half the bar, and truncates. Empty areas are the Tauri drag region; controls are not.
+	Like the bars of desktop apps: on the left the panel toggle, the history arrows and the search,
+	then where you are (left-aligned, truncated); on the right the view toggles and « Plus ».
+	Empty areas are the Tauri drag region; controls are not.
 -->
 <header
 	data-tauri-drag-region
-	class={cn(
-		'grid shrink-0 grid-cols-[minmax(0,1fr)_minmax(0,min(28rem,50%))_minmax(0,1fr)] items-center gap-2 bg-sidebar px-3',
-		className
-	)}
+	class={cn('flex shrink-0 items-center gap-2 bg-sidebar px-3', className)}
 	style:height="{TOP_BAR.height}px"
 	style:padding-left={systemButtons ? `${TOP_BAR.macSystemButtons}px` : undefined}
 >
-	<div data-tauri-drag-region class="flex min-w-0 items-center justify-self-start">
+	<div data-tauri-drag-region class="flex shrink-0 items-center gap-0.5">
 		{#if onToggleLeft}
 			<PanelToggle
 				ariaLabel={t('layout.leftPanel')}
@@ -84,13 +110,22 @@
 				onclick={onToggleLeft}
 			/>
 		{/if}
+		{#if onBack}
+			<Tooltip.Provider delayDuration={400}>
+				{@render arrow(t('common.previous'), MoveLeftIcon, canGoBack, onBack)}
+				{@render arrow(t('common.next'), MoveRightIcon, canGoForward, onForward)}
+				{#if search}
+					{@render search()}
+				{/if}
+			</Tooltip.Provider>
+		{/if}
 	</div>
 
-	<div data-tauri-drag-region class="flex min-w-0 items-center justify-center">
+	<div data-tauri-drag-region class="ml-3 flex min-w-0 flex-1 items-center">
 		{@render title?.()}
 	</div>
 
-	<div data-tauri-drag-region class="flex min-w-0 items-center justify-self-end gap-1">
+	<div data-tauri-drag-region class="flex shrink-0 items-center gap-1">
 		{#if actions}
 			<div class="flex shrink-0 items-center gap-1">
 				{@render actions()}
@@ -110,7 +145,7 @@
 					/>
 				{/if}
 				{#if onToggleRight && (onToggleTerminal || onToggleChanges || onToggleReader)}
-					<Separator orientation="vertical" decorative class="mx-1 h-8 self-center" />
+					<Separator orientation="vertical" decorative class="mx-1 h-5 self-center" />
 				{/if}
 				{#if onToggleTerminal}
 					<PanelToggle

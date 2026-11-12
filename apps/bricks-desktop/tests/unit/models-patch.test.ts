@@ -21,8 +21,7 @@ const provider: ProviderView = {
 	protocol: 'chat_completions',
 	auth: 'bearer',
 	auth_header: null,
-	api_key_env: 'ACME_API_KEY',
-	has_inline_key: false,
+	api_key: 'sk-test-saved',
 	has_credentials: true,
 	path: null,
 	header_names: [],
@@ -42,7 +41,6 @@ const model: ModelView = {
 	async_tool_calls: false,
 	max_input_tokens: 128000,
 	max_output_tokens: 8192,
-	reasoning_default: 'low',
 	profiles: [
 		{ id: 'low', label: 'Léger', parameters: {}, remove: [] },
 		{ id: 'high', label: 'Approfondi', parameters: {}, remove: [] }
@@ -96,7 +94,7 @@ describe('buildProviderPatch', () => {
 			protocol: null,
 			auth: null,
 			auth_header: null,
-			api_key_env: null
+			api_key: null
 		});
 		expect(isEmptyProviderPatch(patch)).toBe(true);
 	});
@@ -117,15 +115,12 @@ describe('buildProviderPatch', () => {
 		expect(buildProviderPatch(provider, { ...form, authHeader: 'X-Key' }).auth_header).toBe('X-Key');
 	});
 
-	it('leaves the variable name alone on a provider with an inline key', () => {
-		const inline = { ...provider, has_inline_key: true, api_key_env: null };
-		const form = { ...providerForm(inline), apiKeyEnv: 'OTHER_KEY' };
-		expect(buildProviderPatch(inline, form).api_key_env).toBeNull();
-	});
-
-	it('sends a changed variable name', () => {
-		const form = { ...providerForm(provider), apiKeyEnv: 'ACME_KEY_2' };
-		expect(buildProviderPatch(provider, form).api_key_env).toBe('ACME_KEY_2');
+	it('sends the key only when it changed, and an empty one to remove it', () => {
+		expect(providerForm(provider).apiKey).toBe('sk-test-saved');
+		const form = { ...providerForm(provider), apiKey: 'sk-test-placeholder' };
+		expect(buildProviderPatch(provider, form).api_key).toBe('sk-test-placeholder');
+		expect(buildProviderPatch(provider, { ...form, apiKey: '' }).api_key).toBe('');
+		expect(buildProviderPatch(provider, { ...form, apiKey: ' sk-test-saved ' }).api_key).toBeNull();
 	});
 });
 
@@ -157,13 +152,19 @@ describe('buildModelPatch', () => {
 		expect('clear_context_window' in patch).toBe(false);
 	});
 
+	it('never sends a default profile: the first level applies when none is chosen', () => {
+		const patch = buildModelPatch(model, { ...modelForm(model), asyncToolCalls: true });
+		expect(patch).not.toHaveProperty('reasoning_default');
+		expect(patch).not.toHaveProperty('clear_reasoning_default');
+	});
+
 	it('does not send modalities reordered or unchanged', () => {
 		const reordered = { ...modelForm(model), modalities: ['image', 'text'] };
 		expect(buildModelPatch(model, reordered).input_modalities).toBeNull();
 	});
 
 	it('sends the modality list when it changed, in display order', () => {
-		const form = { ...modelForm(model), modalities: ['document', 'image', 'text'], documentTypes: 'application/pdf' };
+		const form = { ...modelForm(model), modalities: ['document', 'image', 'text'] };
 		expect(buildModelPatch(model, form).input_modalities).toEqual(['text', 'image', 'document']);
 	});
 
@@ -171,23 +172,5 @@ describe('buildModelPatch', () => {
 		const exotic = { ...model, input_modalities: ['text', 'hologram'] };
 		const form = { ...modelForm(exotic), modalities: ['text', 'hologram', 'image'] };
 		expect(buildModelPatch(exotic, form).input_modalities).toEqual(['text', 'image', 'hologram']);
-	});
-
-	it('changes the default profile, or clears it', () => {
-		expect(buildModelPatch(model, { ...modelForm(model), reasoningDefault: 'high' })).toMatchObject({
-			reasoning_default: 'high',
-			clear_reasoning_default: false
-		});
-		expect(buildModelPatch(model, { ...modelForm(model), reasoningDefault: null })).toMatchObject({
-			reasoning_default: null,
-			clear_reasoning_default: true
-		});
-	});
-
-	it('does not clear a default profile that was already absent', () => {
-		const none = { ...model, reasoning_default: null };
-		const patch = buildModelPatch(none, modelForm(none));
-		expect(patch.clear_reasoning_default).toBe(false);
-		expect(patch.reasoning_default).toBeNull();
 	});
 });

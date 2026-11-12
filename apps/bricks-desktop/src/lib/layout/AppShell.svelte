@@ -7,6 +7,9 @@
 	import * as Resizable from '$lib/components/ui/resizable/index.js';
 	import * as Sheet from '$lib/components/ui/sheet/index.js';
 	import TopBar from './TopBar.svelte';
+
+	/** Opening and closing a side panel: the duration of shadcn's sidebar (200 ms, linear). */
+	const SIDE_ANIMATION_MS = 200;
 	import {
 		LAYOUT_DEFAULTS,
 		LAYOUT_LIMITS,
@@ -100,6 +103,25 @@
 	// Inline visibility: preference AND not forced into an overlay.
 	const leftInline = $derived(Boolean(left) && leftOpen && !leftIsOverlay);
 	const rightInline = $derived(Boolean(right) && rightOpen && !rightIsOverlay);
+	// A side that is not an overlay stays mounted: closed, it is collapsed to zero, so opening
+	// and closing can animate its width instead of popping in and out.
+	const leftMounted = $derived(Boolean(left) && !leftIsOverlay);
+	const rightMounted = $derived(Boolean(right) && !rightIsOverlay);
+
+	/** True for one animation after a side opens or closes; dragging and window resizes stay immediate. */
+	let animating = $state(false);
+	let animationTimer: ReturnType<typeof setTimeout> | undefined;
+	let sidesSeen: string | null = null;
+	$effect(() => {
+		const sides = `${leftInline}:${rightInline}`;
+		if (sidesSeen !== null && sidesSeen !== sides) {
+			animating = true;
+			clearTimeout(animationTimer);
+			animationTimer = setTimeout(() => (animating = false), SIDE_ANIMATION_MS + 60);
+		}
+		sidesSeen = sides;
+	});
+	$effect(() => () => clearTimeout(animationTimer));
 	const terminalInline = $derived(Boolean(terminal) && terminalOpen);
 
 	// Horizontal geometry (px -> paneforge percentages).
@@ -137,9 +159,9 @@
 
 	function horizontalTargets(): number[] {
 		const out: number[] = [];
-		if (leftInline) out.push(leftPct);
+		if (leftMounted) out.push(leftInline ? leftPct : 0);
 		out.push(centerPct);
-		if (rightInline) out.push(rightPct);
+		if (rightMounted) out.push(rightInline ? rightPct : 0);
 		return out;
 	}
 
@@ -217,9 +239,15 @@
 	function onHorizontalLayout(layout: number[]): void {
 		if (bodyWidth <= 0 || !isUserResizing()) return;
 		let i = 0;
-		if (leftInline) leftWidth = toPx(layout[i++] ?? 0, bodyWidth);
+		if (leftMounted) {
+			const size = layout[i++] ?? 0;
+			if (leftInline && size > 0) leftWidth = toPx(size, bodyWidth);
+		}
 		i++; // centre
-		if (rightInline) rightWidth = toPx(layout[i++] ?? 0, bodyWidth);
+		if (rightMounted) {
+			const size = layout[i++] ?? 0;
+			if (rightInline && size > 0) rightWidth = toPx(size, bodyWidth);
+		}
 		scheduleEmit();
 	}
 
@@ -313,16 +341,30 @@
 
 	<!-- The frame (top bar and left panel) shares one colour; the conversation and the right panel
 	     sit on one rounded surface inset in it. -->
-	<div class={['min-h-0 flex-1 pr-2 pb-2', !(leftInline && left) && 'pl-2']}>
+	<div class={['min-h-0 flex-1 pr-2 pb-2 transition-[padding] duration-200 ease-linear', !(leftInline && left) && 'pl-2']}>
 		<div class="h-full w-full" bind:clientWidth={bodyWidth}>
-		<PaneGroup direction="horizontal" bind:this={hGroup} onLayoutChange={onHorizontalLayout} class="flex h-full w-full">
-			{#if leftInline && left}
-				<Pane id="bricks-left" order={1} defaultSize={leftPct} minSize={sideMinPct} maxSize={leftMaxPct}>
-					<div class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-sidebar text-sidebar-foreground">
+		<PaneGroup direction="horizontal" bind:this={hGroup} onLayoutChange={onHorizontalLayout} class="flex h-full w-full" data-animating={animating ? '' : undefined}>
+			{#if leftMounted && left}
+				<Pane
+					id="bricks-left"
+					order={1}
+					defaultSize={leftInline ? leftPct : 0}
+					minSize={sideMinPct}
+					maxSize={leftMaxPct}
+					collapsible={animating || !leftInline}
+					collapsedSize={0}
+				>
+					<div
+						class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden bg-sidebar text-sidebar-foreground"
+						inert={!leftInline}
+						style:min-width={leftInline ? undefined : `${sides.left ?? leftWidth}px`}
+					>
 						{@render left()}
 					</div>
 				</Pane>
-				<Resizable.Handle class="bg-transparent" aria-label={t('layout.resizeTheLeftPanel')} onDraggingChange={onHandleDragging} />
+				{#if leftInline}
+					<Resizable.Handle class="bg-transparent" aria-label={t('layout.resizeTheLeftPanel')} onDraggingChange={onHandleDragging} />
+				{/if}
 			{/if}
 
 			<Pane id="bricks-center" order={2} defaultSize={centerPct} minSize={centerMinPct}>
@@ -351,10 +393,20 @@
 				</div>
 			</Pane>
 
-			{#if rightInline && right}
-				<Resizable.Handle class="border-y border-border-subtle bg-background" aria-label={t('layout.resizeTheRightPanel')} onDraggingChange={onHandleDragging} />
-				<Pane id="bricks-right" order={3} defaultSize={rightPct} minSize={sideMinPct} maxSize={rightMaxPct}>
-					<aside aria-label={t('common.context')} class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-r-xl border-y border-r border-border-subtle bg-background text-foreground">
+			{#if rightMounted && right}
+				{#if rightInline}
+					<Resizable.Handle class="border-y border-border-subtle bg-background" aria-label={t('layout.resizeTheRightPanel')} onDraggingChange={onHandleDragging} />
+				{/if}
+				<Pane
+					id="bricks-right"
+					order={3}
+					defaultSize={rightInline ? rightPct : 0}
+					minSize={sideMinPct}
+					maxSize={rightMaxPct}
+					collapsible={animating || !rightInline}
+					collapsedSize={0}
+				>
+					<aside aria-label={t('common.context')} inert={!rightInline} class="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-r-xl border-y border-r border-border-subtle bg-background text-foreground">
 						{@render right()}
 					</aside>
 				</Pane>

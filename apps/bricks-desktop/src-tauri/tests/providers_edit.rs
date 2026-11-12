@@ -112,12 +112,8 @@ fn setup() -> Setup {
     setup_with(FILE)
 }
 
-fn no_credentials(_: &ProviderConfig) -> bool {
-    false
-}
-
 fn current(path: &Path) -> ProvidersFile {
-    view(path, &no_credentials)
+    view(path)
 }
 
 fn revision(path: &Path) -> String {
@@ -301,11 +297,11 @@ fn a_refused_edit_writes_nothing_and_its_message_names_no_secret() {
                 ..Default::default()
             },
         },
-        // A key from the environment cannot be set on a provider with an inline key.
+        // An unknown authentication mode.
         Edit::ProviderUpdate {
             provider_id: "inline".into(),
             patch: ProviderPatch {
-                api_key_env: Some("BRICKS_TEST_OTHER".into()),
+                auth: Some("not_an_auth_mode".into()),
                 ..Default::default()
             },
         },
@@ -451,17 +447,14 @@ fn the_views_and_the_errors_never_carry_a_secret_value() {
     let s = setup();
     let json = serde_json::to_string(&current(&s.path)).unwrap();
     assert!(
-        !json.contains("SECRET-KEY-VALUE-7731"),
-        "inline key value in the view"
-    );
-    assert!(
         !json.contains("HEADER-SECRET-VALUE-7731"),
         "header value in the view"
     );
 
+    // The key written in the file is shown to the form, masked there.
     let file = current(&s.path);
     let inline = file.providers.iter().find(|p| p.id == "inline").unwrap();
-    assert!(inline.has_inline_key, "the presence of the key is reported");
+    assert_eq!(inline.api_key.as_deref(), Some("SECRET-KEY-VALUE-7731"));
     assert_eq!(
         inline.header_names,
         vec!["X-Tenant".to_string()],
@@ -484,7 +477,6 @@ fn the_views_and_the_errors_never_carry_a_secret_value() {
     assert_eq!(err.code, IpcErrorCode::Invalid);
     assert!(!err.message.contains("SECRET"), "{}", err.message);
     let json = serde_json::to_string(&current(&s.path)).unwrap();
-    assert!(!json.contains("SECRET-KEY-VALUE-7731"));
     assert!(!json.contains("HEADER-SECRET-VALUE-7731"));
 }
 

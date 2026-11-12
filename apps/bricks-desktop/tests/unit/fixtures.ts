@@ -111,7 +111,8 @@ export function openedSession(overrides: Partial<OpenedSession> = {}): OpenedSes
 			reasoning: null,
 			working_dir: '/work/demo',
 			open: true,
-			running: false
+			running: false,
+			parent_id: null,
 		},
 		snapshot: snapshot(),
 		history: [],

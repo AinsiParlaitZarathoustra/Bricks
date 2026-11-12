@@ -8,7 +8,7 @@ use bricks_tools::{CostTracker, Extensions, Tool, ToolContext, ToolResult};
 use serde_json::{Value, json};
 use std::path::Path;
 use std::sync::Arc;
-use tokei::{Config, LanguageType};
+use kodestats::{Config, LanguageType};
 
 fn ctx(dir: &Path) -> ToolContext {
     ToolContext {
@@ -130,7 +130,7 @@ async fn counts_common_languages_names_and_shebangs() {
     assert_eq!(
         row("Python")["comments"],
         3,
-        "a shebang line is a comment for Tokei"
+        "a shebang line is a comment for KodeStats"
     );
     assert!(language_row(&v, "Makefile").is_some(), "{v}");
     assert!(language_row(&v, "Dockerfile").is_some(), "{v}");
@@ -224,7 +224,7 @@ async fn a_mixed_file_counts_once_for_its_primary_language() {
 
     let v = stats(&ctx(p), json!({"detail": "files"})).await;
     assert_eq!(totals(&v).0, 4, "a nested block is not a file: {v}");
-    for (path, lang, tokei_lang, text) in [
+    for (path, lang, kodestats_lang, text) in [
         ("page.html", "HTML", LanguageType::Html, HTML),
         ("App.svelte", "Svelte", LanguageType::Svelte, SVELTE),
         ("README.md", "Markdown", LanguageType::Markdown, MARKDOWN),
@@ -236,7 +236,7 @@ async fn a_mixed_file_counts_once_for_its_primary_language() {
             .find(|r| r["path"] == path)
             .unwrap();
         assert_eq!(row["language"], lang);
-        let (code, comments, blanks) = summarised(tokei_lang, text);
+        let (code, comments, blanks) = summarised(kodestats_lang, text);
         assert_eq!(
             (
                 row["code"].as_u64().unwrap(),
@@ -247,7 +247,7 @@ async fn a_mixed_file_counts_once_for_its_primary_language() {
             "{path}"
         );
         // The nested blocks are in, once.
-        let root = tokei_lang.parse_from_str(text, &Config::default());
+        let root = kodestats_lang.parse_from_str(text, &Config::default());
         assert!(!root.blobs.is_empty(), "{path} has nested blocks");
         assert!(code > root.code as u64, "{path}: nested code counted");
     }

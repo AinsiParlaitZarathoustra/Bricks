@@ -115,11 +115,11 @@ fn setup(replies: Vec<Reply>) -> (Mock, ProviderRegistry) {
 }
 
 fn provider(reg: &ProviderRegistry, sel: &str) -> ConfiguredProvider {
-    // Keys come through `api_key_env` and an injected lookup: no key, not even
+    // The key is injected through the builder: no key, not even
     // a fake one, is written into a fixture.
     model(reg, sel)
         .provider()
-        .env(|_| Some(KEY.to_string()))
+        .api_key(KEY)
         .build()
         .unwrap()
 }
@@ -722,7 +722,6 @@ endpoint = "{base}/gw"
 protocol = "chat_completions"
 auth = "api_key_header"
 auth_header = "api-key"
-api_key_env = "BRICKS_MOCK_API_KEY"
 headers = {{ "x-team" = "blue" }}
 [[providers.models]]
 id = "m"
@@ -749,7 +748,7 @@ max_output_tokens = 10
 }
 
 #[test]
-fn secret_resolution_from_the_environment_reference() {
+fn the_key_is_the_one_written_in_the_file() {
     let text = r#"
 schema_version = 1
 [[providers]]
@@ -758,7 +757,6 @@ name = "P"
 endpoint = "http://127.0.0.1:1"
 protocol = "chat_completions"
 auth = "bearer"
-api_key_env = "BRICKS_TEST_KEY_VAR"
 [[providers.models]]
 id = "m"
 name = "M"
@@ -767,21 +765,23 @@ api_model = "am"
 max_input_tokens = 10
 max_output_tokens = 10
 "#;
-    let reg = ProviderRegistry::from_toml_str(text, "t").unwrap();
-    let m = reg.resolve("p/m").unwrap();
-    // Unset or blank -> an actionable error naming the variable, never a value.
-    for value in [None, Some("   ".to_string())] {
-        let v = value.clone();
-        let e = m.provider().env(move |_| v.clone()).build().unwrap_err();
+    // No key, or a blank one -> an actionable error, never a value.
+    for line in ["", "api_key = \"   \"\n"] {
+        let t = text.replace("auth = \"bearer\"\n", &format!("auth = \"bearer\"\n{line}"));
+        let reg = ProviderRegistry::from_toml_str(&t, "t").unwrap();
+        let e = reg.resolve("p/m").unwrap().provider().build().unwrap_err();
         assert!(matches!(e, BricksError::Auth(_)));
-        assert!(e.to_string().contains("BRICKS_TEST_KEY_VAR"), "{e}");
+        assert!(e.to_string().contains("Bricks settings"), "{e}");
     }
-    let p = m
-        .provider()
-        .env(|name| (name == "BRICKS_TEST_KEY_VAR").then(|| "  sk-from-env-9999\n".to_string()))
-        .build()
-        .unwrap();
-    assert!(!format!("{p:?}").contains("sk-from-env-9999"));
+    // A variable is never read.
+    let t = text.replace("auth = \"bearer\"\n", "auth = \"bearer\"\napi_key_env = \"PATH\"\n");
+    let reg = ProviderRegistry::from_toml_str(&t, "t").unwrap();
+    assert!(reg.resolve("p/m").unwrap().provider().build().is_err());
+    // The key written in the file.
+    let t = text.replace("auth = \"bearer\"\n", "auth = \"bearer\"\napi_key = \" sk-file-1111 \"\n");
+    let reg = ProviderRegistry::from_toml_str(&t, "t").unwrap();
+    let p = reg.resolve("p/m").unwrap().provider().build().unwrap();
+    assert!(!format!("{p:?}").contains("sk-file-1111"));
 }
 
 // ─── Reasoning profiles ──────────────────────────────────────────────────────
@@ -812,9 +812,9 @@ async fn profiles_are_merged_removed_and_selected_as_configured() {
     ]);
     let p = provider(&reg, "mock/think");
 
-    // Default profile `deep`: model parameters first, profile on top (recursive merge).
+    // No choice: the first level (`fast`), merged over the model parameters.
     let b = body_for(&reg, &mock, &p, None).await;
-    assert_eq!(b["reasoning"], json!({"summary":"auto","effort":"high"}));
+    assert_eq!(b["reasoning"], json!({"summary":"auto","effort":"low"}));
     assert_eq!(b["temperature"], 0.5);
     assert!(b.get("thinking").is_none());
 
@@ -868,7 +868,7 @@ async fn unknown_profile_and_empty_profile_lists_never_send_a_request() {
     );
     let built = model(&reg, "mock/think")
         .provider()
-        .env(|_| Some(KEY.to_string()))
+        .api_key(KEY)
         .reasoning_profile("fast")
         .build()
         .unwrap();

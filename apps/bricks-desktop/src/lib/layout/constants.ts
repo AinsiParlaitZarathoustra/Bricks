@@ -21,7 +21,7 @@ export const NARROW_BREAKPOINT = 1000;
  * matches `height`, and leaves `macSystemButtons` px free on its left for them.
  */
 export const TOP_BAR = {
-	height: 52,
+	height: 40,
 	macSystemButtons: 92
 } as const;
 

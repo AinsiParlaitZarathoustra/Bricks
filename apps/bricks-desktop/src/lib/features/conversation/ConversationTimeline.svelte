@@ -228,7 +228,7 @@
     role="region"
     aria-label={t('common.conversation')}
     tabindex="0"
-    class="edge-fade min-h-0 flex-1 overflow-y-auto overscroll-contain focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:outline-none"
+    class="scroll-fade scroll-fade-t-6 scroll-fade-b-10 min-h-0 flex-1 overflow-y-auto overscroll-contain focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring focus-visible:outline-none"
   >
     <div
       bind:this={listEl}
@@ -297,27 +297,3 @@
 
   <p class="sr-only" role="status">{announcement}</p>
 </div>
-
-<style>
-  /* Text scrolling under the top edge, or down towards the composer, fades out
-     instead of being cut. Each fade covers the list's padding on its side, so
-     the first and the last message are never dimmed at rest. */
-  .edge-fade {
-    --fade-top: 24px;
-    --fade-bottom: 40px;
-    -webkit-mask-image: linear-gradient(
-      to bottom,
-      transparent,
-      #000 var(--fade-top),
-      #000 calc(100% - var(--fade-bottom)),
-      transparent
-    );
-    mask-image: linear-gradient(
-      to bottom,
-      transparent,
-      #000 var(--fade-top),
-      #000 calc(100% - var(--fade-bottom)),
-      transparent
-    );
-  }
-</style>

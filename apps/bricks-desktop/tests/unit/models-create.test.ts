@@ -1,13 +1,11 @@
-// Unit tests for creating providers and models, and for the prices and accepted document types of
-// the model form: parsing, validation, the full create patches, the edit patch for prices and
-// document types, and the count of unpriced models.
+// Unit tests for creating providers and models, and for the prices and document input of the
+// model form: parsing, validation, the full create patches, the edit patch for prices and
+// modalities, and the count of unpriced models.
 import { describe, expect, it } from 'vitest';
 import type { ModelView } from '../../src/lib/ipc/bindings/ModelView';
 import type { ProviderView } from '../../src/lib/ipc/bindings/ProviderView';
 import { formatPrice } from '../../src/lib/features/settings/format';
 import {
-	DOCUMENT_TYPES_REQUIRED,
-	DOCUMENT_TYPE_INVALID,
 	ID_DUPLICATE,
 	ID_ERROR,
 	PRICE_ERROR,
@@ -15,7 +13,6 @@ import {
 	buildModelCreatePatch,
 	buildModelPatch,
 	buildProviderCreatePatch,
-	documentTypes,
 	hasFormErrors,
 	isEmptyModelPatch,
 	modelForm,
@@ -41,7 +38,6 @@ const model: ModelView = {
 	async_tool_calls: false,
 	max_input_tokens: 128000,
 	max_output_tokens: 8192,
-	reasoning_default: null,
 	profiles: [],
 	priced: true,
 	document_mime_types: ['application/pdf'],
@@ -71,8 +67,7 @@ function providerWith(models: ModelView[]): ProviderView {
 		protocol: 'chat_completions',
 		auth: 'none',
 		auth_header: null,
-		api_key_env: null,
-		has_inline_key: false,
+		api_key: null,
 		has_credentials: false,
 		path: null,
 		header_names: [],
@@ -96,22 +91,6 @@ describe('parsePrice', () => {
 		expect(parsePrice('-1')).toBeNull();
 		expect(parsePrice('abc')).toBeNull();
 		expect(parsePrice('')).toBeNull();
-	});
-});
-
-describe('documentTypes', () => {
-	it('splits on commas, semicolons and spaces, keeping the order', () => {
-		expect(documentTypes('application/pdf, image/png;text/plain  */*')).toEqual([
-			'application/pdf',
-			'image/png',
-			'text/plain',
-			'*/*'
-		]);
-	});
-
-	it('drops repeats and empty pieces', () => {
-		expect(documentTypes('application/pdf, application/pdf ,, ')).toEqual(['application/pdf']);
-		expect(documentTypes('')).toEqual([]);
 	});
 });
 
@@ -163,25 +142,10 @@ describe('validateModelForm for a new model', () => {
 		);
 	});
 
-	it('requires document types when the document input is checked', () => {
-		const errors = validateModelForm(filledForm({ modalities: ['text', 'document'], documentTypes: ' ' }));
-		expect(errors.documentTypes).toBe(DOCUMENT_TYPES_REQUIRED());
-	});
-
-	it('refuses a type that is not type/subtype, such as pdf', () => {
-		const errors = validateModelForm(filledForm({ modalities: ['document'], documentTypes: 'pdf' }));
-		expect(errors.documentTypes).toBe(DOCUMENT_TYPE_INVALID());
-	});
-
-	it('accepts application/pdf and */* as document types', () => {
-		expect(
-			validateModelForm(filledForm({ modalities: ['document'], documentTypes: 'application/pdf' })).documentTypes
-		).toBeUndefined();
-		expect(validateModelForm(filledForm({ modalities: ['document'], documentTypes: '*/*' })).documentTypes).toBeUndefined();
-	});
-
-	it('does not check document types when the document input is not checked', () => {
-		expect(validateModelForm(filledForm({ modalities: ['text'], documentTypes: 'pdf' })).documentTypes).toBeUndefined();
+	it('has no document type field: checking the document input needs nothing more', () => {
+		const errors = validateModelForm(filledForm({ modalities: ['text', 'document'] }));
+		expect(errors).not.toHaveProperty('documentTypes');
+		expect(hasFormErrors(errors)).toBe(false);
 	});
 });
 
@@ -193,7 +157,6 @@ describe('buildModelCreatePatch', () => {
 				apiModel: ' acme-fast-1 ',
 				maxInput: '128 000',
 				modalities: ['document', 'text', 'image'],
-				documentTypes: 'application/pdf',
 				priceInput: '0,30',
 				priceOutput: '1.20',
 				priceCache: '0'
@@ -205,26 +168,16 @@ describe('buildModelCreatePatch', () => {
 			max_input_tokens: 128000,
 			max_output_tokens: 8192,
 			input_modalities: ['text', 'image', 'document'],
-			document_mime_types: ['application/pdf'],
 			pricing: { input: '0.30', output: '1.20', cache_read: '0' },
-			reasoning_default: null,
-			clear_reasoning_default: false,
 			profiles: null,
 			async_tool_calls: null
 		});
 	});
 
-	it('sends asynchronous tool calls only when checked', () => {
-		expect(buildModelCreatePatch(filledForm({ asyncToolCalls: true })).async_tool_calls).toBe(true);
-		expect(buildModelCreatePatch(filledForm()).async_tool_calls).toBeNull();
-	});
-
-	it('sends no document types when the document input is not checked', () => {
-		const patch = buildModelCreatePatch(
-			filledForm({ modalities: ['text', 'image'], documentTypes: 'application/pdf' })
-		);
-		expect(patch.document_mime_types).toBeNull();
-		expect(patch.input_modalities).toEqual(['text', 'image']);
+	it('has no document type list: the document input is sent alone', () => {
+		const patch = buildModelCreatePatch(filledForm({ modalities: ['text', 'document'] }));
+		expect(patch).not.toHaveProperty('document_mime_types');
+		expect(patch.input_modalities).toEqual(['text', 'document']);
 	});
 
 	it('sends the profiles only when there are some', () => {
@@ -234,7 +187,7 @@ describe('buildModelCreatePatch', () => {
 	});
 });
 
-describe('buildModelPatch for prices and document types', () => {
+describe('buildModelPatch for prices and modalities', () => {
 	it('sends nothing for prices when none changed', () => {
 		const patch = buildModelPatch(model, modelForm(model));
 		expect(patch.pricing).toBeNull();
@@ -259,35 +212,38 @@ describe('buildModelPatch for prices and document types', () => {
 		expect(filled.pricing).toEqual({ input: '0', output: '0', cache_read: '0' });
 	});
 
-	it('sends an empty list of document types when the document input is unchecked', () => {
+	it('sends the modalities without document when the document input is unchecked, with no type list', () => {
 		const patch = buildModelPatch(model, { ...modelForm(model), modalities: ['text'] });
-		expect(patch.document_mime_types).toEqual([]);
 		expect(patch.input_modalities).toEqual(['text']);
+		expect(patch).not.toHaveProperty('document_mime_types');
 	});
 
-	it('sends nothing for document types when they did not change', () => {
-		expect(buildModelPatch(model, modelForm(model)).document_mime_types).toBeNull();
+	it('sends nothing for modalities when they did not change', () => {
+		const patch = buildModelPatch(model, modelForm(model));
+		expect(patch.input_modalities).toBeNull();
+		expect(patch).not.toHaveProperty('document_mime_types');
 	});
 
-	it('sends the new list when the types change', () => {
-		const patch = buildModelPatch(model, { ...modelForm(model), documentTypes: 'application/pdf, */*' });
-		expect(patch.document_mime_types).toEqual(['application/pdf', '*/*']);
+	it('sends the new modality list when the document input is checked', () => {
+		const patch = buildModelPatch(model, { ...modelForm(model), modalities: ['text', 'image', 'document'] });
+		expect(patch.input_modalities).toEqual(['text', 'image', 'document']);
 	});
 
-	it('sends nothing for document types of a model with none, the input being unchecked', () => {
-		const text = { ...model, input_modalities: ['text'], document_mime_types: [] };
-		expect(buildModelPatch(text, modelForm(text)).document_mime_types).toBeNull();
+	it('sends nothing at all for a text-only model that is untouched', () => {
+		const text = { ...model, input_modalities: ['text'] };
+		const patch = buildModelPatch(text, modelForm(text));
+		expect(patch.input_modalities).toBeNull();
+		expect(isEmptyModelPatch(patch)).toBe(true);
 	});
 });
 
 describe('buildProviderCreatePatch', () => {
-	it('trims the texts and sends null for an empty header and an empty variable', () => {
+	it('trims the texts and sends null for an empty header', () => {
 		const patch = buildProviderCreatePatch({
 			...newProviderForm(),
 			name: '  Acme ',
 			endpoint: ' https://api.acme.test/v1 ',
-			authHeader: '   ',
-			apiKeyEnv: ''
+			authHeader: '   '
 		});
 		expect(patch).toEqual({
 			name: 'Acme',
@@ -295,20 +251,27 @@ describe('buildProviderCreatePatch', () => {
 			protocol: 'chat_completions',
 			auth: 'bearer',
 			auth_header: null,
-			api_key_env: null
+			api_key: null
 		});
 	});
 
-	it('sends the header and the variable when they are typed', () => {
+	it('sends the header and the key when they are typed, trimmed', () => {
 		const patch = buildProviderCreatePatch({
 			...newProviderForm(),
 			name: 'Acme',
 			endpoint: 'https://api.acme.test/v1',
 			auth: 'api_key_header',
 			authHeader: ' X-Key ',
-			apiKeyEnv: ' ACME_KEY '
+			apiKey: ' sk-test-placeholder '
 		});
-		expect(patch).toMatchObject({ auth: 'api_key_header', auth_header: 'X-Key', api_key_env: 'ACME_KEY' });
+		expect(patch).toEqual({
+			name: 'Acme',
+			endpoint: 'https://api.acme.test/v1',
+			protocol: 'chat_completions',
+			auth: 'api_key_header',
+			auth_header: 'X-Key',
+			api_key: 'sk-test-placeholder'
+		});
 	});
 });
 

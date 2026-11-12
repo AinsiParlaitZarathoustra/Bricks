@@ -60,8 +60,8 @@ fn matrix() -> Vec<Case> {
         case("m", "/m test/b", Engine(json!({"type": "set_model", "model": "test/b"}))),
         // /effort: `default` resets the profile, an id is sent as is (the engine refuses unknown ids)
         case("effort", "/effort", Pres(json!({"view": "effort_picker"}))),
-        case("effort", "/effort default", Engine(json!({"type": "set_reasoning", "profile": null}))),
-        case("effort", "/effort   default  ", Engine(json!({"type": "set_reasoning", "profile": null}))),
+        case("effort", "/effort high", Engine(json!({"type": "set_reasoning", "profile": "high"}))),
+        case("effort", "/effort   high  ", Engine(json!({"type": "set_reasoning", "profile": "high"}))),
         case("effort", "/effort deep", Engine(json!({"type": "set_reasoning", "profile": "deep"}))),
         case("effort", "/effort inconnu", Engine(json!({"type": "set_reasoning", "profile": "inconnu"}))),
         // /search (/s): plain text, `re:` regex
@@ -399,9 +399,9 @@ async fn skill_without_a_request_is_an_error_and_sends_nothing() {
 }
 
 #[tokio::test]
-async fn effort_default_resets_the_profile_to_null() {
+async fn effort_default_is_a_level_name_like_any_other() {
     let got = parse_ok("/effort default").await;
-    assert_eq!(got, engine(json!({"type": "set_reasoning", "profile": null})));
+    assert_eq!(got, engine(json!({"type": "set_reasoning", "profile": "default"})));
 }
 
 #[tokio::test]

@@ -68,6 +68,7 @@ function fakeHost(action: SlashAction, options: Options = {}) {
 		},
 		openPicker: (picker) => rec('openPicker', picker),
 		open: (view, args) => rec('open', view, args),
+		openSettings: (section) => rec('openSettings', section),
 		openAgent: (agentId) => rec('openAgent', agentId),
 		attachmentBlocks() {
 			rec('attachmentBlocks');
@@ -158,7 +159,7 @@ const PRESENT: Record<SlashPresent['view'], { present: SlashPresent; calls: Call
 	},
 	diff: { present: { view: 'diff' }, calls: [{ name: 'showChanges', args: [] }] },
 	tools: { present: { view: 'tools' }, calls: [open('tools')] },
-	mcp: { present: { view: 'mcp' }, calls: [open('mcp')] },
+	mcp: { present: { view: 'mcp' }, calls: [{ name: 'openSettings', args: ['extensions'] }] },
 	config: { present: { view: 'config' }, calls: [open('config')] },
 	help: { present: { view: 'help' }, calls: [open('help')] },
 	quit: { present: { view: 'quit' }, calls: [{ name: 'quit', args: [] }] },
