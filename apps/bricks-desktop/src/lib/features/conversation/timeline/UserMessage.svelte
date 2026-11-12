@@ -6,6 +6,10 @@
   import FileIcon from '$lib/features/file-icons/FileIcon.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Textarea } from '$lib/components/ui/textarea'
+  import * as Bubble from '$lib/components/ui/bubble'
+  import * as Message from '$lib/components/ui/message'
+  import * as Tooltip from '$lib/components/ui/tooltip'
+  import MessageAction from './MessageAction.svelte'
   import { app } from '$lib/state/app.svelte'
   import { openUrl } from '@tauri-apps/plugin-opener'
   import type { Conversation, UserItem } from '$lib/state/conversation.svelte'
@@ -59,7 +63,7 @@
       copyError = null
       copied = true
       clearTimeout(copyTimer)
-      copyTimer = setTimeout(() => (copied = false), 1500)
+      copyTimer = setTimeout(() => (copied = false), 2000)
     } catch (e) {
       copied = false
       copyError = e instanceof Error ? e.message : String(e)
@@ -71,7 +75,7 @@
   let draft = $state('')
   let saving = $state(false)
   let editError = $state<string | null>(null)
-  let editButton = $state<HTMLButtonElement | null>(null)
+  let editButton = $state<HTMLElement | null>(null)
 
   const running = $derived(conversation?.running ?? false)
   const canSave = $derived(!saving && !running && (draft.trim() !== '' || item.attachments.length > 0))
@@ -117,9 +121,6 @@
     }
   }
 
-  const action =
-    'inline-flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50'
-
   function openLink(event: MouseEvent, href: string) {
     // Never let the webview navigate: the address goes to the system handler.
     event.preventDefault()
@@ -150,46 +151,44 @@
       </div>
     </div>
   {:else if item.text}
-    <div class="group/message flex w-full items-start justify-end gap-1">
-      <!-- Present at rest (no shift when they show), visible on hover, focus or touch. -->
-      <div
-        class="flex shrink-0 items-center gap-0.5 pt-1.5 opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100 [@media(hover:none)]:opacity-100"
-      >
-        <!-- A message sent by a typed command (`/skill …`) is sent again by typing it. -->
-        {#if conversation && !conversation.readOnly && !item.commandLabel}
-          <button
-            bind:this={editButton}
-            type="button"
-            class={action}
-            title={t('conversation.edit')}
-            aria-label={t('conversation.editTheMessage')}
-            disabled={running}
-            onclick={startEdit}
+    <Message.Root align="end">
+      <Message.Content class="gap-1">
+        <Bubble.Root align="end" variant="muted" class="max-w-[85%]">
+          <Bubble.Content dir="auto" class="text-start whitespace-pre-wrap"
+            >{#if item.commandLabel}<span
+                class="mr-1.5 inline-block rounded-sm bg-background/70 px-1.5 align-baseline font-mono text-xs text-muted-foreground"
+                dir="ltr">{item.commandLabel}</span>{/if}{#each parts as part, i (i)}{#if part.kind === 'link'}<a
+                  href={part.href}
+                  rel="noopener noreferrer nofollow"
+                  title={part.href}
+                  class="rounded-sm text-primary underline underline-offset-2 hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                  onclick={(event) => openLink(event, part.href)}
+                  onauxclick={(event) => event.preventDefault()}>{part.text}</a
+                >{:else}{part.text}{/if}{/each}</Bubble.Content
           >
-            <Pencil class="size-3.5" aria-hidden="true" />
-          </button>
-        {/if}
-        <button type="button" class={action} title={t('common.copy')} aria-label={t('conversation.copyTheMessage')} onclick={copy}>
-          {#if copied}
-            <Check class="size-3.5" aria-hidden="true" />
-          {:else}
-            <Copy class="size-3.5" aria-hidden="true" />
-          {/if}
-        </button>
-      </div>
-    <div
-      dir="auto"
-      class="max-w-[85%] rounded-2xl bg-secondary px-3.5 py-2 text-start text-sm break-words whitespace-pre-wrap text-secondary-foreground"
-    >{#if item.commandLabel}<span
-          class="mr-1.5 inline-block rounded bg-background/70 px-1.5 align-baseline font-mono text-xs text-muted-foreground"
-          dir="ltr">{item.commandLabel}</span>{/if}{#each parts as part, i (i)}{#if part.kind === 'link'}<a
-            href={part.href}
-            rel="noopener noreferrer nofollow"
-            title={part.href}
-            class="rounded-sm text-primary underline underline-offset-2 hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-            onclick={(event) => openLink(event, part.href)}
-            onauxclick={(event) => event.preventDefault()}>{part.text}</a>{:else}{part.text}{/if}{/each}</div>
-    </div>
+        </Bubble.Root>
+        <!-- Present at rest (no shift when they show), visible on hover, focus or touch. -->
+        <Tooltip.Provider delayDuration={400}>
+          <Message.Footer
+            class="gap-0.5 px-0 opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100 [@media(hover:none)]:opacity-100"
+          >
+            <!-- A message sent by a typed command (`/skill …`) is sent again by typing it. -->
+            {#if conversation && !conversation.readOnly && !item.commandLabel}
+              <MessageAction bind:ref={editButton} label={t('conversation.editTheMessage')} disabled={running} onclick={startEdit}>
+                <Pencil aria-hidden="true" />
+              </MessageAction>
+            {/if}
+            <MessageAction label={t('conversation.copyTheMessage')} onclick={copy}>
+              {#if copied}
+                <Check aria-hidden="true" />
+              {:else}
+                <Copy aria-hidden="true" />
+              {/if}
+            </MessageAction>
+          </Message.Footer>
+        </Tooltip.Provider>
+      </Message.Content>
+    </Message.Root>
     {#if copyError}
       <p class="max-w-[85%] text-xs break-words text-destructive" role="alert">{t('conversation.couldNotCopy', { copyError })}</p>
     {/if}
@@ -210,7 +209,7 @@
           title={shownName(attachment)}
         >
           {#if preview}
-            <img src={preview} alt="" class="size-10 shrink-0 rounded object-cover" />
+            <img src={preview} alt="" class="size-10 shrink-0 rounded-sm object-cover" />
           {:else}
             <FileIcon path={shownName(attachment)} kind={attachment.kind === 'folder' ? 'folder' : 'file'} />
           {/if}

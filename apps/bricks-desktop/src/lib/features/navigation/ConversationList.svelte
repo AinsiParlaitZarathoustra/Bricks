@@ -305,7 +305,7 @@
 						class="absolute top-1/2 right-1 shrink-0 -translate-y-1/2 text-muted-foreground opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
 						aria-label={t('navigation.actionsForConversation', { title: displayTitle(session.title) })}
 					>
-						<EllipsisVertical class="size-4" aria-hidden="true" />
+						<EllipsisVertical aria-hidden="true" />
 					</Button>
 				{/snippet}
 			</DropdownMenu.Trigger>

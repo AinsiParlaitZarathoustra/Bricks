@@ -37,7 +37,7 @@
 </script>
 
 <div
-  class="absolute inset-x-0 bottom-full z-20 mb-2 overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-md"
+  class="absolute inset-x-0 bottom-full z-20 mb-2 overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-float"
 >
   {#if status === 'loading'}
     <p role="status" class="px-3 py-2 text-sm text-muted-foreground">{t('commands.loadingCommands')}</p>

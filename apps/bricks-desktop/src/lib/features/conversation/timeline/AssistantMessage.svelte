@@ -1,8 +1,9 @@
 <script lang="ts">
   import { t } from '$lib/i18n/i18n.svelte'
-  import Brain from '@lucide/svelte/icons/brain'
   import ChevronDown from '@lucide/svelte/icons/chevron-down'
   import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '$lib/components/ui/collapsible'
+  import * as Trace from '$lib/components/ui/trace'
+  import { formatWorked } from '../runend'
   import type { AssistantItem, Conversation } from '$lib/state/conversation.svelte'
   import { ui } from '$lib/state/ui.svelte'
   import { throttledValue } from '../throttled.svelte'
@@ -21,7 +22,8 @@
     part = 'all',
   }: { item: AssistantItem; conversation?: Conversation; part?: Part } = $props()
 
-  let reasoningOpen = $state(false)
+  /** The person's own choice; until then the reasoning is open while it streams. */
+  let reasoningOpen = $state<boolean | undefined>(undefined)
   let tocOpen = $state(false)
   /** Error of the last link or file reference that could not be opened; cleared by the next successful open. */
   let linkError = $state<string | null>(null)
@@ -44,6 +46,14 @@
 
   const hasReasoning = $derived(part !== 'answer' && item.thinking.trim().length > 0)
   const hasText = $derived(part !== 'reasoning')
+  /** The model is still reasoning: the message streams and no answer text has come yet. */
+  const thinkingNow = $derived(item.streaming && item.text.trim().length === 0)
+  /** « Réfléchit » while it lasts, then « A réfléchi pendant 5s » when it was followed live. */
+  const thinkingLabel = $derived.by(() => {
+    if (thinkingNow) return t('conversation.thinking')
+    const lasted = item.thinkingMs !== undefined ? formatWorked(Math.max(1000, item.thinkingMs)) : null
+    return lasted ? t('conversation.thoughtFor', { value: lasted }) : t('conversation.thought')
+  })
 
   function openFile(ref: FileReference) {
     const projectId = conversation?.projectId
@@ -71,26 +81,23 @@
 
 <article class="flex min-w-0 flex-col gap-1.5" aria-busy={item.streaming}>
   {#if hasReasoning}
-    <Collapsible bind:open={reasoningOpen}>
-      <CollapsibleTrigger
-        class="group inline-flex w-fit items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-      >
-        <Brain class="size-3.5" aria-hidden="true" />
-        {t('conversation.thinking')}
-        <ChevronDown class="size-3.5 transition-transform group-data-[state=open]:rotate-180" aria-hidden="true" />
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <p class="mt-1 border-l-2 border-border pl-3 text-xs break-words whitespace-pre-wrap text-muted-foreground">
-          {item.thinking}
-        </p>
-      </CollapsibleContent>
-    </Collapsible>
+    <Trace.Root>
+      <!-- Open while the model reasons, folded once it answers; the person's own toggle wins. -->
+      <Trace.Collapsible bind:open={() => reasoningOpen ?? thinkingNow, (value) => (reasoningOpen = value)}>
+        <Trace.CollapsibleTrigger>
+          <Trace.Line status={thinkingNow ? 'running' : undefined}>
+            <Trace.Title>{thinkingLabel}</Trace.Title>
+          </Trace.Line>
+        </Trace.CollapsibleTrigger>
+        <Trace.CollapsibleContent class="text-xs whitespace-pre-wrap">{item.thinking}</Trace.CollapsibleContent>
+      </Trace.Collapsible>
+    </Trace.Root>
   {/if}
 
   {#if hasText && showToc}
     <Collapsible bind:open={tocOpen}>
       <CollapsibleTrigger
-        class="group inline-flex w-fit items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+        class="group inline-flex w-fit items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground hover:bg-element-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
       >
         {t('conversation.summary')}
         <ChevronDown class="size-3.5 transition-transform group-data-[state=open]:rotate-180" aria-hidden="true" />

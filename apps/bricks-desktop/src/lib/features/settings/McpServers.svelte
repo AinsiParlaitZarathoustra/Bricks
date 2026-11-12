@@ -7,6 +7,7 @@
 	import type { McpServerItem, McpServerInput, McpServersView, McpTestResult } from '$lib/ipc/client';
 	import { app } from '$lib/state/app.svelte';
 	import { Button } from '$lib/components/ui/button';
+	import { Spinner } from '$lib/components/ui/spinner';
 	import { Switch } from '$lib/components/ui/switch';
 	import Plus from '@lucide/svelte/icons/plus';
 	import Terminal from '@lucide/svelte/icons/terminal';
@@ -15,7 +16,6 @@
 	import PlugZap from '@lucide/svelte/icons/plug-zap';
 	import CircleCheck from '@lucide/svelte/icons/circle-check';
 	import CircleX from '@lucide/svelte/icons/circle-x';
-	import LoaderCircle from '@lucide/svelte/icons/loader-circle';
 	import SettingsGroup from './SettingsGroup.svelte';
 	import McpServerDialog from './McpServerDialog.svelte';
 	import McpAppDialog from './McpAppDialog.svelte';
@@ -104,9 +104,9 @@
 					onclick={() => void test(server)}
 				>
 					{#if result === null}
-						<LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
+						<Spinner aria-hidden="true" />
 					{:else}
-						<PlugZap class="size-4" aria-hidden="true" />
+						<PlugZap aria-hidden="true" />
 					{/if}
 				</Button>
 				{#if server.source === 'user'}
@@ -118,7 +118,7 @@
 						title={t('settings.mcpRemove', { name: server.name })}
 						onclick={() => void run(() => ipc.mcpRemove(server.name, projectId))}
 					>
-						<Trash class="size-4" aria-hidden="true" />
+						<Trash aria-hidden="true" />
 					</Button>
 					<Switch
 						aria-label={t('settings.mcpEnabled', { name: server.name })}
@@ -141,7 +141,7 @@
 				{#each result.apps as tool (tool)}
 					<div class="pl-7">
 						<Button size="sm" variant="secondary" onclick={() => (app_ = { server: server.name, tool })}>
-							<AppWindow class="size-3.5" aria-hidden="true" />
+							<AppWindow aria-hidden="true" data-icon="inline-start" />
 							{t('settings.mcpOpenApp', { tool })}
 						</Button>
 					</div>
@@ -166,7 +166,7 @@
 			title={t('settings.mcpAdd')}
 			onclick={() => (adding = true)}
 		>
-			<Plus class="size-3.5" aria-hidden="true" />
+			<Plus aria-hidden="true" />
 		</Button>
 	{/snippet}
 	{#each mine as server (server.name)}

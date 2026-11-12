@@ -3,9 +3,9 @@
 	color-scheme: light;
 	--background: oklch(0.985 0.004 85);
 	--foreground: oklch(0.235 0.012 60);
-	--card: oklch(0.998 0.002 85);
+	--card: oklch(0.9612 0 0);
 	--card-foreground: oklch(0.235 0.012 60);
-	--popover: oklch(0.995 0.003 85);
+	--popover: oklch(0.9612 0 0);
 	--popover-foreground: oklch(0.235 0.012 60);
 	--primary: oklch(0.4755 0.2973 264.2);
 	--primary-foreground: oklch(0.985 0.005 85);
@@ -66,9 +66,9 @@
 	color-scheme: dark;
 	--background: oklch(0.145 0.003 60);
 	--foreground: oklch(0.965 0.005 80);
-	--card: oklch(0.185 0.004 65);
+	--card: oklch(0.198 0.01 285.5);
 	--card-foreground: oklch(0.965 0.005 80);
-	--popover: oklch(0.2 0.004 65);
+	--popover: oklch(0.198 0.01 285.5);
 	--popover-foreground: oklch(0.965 0.005 80);
 	--primary: oklch(0.54 0.24 264.2);
 	--primary-foreground: oklch(0.985 0.005 85);

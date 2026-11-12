@@ -45,7 +45,7 @@
     side="top"
     sideOffset={2}
     arrowClasses="hidden"
-    class="flex w-80 max-w-none flex-col items-stretch gap-2.5 rounded-xl border bg-popover p-3 text-popover-foreground shadow-md"
+    class="flex w-80 max-w-none flex-col items-stretch gap-2.5 rounded-xl border bg-popover p-3 text-popover-foreground shadow-float"
   >
     <div class="flex items-baseline justify-between gap-3">
       <span class="min-w-0 truncate text-sm font-medium">{t('context.inputContext2')}</span>

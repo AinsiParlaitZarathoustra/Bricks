@@ -52,7 +52,7 @@
 				class={cn('aria-disabled:opacity-50', className)}
 				onclick={start}
 			>
-				<SquarePen class="size-4" aria-hidden="true" />
+				<SquarePen aria-hidden="true" data-icon="inline-start" />
 				{t('common.newConversation')}
 			</Button>
 		{/snippet}

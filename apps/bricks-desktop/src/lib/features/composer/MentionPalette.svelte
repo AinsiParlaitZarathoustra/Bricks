@@ -41,7 +41,7 @@
 </script>
 
 <div
-  class="absolute inset-x-0 bottom-full z-20 mb-2 overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-md"
+  class="absolute inset-x-0 bottom-full z-20 mb-2 overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-float"
 >
   {#if items.length > 0}
     <div role="listbox" {id} aria-label={t('composer.projectFiles')} class="max-h-64 overflow-y-auto p-1">
@@ -82,7 +82,7 @@
   <div class="flex items-center justify-end gap-2 border-t px-2 py-1.5 text-xs text-muted-foreground">
     <button
       type="button"
-      class="inline-flex items-center gap-1.5 rounded-sm px-1.5 py-0.5 hover:bg-accent hover:text-accent-foreground"
+      class="inline-flex items-center gap-1.5 rounded-sm px-1.5 py-0.5 hover:bg-element-hover hover:text-foreground"
       aria-keyshortcuts="Control+R"
       title={t('composer.refreshTheFileListCtrlR')}
       onmousedown={(e) => e.preventDefault()}

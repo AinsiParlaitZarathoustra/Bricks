@@ -6,7 +6,8 @@
 	import { app } from '$lib/state/app.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import { Button } from '$lib/components/ui/button';
-	import LoaderIcon from '@lucide/svelte/icons/loader';
+	import * as Alert from '$lib/components/ui/alert';
+	import { Spinner } from '$lib/components/ui/spinner';
 
 	let { args }: { args: InspectorState['args'] } = $props();
 
@@ -54,13 +55,13 @@
 		<p class="text-sm text-muted-foreground">{t('common.noOpenConversation')}</p>
 	{:else}
 		{#if conv.running}
-			<p role="alert" class="rounded-md border border-border bg-muted p-3 text-sm text-pretty">
-				{t('inspect.notPossibleDuringARun')}
-			</p>
+			<Alert.Root>
+				<Alert.Description>{t('inspect.notPossibleDuringARun')}</Alert.Description>
+			</Alert.Root>
 		{:else if conv.busy !== null}
-			<p role="alert" class="rounded-md border border-border bg-muted p-3 text-sm text-pretty">
-				{t('inspect.anOperationIsInProgress')}
-			</p>
+			<Alert.Root>
+				<Alert.Description>{t('inspect.anOperationIsInProgress')}</Alert.Description>
+			</Alert.Root>
 		{/if}
 
 		<div class="flex flex-wrap items-center gap-2" role="status" aria-live="polite">
@@ -71,7 +72,7 @@
 				<Button variant="outline" onclick={() => ui.close()}>{t('common.close')}</Button>
 			{:else if pending}
 				<p class="flex items-center gap-2 text-sm text-muted-foreground">
-					<LoaderIcon class="size-4 animate-spin" aria-hidden="true" />
+					<Spinner aria-hidden="true" />
 					{t('inspect.clearRequestedWaitingForTheEngines')}
 				</p>
 			{:else}

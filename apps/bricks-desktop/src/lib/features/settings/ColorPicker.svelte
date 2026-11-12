@@ -4,6 +4,7 @@
 	// new value to the parent, which stores it per mode.
 	import { numberFormat, t } from '$lib/i18n/i18n.svelte';
 	import { Input } from '$lib/components/ui/input';
+	import * as ToggleGroup from '$lib/components/ui/toggle-group';
 	import TriangleAlert from '@lucide/svelte/icons/triangle-alert';
 	import {
 		hexToHsv,
@@ -181,19 +182,23 @@
 		/>
 	</div>
 
-	<div class="flex flex-wrap gap-1.5" role="group" aria-label={t('settings.suggestedColors', { label })}>
+	<ToggleGroup.Root
+		type="single"
+		spacing={1.5}
+		class="flex-wrap"
+		aria-label={t('settings.suggestedColors', { label })}
+		bind:value={() => value, (hex) => hex && pick(hex as Hex)}
+	>
 		{#each presets as preset (preset.hex)}
-			<button
-				type="button"
-				class="size-6 rounded-md border border-border shadow-xs focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none {value === preset.hex ? 'ring-2 ring-ring ring-offset-1 ring-offset-background' : ''}"
-				style:background-color={preset.hex}
+			<ToggleGroup.Item
+				value={preset.hex}
+				class="size-6 min-w-0 border border-border p-0 shadow-xs data-[state=on]:ring-2 data-[state=on]:ring-ring data-[state=on]:ring-offset-1 data-[state=on]:ring-offset-background"
+				style="background-color: {preset.hex}"
 				title={preset.label}
 				aria-label={preset.label}
-				aria-pressed={value === preset.hex}
-				onclick={() => pick(preset.hex)}
-			></button>
+			></ToggleGroup.Item>
 		{/each}
-	</div>
+	</ToggleGroup.Root>
 
 	<div class="flex flex-col gap-1.5">
 		<Input

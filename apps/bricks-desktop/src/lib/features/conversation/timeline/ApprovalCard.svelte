@@ -67,7 +67,7 @@
     <header class="flex flex-wrap items-center gap-x-2 gap-y-1">
       <ShieldAlert class="size-4 shrink-0 text-warning" aria-hidden="true" />
       <h2 class="font-medium">{t('conversation.approvalRequested2')}</h2>
-      <span class="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">{approval.tool}</span>
+      <span class="rounded-sm bg-muted px-1.5 py-0.5 font-mono text-xs">{approval.tool}</span>
       <span class="text-xs text-muted-foreground">{t('conversation.level', { level: approval.level })}</span>
       {#if agentName}
         <span class="text-xs text-muted-foreground">{t('conversation.agent', { agentName })}</span>
@@ -107,7 +107,7 @@
                   <DiffStat additions={file.added} deletions={file.removed} label={t('common.lines')} />
                   {#if file.diff}
                     <CollapsibleTrigger
-                      aria-label={t('conversation.viewTheDiffOf', { path: file.path })} class="rounded px-1 text-primary underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                      aria-label={t('conversation.viewTheDiffOf', { path: file.path })} class="rounded-sm px-1 text-primary underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
                     >
                       {t('conversation.viewTheDiff')}
                     </CollapsibleTrigger>

@@ -27,7 +27,7 @@
 </div>
 <section aria-label={t('common.messageInput')} class="shrink-0 px-4 pt-1 pb-3">
   <p
-    class="mx-auto mt-1 max-w-3xl rounded-2xl border bg-card px-4 py-3.5 text-ui text-muted-foreground shadow-[0_1px_2px_rgb(0_0_0/0.05),0_6px_20px_-6px_rgb(0_0_0/0.14)] dark:shadow-[0_1px_2px_rgb(0_0_0/0.4),0_8px_24px_-8px_rgb(0_0_0/0.6)]"
+    class="mx-auto mt-1 max-w-3xl rounded-2xl border bg-card px-4 py-3.5 text-ui text-muted-foreground shadow-float"
   >
     {t('agents.youCantWriteToASub')}
   </p>

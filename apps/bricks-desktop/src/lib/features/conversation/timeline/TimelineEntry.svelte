@@ -8,7 +8,7 @@
   import EditRow from './EditRow.svelte'
   import NoticeLine from './NoticeLine.svelte'
   import RunEndCard from './RunEndCard.svelte'
-  import ResponseCopy from './ResponseCopy.svelte'
+  import ResponseActions from './ResponseActions.svelte'
   import AgentLine from './AgentLine.svelte'
 
   let {
@@ -46,5 +46,5 @@
 {/if}
 
 {#if response && response.complete && response.copyText.trim()}
-  <ResponseCopy text={response.copyText} />
+  <ResponseActions text={response.copyText} sessionId={conversation.sessionId} />
 {/if}

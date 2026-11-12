@@ -67,6 +67,17 @@ export interface AssistantItem {
   /** Reasoning the provider exposed (never reconstructed). */
   thinking: string
   streaming: boolean
+  /** When the first reasoning arrived, while this view followed it live. */
+  thinkingStartedAt?: number
+  /** How long the reasoning lasted, when it was followed live (never for a reloaded history). */
+  thinkingMs?: number
+}
+
+/** The reasoning of a message followed live ends with its first text, or with the message. */
+function endThinking(a: AssistantItem) {
+  if (a.thinkingStartedAt !== undefined && a.thinkingMs === undefined) {
+    a.thinkingMs = Date.now() - a.thinkingStartedAt
+  }
 }
 
 export type ToolStatus = 'running' | 'ok' | 'error'
@@ -1043,11 +1054,13 @@ export class Conversation {
         break
       case 'text_delta': {
         const a = this.currentAssistant(runId)
+        endThinking(a)
         a.text += env.text
         break
       }
       case 'thinking_delta': {
         const a = this.currentAssistant(runId)
+        a.thinkingStartedAt ??= Date.now()
         a.thinking += env.text
         break
       }
@@ -1663,7 +1676,10 @@ export class Conversation {
    */
   private closeAssistant() {
     const last = this.items.at(-1)
-    if (last?.kind === 'assistant') last.streaming = false
+    if (last?.kind === 'assistant') {
+      endThinking(last)
+      last.streaming = false
+    }
   }
 
   private findTool(toolCallId: string | undefined, name: string): ToolItem | undefined {

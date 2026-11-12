@@ -9,6 +9,7 @@
 	import { app } from '$lib/state/app.svelte';
 	import { ui } from '$lib/state/ui.svelte';
 	import { Button } from '$lib/components/ui/button';
+	import * as ButtonGroup from '$lib/components/ui/button-group';
 	import { Switch } from '$lib/components/ui/switch';
 	import SettingsGroup from './SettingsGroup.svelte';
 	import DeleteDialog from './DeleteDialog.svelte';
@@ -114,10 +115,10 @@
 			<span class="text-ui tabular-nums text-muted-foreground">
 				{overview ? total(overview.global) : '—'}
 			</span>
-			<div class="ml-auto flex gap-2">
-				<Button variant="secondary" size="sm" onclick={() => view('global')}>{t('settings.view')}</Button>
+			<ButtonGroup.Root class="ml-auto">
+				<Button variant="outline" size="sm" onclick={() => view('global')}>{t('settings.view')}</Button>
 				<Button
-					variant="ghost"
+					variant="outline"
 					size="sm"
 					class="text-destructive"
 					disabled={!overview}
@@ -125,7 +126,7 @@
 				>
 					{t('common.delete')}
 				</Button>
-			</div>
+			</ButtonGroup.Root>
 		</div>
 	</SettingsGroup>
 
@@ -139,10 +140,10 @@
 			{:else}
 				<span class="text-ui text-muted-foreground">{t('common.noOpenProject')}</span>
 			{/if}
-			<div class="ml-auto flex gap-2">
-				<Button variant="secondary" size="sm" disabled={!project} onclick={() => view('project')}>{t('settings.view')}</Button>
+			<ButtonGroup.Root class="ml-auto">
+				<Button variant="outline" size="sm" disabled={!project} onclick={() => view('project')}>{t('settings.view')}</Button>
 				<Button
-					variant="ghost"
+					variant="outline"
 					size="sm"
 					class="text-destructive"
 					disabled={!project || !overview?.project}
@@ -151,7 +152,7 @@
 				>
 					{t('common.delete')}
 				</Button>
-			</div>
+			</ButtonGroup.Root>
 		</div>
 		{#if overview?.toml_section_ignored}
 			<p class="p-3 text-caption text-muted-foreground">

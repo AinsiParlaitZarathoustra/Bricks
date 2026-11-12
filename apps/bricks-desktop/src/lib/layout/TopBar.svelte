@@ -8,6 +8,7 @@
 	import TerminalIcon from '@lucide/svelte/icons/terminal';
 	import GitCompareIcon from '@lucide/svelte/icons/git-compare';
 	import BookOpenIcon from '@lucide/svelte/icons/book-open';
+	import { Separator } from '$lib/components/ui/separator';
 	import PanelToggle from './PanelToggle.svelte';
 	import { TOP_BAR } from './constants.js';
 	import { cn } from '$lib/utils.js';
@@ -109,7 +110,7 @@
 					/>
 				{/if}
 				{#if onToggleRight && (onToggleTerminal || onToggleChanges || onToggleReader)}
-					<span aria-hidden="true" class="mx-1 h-8 w-px shrink-0 bg-border"></span>
+					<Separator orientation="vertical" decorative class="mx-1 h-8 self-center" />
 				{/if}
 				{#if onToggleTerminal}
 					<PanelToggle

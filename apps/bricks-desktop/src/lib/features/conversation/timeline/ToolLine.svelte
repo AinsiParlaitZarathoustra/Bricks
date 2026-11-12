@@ -5,6 +5,7 @@
   import type { Snippet } from 'svelte'
   import { TOOL_LINE_LABEL, formatToolDuration, type ToolLineState } from './toolLine'
   import { toolIcon } from './toolIcons'
+  import { cn } from '$lib/utils.js'
 
   interface Props {
     /** Real tool name, as the engine reported it. */
@@ -23,10 +24,10 @@
 
 <div class="flex min-w-0 items-center gap-2 py-0.5 text-xs text-muted-foreground">
   <Icon
-    class="size-3.5 shrink-0 {state === 'running' ? 'animate-pulse' : ''} {state === 'failed' ? 'text-destructive' : ''}"
+    class={cn('size-3.5 shrink-0', state === 'failed' && 'text-destructive')}
     aria-hidden="true"
   />
-  <span class="min-w-0 truncate font-mono text-foreground">{name}</span>
+  <span class={cn('min-w-0 truncate font-mono text-foreground', state === 'running' && 'shimmer motion-reduce:shimmer-none')}>{name}</span>
   {@render children?.()}
   {#if state === 'failed'}
     <span class="shrink-0 text-destructive">{TOOL_LINE_LABEL.failed}</span>

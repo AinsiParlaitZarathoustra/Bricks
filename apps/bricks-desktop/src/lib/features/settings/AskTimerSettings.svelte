@@ -4,7 +4,7 @@
 	// and sent with each message: a change applies from the next message.
 	import { t } from '$lib/i18n/i18n.svelte';
 	import type { AskTimerMode } from '$lib/ipc/client';
-	import { Label } from '$lib/components/ui/label';
+	import * as Field from '$lib/components/ui/field';
 	import { Input } from '$lib/components/ui/input';
 	import { Switch } from '$lib/components/ui/switch';
 	import { app } from '$lib/state/app.svelte';
@@ -59,8 +59,8 @@
 				</label>
 			{/each}
 			{#if timer.mode === 'custom'}
-				<div class="flex items-center gap-2">
-					<Label for={`${uid}-seconds`} class="text-ui">{t('settings.durationS')}</Label>
+				<Field.Field orientation="horizontal" class="w-auto" data-invalid={invalid ? 'true' : undefined}>
+					<Field.Label for={`${uid}-seconds`} class="text-ui">{t('settings.durationS')}</Field.Label>
 					<Input
 						id={`${uid}-seconds`}
 						type="number"
@@ -73,11 +73,11 @@
 						class="h-8 w-24 text-ui"
 						oninput={(event) => onSeconds(event.currentTarget.value)}
 					/>
-				</div>
+				</Field.Field>
 				{#if invalid}
-					<p id={`${uid}-error`} role="alert" class="w-full text-caption text-destructive">
+					<Field.Error id={`${uid}-error`} class="w-full text-caption">
 						{t('settings.betweenAndSeconds', { MIN, MAX })}
-					</p>
+					</Field.Error>
 				{/if}
 			{/if}
 		</fieldset>

@@ -28,7 +28,7 @@
 </script>
 
 {#if elapsed}
-  <span class="tabular-nums">{t('conversation.workingFor', { elapsed })}</span>
+  <span class="tabular-nums shimmer motion-reduce:shimmer-none">{t('conversation.workingFor', { elapsed })}</span>
 {:else}
-  <span>{t('conversation.working')}</span>
+  <span class="shimmer motion-reduce:shimmer-none">{t('conversation.working')}</span>
 {/if}

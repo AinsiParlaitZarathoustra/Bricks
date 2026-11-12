@@ -4,6 +4,7 @@
 	import { t } from '$lib/i18n/i18n.svelte';
 	import { onMount } from 'svelte';
 	import { Button } from '$lib/components/ui/button';
+	import * as Alert from '$lib/components/ui/alert';
 	import { app } from '$lib/state/app.svelte';
 	import {
 		errorMessage,
@@ -195,16 +196,16 @@
 
 		{#if !file}
 			{#if loadError}
-				<div role="alert" class="flex flex-col items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-ui">
-					<p class="flex items-start gap-2 text-pretty">
-						<TriangleAlert class="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
-						{t('settings.couldNotReadTheProviders', { loadError })}
-					</p>
-					<Button variant="outline" size="sm" onclick={load} disabled={loading}>
-						<RefreshCw aria-hidden="true" />
-						{t('common.retry')}
-					</Button>
-				</div>
+				<Alert.Root variant="destructive">
+					<TriangleAlert aria-hidden="true" />
+					<Alert.Description class="flex flex-col items-start gap-3">
+						<p>{t('settings.couldNotReadTheProviders', { loadError })}</p>
+						<Button variant="outline" size="sm" onclick={load} disabled={loading}>
+							<RefreshCw aria-hidden="true" />
+							{t('common.retry')}
+						</Button>
+					</Alert.Description>
+				</Alert.Root>
 			{:else}
 				<p role="status" class="text-ui text-muted-foreground">{t('settings.readingProviders')}</p>
 			{/if}
@@ -214,31 +215,31 @@
 			{/if}
 
 			{#if file.error}
-				<div role="alert" class="flex flex-col items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-ui">
-					<p class="flex items-start gap-2 text-pretty">
-						<TriangleAlert class="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
-						{t('settings.theProvidersFileIsInvalid', { error: file.error })}
-					</p>
-					<Button variant="outline" size="sm" onclick={load} disabled={loading}>
-						<RefreshCw aria-hidden="true" />
-						{t('common.retry')}
-					</Button>
-				</div>
+				<Alert.Root variant="destructive">
+					<TriangleAlert aria-hidden="true" />
+					<Alert.Description class="flex flex-col items-start gap-3">
+						<p>{t('settings.theProvidersFileIsInvalid', { error: file.error })}</p>
+						<Button variant="outline" size="sm" onclick={load} disabled={loading}>
+							<RefreshCw aria-hidden="true" />
+							{t('common.retry')}
+						</Button>
+					</Alert.Description>
+				</Alert.Root>
 			{/if}
 
 			{#if unpriced > 0}
-				<div class="flex flex-wrap items-center gap-3 rounded-lg border border-warning/40 bg-warning/5 p-3 text-ui">
-					<p class="flex flex-1 items-center gap-2">
-						<TriangleAlert class="size-4 shrink-0 text-warning" aria-hidden="true" />
-						{t('settings.modelsWithoutCosts', { count: unpriced })}
-					</p>
-					<Button variant="outline" size="sm" onclick={fillMissingPrices} disabled={filling}>
-						{t('settings.setTheMissingCostsTo0')}
-					</Button>
-					{#if fillError}
-						<p role="alert" class="w-full text-pretty text-destructive">{fillError}</p>
-					{/if}
-				</div>
+				<Alert.Root variant="warning" role="status">
+					<TriangleAlert aria-hidden="true" />
+					<Alert.Description class="flex flex-wrap items-center gap-3">
+						<p class="flex-1">{t('settings.modelsWithoutCosts', { count: unpriced })}</p>
+						<Button variant="outline" size="sm" onclick={fillMissingPrices} disabled={filling}>
+							{t('settings.setTheMissingCostsTo0')}
+						</Button>
+						{#if fillError}
+							<p role="alert" class="w-full text-destructive">{fillError}</p>
+						{/if}
+					</Alert.Description>
+				</Alert.Root>
 			{/if}
 
 			{#if providers.length === 0}

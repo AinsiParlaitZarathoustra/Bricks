@@ -150,7 +150,7 @@
 				<li>
 					<button
 						type="button"
-						class="flex w-full min-w-0 flex-col gap-1 px-3 py-2.5 text-left transition-colors outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+						class="flex w-full min-w-0 flex-col gap-1 px-3 py-2.5 text-left transition-colors outline-none hover:bg-element-hover focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
 						aria-current={item.id === currentId ? 'true' : undefined}
 						disabled={resumingId !== null}
 						onclick={() => void resume(item.id)}

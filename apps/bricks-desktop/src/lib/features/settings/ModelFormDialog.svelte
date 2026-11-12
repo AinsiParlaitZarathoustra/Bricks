@@ -8,8 +8,10 @@
 	import { untrack } from 'svelte';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import { Button } from '$lib/components/ui/button';
+	import * as ButtonGroup from '$lib/components/ui/button-group';
 	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
+	import * as Field from '$lib/components/ui/field';
+	import { Checkbox } from '$lib/components/ui/checkbox';
 	import { Switch } from '$lib/components/ui/switch';
 	import type { ModelPatch } from '$lib/ipc/bindings/ModelPatch';
 	import type { ModelView } from '$lib/ipc/bindings/ModelView';
@@ -138,8 +140,8 @@
 			{/if}
 
 			{#if !original}
-				<div class="flex flex-col gap-2">
-					<Label for={`${uid}-id`}>{t('common.identifier')}</Label>
+				<Field.Field data-invalid={attempted && idError ? 'true' : undefined}>
+					<Field.Label for={`${uid}-id`}>{t('common.identifier')}</Field.Label>
 					<Input
 						id={`${uid}-id`}
 						bind:value={id}
@@ -151,13 +153,13 @@
 						aria-describedby={attempted && idError ? `${uid}-id-error` : undefined}
 					/>
 					{#if attempted && idError}
-						<p id={`${uid}-id-error`} role="alert" class="text-xs text-pretty text-destructive">{idError}</p>
+						<Field.Error id={`${uid}-id-error`}>{idError}</Field.Error>
 					{/if}
-				</div>
+				</Field.Field>
 			{/if}
 
-			<div class="flex flex-col gap-2">
-				<Label for={`${uid}-name`}>{t('settings.name')}</Label>
+			<Field.Field data-invalid={shown.name ? 'true' : undefined}>
+				<Field.Label for={`${uid}-name`}>{t('settings.name')}</Field.Label>
 				<Input
 					id={`${uid}-name`}
 					bind:value={form.name}
@@ -167,12 +169,12 @@
 					aria-describedby={shown.name ? `${uid}-name-error` : undefined}
 				/>
 				{#if shown.name}
-					<p id={`${uid}-name-error`} role="alert" class="text-xs text-destructive">{shown.name}</p>
+					<Field.Error id={`${uid}-name-error`}>{shown.name}</Field.Error>
 				{/if}
-			</div>
+			</Field.Field>
 
-			<div class="flex flex-col gap-2">
-				<Label for={`${uid}-api-model`}>{t('settings.apiName')}</Label>
+			<Field.Field data-invalid={shown.apiModel ? 'true' : undefined}>
+				<Field.Label for={`${uid}-api-model`}>{t('settings.apiName')}</Field.Label>
 				<Input
 					id={`${uid}-api-model`}
 					bind:value={form.apiModel}
@@ -183,13 +185,13 @@
 					aria-describedby={shown.apiModel ? `${uid}-api-model-error` : undefined}
 				/>
 				{#if shown.apiModel}
-					<p id={`${uid}-api-model-error`} role="alert" class="text-xs text-destructive">{shown.apiModel}</p>
+					<Field.Error id={`${uid}-api-model-error`}>{shown.apiModel}</Field.Error>
 				{/if}
-			</div>
+			</Field.Field>
 
 			<div class="grid gap-4 sm:grid-cols-2">
-				<div class="flex flex-col gap-2">
-					<Label for={`${uid}-max-input`}>{t('settings.maximumInputTokens')}</Label>
+				<Field.Field data-invalid={shown.maxInput ? 'true' : undefined}>
+					<Field.Label for={`${uid}-max-input`}>{t('settings.maximumInputTokens')}</Field.Label>
 					<Input
 						id={`${uid}-max-input`}
 						bind:value={form.maxInput}
@@ -199,12 +201,12 @@
 						aria-describedby={shown.maxInput ? `${uid}-max-input-error` : undefined}
 					/>
 					{#if shown.maxInput}
-						<p id={`${uid}-max-input-error`} role="alert" class="text-xs text-destructive">{shown.maxInput}</p>
+						<Field.Error id={`${uid}-max-input-error`}>{shown.maxInput}</Field.Error>
 					{/if}
-				</div>
+				</Field.Field>
 
-				<div class="flex flex-col gap-2">
-					<Label for={`${uid}-max-output`}>{t('settings.maximumOutputTokens')}</Label>
+				<Field.Field data-invalid={shown.maxOutput ? 'true' : undefined}>
+					<Field.Label for={`${uid}-max-output`}>{t('settings.maximumOutputTokens')}</Field.Label>
 					<Input
 						id={`${uid}-max-output`}
 						bind:value={form.maxOutput}
@@ -214,37 +216,43 @@
 						aria-describedby={shown.maxOutput ? `${uid}-max-output-error` : undefined}
 					/>
 					{#if shown.maxOutput}
-						<p id={`${uid}-max-output-error`} role="alert" class="text-xs text-destructive">{shown.maxOutput}</p>
+						<Field.Error id={`${uid}-max-output-error`}>{shown.maxOutput}</Field.Error>
 					{/if}
-				</div>
+				</Field.Field>
 			</div>
 
-			<fieldset class="flex flex-col gap-2">
-				<legend class="mb-2 text-sm leading-none font-medium">{t('settings.acceptedInputs')}</legend>
+			<Field.Set data-invalid={shown.modalities ? 'true' : undefined}>
+				<Field.Legend variant="label">{t('settings.acceptedInputs')}</Field.Legend>
 				<div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
 					{#each MODALITY_OPTIONS as modality (modality)}
-						<label class="flex items-center gap-2 text-sm">
-							<input
-								type="checkbox"
-								value={modality}
-								bind:group={form.modalities}
-								class="size-4 accent-primary"
+						<Field.Field orientation="horizontal">
+							<Checkbox
+								id={`${uid}-modality-${modality}`}
+								bind:checked={
+									() => form.modalities.includes(modality),
+									(on) =>
+										(form.modalities = on
+											? [...form.modalities, modality]
+											: form.modalities.filter((m) => m !== modality))
+								}
 							/>
-							{MODALITY_LABELS[modality] ?? modality}
-						</label>
+							<Field.Label for={`${uid}-modality-${modality}`} class="font-normal">
+								{MODALITY_LABELS[modality] ?? modality}
+							</Field.Label>
+						</Field.Field>
 					{/each}
 				</div>
 				{#if shown.modalities}
-					<p role="alert" class="text-xs text-destructive">{shown.modalities}</p>
+					<Field.Error>{shown.modalities}</Field.Error>
 				{/if}
-			</fieldset>
+			</Field.Set>
 
-			<div class="flex flex-col gap-3" role="group" aria-labelledby={`${uid}-cost-label`}>
-				<span id={`${uid}-cost-label`} class="text-sm leading-none font-medium">{t('settings.costPerMtok')}</span>
+			<Field.Set>
+				<Field.Legend variant="label">{t('settings.costPerMtok')}</Field.Legend>
 				<div class="grid gap-4 sm:grid-cols-3">
 					{#each [{ key: 'priceInput', label: t('common.enter') }, { key: 'priceOutput', label: t('common.output') }, { key: 'priceCache', label: t('settings.cache') }] as const as field (field.key)}
-						<div class="flex flex-col gap-2">
-							<Label for={`${uid}-${field.key}`}>{field.label}</Label>
+						<Field.Field data-invalid={shown[field.key] ? 'true' : undefined}>
+							<Field.Label for={`${uid}-${field.key}`}>{field.label}</Field.Label>
 							<Input
 								id={`${uid}-${field.key}`}
 								bind:value={form[field.key]}
@@ -255,15 +263,15 @@
 								aria-describedby={shown[field.key] ? `${uid}-${field.key}-error` : undefined}
 							/>
 							{#if shown[field.key]}
-								<p id={`${uid}-${field.key}-error`} role="alert" class="text-xs text-pretty text-destructive">{shown[field.key]}</p>
+								<Field.Error id={`${uid}-${field.key}-error`}>{shown[field.key]}</Field.Error>
 							{/if}
-						</div>
+						</Field.Field>
 					{/each}
 				</div>
-			</div>
+			</Field.Set>
 
-			<div class="flex flex-col gap-2">
-				<Label for={`${uid}-level`}>{t('settings.reasoningLevels')}</Label>
+			<Field.Field data-invalid={levelError ? 'true' : undefined}>
+				<Field.Label for={`${uid}-level`}>{t('settings.reasoningLevels')}</Field.Label>
 				{#if form.profiles.length > 0}
 					<ul class="flex flex-wrap items-center gap-1.5" aria-label={t('settings.reasoningLevels')}>
 						{#each form.profiles as profile, index (profile.id)}
@@ -283,7 +291,7 @@
 						{/each}
 					</ul>
 				{/if}
-				<div class="flex items-center gap-2">
+				<ButtonGroup.Root class="w-full">
 					<Input
 						id={`${uid}-level`}
 						bind:value={level}
@@ -300,11 +308,11 @@
 					<Button type="button" variant="outline" disabled={level.trim() === ''} onclick={addLevel}>
 						{t('common.add')}
 					</Button>
-				</div>
+				</ButtonGroup.Root>
 				{#if levelError}
-					<p id={`${uid}-level-error`} role="alert" class="text-xs text-destructive">{levelError}</p>
+					<Field.Error id={`${uid}-level-error`}>{levelError}</Field.Error>
 				{/if}
-			</div>
+			</Field.Field>
 
 			<label class="flex items-center justify-between gap-3 text-sm">
 				{t('settings.asynchronousToolCalls')}

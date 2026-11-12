@@ -165,7 +165,7 @@
 					</span>
 					{#if state === 'missing'}
 						<Button size="sm" variant="secondary" onclick={() => void request(permission.id)}>
-							<ExternalLink class="size-3.5" aria-hidden="true" />
+							<ExternalLink aria-hidden="true" data-icon="inline-start" />
 							{t('settings.openSettings')}
 						</Button>
 					{/if}

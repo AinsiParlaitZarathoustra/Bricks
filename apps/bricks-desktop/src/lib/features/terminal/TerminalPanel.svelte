@@ -10,8 +10,8 @@
 	import RotateCw from '@lucide/svelte/icons/rotate-cw';
 	import X from '@lucide/svelte/icons/x';
 	import { Button } from '$lib/components/ui/button';
+	import * as ToggleGroup from '$lib/components/ui/toggle-group';
 	import EmptyState from '$lib/layout/EmptyState.svelte';
-	import { cn } from '$lib/utils.js';
 	import { app } from '$lib/state/app.svelte';
 	import { theme } from '$lib/theme/theme.svelte';
 	import { terminals } from './terminals.svelte';
@@ -76,21 +76,21 @@
 
 <div class="flex h-full min-h-0 flex-col bg-code-bg">
 	<div class="flex h-9 shrink-0 items-center gap-1 border-b border-border bg-background px-2">
-		<div role="group" aria-label={t('terminal.projectTerminals')} class="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+		<ToggleGroup.Root
+			type="single"
+			spacing={1}
+			aria-label={t('terminal.projectTerminals')}
+			class="min-w-0 flex-1 overflow-x-auto"
+			bind:value={() => activeId ?? '', (id) => id && select(id)}
+		>
 			{#each list as session, index (session.id)}
-				{@const isActive = session.id === activeId}
-				<div class={cn('flex shrink-0 items-center rounded-md', isActive && 'bg-muted')}>
-					<button
-						type="button"
-						aria-pressed={isActive}
-						class={cn(
-							'rounded-md px-2 py-1 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring',
-							isActive ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
-						)}
-						onclick={() => select(session.id)}
+				<div class="flex shrink-0 items-center rounded-md has-data-[state=on]:bg-element-selected">
+					<ToggleGroup.Item
+						value={session.id}
+						class="h-6 min-w-0 px-2 text-xs font-normal hover:bg-transparent data-[state=on]:bg-transparent"
 					>
 						{t('terminal.terminal', { value: index + 1 })}
-					</button>
+					</ToggleGroup.Item>
 					<button
 						type="button"
 						class="rounded-md p-1 text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
@@ -102,7 +102,7 @@
 					</button>
 				</div>
 			{/each}
-		</div>
+		</ToggleGroup.Root>
 		<Button
 			variant="ghost"
 			size="icon-sm"
@@ -111,7 +111,7 @@
 			disabled={!projectId}
 			onclick={create}
 		>
-			<Plus class="size-4" aria-hidden="true" />
+			<Plus aria-hidden="true" />
 		</Button>
 		{#if onHide}
 			<Button
@@ -121,7 +121,7 @@
 				title={t('common.hideTheTerminal')}
 				onclick={onHide}
 			>
-				<X class="size-4" aria-hidden="true" />
+				<X aria-hidden="true" />
 			</Button>
 		{/if}
 	</div>
@@ -155,7 +155,7 @@
 					{t('terminal.processFinished', { value: active.exitCode !== null ? t('terminal.code', { exitCode: active.exitCode }) : '' })}
 				</span>
 				<Button variant="outline" size="sm" onclick={() => active?.restart()}>
-					<RotateCw class="size-3.5" aria-hidden="true" />
+					<RotateCw aria-hidden="true" data-icon="inline-start" />
 					{t('terminal.restart')}
 				</Button>
 			</div>

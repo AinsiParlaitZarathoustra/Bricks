@@ -49,7 +49,7 @@
 				aria-expanded={open}
 				onclick={() => (open = true)}
 			>
-				<Search class="size-3.5" aria-hidden="true" />
+				<Search aria-hidden="true" />
 			</Button>
 		{/snippet}
 	</Tooltip.Trigger>

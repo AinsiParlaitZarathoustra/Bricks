@@ -46,7 +46,7 @@
 {#if hiddenCount > 0}
   <button
     type="button"
-    class="mt-1 rounded text-xs text-primary underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+    class="mt-1 rounded-sm text-xs text-primary underline-offset-4 hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
     onclick={() => (showAll = true)}
   >
     {t('conversation.showAllMoreLine', { count: hiddenCount })}

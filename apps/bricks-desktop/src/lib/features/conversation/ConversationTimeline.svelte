@@ -283,7 +283,7 @@
       <Button
         variant="secondary"
         size="sm"
-        class="pointer-events-auto shadow-md"
+        class="pointer-events-auto shadow-float"
         onclick={() => scrollToBottom(true)}
       >
         <ArrowDown aria-hidden="true" />

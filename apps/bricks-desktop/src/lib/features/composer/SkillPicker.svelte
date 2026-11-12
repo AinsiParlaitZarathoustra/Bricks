@@ -105,7 +105,7 @@
 <div
   role="group"
   aria-label={t('composer.skillsForTheNextMessage')}
-  class="absolute inset-x-0 bottom-full z-20 mb-2 overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-md"
+  class="absolute inset-x-0 bottom-full z-20 mb-2 overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-float"
 >
   <Command.Root shouldFilter={false} class="bg-transparent p-0">
     <Command.Input

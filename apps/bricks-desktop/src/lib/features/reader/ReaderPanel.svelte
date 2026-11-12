@@ -5,6 +5,8 @@
   // operations of that file (each patch on its own, never merged).
   import { t, numberFormat } from '$lib/i18n/i18n.svelte'
   import X from '@lucide/svelte/icons/x'
+  import { Button } from '$lib/components/ui/button'
+  import * as ToggleGroup from '$lib/components/ui/toggle-group'
   import FileIcon from '$lib/features/file-icons/FileIcon.svelte'
   import DiffView from '$lib/features/changes/DiffView.svelte'
   import SvgViewer from '$lib/features/conversation/markdown/SvgViewer.svelte'
@@ -66,7 +68,7 @@
         <div
           class={[
             'group flex max-w-48 min-w-12 shrink items-center rounded-md text-ui',
-            tab.id === active?.id ? 'bg-muted text-foreground' : 'text-muted-foreground hover:bg-muted/60',
+            tab.id === active?.id ? 'bg-element-selected text-foreground' : 'text-muted-foreground hover:bg-element-hover',
           ]}
         >
           <button
@@ -84,7 +86,7 @@
             type="button"
             aria-label={t('reader.close', { title: tab.title })}
             title={t('common.close')}
-            class="mr-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+            class="mr-0.5 inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-background hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
             onclick={() => reader.close(tab.id)}
           >
             <X class="size-3" aria-hidden="true" />
@@ -95,24 +97,19 @@
 
     {#if active}
       <div class="flex shrink-0 items-center gap-2 px-2 py-1">
-        <div role="radiogroup" aria-label={t('reader.readingMode')} class="flex items-center gap-0.5">
+        <ToggleGroup.Root
+          type="single"
+          size="sm"
+          spacing={0.5}
+          aria-label={t('reader.readingMode')}
+          bind:value={() => active.mode, (mode) => mode && reader.setMode(active.id, mode as typeof active.mode)}
+        >
           {#each MODES as mode (mode.id)}
             {#if available(active, mode.id)}
-              <button
-                type="button"
-                role="radio"
-                aria-checked={active.mode === mode.id}
-                class={[
-                  'rounded-md px-2 py-0.5 text-xs focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none',
-                  active.mode === mode.id ? 'bg-muted text-foreground' : 'text-muted-foreground hover:text-foreground',
-                ]}
-                onclick={() => reader.setMode(active.id, mode.id)}
-              >
-                {mode.label}
-              </button>
+              <ToggleGroup.Item value={mode.id} class="h-6 px-2 text-xs font-normal">{mode.label}</ToggleGroup.Item>
             {/if}
           {/each}
-        </div>
+        </ToggleGroup.Root>
         <span class="ml-auto min-w-0 truncate font-mono text-caption text-muted-foreground" title={active.fullPath}>
           {active.fullPath}
         </span>
@@ -186,22 +183,23 @@
           <span class="tabular-nums">
             {t('reader.linesOf', { start: nf.format(w.start), value: nf.format(w.start + w.lines.length - 1), totalLines: nf.format(w.totalLines) })}
           </span>
-          <button
-            type="button"
-            class="ml-auto rounded px-1.5 py-0.5 hover:bg-muted hover:text-foreground disabled:opacity-40"
+          <Button
+            variant="ghost"
+            size="xs"
+            class="ml-auto"
             disabled={w.start <= 1}
             onclick={() => reader.loadWindow(active.id, Math.max(1, w.start - 400))}
           >
             {t('reader.previous')}
-          </button>
-          <button
-            type="button"
-            class="rounded px-1.5 py-0.5 hover:bg-muted hover:text-foreground disabled:opacity-40"
+          </Button>
+          <Button
+            variant="ghost"
+            size="xs"
             disabled={w.start + w.lines.length > w.totalLines}
             onclick={() => reader.loadWindow(active.id, w.start + w.lines.length)}
           >
             {t('reader.next')}
-          </button>
+          </Button>
         </div>
       {/if}
     {/if}

@@ -8,8 +8,10 @@
 	import { open as openDialog } from '@tauri-apps/plugin-dialog';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
+	import * as ButtonGroup from '$lib/components/ui/button-group';
+	import * as Alert from '$lib/components/ui/alert';
 	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
+	import * as Field from '$lib/components/ui/field';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import {
 		errorMessage,
@@ -204,7 +206,7 @@
 {#snippet fieldMessage(field: string)}
 	{@const message = fieldError(field)}
 	{#if message}
-		<p id={`${uid}-${field}-error`} class="text-xs text-pretty text-destructive">{message}</p>
+		<Field.Error id={`${uid}-${field}-error`} class="text-pretty">{message}</Field.Error>
 	{/if}
 {/snippet}
 
@@ -213,8 +215,8 @@
 		<h3 id={`${uid}-title`} class="text-ui font-semibold text-foreground">{t('common.skills')}</h3>
 
 		<div class="flex flex-col gap-3 sm:flex-row sm:items-end">
-			<div class="flex min-w-0 flex-1 flex-col gap-1.5">
-				<Label for={`${uid}-search`}>{t('common.search')}</Label>
+			<Field.Field class="min-w-0 flex-1">
+				<Field.Label for={`${uid}-search`}>{t('common.search')}</Field.Label>
 				<Input
 					id={`${uid}-search`}
 					type="search"
@@ -224,22 +226,22 @@
 					autocomplete="off"
 					spellcheck={false}
 				/>
-			</div>
+			</Field.Field>
 
-			<div class="flex shrink-0 flex-wrap gap-2">
+			<ButtonGroup.Root aria-label={t('common.skills')} class="shrink-0">
 				<Button variant="outline" size="sm" onclick={startAdding} disabled={busy || adding}>
-					<Plus aria-hidden="true" />
+					<Plus aria-hidden="true" data-icon="inline-start" />
 					{t('common.add')}
 				</Button>
 				<Button variant="outline" size="sm" onclick={importFolder} disabled={busy}>
-					<FolderInput aria-hidden="true" />
+					<FolderInput aria-hidden="true" data-icon="inline-start" />
 					{t('settings.import')}
 				</Button>
 				<Button variant="outline" size="sm" onclick={reload} disabled={loading}>
-					<RefreshCw class={loading ? 'animate-spin' : ''} aria-hidden="true" />
+					<RefreshCw class={loading ? 'animate-spin' : ''} data-icon="inline-start" aria-hidden="true" />
 					{t('common.reload')}
 				</Button>
-			</div>
+			</ButtonGroup.Root>
 		</div>
 	</section>
 
@@ -249,8 +251,8 @@
 			aria-label={t('settings.newSkill')}
 			onsubmit={submitNew}
 		>
-			<div class="flex flex-col gap-1.5">
-				<Label for={`${uid}-name`}>{t('settings.name')}</Label>
+			<Field.Field data-invalid={fieldError('name') ? 'true' : undefined}>
+				<Field.Label for={`${uid}-name`}>{t('settings.name')}</Field.Label>
 				<Input
 					id={`${uid}-name`}
 					bind:value={name}
@@ -263,9 +265,9 @@
 					aria-describedby={fieldError('name') ? `${uid}-name-error` : undefined}
 				/>
 				{@render fieldMessage('name')}
-			</div>
-			<div class="flex flex-col gap-1.5">
-				<Label for={`${uid}-description`}>{t('settings.description')}</Label>
+			</Field.Field>
+			<Field.Field data-invalid={fieldError('description') ? 'true' : undefined}>
+				<Field.Label for={`${uid}-description`}>{t('settings.description')}</Field.Label>
 				<Input
 					id={`${uid}-description`}
 					bind:value={description}
@@ -276,9 +278,9 @@
 					aria-describedby={fieldError('description') ? `${uid}-description-error` : undefined}
 				/>
 				{@render fieldMessage('description')}
-			</div>
-			<div class="flex flex-col gap-1.5">
-				<Label for={`${uid}-instructions`}>{t('settings.instructions')}</Label>
+			</Field.Field>
+			<Field.Field data-invalid={fieldError('instructions') ? 'true' : undefined}>
+				<Field.Label for={`${uid}-instructions`}>{t('settings.instructions')}</Field.Label>
 				<Textarea
 					id={`${uid}-instructions`}
 					bind:value={instructions}
@@ -291,7 +293,7 @@
 					aria-describedby={fieldError('instructions') ? `${uid}-instructions-error` : undefined}
 				/>
 				{@render fieldMessage('instructions')}
-			</div>
+			</Field.Field>
 			{#if otherFormError}
 				<p role="alert" class="flex items-start gap-2 text-xs text-pretty text-destructive">
 					<TriangleAlert class="mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
@@ -306,26 +308,26 @@
 	{/if}
 
 	{#if problem}
-		<div role="alert" class="flex items-start justify-between gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-ui">
-			<p class="flex items-start gap-2 text-pretty">
-				<TriangleAlert class="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
-				{problem}
-			</p>
-			<Button variant="ghost" size="sm" class="shrink-0" onclick={() => (problem = null)}>{t('common.close')}</Button>
-		</div>
+		<Alert.Root variant="destructive">
+			<TriangleAlert aria-hidden="true" />
+			<Alert.Description>{problem}</Alert.Description>
+			<Alert.Action>
+				<Button variant="ghost" size="sm" onclick={() => (problem = null)}>{t('common.close')}</Button>
+			</Alert.Action>
+		</Alert.Root>
 	{/if}
 
 	{#if error}
-		<div role="alert" class="flex flex-col items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-ui">
-			<p class="flex items-start gap-2 text-pretty">
-				<TriangleAlert class="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
-				{t('settings.couldNotReadTheSkills', { error })}
-			</p>
-			<Button variant="outline" size="sm" onclick={reload} disabled={loading}>
-				<RefreshCw aria-hidden="true" />
-				{t('common.retry')}
-			</Button>
-		</div>
+		<Alert.Root variant="destructive">
+			<TriangleAlert aria-hidden="true" />
+			<Alert.Description class="flex flex-col items-start gap-3">
+				<p>{t('settings.couldNotReadTheSkills', { error })}</p>
+				<Button variant="outline" size="sm" onclick={reload} disabled={loading}>
+					<RefreshCw aria-hidden="true" />
+					{t('common.retry')}
+				</Button>
+			</Alert.Description>
+		</Alert.Root>
 	{:else if !catalog}
 		<p role="status" class="text-ui text-muted-foreground">{t('settings.readingSkills')}</p>
 	{:else}

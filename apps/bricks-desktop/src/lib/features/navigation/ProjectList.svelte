@@ -11,7 +11,7 @@
 	import { app } from '$lib/state/app.svelte';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
+	import * as Field from '$lib/components/ui/field';
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as AlertDialog from '$lib/components/ui/alert-dialog';
 	import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
@@ -133,7 +133,7 @@
 					aria-label={t('navigation.newConversationIn', { name: project.name })}
 					onclick={() => startConversation(project)}
 				>
-					<Plus class="size-4" aria-hidden="true" />
+					<Plus aria-hidden="true" />
 				</Button>
 
 				<DropdownMenu.Root>
@@ -146,7 +146,7 @@
 								class="shrink-0 text-muted-foreground opacity-0 group-focus-within:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
 								aria-label={t('navigation.actionsForProject', { name: project.name })}
 							>
-								<EllipsisVertical class="size-4" aria-hidden="true" />
+								<EllipsisVertical aria-hidden="true" />
 							</Button>
 						{/snippet}
 					</DropdownMenu.Trigger>
@@ -183,8 +183,8 @@
 			<Dialog.Header>
 				<Dialog.Title>{t('navigation.renameTheProject')}</Dialog.Title>
 			</Dialog.Header>
-			<div class="flex flex-col gap-2">
-				<Label for={`${uid}-name`}>{t('navigation.projectName')}</Label>
+			<Field.Field data-invalid={renameError ? 'true' : undefined}>
+				<Field.Label for={`${uid}-name`}>{t('navigation.projectName')}</Field.Label>
 				<Input
 					id={`${uid}-name`}
 					bind:value={renameName}
@@ -194,9 +194,9 @@
 					aria-describedby={renameError ? `${uid}-error` : undefined}
 				/>
 				{#if renameError}
-					<p id={`${uid}-error`} class="text-xs text-destructive" role="alert">{renameError}</p>
+					<Field.Error id={`${uid}-error`}>{renameError}</Field.Error>
 				{/if}
-			</div>
+			</Field.Field>
 			<Dialog.Footer>
 				<Button type="button" variant="outline" onclick={() => (renameOpen = false)}>{t('common.cancel')}</Button>
 				<Button type="submit" disabled={renaming}>{t('common.save')}</Button>

@@ -5,7 +5,7 @@
 	import * as Tabs from '$lib/components/ui/tabs';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
+	import * as Field from '$lib/components/ui/field';
 	import { Textarea } from '$lib/components/ui/textarea';
 	import type { McpServerInput } from '$lib/ipc/client';
 
@@ -33,9 +33,28 @@
 			.map((l) => l.trim())
 			.filter((l) => l !== '');
 
+	/** Field errors, shown once an add has been tried, then kept up to date. */
+	let tried = $state(false);
+	const errors = $derived.by(() => {
+		const out: Partial<Record<'name' | 'command' | 'url' | 'pairs', string>> = {};
+		if (name.trim() === '') out.name = t('settings.thisFieldIsRequired');
+		if (transport === 'stdio' && command.trim() === '') out.command = t('settings.thisFieldIsRequired');
+		if (transport === 'http') {
+			const address = url.trim();
+			if (address === '') out.url = t('settings.thisFieldIsRequired');
+			else if (!/^https?:\/\/[^\s/]+/i.test(address)) out.url = t('settings.mcpUrlInvalid');
+		}
+		const bad = pairs.split('\n').findIndex((l) => l.trim() !== '' && !/^[^=\s]+=/.test(l.trim()));
+		if (bad >= 0) out.pairs = t('settings.mcpPairInvalid', { line: bad + 1 });
+		return out;
+	});
+	const shown = $derived(tried ? errors : {});
+
 	async function submit(event: SubmitEvent) {
 		event.preventDefault();
 		if (saving) return;
+		tried = true;
+		if (Object.keys(errors).length > 0) return;
 		saving = true;
 		error = null;
 		error = await onSave({
@@ -58,10 +77,21 @@
 				<Dialog.Title>{t('settings.mcpAdd')}</Dialog.Title>
 			</Dialog.Header>
 
-			<div class="flex flex-col gap-2">
-				<Label for={`${uid}-name`}>{t('settings.name')}</Label>
-				<Input id={`${uid}-name`} bind:value={name} autocomplete="off" spellcheck={false} class="font-mono text-sm" />
-			</div>
+			<Field.Field data-invalid={shown.name ? 'true' : undefined}>
+				<Field.Label for={`${uid}-name`}>{t('settings.name')}</Field.Label>
+				<Input
+					id={`${uid}-name`}
+					bind:value={name}
+					autocomplete="off"
+					spellcheck={false}
+					class="font-mono text-sm"
+					aria-invalid={shown.name ? 'true' : undefined}
+					aria-describedby={shown.name ? `${uid}-name-error` : undefined}
+				/>
+				{#if shown.name}
+					<Field.Error id={`${uid}-name-error`}>{shown.name}</Field.Error>
+				{/if}
+			</Field.Field>
 
 			<Tabs.Root bind:value={transport}>
 				<Tabs.List class="w-full">
@@ -71,9 +101,11 @@
 			</Tabs.Root>
 
 			{#if transport === 'stdio'}
-				<div class="flex flex-col gap-2">
-					<Label for={`${uid}-command`}>{t('settings.mcpCommand')}</Label>
+				<Field.Field data-invalid={shown.command ? 'true' : undefined}>
+					<Field.Label for={`${uid}-command`}>{t('settings.mcpCommand')}</Field.Label>
 					<Input
+						aria-invalid={shown.command ? 'true' : undefined}
+						aria-describedby={shown.command ? `${uid}-command-error` : undefined}
 						id={`${uid}-command`}
 						bind:value={command}
 						placeholder="npx -y @modelcontextprotocol/server-filesystem ."
@@ -81,11 +113,16 @@
 						spellcheck={false}
 						class="font-mono text-sm"
 					/>
-				</div>
+					{#if shown.command}
+						<Field.Error id={`${uid}-command-error`}>{shown.command}</Field.Error>
+					{/if}
+				</Field.Field>
 			{:else}
-				<div class="flex flex-col gap-2">
-					<Label for={`${uid}-url`}>{t('settings.mcpUrl')}</Label>
+				<Field.Field data-invalid={shown.url ? 'true' : undefined}>
+					<Field.Label for={`${uid}-url`}>{t('settings.mcpUrl')}</Field.Label>
 					<Input
+						aria-invalid={shown.url ? 'true' : undefined}
+						aria-describedby={shown.url ? `${uid}-url-error` : undefined}
 						id={`${uid}-url`}
 						bind:value={url}
 						placeholder="https://example.com/mcp"
@@ -93,12 +130,17 @@
 						spellcheck={false}
 						class="font-mono text-sm"
 					/>
-				</div>
+					{#if shown.url}
+						<Field.Error id={`${uid}-url-error`}>{shown.url}</Field.Error>
+					{/if}
+				</Field.Field>
 			{/if}
 
-			<div class="flex flex-col gap-2">
-				<Label for={`${uid}-pairs`}>{transport === 'http' ? t('settings.mcpHeaders') : t('settings.mcpEnv')}</Label>
+			<Field.Field data-invalid={shown.pairs ? 'true' : undefined}>
+				<Field.Label for={`${uid}-pairs`}>{transport === 'http' ? t('settings.mcpHeaders') : t('settings.mcpEnv')}</Field.Label>
 				<Textarea
+					aria-invalid={shown.pairs ? 'true' : undefined}
+					aria-describedby={shown.pairs ? `${uid}-pairs-error` : undefined}
 					id={`${uid}-pairs`}
 					bind:value={pairs}
 					rows={3}
@@ -106,7 +148,10 @@
 					spellcheck={false}
 					class="font-mono text-sm"
 				/>
-			</div>
+				{#if shown.pairs}
+					<Field.Error id={`${uid}-pairs-error`}>{shown.pairs}</Field.Error>
+				{/if}
+			</Field.Field>
 
 			{#if error}
 				<p role="alert" class="text-sm text-pretty text-destructive">{error}</p>
@@ -114,7 +159,7 @@
 
 			<Dialog.Footer>
 				<Button type="button" variant="outline" onclick={onClose}>{t('common.cancel')}</Button>
-				<Button type="submit" disabled={saving || name.trim() === ''}>{t('common.add')}</Button>
+				<Button type="submit" disabled={saving}>{t('common.add')}</Button>
 			</Dialog.Footer>
 		</form>
 	</Dialog.Content>

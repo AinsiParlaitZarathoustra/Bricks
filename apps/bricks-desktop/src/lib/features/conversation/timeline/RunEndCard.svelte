@@ -93,7 +93,7 @@
     <section aria-label={t('conversation.filesChanged')} class="rounded-xl border border-border bg-card text-ui text-card-foreground">
       <Collapsible bind:open>
         <CollapsibleTrigger
-          class="group flex w-full min-w-0 items-center gap-2 rounded-xl px-3 py-2 text-start hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          class="group flex w-full min-w-0 items-center gap-2 rounded-xl px-3 py-2 text-start hover:bg-element-hover focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
         >
           <ChevronRight
             class="size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-90"

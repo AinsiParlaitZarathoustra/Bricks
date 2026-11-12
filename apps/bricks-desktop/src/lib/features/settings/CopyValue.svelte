@@ -40,9 +40,9 @@
 	</code>
 	<Button variant="outline" size="sm" onclick={copy} aria-label={t('settings.copy', { label })}>
 		{#if copied}
-			<Check class="size-4" aria-hidden="true" />
+			<Check aria-hidden="true" data-icon="inline-start" />
 		{:else}
-			<Copy class="size-4" aria-hidden="true" />
+			<Copy aria-hidden="true" data-icon="inline-start" />
 		{/if}
 		{copied ? t('common.copied') : t('common.copy')}
 	</Button>

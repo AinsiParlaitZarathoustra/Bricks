@@ -10,7 +10,7 @@
   <ConversationTimeline {conversation} />
   {#if conversation.plan && conversation.plan.todos.length > 0}
     <div class="mx-auto w-full max-w-3xl shrink-0 px-4 pb-2">
-      <PlanPanel plan={conversation.plan} />
+      <PlanPanel plan={conversation.plan} running={conversation.running} />
     </div>
   {/if}
 </div>

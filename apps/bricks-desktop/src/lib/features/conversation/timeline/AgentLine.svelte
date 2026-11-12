@@ -37,7 +37,7 @@
 {#if agent && view}
   <button
     type="button"
-    class="group flex w-full min-w-0 items-start gap-2.5 rounded-md px-2 py-1.5 text-start outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+    class="group flex w-full min-w-0 items-start gap-2.5 rounded-md px-2 py-1.5 text-start outline-none hover:bg-element-hover focus-visible:ring-2 focus-visible:ring-ring"
     aria-label={t('conversation.subAgent', { profile: agent.spawn.profile, description })}
     onclick={() => ui.openAgent(agent.id)}
   >

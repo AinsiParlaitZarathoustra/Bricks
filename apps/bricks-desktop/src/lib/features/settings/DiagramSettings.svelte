@@ -3,7 +3,7 @@
 	import { t } from '$lib/i18n/i18n.svelte';
 	import { app } from '$lib/state/app.svelte';
 	import * as Select from '$lib/components/ui/select';
-	import { Label } from '$lib/components/ui/label';
+	import * as Field from '$lib/components/ui/field';
 	import { Switch } from '$lib/components/ui/switch';
 	import {
 		MERMAID_LOOKS,
@@ -86,8 +86,8 @@
 	}
 </script>
 
-<div class="flex flex-col gap-3">
-	<Label for={`${uid}-security`} class="text-ui font-semibold text-foreground">{t('settings.mermaidSecurity')}</Label>
+<Field.Field class="gap-3">
+	<Field.Label for={`${uid}-security`} class="text-ui font-semibold text-foreground">{t('settings.mermaidSecurity')}</Field.Label>
 	<Select.Root type="single" value={settings.mermaid.securityLevel} onValueChange={chooseSecurity}>
 		<Select.Trigger id={`${uid}-security`} class="w-full max-w-72">
 			<span class="truncate">{SECURITY_LABEL[settings.mermaid.securityLevel]}</span>
@@ -98,11 +98,12 @@
 			{/each}
 		</Select.Content>
 	</Select.Root>
-</div>
+</Field.Field>
 
 <SettingsGroup title={t('settings.diagramsAndSvg')}>
 	<div class="flex flex-wrap items-center gap-3 p-3 text-ui">
-		<Label for={`${uid}-theme`} class="text-ui">{t('settings.theme')}</Label>
+		<Field.Field orientation="horizontal" class="w-auto">
+		<Field.Label for={`${uid}-theme`} class="text-ui">{t('settings.theme')}</Field.Label>
 		<Select.Root type="single" value={theme} onValueChange={chooseTheme}>
 			<Select.Trigger id={`${uid}-theme`} class="w-44">
 				<span class="truncate">{THEME_LABEL[theme]}</span>
@@ -113,7 +114,9 @@
 				{/each}
 			</Select.Content>
 		</Select.Root>
-		<Label for={`${uid}-look`} class="text-ui">{t('settings.style')}</Label>
+		</Field.Field>
+		<Field.Field orientation="horizontal" class="w-auto">
+		<Field.Label for={`${uid}-look`} class="text-ui">{t('settings.style')}</Field.Label>
 		<Select.Root type="single" value={settings.mermaid.look} onValueChange={chooseLook}>
 			<Select.Trigger id={`${uid}-look`} class="w-36">
 				<span class="truncate">{LOOK_LABEL[settings.mermaid.look]}</span>
@@ -124,6 +127,7 @@
 				{/each}
 			</Select.Content>
 		</Select.Root>
+		</Field.Field>
 	</div>
 	{#each controls as control (control.key)}
 		<label class="flex items-center justify-between gap-3 p-3 text-ui">

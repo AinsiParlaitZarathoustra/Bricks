@@ -80,7 +80,7 @@
 				<div class="flex min-w-0 items-center gap-1 pr-1.5">
 					<CollapsibleTrigger
 						disabled={jobs.length === 0}
-						class="group flex min-w-0 flex-1 items-center gap-2 rounded-xl px-3 py-2 text-start enabled:hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+						class="group flex min-w-0 flex-1 items-center gap-2 rounded-xl px-3 py-2 text-start enabled:hover:bg-element-hover focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
 					>
 						<ChevronRightIcon
 							class="size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-90 group-disabled:opacity-0"
@@ -107,7 +107,7 @@
 								<Collapsible>
 									<div class="flex min-w-0 items-center gap-1 pr-1.5">
 										<CollapsibleTrigger
-											class="group flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-start hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+											class="group flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-start hover:bg-element-hover focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
 										>
 											<ChevronRightIcon
 												class="size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-90"

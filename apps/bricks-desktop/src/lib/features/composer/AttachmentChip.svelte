@@ -24,9 +24,9 @@
   class:border-destructive={error !== null}
   data-kind={attachment.kind}
 >
-  <div class="flex min-w-0 items-center {attachment.previewUrl ? 'gap-2' : 'gap-1.5'}">
+  <div class={['flex min-w-0 items-center', attachment.previewUrl ? 'gap-2' : 'gap-1.5']}>
     {#if attachment.previewUrl}
-      <img src={attachment.previewUrl} alt="" class="size-8 shrink-0 rounded object-cover" />
+      <img src={attachment.previewUrl} alt="" class="size-8 shrink-0 rounded-sm object-cover" />
     {:else}
       <FileIcon path={attachment.path || attachment.name} kind={attachment.kind === 'folder' ? 'folder' : 'file'} />
     {/if}

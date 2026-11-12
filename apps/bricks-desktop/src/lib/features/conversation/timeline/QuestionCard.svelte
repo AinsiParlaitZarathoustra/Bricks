@@ -92,7 +92,7 @@
       {#each [...question.options, { label: t('common.other'), description: undefined }] as option, index (index)}
         <label
           class={cn(
-            'flex cursor-pointer gap-3 px-4 py-3 transition-colors hover:bg-muted/50',
+            'flex cursor-pointer gap-3 px-4 py-3 transition-colors hover:bg-element-hover',
             index > 0 && 'border-t border-border',
           )}
         >

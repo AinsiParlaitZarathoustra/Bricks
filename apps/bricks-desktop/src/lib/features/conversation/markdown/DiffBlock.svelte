@@ -1,5 +1,6 @@
 <script lang="ts">
   import { t } from '$lib/i18n/i18n.svelte'
+  import { Button } from '$lib/components/ui/button'
   import FileIcon from '$lib/features/file-icons/FileIcon.svelte'
   // A top-level ```diff / ```patch fence: a proposal written in the answer,
   // shown read-only with the change views' DiffView. Its counts are the
@@ -40,19 +41,15 @@
 <div class="diff-block my-2 overflow-hidden rounded-md bg-code-bg text-xs text-code-foreground">
   <div class="flex items-center justify-between gap-2 px-2.5 py-1 text-muted-foreground">
     <span class="font-mono">diff{complete ? '' : '…'}</span>
-    <button
-      type="button"
-      class="rounded px-1.5 py-0.5 hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-      onclick={copyPatch}
-    >
+    <Button variant="ghost" size="xs" onclick={copyPatch}>
       {copied ?? t('common.copy')}
-    </button>
+    </Button>
   </div>
   {#each files as file, i (i)}
     <Collapsible open={true}>
       <div class="flex items-center gap-1.5 px-1.5 py-0.5">
         <CollapsibleTrigger
-          class="group inline-flex items-center gap-1 rounded px-1 py-0.5 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+          class="group inline-flex items-center gap-1 rounded-sm px-1 py-0.5 text-muted-foreground hover:bg-element-hover hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
           aria-label={file.path ? t('conversation.showOrHide', { path: file.path }) : t('conversation.showOrHideTheDiff')}
         >
           <ChevronRight class="size-3.5 transition-transform group-data-[state=open]:rotate-90" aria-hidden="true" />

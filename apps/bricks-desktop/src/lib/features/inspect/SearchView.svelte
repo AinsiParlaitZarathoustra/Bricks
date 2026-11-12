@@ -6,10 +6,11 @@
 	import type { InspectorState } from '$lib/state/ui.svelte';
 	import { app } from '$lib/state/app.svelte';
 	import { Button } from '$lib/components/ui/button';
+	import * as ButtonGroup from '$lib/components/ui/button-group';
+	import { Spinner } from '$lib/components/ui/spinner';
 	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
+	import * as Field from '$lib/components/ui/field';
 	import { Switch } from '$lib/components/ui/switch';
-	import LoaderIcon from '@lucide/svelte/icons/loader';
 	import SearchIcon from '@lucide/svelte/icons/search';
 	import { cn } from '$lib/utils.js';
 	import { formatInt, formatMs } from './format';
@@ -93,8 +94,9 @@
 
 <div class="flex min-w-0 flex-col gap-4">
 	<form class="flex flex-col gap-2" onsubmit={submit}>
-		<Label for="{uid}-query">{t('inspect.textToSearchForInThe')}</Label>
-		<div class="flex gap-2">
+		<Field.Field data-invalid={formError ? 'true' : undefined}>
+		<Field.Label for="{uid}-query">{t('inspect.textToSearchForInThe')}</Field.Label>
+		<ButtonGroup.Root class="w-full">
 			<Input
 				id="{uid}-query"
 				bind:value={text}
@@ -105,29 +107,28 @@
 			/>
 			<Button type="submit" disabled={pending || !hasText}>
 				{#if pending}
-					<LoaderIcon class="animate-spin" aria-hidden="true" />
+					<Spinner data-icon="inline-start" aria-hidden="true" />
 					{t('inspect.searching')}
 				{:else}
-					<SearchIcon aria-hidden="true" />
+					<SearchIcon data-icon="inline-start" aria-hidden="true" />
 					{t('common.search')}
 				{/if}
 			</Button>
-		</div>
-		<div class="flex flex-wrap items-center gap-x-4 gap-y-2">
-			<div class="flex items-center gap-2">
-				<Switch id="{uid}-regex" bind:checked={regexSwitch} />
-				<Label for="{uid}-regex" class="font-normal">{t('inspect.regularExpression')}</Label>
-			</div>
-		</div>
+		</ButtonGroup.Root>
 		{#if formError}
-			<p role="alert" class="text-sm text-destructive">{formError}</p>
+			<Field.Error>{formError}</Field.Error>
 		{/if}
+		</Field.Field>
+		<Field.Field orientation="horizontal" class="w-fit">
+			<Switch id="{uid}-regex" bind:checked={regexSwitch} />
+			<Field.Label for="{uid}-regex" class="font-normal">{t('inspect.regularExpression')}</Field.Label>
+		</Field.Field>
 	</form>
 
 	<div role="status" aria-live="polite" class="text-sm">
 		{#if pending}
 			<p class="flex items-center gap-2 text-muted-foreground">
-				<LoaderIcon class="size-4 animate-spin" aria-hidden="true" />
+				<Spinner aria-hidden="true" />
 				{t('inspect.searchingIn', { value: conv?.workingDir ?? t('inspect.theProject') })}
 			</p>
 		{:else if refusal !== null}

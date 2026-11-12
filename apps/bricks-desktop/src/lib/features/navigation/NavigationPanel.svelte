@@ -64,7 +64,7 @@
 						onclick={addProject}
 						disabled={adding}
 					>
-						<FolderPlus class="size-3.5" aria-hidden="true" />
+						<FolderPlus aria-hidden="true" />
 					</Button>
 				</div>
 				{#if app.folders.length > 0}
@@ -88,7 +88,7 @@
 			aria-label={t('common.bricksSettings')}
 			onclick={() => (ui.settingsOpen = true)}
 		>
-			<Settings class="size-4" aria-hidden="true" />
+			<Settings aria-hidden="true" data-icon="inline-start" />
 			{t('navigation.settings')}
 		</Button>
 	</div>

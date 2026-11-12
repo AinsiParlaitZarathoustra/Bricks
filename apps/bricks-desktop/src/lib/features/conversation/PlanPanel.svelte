@@ -1,18 +1,21 @@
 <script lang="ts">
+  // The session's plan above the composer, as a trace: one line for the plan
+  // (its progress), and under it one line per step. While the conversation works,
+  // the plan and its current step shimmer; steps still to do are dimmed.
   import { t } from '$lib/i18n/i18n.svelte'
-  import ChevronRight from '@lucide/svelte/icons/chevron-right'
   import Circle from '@lucide/svelte/icons/circle'
   import CircleCheck from '@lucide/svelte/icons/circle-check'
   import CircleDot from '@lucide/svelte/icons/circle-dot'
+  import ListCheck from '@lucide/svelte/icons/list-check'
+  import * as Trace from '$lib/components/ui/trace'
   import type { PlanState, PlanStatus } from '$lib/ipc/engine'
 
-  let { plan }: { plan: PlanState } = $props()
+  let { plan, running = false }: { plan: PlanState; running?: boolean } = $props()
 
-  const uid = $props.id()
-  let open = $state(false)
+  let open = $state(true)
 
-  let done = $derived(plan.todos.filter((t) => t.status === 'completed').length)
-  let current = $derived(plan.todos.find((t) => t.status === 'in_progress'))
+  const done = $derived(plan.todos.filter((step) => step.status === 'completed').length)
+  const working = $derived(running && done < plan.todos.length)
 
   const STATUS_LABEL: Record<PlanStatus, string> = {
     get pending() { return t('conversation.toDo') },
@@ -21,54 +24,50 @@
   }
 </script>
 
-<section aria-label={t('conversation.plan')} class="rounded-lg border border-border bg-card text-sm text-card-foreground">
-  <button
-    type="button"
-    class="flex w-full min-w-0 items-center gap-2 rounded-lg px-3 py-1.5 text-left hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-    aria-expanded={open}
-    aria-controls="{uid}-steps"
-    onclick={() => (open = !open)}
-  >
-    <ChevronRight
-      class="size-3.5 shrink-0 text-muted-foreground transition-transform {open ? 'rotate-90' : ''}"
-      aria-hidden="true"
-    />
-    <span class="font-medium">{t('conversation.plan')}</span>
-    <span class="text-xs text-muted-foreground tabular-nums" aria-label={t('conversation.ofStepsDone', { done, todos: plan.todos.length })}>
-      {done}/{plan.todos.length}
-    </span>
-    {#if current && !open}
-      <span class="min-w-0 truncate text-xs text-muted-foreground">· {current.activeForm}</span>
-    {/if}
-  </button>
-  {#if open}
-    <div id="{uid}-steps" class="flex flex-col gap-1.5 border-t border-border px-3 py-2">
-      <ol class="flex flex-col gap-1">
-        {#each plan.todos as step, i (i)}
-          <li class="flex min-w-0 items-start gap-2 text-xs">
-            {#if step.status === 'completed'}
-              <CircleCheck class="mt-px size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-            {:else if step.status === 'in_progress'}
-              <CircleDot class="mt-px size-3.5 shrink-0 text-primary" aria-hidden="true" />
-            {:else}
-              <Circle class="mt-px size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-            {/if}
-            <span
-              class={[
-                'min-w-0 break-words',
-                step.status === 'completed' && 'text-muted-foreground line-through',
-                step.status === 'in_progress' && 'font-medium',
-              ]}
+<section aria-label={t('conversation.plan')} class="rounded-lg border border-border bg-card px-3 py-2 text-card-foreground">
+  <Trace.Root>
+    <Trace.Collapsible bind:open>
+      <Trace.CollapsibleTrigger>
+        <Trace.Line status={working ? 'running' : undefined}>
+          <Trace.Icon>
+            <ListCheck />
+          </Trace.Icon>
+          <Trace.Title>{t('conversation.plan')}</Trace.Title>
+          <Trace.Description aria-label={t('conversation.ofStepsDone', { done, todos: plan.todos.length })}>
+            {t('conversation.stepsDone', { done, todos: plan.todos.length })}
+          </Trace.Description>
+        </Trace.Line>
+      </Trace.CollapsibleTrigger>
+      <Trace.CollapsibleContent>
+        <Trace.Root>
+          {#each plan.todos as step, i (i)}
+            <Trace.Line
+              status={step.status === 'pending'
+                ? 'pending'
+                : working && step.status === 'in_progress'
+                  ? 'running'
+                  : undefined}
             >
-              {step.status === 'in_progress' ? step.activeForm : step.content}
-              <span class="sr-only">({STATUS_LABEL[step.status]})</span>
-            </span>
-          </li>
-        {/each}
-      </ol>
-      {#if plan.explanation}
-        <p class="text-xs text-muted-foreground break-words">{plan.explanation}</p>
-      {/if}
-    </div>
-  {/if}
+              <Trace.Icon>
+                {#if step.status === 'completed'}
+                  <CircleCheck />
+                {:else if step.status === 'in_progress'}
+                  <CircleDot />
+                {:else}
+                  <Circle />
+                {/if}
+              </Trace.Icon>
+              <Trace.Title class="whitespace-normal break-words">
+                {step.status === 'in_progress' ? step.activeForm : step.content}
+                <span class="sr-only">({STATUS_LABEL[step.status]})</span>
+              </Trace.Title>
+            </Trace.Line>
+          {/each}
+        </Trace.Root>
+        {#if plan.explanation}
+          <p class="mt-2 text-xs break-words">{plan.explanation}</p>
+        {/if}
+      </Trace.CollapsibleContent>
+    </Trace.Collapsible>
+  </Trace.Root>
 </section>

@@ -1,8 +1,7 @@
 <script lang="ts">
-	import { Button } from '$lib/components/ui/button/index.js';
+	import { Toggle } from '$lib/components/ui/toggle/index.js';
 	import { Kbd } from '$lib/components/ui/kbd/index.js';
 	import * as Tooltip from '$lib/components/ui/tooltip/index.js';
-	import { cn } from '$lib/utils.js';
 	import type { IconComponent } from './types.js';
 
 	interface Props {
@@ -12,7 +11,7 @@
 		tooltipShow: string;
 		/** Tooltip shown while the panel is visible, e.g. "Masquer le panneau de gauche". */
 		tooltipHide: string;
-		/** Whether the panel is currently visible. Exposed as aria-pressed. */
+		/** Whether the panel is currently visible. The toggle's pressed state. */
 		pressed: boolean;
 		icon: IconComponent;
 		onclick: () => void;
@@ -39,21 +38,16 @@
 	<Tooltip.Root>
 		<Tooltip.Trigger>
 			{#snippet child({ props })}
-				<Button
+				<Toggle
 					{...props}
-					variant="ghost"
 					size="icon-sm"
 					aria-label={ariaLabel}
-					aria-pressed={pressed}
+					bind:pressed={() => pressed, () => onclick()}
 					{disabled}
-					{onclick}
-					class={cn(
-						'text-muted-foreground hover:text-foreground aria-pressed:bg-accent aria-pressed:text-foreground',
-						className
-					)}
+					class={className}
 				>
-					<Icon class="size-4" aria-hidden="true" />
-				</Button>
+					<Icon aria-hidden="true" />
+				</Toggle>
 			{/snippet}
 		</Tooltip.Trigger>
 		<Tooltip.Content side="bottom" sideOffset={6}>

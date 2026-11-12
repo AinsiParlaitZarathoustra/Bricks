@@ -10,6 +10,8 @@
   import ZoomIn from '@lucide/svelte/icons/zoom-in'
   import ZoomOut from '@lucide/svelte/icons/zoom-out'
   import * as Dialog from '$lib/components/ui/dialog'
+  import { Button } from '$lib/components/ui/button'
+  import { Toggle } from '$lib/components/ui/toggle'
   import { app } from '$lib/state/app.svelte'
   import { theme } from '$lib/theme/theme.svelte'
   import { diagramMode, diagramSettings, diagramTheme } from '$lib/features/diagrams/settings'
@@ -135,35 +137,34 @@
       if (await savePngFile(name, new Uint8Array(await blob.arrayBuffer()))) flash(t('conversation.pngSaved'))
     } catch { flash(t('conversation.couldNotExport')) }
   }
-  const action = 'inline-flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40'
 </script>
 
 {#snippet controls(fullscreen = false)}
   <div class="flex flex-wrap items-center gap-0.5">
     {#if options.allowZoom && frame.svg}
-      <button type="button" class={action} title={t('conversation.zoomOut')} aria-label={t('conversation.zoomOut')} disabled={zoom <= 0.5} onclick={() => (zoom = Math.max(0.5, zoom - 0.25))}><ZoomOut class="size-3.5" aria-hidden="true" /></button>
-      <button type="button" class="rounded px-1 text-xs tabular-nums" title={t('conversation.resetTheView')} aria-label={t('conversation.resetTheView')} onclick={reset}>{Math.round(zoom * 100)} %</button>
-      <button type="button" class={action} title={t('conversation.zoomIn')} aria-label={t('conversation.zoomIn')} disabled={zoom >= 4} onclick={() => (zoom = Math.min(4, zoom + 0.25))}><ZoomIn class="size-3.5" aria-hidden="true" /></button>
+      <Button variant="ghost" size="icon-sm" title={t('conversation.zoomOut')} aria-label={t('conversation.zoomOut')} disabled={zoom <= 0.5} onclick={() => (zoom = Math.max(0.5, zoom - 0.25))}><ZoomOut aria-hidden="true" /></Button>
+      <Button variant="ghost" size="xs" class="tabular-nums" title={t('conversation.resetTheView')} aria-label={t('conversation.resetTheView')} onclick={reset}>{Math.round(zoom * 100)} %</Button>
+      <Button variant="ghost" size="icon-sm" title={t('conversation.zoomIn')} aria-label={t('conversation.zoomIn')} disabled={zoom >= 4} onclick={() => (zoom = Math.min(4, zoom + 0.25))}><ZoomIn aria-hidden="true" /></Button>
     {/if}
     {#if options.allowPan && frame.svg}
-      <button type="button" class={action} title={t('conversation.moveTheDiagramDragOrUse')} aria-label={t('conversation.moveTheDiagram')} aria-pressed={moving} onclick={() => (moving = !moving)}><Move class="size-3.5" aria-hidden="true" /></button>
+      <Toggle size="icon-sm" title={t('conversation.moveTheDiagramDragOrUse')} aria-label={t('conversation.moveTheDiagram')} bind:pressed={moving}><Move aria-hidden="true" /></Toggle>
     {/if}
     {#if options.allowFullscreen && frame.svg && !fullscreen}
-      <button type="button" class={action} title={t('common.fullscreen')} aria-label={t('common.fullscreen')} onclick={() => (expanded = true)}><Maximize2 class="size-3.5" aria-hidden="true" /></button>
+      <Button variant="ghost" size="icon-sm" title={t('common.fullscreen')} aria-label={t('common.fullscreen')} onclick={() => (expanded = true)}><Maximize2 aria-hidden="true" /></Button>
     {/if}
     {#if options.allowDownload && frame.svg}
-      <button type="button" class={action} title={t('conversation.exportAsSvg')} aria-label={t('conversation.exportAsSvg')} onclick={download}><Download class="size-3.5" aria-hidden="true" /></button>
+      <Button variant="ghost" size="icon-sm" title={t('conversation.exportAsSvg')} aria-label={t('conversation.exportAsSvg')} onclick={download}><Download aria-hidden="true" /></Button>
     {/if}
     {#if options.allowDownload && frame.svg}
-      <button type="button" class={action} title={t('conversation.exportAsPng')} aria-label={t('conversation.exportAsPng')} onclick={downloadPng}><FileImage class="size-3.5" aria-hidden="true" /></button>
+      <Button variant="ghost" size="icon-sm" title={t('conversation.exportAsPng')} aria-label={t('conversation.exportAsPng')} onclick={downloadPng}><FileImage aria-hidden="true" /></Button>
     {/if}
     {#if source !== undefined}
-      <button type="button" class={action} title={t('conversation.showTheSource')} aria-label={t('conversation.showTheSource')} aria-pressed={showSource} onclick={() => (showSource = !showSource)}><Code class="size-3.5" aria-hidden="true" /></button>
+      <Toggle size="icon-sm" title={t('conversation.showTheSource')} aria-label={t('conversation.showTheSource')} bind:pressed={showSource}><Code aria-hidden="true" /></Toggle>
     {/if}
     {#if options.allowCopy}
-      <button type="button" class={action} title={t('conversation.copyTheSource')} aria-label={t('conversation.copyTheSource')} onclick={copy}><Copy class="size-3.5" aria-hidden="true" /></button>
+      <Button variant="ghost" size="icon-sm" title={t('conversation.copyTheSource')} aria-label={t('conversation.copyTheSource')} onclick={copy}><Copy aria-hidden="true" /></Button>
       {#if canCopyImage}
-        <button type="button" class={action} title={t('conversation.copyImage')} aria-label={t('conversation.copyImage')} disabled={!frame.svg} onclick={copyImage}><ImageDown class="size-3.5" aria-hidden="true" /></button>
+        <Button variant="ghost" size="icon-sm" title={t('conversation.copyImage')} aria-label={t('conversation.copyImage')} disabled={!frame.svg} onclick={copyImage}><ImageDown aria-hidden="true" /></Button>
       {/if}
     {/if}
     {#if feedback}<span role="status" class="px-1 text-xs">{feedback}</span>{/if}

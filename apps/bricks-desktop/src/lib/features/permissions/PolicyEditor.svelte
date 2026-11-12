@@ -6,7 +6,7 @@
 	import X from '@lucide/svelte/icons/x';
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
+	import * as Field from '$lib/components/ui/field';
 	import * as Select from '$lib/components/ui/select';
 	import type { PermissionEffect, SessionPolicy } from '$lib/ipc/engine';
 	import {
@@ -78,8 +78,8 @@
 {/snippet}
 
 <div class="flex flex-col gap-4">
-	<div class="flex flex-col gap-1.5">
-		<Label for={`${uid}-profile`} class="text-xs text-muted-foreground">{t('permissions.profile')}</Label>
+	<Field.Field>
+		<Field.Label for={`${uid}-profile`} class="text-xs text-muted-foreground">{t('permissions.profile')}</Field.Label>
 		<Select.Root type="single" value={profile} onValueChange={chooseProfile} {disabled}>
 			<Select.Trigger id={`${uid}-profile`} class="w-full max-w-72">
 				<span class="truncate">
@@ -94,18 +94,20 @@
 				{/each}
 			</Select.Content>
 		</Select.Root>
-	</div>
+	</Field.Field>
 
 	{#if profile === 'custom'}
 		<div class="flex flex-col gap-2">
 			<h4 class="text-xs font-medium text-muted-foreground">{t('permissions.perAction')}</h4>
 			<ul class="flex flex-col gap-2">
 				{#each CLASS_ROWS as row (row.key)}
-					<li class="flex items-center justify-between gap-3">
-						<Label for={`${uid}-${row.key}`} class="text-sm font-normal">{row.label}</Label>
+					<li>
+						<Field.Field orientation="horizontal" class="justify-between gap-3">
+							<Field.Label for={`${uid}-${row.key}`} class="text-sm font-normal">{row.label}</Field.Label>
 						{@render effectSelect(`${uid}-${row.key}`, policy.custom[row.key], row.label, (next) =>
 							chooseClass(row.key, next)
 						)}
+						</Field.Field>
 					</li>
 				{/each}
 			</ul>
@@ -130,7 +132,7 @@
 									{disabled}
 									onclick={() => onchange(withTool(policy, rule.name, null))}
 								>
-									<X class="size-4" aria-hidden="true" />
+									<X aria-hidden="true" />
 								</Button>
 							</div>
 						</li>

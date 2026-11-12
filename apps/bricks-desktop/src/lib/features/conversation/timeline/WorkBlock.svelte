@@ -6,6 +6,7 @@
   import { t } from '$lib/i18n/i18n.svelte'
   import ChevronRight from '@lucide/svelte/icons/chevron-right'
   import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '$lib/components/ui/collapsible'
+  import { Separator } from '$lib/components/ui/separator'
   import type { AssistantItem, Conversation, TimelineItem } from '$lib/state/conversation.svelte'
   import type { RunOutcome } from '$lib/ipc/engine'
   import { OUTCOME_LABEL } from '../format'
@@ -69,12 +70,12 @@
     {/if}
     {#if step && !open}
       <span class="inline-flex min-w-0 items-center gap-1.5 text-xs">
-        <step.icon class="size-3.5 shrink-0 animate-pulse" aria-hidden="true" />
-        <span class="min-w-0 truncate">{step.label}</span>
+        <step.icon class="size-3.5 shrink-0" aria-hidden="true" />
+        <span class="min-w-0 truncate shimmer motion-reduce:shimmer-none">{step.label}</span>
       </span>
     {/if}
   </div>
-  <div aria-hidden="true" class="h-px bg-border"></div>
+  <Separator decorative />
 
   {#if !open}
     {#each attention as item (item.id)}

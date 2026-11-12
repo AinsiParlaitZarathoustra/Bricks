@@ -6,8 +6,10 @@
 	import * as Dialog from '$lib/components/ui/dialog';
 	import * as Select from '$lib/components/ui/select';
 	import { Button } from '$lib/components/ui/button';
+	import { Toggle } from '$lib/components/ui/toggle';
+	import * as InputGroup from '$lib/components/ui/input-group';
 	import { Input } from '$lib/components/ui/input';
-	import { Label } from '$lib/components/ui/label';
+	import * as Field from '$lib/components/ui/field';
 	import Eye from '@lucide/svelte/icons/eye';
 	import EyeOff from '@lucide/svelte/icons/eye-off';
 	import type { ProviderPatch } from '$lib/ipc/bindings/ProviderPatch';
@@ -99,8 +101,8 @@
 			{/if}
 
 			{#if !original}
-				<div class="flex flex-col gap-2">
-					<Label for={`${uid}-id`}>{t('common.identifier')}</Label>
+				<Field.Field data-invalid={attempted && idError ? 'true' : undefined}>
+					<Field.Label for={`${uid}-id`}>{t('common.identifier')}</Field.Label>
 					<Input
 						id={`${uid}-id`}
 						bind:value={id}
@@ -112,13 +114,13 @@
 						aria-describedby={attempted && idError ? `${uid}-id-error` : undefined}
 					/>
 					{#if attempted && idError}
-						<p id={`${uid}-id-error`} role="alert" class="text-xs text-pretty text-destructive">{idError}</p>
+						<Field.Error id={`${uid}-id-error`}>{idError}</Field.Error>
 					{/if}
-				</div>
+				</Field.Field>
 			{/if}
 
-			<div class="flex flex-col gap-2">
-				<Label for={`${uid}-name`}>{t('settings.name')}</Label>
+			<Field.Field data-invalid={shown.name ? 'true' : undefined}>
+				<Field.Label for={`${uid}-name`}>{t('settings.name')}</Field.Label>
 				<Input
 					id={`${uid}-name`}
 					bind:value={form.name}
@@ -128,12 +130,12 @@
 					aria-describedby={shown.name ? `${uid}-name-error` : undefined}
 				/>
 				{#if shown.name}
-					<p id={`${uid}-name-error`} role="alert" class="text-xs text-destructive">{shown.name}</p>
+					<Field.Error id={`${uid}-name-error`}>{shown.name}</Field.Error>
 				{/if}
-			</div>
+			</Field.Field>
 
-			<div class="flex flex-col gap-2">
-				<Label for={`${uid}-endpoint`}>{t('settings.apiUrl')}</Label>
+			<Field.Field data-invalid={shown.endpoint ? 'true' : undefined}>
+				<Field.Label for={`${uid}-endpoint`}>{t('settings.apiUrl')}</Field.Label>
 				<Input
 					id={`${uid}-endpoint`}
 					bind:value={form.endpoint}
@@ -144,12 +146,12 @@
 					aria-describedby={shown.endpoint ? `${uid}-endpoint-error` : undefined}
 				/>
 				{#if shown.endpoint}
-					<p id={`${uid}-endpoint-error`} role="alert" class="text-xs text-destructive">{shown.endpoint}</p>
+					<Field.Error id={`${uid}-endpoint-error`}>{shown.endpoint}</Field.Error>
 				{/if}
-			</div>
+			</Field.Field>
 
-			<div class="flex flex-col gap-2">
-				<Label for={`${uid}-protocol`}>{t('settings.protocol')}</Label>
+			<Field.Field>
+				<Field.Label for={`${uid}-protocol`}>{t('settings.protocol')}</Field.Label>
 				<Select.Root
 					type="single"
 					value={form.protocol}
@@ -166,10 +168,10 @@
 						{/each}
 					</Select.Content>
 				</Select.Root>
-			</div>
+			</Field.Field>
 
-			<div class="flex flex-col gap-2">
-				<Label for={`${uid}-auth`}>{t('settings.authentication')}</Label>
+			<Field.Field>
+				<Field.Label for={`${uid}-auth`}>{t('settings.authentication')}</Field.Label>
 				<Select.Root
 					type="single"
 					value={form.auth}
@@ -186,11 +188,11 @@
 						{/each}
 					</Select.Content>
 				</Select.Root>
-			</div>
+			</Field.Field>
 
 			{#if form.auth === 'api_key_header'}
-				<div class="flex flex-col gap-2">
-					<Label for={`${uid}-header`}>{t('settings.keyHeader')}</Label>
+				<Field.Field>
+					<Field.Label for={`${uid}-header`}>{t('settings.keyHeader')}</Field.Label>
 					<Input
 						id={`${uid}-header`}
 						bind:value={form.authHeader}
@@ -198,43 +200,41 @@
 						spellcheck={false}
 						class="font-mono text-sm"
 					/>
-				</div>
+				</Field.Field>
 			{/if}
 
 			{#if needsKey}
-				<div class="flex flex-col gap-2">
-					<Label for={`${uid}-key`}>{t('settings.apiKey')}</Label>
-					<div class="relative">
-						<Input
+				<Field.Field data-invalid={shown.apiKey ? 'true' : undefined}>
+					<Field.Label for={`${uid}-key`}>{t('settings.apiKey')}</Field.Label>
+					<InputGroup.Root>
+						<InputGroup.Input
 							id={`${uid}-key`}
 							type={revealed ? 'text' : 'password'}
 							bind:value={form.apiKey}
 							autocomplete="off"
 							spellcheck={false}
-							class="pr-9 font-mono text-sm"
+							class="font-mono text-sm"
 							aria-invalid={shown.apiKey ? 'true' : undefined}
 							aria-describedby={shown.apiKey ? `${uid}-key-error` : undefined}
 						/>
-						<Button
-							type="button"
-							variant="ghost"
-							size="icon-xs"
-							class="absolute top-1/2 right-1.5 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-							aria-label={revealed ? t('settings.hideKey') : t('settings.showKey')}
-							aria-pressed={revealed}
-							onclick={() => (revealed = !revealed)}
-						>
-							{#if revealed}
-								<EyeOff class="size-3.5" aria-hidden="true" />
-							{:else}
-								<Eye class="size-3.5" aria-hidden="true" />
-							{/if}
-						</Button>
-					</div>
+						<InputGroup.Addon align="inline-end">
+							<Toggle
+								size="icon-xs"
+								aria-label={revealed ? t('settings.hideKey') : t('settings.showKey')}
+								bind:pressed={revealed}
+							>
+								{#if revealed}
+									<EyeOff aria-hidden="true" />
+								{:else}
+									<Eye aria-hidden="true" />
+								{/if}
+							</Toggle>
+						</InputGroup.Addon>
+					</InputGroup.Root>
 					{#if shown.apiKey}
-						<p id={`${uid}-key-error`} role="alert" class="text-xs text-destructive">{shown.apiKey}</p>
+						<Field.Error id={`${uid}-key-error`}>{shown.apiKey}</Field.Error>
 					{/if}
-				</div>
+				</Field.Field>
 			{/if}
 
 			{#if error}
