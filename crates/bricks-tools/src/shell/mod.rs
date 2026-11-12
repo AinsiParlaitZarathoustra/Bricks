@@ -264,25 +264,31 @@ pub fn session_path(id: &str, config: &ShellConfig) -> Option<OsString> {
     }
 }
 
-/// The shell the Bash tool runs with `config` (`None`: none found), and
+/// The shell the Bash tool runs with `config` (`None` inside: none found), and
 /// whether its state carries over between calls (`false`: each command runs
-/// on its own, as in a sandbox).
-pub fn tool_shell(config: &ShellConfig, ext: &crate::Extensions) -> (Option<PathBuf>, bool) {
+/// on its own, as in a sandbox). `None`: Bash cannot run here at all.
+pub fn tool_shell(config: &ShellConfig, ext: &crate::Extensions) -> Option<(Option<PathBuf>, bool)> {
     #[cfg(feature = "vms")]
     if ext
         .get::<std::sync::Arc<dyn bricks_vms::Sandbox>>()
         .is_some()
     {
-        return (None, false);
+        return Some((None, false));
     }
     let _ = ext;
+    // Outside a sandbox, Bash runs only on Unix (elsewhere the tool refuses
+    // every command): no shell to announce. On Windows the `bash` on `PATH`
+    // is often WSL's launcher, which would be announced as a working shell.
+    if cfg!(not(unix)) {
+        return None;
+    }
     // The `bash` found on `PATH` is looked up once for the process.
     static FOUND: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
     let path = match &config.bash_path {
         Some(p) => Some(p.clone()),
         None => FOUND.get_or_init(|| which::which("bash").ok()).clone(),
     };
-    (path, true)
+    Some((path, true))
 }
 
 /// The `bash` to run: configured, or the first on `PATH`.

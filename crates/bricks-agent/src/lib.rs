@@ -892,7 +892,7 @@ impl Agent {
                     });
                     let shell = shell_config
                         .as_ref()
-                        .map(|c| bricks_tools::shell::tool_shell(c, &self.extensions));
+                        .and_then(|c| bricks_tools::shell::tool_shell(c, &self.extensions));
                     let shell_dir = has("Bash")
                         .then(|| bricks_tools::shell::session_cwd(&self.shell_session_id))
                         .flatten();
