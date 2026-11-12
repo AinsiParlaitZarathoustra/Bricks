@@ -4,7 +4,7 @@
 //! that name a field, never the value of a key or header.
 
 use super::providers_toml::{self, Edit};
-use super::{error, io_error, not_found};
+use super::{error, io_error};
 use crate::contract::{
     IpcErrorCode, IpcResult, ModelProfileView, ModelView, PricingView, ProviderView, ProvidersFile,
 };
@@ -133,24 +133,41 @@ fn provider_view(p: &ProviderConfig) -> ProviderView {
 
 /// Applies `edit` to the file, if it still has `revision`. The result is
 /// validated before anything is written, and written atomically with the
-/// file's permissions kept. Errors leave the file as it was.
+/// file's permissions kept. Errors leave the file as it was. An absent file
+/// (revision of empty content, as [`view`] gives it) is created, with its
+/// folder, from an empty providers file.
 pub fn commit(path: &Path, revision: &str, edit: &Edit) -> IpcResult<()> {
     let origin = path.display().to_string();
-    let bytes =
-        read_file(path)?.ok_or_else(|| not_found(tr!(msg::FILE_DOESNT_EXIST, origin = origin)))?;
-    if revision_of(&bytes) != revision {
+    let existing = read_file(path)?;
+    if revision_of(existing.as_deref().unwrap_or(&[])) != revision {
         return Err(error(
             IpcErrorCode::Conflict,
             tr!(msg::PROVIDERS_FILE_CHANGED),
         ));
     }
-    let text = std::str::from_utf8(&bytes).map_err(|_| {
-        error(
-            IpcErrorCode::Config,
-            tr!(msg::THE_PROVIDERS_TOML_FILE_ISNT_UTF),
-        )
-    })?;
-    let next = providers_toml::apply(text, edit, &origin)?;
+    let next = match &existing {
+        Some(bytes) => {
+            let text = std::str::from_utf8(bytes).map_err(|_| {
+                error(
+                    IpcErrorCode::Config,
+                    tr!(msg::THE_PROVIDERS_TOML_FILE_ISNT_UTF),
+                )
+            })?;
+            providers_toml::apply(text, edit, &origin)?
+        }
+        None => {
+            let empty = format!(
+                "schema_version = {}\n",
+                bricks_provider::config::SCHEMA_VERSION
+            );
+            let next = providers_toml::apply(&empty, edit, &origin)?;
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)
+                    .map_err(|e| io_error(&format!("fournisseurs ({origin})"), e))?;
+            }
+            next
+        }
+    };
     write_replacing(path, next.as_bytes())
         .map_err(|e| io_error(&format!("fournisseurs ({origin})"), e))
 }

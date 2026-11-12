@@ -224,6 +224,56 @@ fn a_missing_file_is_an_empty_list_and_a_broken_one_says_why() {
     );
 }
 
+#[test]
+fn the_first_provider_creates_the_missing_file_and_its_folder() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("home").join("providers.toml");
+    let registry = bricks_config::load_registry(Some(&path)).map(Arc::new);
+    let catalog = DesktopCatalog::new(registry);
+    let lock = Mutex::new(());
+
+    let file = apply_edit(
+        &path,
+        &lock,
+        &catalog,
+        &revision(&path),
+        &Edit::ProviderCreate {
+            provider_id: "premier".into(),
+            patch: ProviderPatch {
+                name: Some("Premier".into()),
+                endpoint: Some("http://127.0.0.1:7/v1".into()),
+                protocol: Some("chat_completions".into()),
+                auth: Some("none".into()),
+                ..Default::default()
+            },
+        },
+    )
+    .expect("the file is created");
+
+    assert!(file.error.is_none(), "{:?}", file.error);
+    assert_eq!(file.providers.len(), 1);
+    assert_eq!(file.providers[0].id, "premier");
+    let on_disk = std::fs::read_to_string(&path).unwrap();
+    assert!(on_disk.starts_with("schema_version = 1\n"), "{on_disk}");
+}
+
+#[test]
+fn a_missing_file_with_a_stale_revision_is_a_conflict_and_stays_missing() {
+    let dir = tempdir().unwrap();
+    let path = dir.path().join("providers.toml");
+    let catalog = DesktopCatalog::new(bricks_config::load_registry(Some(&path)).map(Arc::new));
+    let err = apply_edit(
+        &path,
+        &Mutex::new(()),
+        &catalog,
+        "not-the-revision",
+        &Edit::ProviderDelete { provider_id: "x".into() },
+    )
+    .expect_err("conflict");
+    assert!(matches!(err.code, IpcErrorCode::Conflict), "{err:?}");
+    assert!(!path.exists());
+}
+
 /// One request on localhost: answers it with a chat completion and gives
 /// back the JSON body it received.
 async fn one_shot_server() -> (u16, tokio::task::JoinHandle<serde_json::Value>) {
