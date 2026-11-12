@@ -504,6 +504,22 @@ moves it to the folder of another project; refused while it works). The final an
 message starts is its reply: get it with `wait` or `messages`. A conversation answering a message \
 cannot send one during that turn. Use Agent for sub-agents, not this tool.";
 
+/// The parameters `Session` accepts, as its schema declares them.
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+#[allow(dead_code)] // Checked whole, then read from the call's input.
+struct SessionInput {
+    action: String,
+    id: Option<String>,
+    query: Option<String>,
+    offset: Option<usize>,
+    limit: Option<usize>,
+    message: Option<String>,
+    message_id: Option<String>,
+    timeout_seconds: Option<u64>,
+    folder: Option<String>,
+}
+
 #[async_trait::async_trait]
 impl Tool for SessionTool {
     fn name(&self) -> &str {
@@ -549,6 +565,12 @@ impl Tool for SessionTool {
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> ToolResult {
         use tauri::Manager;
+        // The parameters are checked whole (names and types) before any is
+        // read: a misnamed or mistyped one is refused, never skipped.
+        let checked = bricks_tools::tool_feedback::parse_input::<SessionInput, _>(self, &input);
+        if let Err(refused) = checked {
+            return refused;
+        }
         let Some(state) = self.app.try_state::<AppState>() else {
             return ToolResult::error("the conversations are not reachable here");
         };

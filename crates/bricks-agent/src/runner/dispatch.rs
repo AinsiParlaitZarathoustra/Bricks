@@ -60,10 +60,13 @@ pub(super) async fn decide_and_run(
     // is what runs (the hook is not run a second time on its own output).
     let mut hooked = false;
     for _ in 0..MAX_DECISION_ROUNDS {
-        let (decision, approved) = decide(site, tool, tool_name, &input).await;
-        if let PermissionDecision::Deny(reason) = decision {
-            return CallRun::not_run(ToolResult::error(format!("Permission denied: {reason}")));
-        }
+        let approved = match decide(site, tool, tool_name, &input).await {
+            Decided::Run(approved) => approved,
+            Decided::Denied(reason) => {
+                return CallRun::not_run(ToolResult::error(format!("Permission denied: {reason}")));
+            }
+            Decided::NotRun(reason) => return CallRun::not_run(ToolResult::error(reason)),
+        };
         if hooked {
             let mut exec_ctx = site.tool_ctx.clone();
             if let Some(change) = &approved {
@@ -126,8 +129,21 @@ pub(super) async fn decide_and_run(
     ))
 }
 
-/// The decision on a call, and the change it was given for (`None` when the
-/// call was not allowed, or has no change to show).
+/// What deciding a call came to.
+#[derive(Debug)]
+enum Decided {
+    /// Run it, with the change it was approved for (`None` when it has no
+    /// change to show).
+    Run(Option<ChangePreview>),
+    /// The permission policy refused it: why.
+    Denied(String),
+    /// Not run for a reason of the call itself (the tool would refuse it, or
+    /// its file kept moving during the approval), not of the policy: the
+    /// message the model reads, as the tool gave it.
+    NotRun(String),
+}
+
+/// The decision on a call, and the change it was given for.
 ///
 /// The preview is computed without writing. If the files it describes move on
 /// while the decision is pending, the preview is computed again and asked
@@ -137,7 +153,7 @@ async fn decide(
     tool: &dyn bricks_tools::Tool,
     tool_name: &str,
     input: &serde_json::Value,
-) -> (PermissionDecision, Option<ChangePreview>) {
+) -> Decided {
     let mut description = format!("Execute tool '{}'", tool_name);
     if let Some(details) = tool.permission_details(input, site.tool_ctx).await {
         description.push('\n');
@@ -147,11 +163,9 @@ async fn decide(
     let mut stale_rounds = 0;
     loop {
         if let Some(reason) = preview.as_ref().and_then(|p| p.refusal.clone()) {
-            // The tool would refuse it: nothing to approve.
-            return (
-                PermissionDecision::Deny(format!("{reason}\nNothing was written.")),
-                None,
-            );
+            // The tool would refuse it: nothing to approve, and nothing the
+            // policy refused.
+            return Decided::NotRun(format!("{reason}\nNothing was written."));
         }
         let request = PermissionRequest {
             tool_name: tool_name.to_string(),
@@ -173,20 +187,21 @@ async fn decide(
             Some(Err(changed)) if allowed => {
                 stale_rounds += 1;
                 if stale_rounds >= MAX_DECISION_ROUNDS {
-                    return (
-                        PermissionDecision::Deny(format!(
-                            "{} changed on disk while the change was awaiting approval; \
-                             nothing was written. Read the file again and retry.",
-                            changed.join(", ")
-                        )),
-                        None,
-                    );
+                    return Decided::NotRun(format!(
+                        "{} changed on disk while the change was awaiting approval; \
+                         nothing was written. Read the file again and retry.",
+                        changed.join(", ")
+                    ));
                 }
                 preview = tool.preview(input, site.tool_ctx).await;
             }
             _ => {
-                let approved = if allowed { preview } else { None };
-                return (decision, approved);
+                return match decision {
+                    PermissionDecision::Deny(reason) => Decided::Denied(reason),
+                    PermissionDecision::Allow | PermissionDecision::AllowOnce => {
+                        Decided::Run(preview)
+                    }
+                };
             }
         }
     }
@@ -213,7 +228,7 @@ async fn execute_admitted(
     if let Some(other) = another_agents_worktree(&input, ctx) {
         return ToolResult::error(format!(
             "`{}` is in {other}'s worktree: another agent's worktree is read-only for you \
-             (Read, Grep, CodeScout, CodeSearch, CodeStats). Write in your own workspace.",
+             (Read, Grep, CodeScout, CodeStats). Write in your own workspace.",
             other_path(&input, ctx).unwrap_or_default()
         ));
     }
@@ -656,5 +671,137 @@ mod tests {
         .await;
         assert!(r.is_error, "{}", r.content);
         assert_eq!(calls.load(Ordering::SeqCst), 0);
+    }
+
+    /// Answers every request with `answer` and counts the requests.
+    struct Policy {
+        answer: PermissionDecision,
+        asked: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl PermissionPolicy for Policy {
+        async fn check(&self, _request: &PermissionRequest) -> PermissionDecision {
+            self.asked.fetch_add(1, Ordering::SeqCst);
+            self.answer.clone()
+        }
+    }
+
+    async fn edit_with(answer: PermissionDecision, old: &str) -> (ToolResult, bool, usize, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.txt");
+        std::fs::write(&path, "alpha\n").unwrap();
+        let policy = Policy {
+            answer,
+            asked: AtomicUsize::new(0),
+        };
+        let tool_ctx = ctx(&runtime(&[]), dir.path(), None, None);
+        let site = CallSite {
+            tool_id: "e1",
+            tool_ctx: &tool_ctx,
+            permissions: &policy,
+            hooks: &[],
+            turn: 1,
+            cumulative_cost: 0.0,
+            message_count: 0,
+        };
+        let input = serde_json::json!({
+            "file_path": path.display().to_string(),
+            "old_string": old,
+            "new_string": "ALPHA",
+        });
+        let run =
+            decide_and_run(&site, &bricks_tools::file_edit::FileEditTool, "Edit", input).await;
+        let on_disk = std::fs::read_to_string(&path).unwrap();
+        (
+            run.result,
+            run.executed,
+            policy.asked.load(Ordering::SeqCst),
+            on_disk,
+        )
+    }
+
+    /// An edit the tool itself would refuse is reported as the tool's error,
+    /// never as a permission refusal, and the policy is not asked.
+    #[tokio::test]
+    async fn a_call_the_tool_refuses_is_not_reported_as_a_permission_denial() {
+        let (r, executed, asked, on_disk) = edit_with(PermissionDecision::Allow, "missing").await;
+        assert!(r.is_error, "{}", r.content);
+        assert!(!r.content.contains("Permission denied"), "{}", r.content);
+        assert!(r.content.contains("Nothing was written."), "{}", r.content);
+        assert!(!executed);
+        assert_eq!(asked, 0);
+        assert_eq!(on_disk, "alpha\n");
+    }
+
+    /// A refusal of the policy still reads as one.
+    #[tokio::test]
+    async fn a_call_the_policy_refuses_is_reported_as_a_permission_denial() {
+        let (r, executed, asked, on_disk) =
+            edit_with(PermissionDecision::Deny("not now".into()), "alpha").await;
+        assert!(r.is_error);
+        assert!(
+            r.content.starts_with("Permission denied: not now"),
+            "{}",
+            r.content
+        );
+        assert!(!executed);
+        assert_eq!(asked, 1);
+        assert_eq!(on_disk, "alpha\n");
+    }
+
+    /// A patch with no file in it, and a Write onto a directory, are refused
+    /// by the tool before any approval is asked.
+    #[tokio::test]
+    async fn an_empty_patch_or_a_write_onto_a_directory_asks_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let policy = Policy {
+            answer: PermissionDecision::Allow,
+            asked: AtomicUsize::new(0),
+        };
+        let tool_ctx = ctx(&runtime(&[]), dir.path(), None, None);
+        let site = CallSite {
+            tool_id: "p1",
+            tool_ctx: &tool_ctx,
+            permissions: &policy,
+            hooks: &[],
+            turn: 1,
+            cumulative_cost: 0.0,
+            message_count: 0,
+        };
+        let patch = decide_and_run(
+            &site,
+            &bricks_tools::apply_patch::ApplyPatchTool,
+            "ApplyPatch",
+            serde_json::json!({ "patch": "this is not a patch" }),
+        )
+        .await;
+        assert!(patch.result.is_error, "{}", patch.result.content);
+        assert!(patch.result.content.contains("no file changes"));
+        assert!(!patch.result.content.contains("Permission denied"));
+
+        std::fs::create_dir(dir.path().join("sub")).unwrap();
+        let write = decide_and_run(
+            &site,
+            &bricks_tools::file_write::FileWriteTool,
+            "Write",
+            serde_json::json!({ "file_path": "sub", "content": "x" }),
+        )
+        .await;
+        assert!(write.result.is_error, "{}", write.result.content);
+        assert!(write.result.content.contains("is a directory"));
+        assert!(write.result.content.contains("Nothing was written."));
+        assert!(!patch.executed && !write.executed);
+        assert_eq!(policy.asked.load(Ordering::SeqCst), 0);
+    }
+
+    /// An allowed edit runs.
+    #[tokio::test]
+    async fn an_allowed_edit_runs() {
+        let (r, executed, asked, on_disk) = edit_with(PermissionDecision::Allow, "alpha").await;
+        assert!(!r.is_error, "{}", r.content);
+        assert!(executed);
+        assert_eq!(asked, 1);
+        assert_eq!(on_disk, "ALPHA\n");
     }
 }

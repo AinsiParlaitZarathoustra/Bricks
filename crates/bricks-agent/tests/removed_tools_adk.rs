@@ -147,7 +147,12 @@ async fn the_later_removed_tools_are_unknown_with_the_standard_error() {
     let results = tool_results(&agent);
     assert_eq!(results.len(), 4, "{results:?}");
     let total = bricks_tools::all().len();
-    assert_eq!(total, 15, "the standard set has fifteen tools");
+    let pwsh = usize::from(bricks_tools::powershell_available());
+    assert_eq!(
+        total,
+        13 + pwsh,
+        "the standard set has thirteen tools, and PowerShell where it runs"
+    );
     for (id, name) in ["w1", "w2", "w3", "w4"].iter().zip(removed) {
         let (_, text, is_error) = result_of(&results, id);
         assert!(*is_error, "{name}: {text}");

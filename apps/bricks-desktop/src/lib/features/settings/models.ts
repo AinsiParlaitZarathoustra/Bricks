@@ -229,7 +229,7 @@ export function newModelForm(): ModelForm {
 		priceOutput: '',
 		priceCache: '',
 		profiles: [],
-		asyncToolCalls: false
+		asyncToolCalls: true
 	};
 }
 
@@ -467,7 +467,7 @@ export function buildModelCreatePatch(form: ModelForm, profiles: ReasoningProfil
 		input_modalities: orderedModalities(form.modalities),
 		pricing: pricingOf(form),
 		profiles: profiles && profiles.length > 0 ? profiles : null,
-		async_tool_calls: form.asyncToolCalls ? true : null
+		async_tool_calls: form.asyncToolCalls ? null : false
 	};
 }
 

@@ -58,29 +58,32 @@ fn names(tools: &[Box<dyn bricks_tools::Tool>]) -> Vec<String> {
 #[test]
 fn the_built_in_surface_is_exactly_the_kept_tools() {
     let all = names(&bricks_tools::all());
+    // PowerShell is offered only where it can run.
+    let pwsh = bricks_tools::powershell_available();
+    let mut expected = vec![
+        "Read",
+        "Write",
+        "Edit",
+        "ApplyPatch",
+        "Glob",
+        "Grep",
+        "CodeScout",
+        "CodeStats",
+        "Bash",
+        "Job",
+    ];
+    if pwsh {
+        expected.push("PowerShell");
+    }
+    expected.extend(["WebFetch", "WebSearch", "TodoWrite"]);
+    assert_eq!(all, expected);
     assert_eq!(
-        all,
-        [
-            "Read",
-            "Write",
-            "Edit",
-            "ApplyPatch",
-            "Glob",
-            "Grep",
-            "CodeSearch",
-            "CodeScout",
-            "CodeStats",
-            "Bash",
-            "Job",
-            "PowerShell",
-            "WebFetch",
-            "WebSearch",
-            "TodoWrite",
-        ]
+        names(&bricks_tools::shell()).contains(&"PowerShell".to_string()),
+        pwsh
     );
     // `all()` is the coding tools plus the plan.
     let mut coding_and_plan = names(&bricks_tools::coding());
-    assert_eq!(coding_and_plan.len(), 14);
+    assert_eq!(coding_and_plan.len(), 12 + usize::from(pwsh));
     coding_and_plan.extend(names(&bricks_tools::planning()));
     assert_eq!(all, coding_and_plan);
     // Job follows the jobs Bash records: it comes with a registry, not alone.

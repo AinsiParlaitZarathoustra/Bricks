@@ -290,9 +290,10 @@ pub fn not_found_message(kind: &str, id: &str, available: &[String], how_to_list
 /// Describe a windowed result so the model can tell truncation from EOF.
 ///
 /// Returns `None` only when the window genuinely covered everything from the
-/// start, in which case silence is correct. `unit` is a plural noun
-/// (`"lines"`). `how_to_continue` is an imperative telling the model how to
-/// fetch the rest.
+/// start, in which case silence is correct. `offset` is the number of units
+/// skipped (0 for the first); the notice speaks in 1-based positions, as the
+/// numbered lines do. `unit` is a plural noun (`"lines"`). `how_to_continue`
+/// is an imperative telling the model how to fetch the rest.
 pub fn window_notice(
     offset: usize,
     returned: usize,
@@ -307,8 +308,8 @@ pub fn window_notice(
         // Offset past the end currently yields a blank success: the model sees
         // nothing at all and concludes the file is empty.
         return Some(format!(
-            "[No {unit} returned. You asked to start at offset {offset}, but there are only {total} {unit} (valid offsets are 0 to {}). Retry with a smaller offset.]",
-            total.saturating_sub(1)
+            "[No {unit} returned. You asked to start at offset {}, but there are only {total} {unit} (valid offsets are 1 to {total}). Retry with a smaller offset.]",
+            offset + 1
         ));
     }
 
@@ -680,8 +681,8 @@ mod tests {
         json!({
             "type": "object",
             "properties": {
-                "file_path": { "type": "string", "description": "Absolute path to the file" },
-                "offset": { "type": "integer", "description": "Line number to start reading from" },
+                "file_path": { "type": "string", "description": "Path to the file, absolute or relative to the working directory" },
+                "offset": { "type": "integer", "minimum": 0, "description": "1-based line number to start reading from (default 1)" },
                 "limit": { "type": "integer", "description": "Number of lines to read" }
             },
             "required": ["file_path"]
@@ -821,12 +822,12 @@ mod tests {
 
     #[test]
     fn window_notice_flags_truncation() {
-        let n = window_notice(0, 2000, 5000, "lines", "Call Read again with offset=2000.")
+        let n = window_notice(0, 2000, 5000, "lines", "Call Read again with offset=2001.")
             .expect("truncation must be reported");
         assert!(n.contains("Showing lines 1-2000 of 5000"), "{n}");
         assert!(n.contains("NOT the end"), "{n}");
         assert!(n.contains("3000 more lines"), "{n}");
-        assert!(n.contains("offset=2000"), "{n}");
+        assert!(n.contains("offset=2001"), "{n}");
     }
 
     #[test]
@@ -841,7 +842,8 @@ mod tests {
 
         let past = window_notice(9000, 0, 5000, "lines", "x").unwrap();
         assert!(past.contains("No lines returned"), "{past}");
-        assert!(past.contains("0 to 4999"), "{past}");
+        assert!(past.contains("offset 9001"), "{past}");
+        assert!(past.contains("1 to 5000"), "{past}");
 
         let empty = window_notice(0, 0, 0, "lines", "x").unwrap();
         assert!(empty.contains("empty"), "{empty}");

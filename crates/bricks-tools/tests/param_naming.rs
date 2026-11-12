@@ -22,7 +22,7 @@ fn properties(schema: &Value) -> Vec<String> {
 #[test]
 fn file_tools_declare_file_path_and_scope_tools_declare_path() {
     const FILE_TOOLS: &[&str] = &["Read", "Write", "Edit"];
-    const SCOPE_TOOLS: &[&str] = &["Glob", "Grep", "CodeSearch", "CodeStats"];
+    const SCOPE_TOOLS: &[&str] = &["Glob", "Grep", "CodeStats"];
 
     let tools = bricks_tools::all();
     let mut seen_file = 0;

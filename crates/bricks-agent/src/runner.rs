@@ -658,7 +658,7 @@ async fn run_loop(
             messages: messages.clone(),
             system: system_with_nudge,
             tools: tool_defs,
-            max_tokens: agent.max_tokens,
+            max_tokens: agent.output_limit_for(&*provider),
             temperature: agent.temperature,
             stop_sequences: Vec::new(),
             options,

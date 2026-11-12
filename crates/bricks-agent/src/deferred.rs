@@ -127,13 +127,18 @@ impl Tool for LoadTools {
     }
 
     async fn execute(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
-        let Some(query) = input.get("query").and_then(Value::as_str) else {
-            return ToolResult::error("`query` is required");
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Input {
+            query: String,
+            max_results: Option<usize>,
+        }
+        let input: Input = match bricks_tools::tool_feedback::parse_input(self, &input) {
+            Ok(i) => i,
+            Err(e) => return e,
         };
-        let max = input
-            .get("max_results")
-            .and_then(Value::as_u64)
-            .map_or(DEFAULT_RESULTS, |n| n.max(1) as usize);
+        let query = input.query.as_str();
+        let max = input.max_results.map_or(DEFAULT_RESULTS, |n| n.max(1));
         let found = self.find(query, max);
         if found.is_empty() {
             return ToolResult::error(format!(
@@ -270,5 +275,37 @@ mod tests {
             "Click an element."
         );
         assert_eq!(summary(&"x".repeat(300)).chars().count(), 201);
+    }
+
+    fn ctx() -> ToolContext {
+        ToolContext {
+            working_dir: std::env::temp_dir(),
+            session_id: "t".into(),
+            permissions: Arc::new(bricks_tools::permissions::AllowAll),
+            cost_tracker: Arc::new(bricks_tools::CostTracker::new()),
+            mcp_manager: None,
+            extensions: Default::default(),
+        }
+    }
+
+    /// A wrong or unknown parameter is refused with the tool's parameters,
+    /// and loads nothing.
+    #[tokio::test]
+    async fn unknown_or_misnamed_parameters_are_refused() {
+        let l = loader();
+        let r = l.execute(json!({"q": "zoom"}), &ctx()).await;
+        assert!(r.is_error, "{}", r.content);
+        assert!(
+            r.content.contains("'LoadTools'") && r.content.contains("query"),
+            "{}",
+            r.content
+        );
+        let r = l
+            .execute(json!({"query": "zoom", "limit": 2}), &ctx())
+            .await;
+        assert!(r.is_error && r.content.contains("limit"), "{}", r.content);
+        assert!(l.loaded.lock().is_empty());
+        let ok = l.execute(json!({"query": "select:zoom"}), &ctx()).await;
+        assert!(!ok.is_error, "{}", ok.content);
     }
 }

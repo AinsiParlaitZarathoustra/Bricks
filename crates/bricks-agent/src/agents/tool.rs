@@ -129,13 +129,17 @@ impl Tool for NativeAgentTool {
     }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> ToolResult {
-        let requests = match missions(input) {
+        let requests = match missions(input.clone()) {
             Ok(r) => r,
             Err(e) => {
-                return ToolResult::error(format!(
-                    "Invalid input: {e}. Nothing was started. (`system_prompt` is not accepted: \
-                     choose a `profile` instead.)"
-                ));
+                return bricks_tools::tool_feedback::invalid_input(
+                    self,
+                    &input,
+                    format!(
+                        "{e}. Nothing was started. (`system_prompt` is not accepted: choose a \
+                         `profile` instead.)"
+                    ),
+                );
             }
         };
         let batch = requests.len() > 1;
@@ -332,9 +336,9 @@ impl Tool for AgentControlTool {
     }
 
     async fn execute(&self, input: Value, ctx: &ToolContext) -> ToolResult {
-        let i: ControlInput = match serde_json::from_value(input) {
+        let i: ControlInput = match bricks_tools::tool_feedback::parse_input(self, &input) {
             Ok(i) => i,
-            Err(e) => return ToolResult::error(format!("Invalid input: {e}")),
+            Err(e) => return e,
         };
         let rt = ctx
             .extensions
@@ -602,10 +606,20 @@ impl Tool for AgentProfilesTool {
     }
 
     async fn execute(&self, input: Value, _ctx: &ToolContext) -> ToolResult {
-        let query = input["query"].as_str().unwrap_or("");
-        let page = input["page"].as_u64().unwrap_or(0) as usize;
+        #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Input {
+            #[serde(default)]
+            query: String,
+            #[serde(default)]
+            page: usize,
+        }
+        let Input { query, page } = match bricks_tools::tool_feedback::parse_input(self, &input) {
+            Ok(i) => i,
+            Err(e) => return e,
+        };
         let reg = self.spawner.profiles().snapshot();
-        let (items, total) = reg.search(query, page, 20);
+        let (items, total) = reg.search(&query, page, 20);
         let mut out = format!("{total} profile(s) match; page {page}:\n");
         for l in &items {
             if l.valid {
@@ -625,7 +639,7 @@ impl Tool for AgentProfilesTool {
                 ));
             }
         }
-        if (page + 1) * 20 < total {
+        if page.saturating_add(1).saturating_mul(20) < total {
             out.push_str(&format!("(next: page {})\n", page + 1));
         }
         ToolResult::success(out)

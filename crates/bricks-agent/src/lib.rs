@@ -243,6 +243,10 @@ type EventFilter = Arc<dyn Fn(&AgentEvent) -> bool + Send + Sync>;
 
 // ─── Agent ───────────────────────────────────────────────────────────────────
 
+/// Output limit of a request when neither the agent nor the provider gives
+/// one (a provider that does not come from configuration).
+pub const DEFAULT_MAX_TOKENS: u32 = 16_384;
+
 /// The policy cell and the approver an agent's engine was built from.
 type PermissionParts = (permission::PolicyCell, Arc<dyn PermissionPolicy>);
 
@@ -262,7 +266,9 @@ pub struct Agent {
     /// The system of the last request built (what was measured and sent).
     last_system: parking_lot::Mutex<Option<String>>,
     append_system_prompt: Option<String>,
-    max_tokens: u32,
+    /// The output limit asked for ([`AgentBuilder::max_tokens`]); `None`:
+    /// the model's own (see [`Agent::output_limit`]).
+    max_tokens: Option<u32>,
     temperature: Option<f32>,
     working_dir: PathBuf,
     /// Decides every tool call (the session's policy, then the approver).
@@ -547,6 +553,26 @@ impl Agent {
         self.context
             .lock()
             .invalidate("the reasoning profile changed");
+    }
+
+    /// The output limit of a request to `provider`: the one asked for, else
+    /// the `max_output_tokens` its model declares, else
+    /// [`DEFAULT_MAX_TOKENS`] for a provider that declares none. Output
+    /// covers thinking, text and tool calls; the protocol still caps it at
+    /// the model's declared maximum.
+    pub(crate) fn output_limit_for(&self, provider: &dyn Provider) -> u32 {
+        self.max_tokens.unwrap_or_else(|| {
+            provider
+                .model_info()
+                .map(|i| u32::try_from(i.limits.max_output_tokens).unwrap_or(u32::MAX))
+                .filter(|n| *n > 0)
+                .unwrap_or(DEFAULT_MAX_TOKENS)
+        })
+    }
+
+    /// [`Agent::output_limit_for`] the current provider.
+    pub fn output_limit(&self) -> u32 {
+        self.output_limit_for(&*self.provider())
     }
 
     /// The current provider.
@@ -1145,7 +1171,8 @@ pub struct AgentBuilder {
     prompt_options: Option<system_prompt::SystemPromptOptions>,
     append_system_prompt: Option<String>,
     model: Option<String>,
-    max_tokens: u32,
+    /// `None`: the model's declared output limit.
+    max_tokens: Option<u32>,
     temperature: Option<f32>,
     reasoning_profile: Option<String>,
     seed_usage: Option<Usage>,
@@ -1193,7 +1220,7 @@ impl Default for AgentBuilder {
             prompt_options: None,
             append_system_prompt: None,
             model: None,
-            max_tokens: 16384,
+            max_tokens: None,
             temperature: None,
             reasoning_profile: None,
             seed_usage: None,
@@ -1285,8 +1312,10 @@ impl AgentBuilder {
         self
     }
 
+    /// The output limit of every request (thinking, text and tool calls).
+    /// Without it, the model's declared `max_output_tokens` is used.
     pub fn max_tokens(mut self, n: u32) -> Self {
-        self.max_tokens = n;
+        self.max_tokens = Some(n);
         self
     }
 
@@ -1833,6 +1862,61 @@ mod tests {
             let (_tx, rx) = tokio::sync::mpsc::channel(1);
             Ok(CompletionStream::new(rx))
         }
+    }
+
+    /// A provider whose model declares `max_output_tokens`.
+    struct Declared(u64);
+
+    #[async_trait::async_trait]
+    impl Provider for Declared {
+        fn name(&self) -> &str {
+            "declared"
+        }
+        fn context_window(&self, _model: &str) -> u64 {
+            100_000
+        }
+        fn model_info(&self) -> Option<bricks_provider::ModelInfo> {
+            Some(bricks_provider::ModelInfo {
+                selection: "p/m".into(),
+                protocol: "anthropic_messages",
+                limits: bricks_provider::ModelLimits {
+                    max_input_tokens: 100_000,
+                    max_output_tokens: self.0,
+                },
+                reasoning_resent: true,
+                token_counting: false,
+            })
+        }
+        async fn complete(
+            &self,
+            _request: CompletionRequest,
+        ) -> bricks_types::Result<CompletionStream> {
+            let (_tx, rx) = tokio::sync::mpsc::channel(1);
+            Ok(CompletionStream::new(rx))
+        }
+    }
+
+    /// Without `max_tokens`, a request may use the whole output the model
+    /// declares (thinking included); a limit asked for wins; a provider
+    /// that declares nothing gets the default.
+    #[test]
+    fn the_output_limit_is_the_models_unless_one_is_asked_for() {
+        let agent = Agent::builder()
+            .provider(Declared(128_000))
+            .build()
+            .unwrap();
+        assert_eq!(agent.output_limit(), 128_000);
+        let capped = Agent::builder()
+            .provider(Declared(128_000))
+            .max_tokens(4_000)
+            .build()
+            .unwrap();
+        assert_eq!(capped.output_limit(), 4_000);
+        let stub = Agent::builder().provider(StubProvider).build().unwrap();
+        assert_eq!(stub.output_limit(), DEFAULT_MAX_TOKENS);
+        // The limit follows a change of model.
+        agent.set_model(Box::new(Declared(32_000)), None, None);
+        assert_eq!(agent.output_limit(), 32_000);
     }
 
     #[test]

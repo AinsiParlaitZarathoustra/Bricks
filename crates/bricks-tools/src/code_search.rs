@@ -816,10 +816,9 @@ impl Tool for CodeSearchTool {
     }
 
     fn description(&self) -> &str {
-        "Semantic code search across the codebase. Use natural language queries about behavior, \
-         patterns, or concepts. Returns relevant code snippets with file paths and line numbers. \
-         This is your DEFAULT tool for discovering code — use it before Grep when you need to \
-         understand how something works rather than find an exact string."
+        "Ranked search across the codebase for a query in words (full text, and by meaning \
+         when embeddings are configured). Returns code snippets with file paths and line \
+         numbers. Use Grep for exact text and CodeScout for symbols and references."
     }
 
     fn permission_level(&self) -> PermissionLevel {

@@ -320,9 +320,16 @@ pub struct ModelConfig {
     #[serde(default)]
     pub token_counting: Option<TokenCounting>,
     /// Tools start as soon as their call is complete in the stream, without
-    /// waiting for the rest of the answer. Off unless `true`.
-    #[serde(default)]
+    /// waiting for the rest of the answer. On unless `false`: every protocol
+    /// closes a call only once its arguments are whole, and a turn is never
+    /// redone behind a call that started.
+    #[serde(default = "async_tool_calls_default")]
     pub async_tool_calls: bool,
+}
+
+/// `async_tool_calls` of a model that does not set it.
+fn async_tool_calls_default() -> bool {
+    true
 }
 
 /// `[providers.models.token_counting]`.
@@ -1277,6 +1284,19 @@ mod tests {
         assert_eq!(p.models[1].effective_protocol(p), Protocol::Responses);
         // Defaults apply to omitted booleans/lists.
         assert_eq!(p.models[1].input_modalities, vec![Modality::Text]);
+    }
+
+    /// Tools start during the stream unless a model says `false`.
+    #[test]
+    fn async_tool_calls_is_on_unless_turned_off() {
+        let cfg = ProvidersConfig::from_toml_str(BASIC, "t").unwrap();
+        assert!(cfg.providers[0].models[0].async_tool_calls);
+        let off = BASIC.replace(
+            "streaming = true\n",
+            "streaming = true\nasync_tool_calls = false\n",
+        );
+        let cfg = ProvidersConfig::from_toml_str(&off, "t").unwrap();
+        assert!(!cfg.providers[0].models[0].async_tool_calls);
     }
 
     #[test]

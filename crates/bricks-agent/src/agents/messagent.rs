@@ -77,7 +77,7 @@ pub struct Member {
     pub name: String,
     pub state: String,
     /// Its own worktree, readable by the others (Read, Grep, CodeScout
-    /// `workspace`, CodeSearch, CodeStats); `None` in the shared workspace.
+    /// `workspace`, CodeStats); `None` in the shared workspace.
     pub worktree: Option<String>,
 }
 

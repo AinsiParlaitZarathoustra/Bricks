@@ -70,7 +70,7 @@ impl Tool for FileEditTool {
         serde_json::json!({
             "type": "object",
             "properties": {
-                "file_path": { "type": "string", "description": "Absolute path to the file" },
+                "file_path": { "type": "string", "description": "Path to the file, absolute or relative to the working directory" },
                 "old_string": {
                     "type": "string",
                     "description": "One replacement: the text to replace. Use with new_string, not with edits."
@@ -332,7 +332,7 @@ pub fn parse_call(input: &Value) -> std::result::Result<EditCall, CallError> {
     crate::tool_feedback::reject_unknown_keys(input, KNOWN_PARAMS).map_err(CallError::Shape)?;
 
     let file_path = get_str(obj, "file_path").ok_or_else(|| {
-        CallError::Shape("missing 'file_path' (the absolute path of the file to edit)".to_string())
+        CallError::Shape("missing 'file_path' (the path of the file to edit)".to_string())
     })?;
 
     if let Some(edits) = obj.get("edits") {

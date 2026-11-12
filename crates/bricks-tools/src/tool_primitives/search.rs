@@ -9,12 +9,36 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-/// A single search match with context.
+/// A line a search returns: a match, or a line of context around one.
 #[derive(Debug, Clone)]
 pub struct SearchMatch {
     pub file: PathBuf,
     pub line_number: usize,
     pub line_content: String,
+    /// A line around a match (see [`GrepOptions::context`]), not a match.
+    pub is_context: bool,
+}
+
+/// What a grep collects in each file.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum GrepMode {
+    /// The matching lines, with their context: [`GrepOutcome::matches`].
+    #[default]
+    Lines,
+    /// The files with a match, each read up to its first: [`GrepOutcome::files`].
+    Files,
+    /// The files with a match and how many of their lines match:
+    /// [`GrepOutcome::files`].
+    Count,
+}
+
+/// A file with a match ([`GrepMode::Files`] and [`GrepMode::Count`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileMatches {
+    pub file: PathBuf,
+    /// Matching lines in the file; 1 in [`GrepMode::Files`], which stops at
+    /// the first.
+    pub count: usize,
 }
 
 /// Options for grep.
@@ -37,14 +61,26 @@ pub struct GrepOptions {
     pub hidden: bool,
     /// When `true`, the pattern is exact text, not a regex.
     pub literal: bool,
+    /// What is collected per file. In [`GrepMode::Files`] and
+    /// [`GrepMode::Count`], `max_results` counts files.
+    pub mode: GrepMode,
+    /// Lines of context before and after each match ([`GrepMode::Lines`]
+    /// only). They do not count toward `max_results`. The search of a file
+    /// stops at its last match within the limit, so that match may come
+    /// without its trailing context.
+    pub context: usize,
 }
 
 /// What a grep found.
 #[derive(Debug, Default, Clone)]
 pub struct GrepOutcome {
-    /// Matches sorted by `(file, line_number)`, at most `max_results`.
+    /// [`GrepMode::Lines`]: matches and their context lines, sorted by
+    /// `(file, line_number)`, at most `max_results` matches.
     pub matches: Vec<SearchMatch>,
-    /// More matches exist than returned (their number is not known).
+    /// [`GrepMode::Files`] and [`GrepMode::Count`]: the files with a match,
+    /// sorted, at most `max_results` of them.
+    pub files: Vec<FileMatches>,
+    /// More matches (or files) exist than returned (their number is not known).
     pub more: bool,
 }
 
@@ -102,8 +138,8 @@ pub async fn grep(
 /// even lines read before the NUL. Only the bytes read are checked: a file
 /// left early because the limit was reached is checked up to that point
 /// (and its read-ahead buffer), not to its end. Binary data without a NUL
-/// byte (and UTF-16 text) is not recognised; a file that is not valid UTF-8
-/// where a line matches is skipped.
+/// byte (and UTF-16 text) is not recognised; a matching line that is not
+/// valid UTF-8 is returned with U+FFFD in place of its invalid bytes.
 pub async fn grep_search(
     pattern: &str,
     path: &Path,
@@ -117,13 +153,17 @@ pub async fn grep_search(
         .map_err(|e| SearchError::CommandFailed(e.to_string()))?
 }
 
-/// Collects one file's matches, at most `room` of them; a NUL byte marks
-/// the file binary and stops its reading.
+/// Collects one file's matches, at most `room` of them in
+/// [`GrepMode::Lines`] (with their context); counts them in the other
+/// modes. A NUL byte marks the file binary and stops its reading.
 struct FileSink<'a> {
     file: &'a Path,
     out: Vec<SearchMatch>,
     room: usize,
     binary: bool,
+    mode: GrepMode,
+    /// Matching lines seen.
+    matched: usize,
 }
 
 impl grep::searcher::Sink for FileSink<'_> {
@@ -134,15 +174,39 @@ impl grep::searcher::Sink for FileSink<'_> {
         _searcher: &grep::searcher::Searcher,
         mat: &grep::searcher::SinkMatch<'_>,
     ) -> Result<bool, std::io::Error> {
-        let line = std::str::from_utf8(mat.bytes())
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        // A line that is not valid UTF-8 is shown with U+FFFD: a file in
+        // another encoding still gives its matches.
+        let line = String::from_utf8_lossy(mat.bytes());
+        self.matched += 1;
+        match self.mode {
+            GrepMode::Files => return Ok(false),
+            GrepMode::Count => return Ok(true),
+            GrepMode::Lines => {}
+        }
         self.out.push(SearchMatch {
             file: self.file.to_path_buf(),
             line_number: mat.line_number().unwrap_or(0) as usize,
             line_content: line.trim_end_matches(['\n', '\r']).to_string(),
+            is_context: false,
         });
         self.room -= 1;
         Ok(self.room > 0)
+    }
+
+    fn context(
+        &mut self,
+        _searcher: &grep::searcher::Searcher,
+        ctx: &grep::searcher::SinkContext<'_>,
+    ) -> Result<bool, std::io::Error> {
+        // A context line is shown as it can be: it never drops the file.
+        let line = String::from_utf8_lossy(ctx.bytes());
+        self.out.push(SearchMatch {
+            file: self.file.to_path_buf(),
+            line_number: ctx.line_number().unwrap_or(0) as usize,
+            line_content: line.trim_end_matches(['\n', '\r']).to_string(),
+            is_context: true,
+        });
+        Ok(true)
     }
 
     fn binary_data(
@@ -200,18 +264,28 @@ fn grep_blocking(
         .unwrap_or(1);
     builder.threads(threads);
 
-    // One match past the limit proves that more exist.
+    // One match (or file) past the limit proves that more exist.
     let wanted = opts.max_results.map_or(usize::MAX, |m| m.saturating_add(1));
+    let mode = opts.mode;
+    let context = if mode == GrepMode::Lines {
+        opts.context
+    } else {
+        0
+    };
     let results: Arc<Mutex<Vec<SearchMatch>>> = Arc::new(Mutex::new(Vec::new()));
+    let files: Arc<Mutex<Vec<FileMatches>>> = Arc::new(Mutex::new(Vec::new()));
     let found = Arc::new(AtomicUsize::new(0));
 
     builder.build_parallel().run(|| {
         let matcher = matcher.clone();
         let results = Arc::clone(&results);
+        let files = Arc::clone(&files);
         let found = Arc::clone(&found);
         let mut searcher = SearcherBuilder::new()
             .line_number(true)
             .binary_detection(BinaryDetection::quit(b'\x00'))
+            .before_context(context)
+            .after_context(context)
             .build();
 
         Box::new(move |entry| {
@@ -233,17 +307,29 @@ fn grep_blocking(
                 out: Vec::new(),
                 room,
                 binary: false,
+                mode,
+                matched: 0,
             };
             let search_result = searcher.search_path(&matcher, entry.path(), &mut sink);
             // Ignore per-file read/decoding errors (e.g. permission denied) and
             // keep walking, mirroring ripgrep's resilience. A binary file
             // gives nothing, not even the lines read before its NUL byte.
-            if search_result.is_err() || sink.binary || sink.out.is_empty() {
+            if search_result.is_err() || sink.binary || sink.matched == 0 {
                 return WalkState::Continue;
             }
 
-            let n = sink.out.len();
-            results.lock().unwrap().extend(sink.out);
+            // Matches in Lines mode, files otherwise.
+            let n = if mode == GrepMode::Lines {
+                let n = sink.matched;
+                results.lock().unwrap().extend(sink.out);
+                n
+            } else {
+                files.lock().unwrap().push(FileMatches {
+                    file: entry.path().to_path_buf(),
+                    count: sink.matched,
+                });
+                1
+            };
             if found.fetch_add(n, Ordering::SeqCst) + n >= wanted {
                 return WalkState::Quit;
             }
@@ -254,18 +340,61 @@ fn grep_blocking(
     let mut matches = Arc::try_unwrap(results)
         .map(|m| m.into_inner().unwrap())
         .unwrap_or_else(|arc| arc.lock().unwrap().clone());
+    let mut files = Arc::try_unwrap(files)
+        .map(|m| m.into_inner().unwrap())
+        .unwrap_or_else(|arc| arc.lock().unwrap().clone());
 
     // Parallel walk order is nondeterministic — sort for stable output.
     matches.sort_by(|a, b| a.file.cmp(&b.file).then(a.line_number.cmp(&b.line_number)));
+    files.sort_by(|a, b| a.file.cmp(&b.file));
     let mut more = false;
-    if let Some(max) = opts.max_results
-        && matches.len() > max
-    {
-        matches.truncate(max);
-        more = true;
+    if let Some(max) = opts.max_results {
+        if files.len() > max {
+            files.truncate(max);
+            more = true;
+        }
+        if truncate_lines(&mut matches, max, context) {
+            more = true;
+        }
     }
 
-    Ok(GrepOutcome { matches, more })
+    Ok(GrepOutcome {
+        matches,
+        files,
+        more,
+    })
+}
+
+/// Keeps the first `max` matches of `lines` (sorted) and the context that
+/// belongs to them: what follows the last kept match within `context`
+/// lines of it, in its file. Whether any match was dropped.
+fn truncate_lines(lines: &mut Vec<SearchMatch>, max: usize, context: usize) -> bool {
+    let Some(cut) = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| !l.is_context)
+        .nth(max)
+        .map(|(i, _)| i)
+    else {
+        return false;
+    };
+    lines.truncate(cut);
+    let last = lines
+        .iter()
+        .rev()
+        .find(|l| !l.is_context)
+        .map(|l| (l.file.clone(), l.line_number));
+    while let Some(tail) = lines.last() {
+        let belongs = tail.is_context
+            && last.as_ref().is_some_and(|(file, n)| {
+                *file == tail.file && tail.line_number <= n.saturating_add(context)
+            });
+        if !tail.is_context || belongs {
+            break;
+        }
+        lines.pop();
+    }
+    true
 }
 
 /// Bounds and limits of [`glob_walk`].

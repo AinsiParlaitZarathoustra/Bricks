@@ -496,7 +496,11 @@ pub fn coding() -> Vec<Box<dyn Tool>> {
 }
 
 /// File system tools: Read (text and images), Write, Edit, ApplyPatch, Glob, Grep,
-/// CodeSearch, CodeScout, CodeStats.
+/// CodeScout, CodeStats.
+///
+/// CodeSearch is not among them: without embeddings it is a ranked full-text
+/// search that Grep and CodeScout already cover. Add
+/// [`code_search::CodeSearchTool::with_embeddings`] where a provider is set up.
 pub fn filesystem() -> Vec<Box<dyn Tool>> {
     vec![
         Box::new(file_read::FileReadTool),
@@ -505,29 +509,44 @@ pub fn filesystem() -> Vec<Box<dyn Tool>> {
         Box::new(apply_patch::ApplyPatchTool),
         Box::new(glob_tool::GlobTool),
         Box::new(grep_tool::GrepTool),
-        Box::new(code_search::CodeSearchTool::new()),
         Box::new(code_scout::CodeScoutTool),
         Box::new(code_stats::CodeStatsTool),
     ]
 }
 
 /// Shell tools without jobs: Bash (commands that end in the call only; a
-/// command that may become a job is refused before it starts), PowerShell.
+/// command that may become a job is refused before it starts), and PowerShell
+/// where it can run (see [`powershell_available`]).
 pub fn shell() -> Vec<Box<dyn Tool>> {
-    vec![
-        Box::new(bash::BashTool::default()),
-        Box::new(powershell::PowerShellTool),
-    ]
+    let mut tools: Vec<Box<dyn Tool>> = vec![Box::new(bash::BashTool::default())];
+    if powershell_available() {
+        tools.push(Box::new(powershell::PowerShellTool));
+    }
+    tools
 }
 
 /// Shell tools on one job registry: Bash records its background and
-/// handed-over commands there, Job follows them. What a session uses.
+/// handed-over commands there, Job follows them, and PowerShell where it can
+/// run (see [`powershell_available`]). What a session uses.
 pub fn shell_with_jobs(registry: Arc<jobs::JobRegistry>) -> Vec<Box<dyn Tool>> {
-    vec![
+    let mut tools: Vec<Box<dyn Tool>> = vec![
         Box::new(bash::BashTool::with_jobs(Arc::clone(&registry))),
         Box::new(jobs::JobTool::new(registry)),
-        Box::new(powershell::PowerShellTool),
-    ]
+    ];
+    if powershell_available() {
+        tools.push(Box::new(powershell::PowerShellTool));
+    }
+    tools
+}
+
+/// Whether the PowerShell tool can run here: always on Windows, elsewhere
+/// only when `pwsh` is on the `PATH`, where the tool looks for it too.
+/// Looked up once per process, so a session is not offered a tool whose
+/// every call would fail. A host that sets `ShellConfig::pwsh_path` to a
+/// `pwsh` off the `PATH` adds [`powershell::PowerShellTool`] itself.
+pub fn powershell_available() -> bool {
+    static AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *AVAILABLE.get_or_init(|| cfg!(windows) || which::which("pwsh").is_ok())
 }
 
 /// `tools` with every tool that works with jobs put on `registry`, and Job

@@ -1027,7 +1027,8 @@ pub struct ModelPatch {
     /// Replaces the whole list of reasoning levels (ids unique). The first
     /// applies when none is chosen.
     pub profiles: Option<Vec<ReasoningProfileEdit>>,
-    /// Tools start while the answer still streams; `false` removes the key.
+    /// Tools start while the answer still streams (the default); `true`
+    /// removes the key, `false` writes it.
     pub async_tool_calls: Option<bool>,
 }
 

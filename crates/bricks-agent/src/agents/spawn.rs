@@ -2085,6 +2085,11 @@ impl AgentSpawner {
         if let Some(r) = reasoning {
             b = b.reasoning_profile(r);
         }
+        // `[agent] max_tokens` applies to the sub-agents too; without it,
+        // each one writes up to its own model's declared output limit.
+        if let Some(t) = self.bricks.agent.max_tokens {
+            b = b.max_tokens(t);
+        }
         // A resumed child continues its own conversation: past tool calls
         // stay results, nothing is run again.
         if let Some(h) = history {

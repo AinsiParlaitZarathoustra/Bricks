@@ -26,8 +26,8 @@ impl Tool for FileReadTool {
         serde_json::json!({
             "type": "object",
             "properties": {
-                "file_path": { "type": "string", "description": "Absolute path to the file" },
-                "offset": { "type": "integer", "description": "Line number to start reading from" },
+                "file_path": { "type": "string", "description": "Path to the file, absolute or relative to the working directory" },
+                "offset": { "type": "integer", "minimum": 0, "description": "1-based line number to start reading from (default 1)" },
                 "limit": { "type": "integer", "description": "Number of lines to read" }
             },
             "required": ["file_path"]
@@ -77,7 +77,9 @@ impl Tool for FileReadTool {
             }
             return crate::view_image::view(resolved.clone(), &input.file_path).await;
         }
-        let offset = input.offset.unwrap_or(0);
+        // `offset` is the 1-based line to start at, as numbered in the output
+        // and by Grep; 0 is taken as 1. `read_window` counts lines skipped.
+        let offset = input.offset.unwrap_or(1).saturating_sub(1);
         let limit = input.limit.unwrap_or(2000);
         let p = path.to_path_buf();
         let window = match tokio::task::spawn_blocking(move || {
@@ -127,7 +129,7 @@ impl Tool for FileReadTool {
             "lines",
             &format!(
                 "To read the rest, call Read again with offset={} (and the same limit).",
-                window.offset + window.lines.len()
+                window.offset + window.lines.len() + 1
             ),
         ) {
             out.push_str(&notice);
@@ -153,10 +155,10 @@ impl Tool for FileReadTool {
         ToolResult::success(out.trim_end_matches('\n').to_string()).with_metadata(
             serde_json::json!({
                 "total_lines": window.total_lines,
-                "offset": window.offset,
+                "offset": window.offset + 1,
                 "lines_returned": window.lines.len(),
                 "next_offset": (window.offset + window.lines.len() < window.total_lines)
-                    .then_some(window.offset + window.lines.len()),
+                    .then_some(window.offset + window.lines.len() + 1),
                 "crlf": window.crlf,
                 "bom": matches!(window.kind, pfs::FileKind::Text { bom: true }),
             }),
@@ -178,7 +180,7 @@ fn not_found_with_siblings(path: &std::path::Path, requested: &str) -> ToolResul
 
     let Some(parent) = parent else {
         return ToolResult::error(format!(
-            "File not found: {requested}\n\nCheck the path and retry. Use Glob or LS to find the correct absolute path."
+            "File not found: {requested}\n\nCheck the path and retry. Use Glob to find the correct path."
         ));
     };
     if !parent.is_dir() {
@@ -206,7 +208,7 @@ fn not_found_with_siblings(path: &std::path::Path, requested: &str) -> ToolResul
         ));
     }
     msg.push_str(&format!(
-        "\n\nIts directory {} exists and holds {} entr{}. Use Glob or LS to list it, then Read the exact path.",
+        "\n\nIts directory {} exists and holds {} entr{}. Use Glob to list it, then Read the exact path.",
         parent.display(),
         siblings.len(),
         if siblings.len() == 1 { "y" } else { "ies" }
@@ -295,7 +297,7 @@ mod tests {
             r.content.lines().last().unwrap_or("")
         );
         assert!(
-            r.content.contains("offset=2000"),
+            r.content.contains("offset=2001"),
             "must say how to continue"
         );
     }
@@ -365,7 +367,7 @@ mod tests {
         let path = tmp.path().join("n.rs");
         let body: String = (1..=12).map(|i| format!("let x{i} = {i};\n")).collect();
         std::fs::write(&path, body).unwrap();
-        let r = read(&path, serde_json::json!({ "offset": 8, "limit": 2 })).await;
+        let r = read(&path, serde_json::json!({ "offset": 9, "limit": 2 })).await;
         assert!(
             r.content
                 .starts_with(" 9 | let x9 = 9;\n10 | let x10 = 10;"),
@@ -377,7 +379,40 @@ mod tests {
             "{}",
             r.content
         );
-        assert_eq!(r.metadata.unwrap()["next_offset"], 10);
+        assert!(r.content.contains("offset=11"), "{}", r.content);
+        let meta = r.metadata.unwrap();
+        assert_eq!(meta["offset"], 9);
+        assert_eq!(meta["next_offset"], 11);
+    }
+
+    /// `offset` is the line number shown (and given by Grep): reading from
+    /// line N shows line N first. 0 and 1 both start at the first line.
+    #[tokio::test]
+    async fn offset_is_the_line_number_shown() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("n.txt");
+        std::fs::write(&path, "one\ntwo\nthree\n").unwrap();
+        for (offset, first) in [
+            (0, "1 | one"),
+            (1, "1 | one"),
+            (2, "2 | two"),
+            (3, "3 | three"),
+        ] {
+            let r = read(&path, serde_json::json!({ "offset": offset })).await;
+            assert!(
+                r.content.starts_with(first),
+                "offset {offset}: {}",
+                r.content
+            );
+        }
+        let past = read(&path, serde_json::json!({ "offset": 4 })).await;
+        assert!(
+            past.content.contains("No lines returned"),
+            "{}",
+            past.content
+        );
+        assert!(past.content.contains("offset 4"), "{}", past.content);
+        assert!(past.content.contains("1 to 3"), "{}", past.content);
     }
 
     #[tokio::test]
@@ -474,7 +509,7 @@ mod tests {
                 writeln!(f, "entry {i}").unwrap();
             }
         }
-        let r = read(&p, serde_json::json!({ "offset": 299_998, "limit": 10 })).await;
+        let r = read(&p, serde_json::json!({ "offset": 299_999, "limit": 10 })).await;
         assert!(r.content.contains("299999 | entry 299998"), "{}", r.content);
         assert!(r.content.contains("300000 | entry 299999"));
         assert_eq!(r.metadata.unwrap()["total_lines"], 300_000);

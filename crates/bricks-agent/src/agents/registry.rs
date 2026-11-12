@@ -378,7 +378,13 @@ impl ProfileRegistry {
             .collect();
         let total = all.len();
         let per = per_page.clamp(1, 100);
-        (all.into_iter().skip(page * per).take(per).collect(), total)
+        (
+            all.into_iter()
+                .skip(page.saturating_mul(per))
+                .take(per)
+                .collect(),
+            total,
+        )
     }
 }
 
@@ -569,6 +575,16 @@ mod tests {
             running.source.revision,
             cat.snapshot().get("x").unwrap().source.revision
         );
+    }
+
+    /// A page past every profile, however large, is empty (the model picks
+    /// the number).
+    #[test]
+    fn a_huge_page_is_empty_not_a_panic() {
+        let reg = ProfileRegistry::built_in();
+        let (items, total) = reg.search("", usize::MAX, 20);
+        assert!(items.is_empty());
+        assert!(total > 0);
     }
 
     #[test]

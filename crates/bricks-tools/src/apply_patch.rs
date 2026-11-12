@@ -20,6 +20,10 @@ use std::path::{Component, Path, PathBuf};
 
 pub struct ApplyPatchTool;
 
+/// A patch in which no file header (`--- a/…`, `+++ b/…`) was found.
+const NO_FILE_CHANGES: &str = "The patch contains no file changes: a unified diff needs \
+     `--- a/<file>` and `+++ b/<file>` headers followed by `@@` hunks.";
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Input {
@@ -73,6 +77,9 @@ impl Tool for ApplyPatchTool {
                 )));
             }
         };
+        if actions.is_empty() {
+            return Some(crate::preview::ChangePreview::refused(NO_FILE_CHANGES));
+        }
         let files = actions
             .iter()
             .map(|a| {
@@ -132,9 +139,7 @@ impl Tool for ApplyPatchTool {
             }
         }
         match apply_unified_patch(&input.patch, &ctx.working_dir) {
-            Ok(changes) if changes.is_empty() => {
-                ToolResult::success("The patch contains no file changes.")
-            }
+            Ok(changes) if changes.is_empty() => ToolResult::error(NO_FILE_CHANGES),
             Ok(changes) => ToolResult::success(format!(
                 "Patch applied to {} file(s):\n{}",
                 changes.len(),

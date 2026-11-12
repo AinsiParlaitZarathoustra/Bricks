@@ -4,8 +4,21 @@ use super::*;
 use crate::tool_primitives::search as psearch;
 use serde::Deserialize;
 
-/// Matches returned when the call gives no `limit`.
+/// Matches (or files) returned when the call gives no `limit`.
 pub const DEFAULT_LIMIT: usize = 100;
+
+/// Lines of context a call may ask for around each match.
+pub const MAX_CONTEXT: usize = 10;
+
+/// What a call returns.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum OutputMode {
+    #[default]
+    Content,
+    FilesWithMatches,
+    Count,
+}
 
 pub struct GrepTool;
 
@@ -37,7 +50,10 @@ impl Tool for GrepTool {
                 "case_insensitive": { "type": "boolean", "description": "Case-insensitive matching", "default": false },
                 "hidden": { "type": "boolean", "description": "Include hidden files/directories", "default": false },
                 "literal": { "type": "boolean", "description": "Match `pattern` as exact text, without regex syntax", "default": false },
-                "limit": { "type": "integer", "minimum": 0, "description": "Max matching lines to return (default 100). 0 checks the pattern and path and returns no match", "default": DEFAULT_LIMIT }
+                "no_ignore": { "type": "boolean", "description": "Also search files excluded by .gitignore/.ignore (e.g. target/, node_modules/)", "default": false },
+                "output_mode": { "type": "string", "enum": ["content", "files_with_matches", "count"], "description": "content: matching lines as file:line:text; files_with_matches: the paths of the files that match; count: file:number of matching lines", "default": "content" },
+                "context": { "type": "integer", "minimum": 0, "maximum": MAX_CONTEXT, "description": "Lines shown before and after each match (content only), as file-line-text, with -- between separate groups", "default": 0 },
+                "limit": { "type": "integer", "minimum": 0, "description": "Max matching lines (content) or files (files_with_matches, count) to return (default 100). 0 checks the pattern and path and returns nothing", "default": DEFAULT_LIMIT }
             },
             "required": ["pattern"]
         })
@@ -56,6 +72,12 @@ impl Tool for GrepTool {
             hidden: bool,
             #[serde(default)]
             literal: bool,
+            #[serde(default)]
+            no_ignore: bool,
+            #[serde(default)]
+            output_mode: OutputMode,
+            #[serde(default)]
+            context: usize,
             limit: Option<usize>,
         }
 
@@ -63,6 +85,17 @@ impl Tool for GrepTool {
             Ok(i) => i,
             Err(e) => return e,
         };
+        if input.context > MAX_CONTEXT {
+            return ToolResult::error(format!(
+                "`context` is {}; at most {MAX_CONTEXT} lines are shown around a match.",
+                input.context
+            ));
+        }
+        if input.context > 0 && input.output_mode != OutputMode::Content {
+            return ToolResult::error(
+                "`context` applies to output_mode \"content\" only; drop it or use content.",
+            );
+        }
 
         // A relative path is relative to the working directory.
         let search_path = input
@@ -75,13 +108,20 @@ impl Tool for GrepTool {
         }
 
         let limit = input.limit.unwrap_or(DEFAULT_LIMIT);
+        let mode = match input.output_mode {
+            OutputMode::Content => psearch::GrepMode::Lines,
+            OutputMode::FilesWithMatches => psearch::GrepMode::Files,
+            OutputMode::Count => psearch::GrepMode::Count,
+        };
         let opts = psearch::GrepOptions {
             glob_filter: input.glob,
             max_results: Some(limit),
             case_insensitive: input.case_insensitive,
-            no_ignore: false,
+            no_ignore: input.no_ignore,
             hidden: input.hidden,
             literal: input.literal,
+            mode,
+            context: input.context,
         };
 
         match psearch::grep_search(&input.pattern, &search_path, opts).await {
@@ -89,20 +129,45 @@ impl Tool for GrepTool {
                 if limit == 0 {
                     return ToolResult::success("Limit is 0: no match listed.");
                 }
-                if found.matches.is_empty() {
+                if found.matches.is_empty() && found.files.is_empty() {
                     return ToolResult::success("No matches found.");
                 }
-                let mut output = found
-                    .matches
-                    .iter()
-                    .map(|m| format!("{}:{}:{}", m.file.display(), m.line_number, m.line_content))
-                    .collect::<Vec<_>>()
-                    .join("\n");
+                let (mut output, shown, unit) = match mode {
+                    psearch::GrepMode::Lines => (
+                        render_lines(&found.matches, input.context > 0),
+                        found.matches.iter().filter(|m| !m.is_context).count(),
+                        "matches",
+                    ),
+                    psearch::GrepMode::Files => (
+                        found
+                            .files
+                            .iter()
+                            .map(|f| f.file.display().to_string())
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                        found.files.len(),
+                        "files",
+                    ),
+                    psearch::GrepMode::Count => (
+                        found
+                            .files
+                            .iter()
+                            .map(|f| format!("{}:{}", f.file.display(), f.count))
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                        found.files.len(),
+                        "files",
+                    ),
+                };
                 // The total is not counted past the limit, never invented.
                 if found.more {
                     output.push_str(&format!(
-                        "\n\n[Showing the first {} matches; more matches exist. Narrow the search with a more specific pattern, `path` or `glob`, or raise `limit`.]",
-                        found.matches.len()
+                        "\n\n[Showing the first {shown} {}; more {unit} exist. Narrow the search with a more specific pattern, `path` or `glob`, or raise `limit`.]",
+                        match (shown, unit) {
+                            (1, "matches") => "match",
+                            (1, _) => "file",
+                            _ => unit,
+                        }
                     ));
                 }
                 ToolResult::success(output)
@@ -110,6 +175,32 @@ impl Tool for GrepTool {
             Err(e) => ToolResult::error(format!("Search failed: {}", e)),
         }
     }
+}
+
+/// Matching lines as `file:line:text`, as ripgrep prints them; with context,
+/// context lines as `file-line-text` and `--` between groups that are not
+/// contiguous.
+fn render_lines(lines: &[psearch::SearchMatch], with_context: bool) -> String {
+    let mut out = String::new();
+    let mut prev: Option<(&std::path::Path, usize)> = None;
+    for l in lines {
+        if with_context
+            && let Some((file, n)) = prev
+            && (file != l.file.as_path() || l.line_number != n + 1)
+        {
+            out.push_str("--\n");
+        }
+        let sep = if l.is_context { '-' } else { ':' };
+        out.push_str(&format!(
+            "{}{sep}{}{sep}{}\n",
+            l.file.display(),
+            l.line_number,
+            l.line_content
+        ));
+        prev = Some((l.file.as_path(), l.line_number));
+    }
+    out.pop();
+    out
 }
 
 #[cfg(test)]
@@ -261,5 +352,194 @@ mod tests {
 
         assert!(res.is_error);
         assert!(res.content.contains("Search failed"));
+    }
+
+    async fn grep(dir: &std::path::Path, args: serde_json::Value) -> ToolResult {
+        GrepTool.execute(args, &ctx_in(dir)).await
+    }
+
+    #[tokio::test]
+    async fn files_with_matches_lists_each_file_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("a.rs"), "hit\nhit\nhit\n").unwrap();
+        fs::write(tmp.path().join("b.rs"), "hit\n").unwrap();
+        fs::write(tmp.path().join("c.rs"), "miss\n").unwrap();
+        let r = grep(
+            tmp.path(),
+            serde_json::json!({ "pattern": "hit", "output_mode": "files_with_matches" }),
+        )
+        .await;
+        assert!(!r.is_error, "{}", r.content);
+        let lines: Vec<&str> = r.content.lines().collect();
+        assert_eq!(lines.len(), 2, "{}", r.content);
+        assert!(
+            lines[0].ends_with("a.rs") && lines[1].ends_with("b.rs"),
+            "{}",
+            r.content
+        );
+    }
+
+    #[tokio::test]
+    async fn count_gives_matching_lines_per_file_and_limit_counts_files() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("a.rs"), "hit\nhit\nhit\n").unwrap();
+        fs::write(tmp.path().join("b.rs"), "hit\n").unwrap();
+        let r = grep(
+            tmp.path(),
+            serde_json::json!({ "pattern": "hit", "output_mode": "count" }),
+        )
+        .await;
+        assert!(
+            r.content.contains("a.rs:3") && r.content.contains("b.rs:1"),
+            "{}",
+            r.content
+        );
+
+        let one = grep(
+            tmp.path(),
+            serde_json::json!({ "pattern": "hit", "output_mode": "count", "limit": 1 }),
+        )
+        .await;
+        assert_eq!(
+            one.content.lines().filter(|l| l.contains(".rs:")).count(),
+            1,
+            "{}",
+            one.content
+        );
+        assert!(
+            one.content
+                .contains("Showing the first 1 file; more files exist"),
+            "{}",
+            one.content
+        );
+    }
+
+    #[tokio::test]
+    async fn context_shows_neighbouring_lines_in_groups() {
+        let tmp = tempfile::tempdir().unwrap();
+        let body: String = (1..=20)
+            .map(|i| {
+                if i == 5 || i == 15 {
+                    "HIT\n".to_string()
+                } else {
+                    format!("l{i}\n")
+                }
+            })
+            .collect();
+        fs::write(tmp.path().join("a.txt"), body).unwrap();
+        let r = grep(
+            tmp.path(),
+            serde_json::json!({ "pattern": "HIT", "context": 1 }),
+        )
+        .await;
+        assert!(!r.is_error, "{}", r.content);
+        let lines: Vec<&str> = r.content.lines().collect();
+        assert_eq!(lines.len(), 7, "{}", r.content);
+        assert!(lines[0].ends_with("a.txt-4-l4"), "{}", r.content);
+        assert!(lines[1].ends_with("a.txt:5:HIT"), "{}", r.content);
+        assert!(lines[2].ends_with("a.txt-6-l6"), "{}", r.content);
+        assert_eq!(lines[3], "--");
+        assert!(lines[5].ends_with("a.txt:15:HIT"), "{}", r.content);
+    }
+
+    /// `limit` counts matches, not context lines; the context of a dropped
+    /// match is dropped with it.
+    #[tokio::test]
+    async fn context_lines_do_not_count_toward_the_limit() {
+        let tmp = tempfile::tempdir().unwrap();
+        let body: String = (1..=20)
+            .map(|i| {
+                if i % 5 == 0 {
+                    "HIT\n".to_string()
+                } else {
+                    format!("l{i}\n")
+                }
+            })
+            .collect();
+        fs::write(tmp.path().join("a.txt"), body).unwrap();
+        let r = grep(
+            tmp.path(),
+            serde_json::json!({ "pattern": "HIT", "context": 2, "limit": 2 }),
+        )
+        .await;
+        assert_eq!(r.content.matches(":HIT").count(), 2, "{}", r.content);
+        assert!(r.content.contains("a.txt-8-l8"), "{}", r.content);
+        assert!(
+            !r.content.contains("-13-") && !r.content.contains("-14-"),
+            "{}",
+            r.content
+        );
+        assert!(
+            r.content
+                .contains("Showing the first 2 matches; more matches exist"),
+            "{}",
+            r.content
+        );
+    }
+
+    #[tokio::test]
+    async fn context_is_bounded_and_only_for_content() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("a.txt"), "HIT\n").unwrap();
+        let big = grep(
+            tmp.path(),
+            serde_json::json!({ "pattern": "HIT", "context": 11 }),
+        )
+        .await;
+        assert!(
+            big.is_error && big.content.contains("at most 10"),
+            "{}",
+            big.content
+        );
+        let files = grep(
+            tmp.path(),
+            serde_json::json!({ "pattern": "HIT", "context": 1, "output_mode": "files_with_matches" }),
+        )
+        .await;
+        assert!(
+            files.is_error && files.content.contains("content"),
+            "{}",
+            files.content
+        );
+        let bad = grep(
+            tmp.path(),
+            serde_json::json!({ "pattern": "HIT", "output_mode": "lines" }),
+        )
+        .await;
+        assert!(
+            bad.is_error && bad.content.contains("output_mode"),
+            "{}",
+            bad.content
+        );
+    }
+
+    #[tokio::test]
+    async fn no_ignore_searches_ignored_files_but_not_hidden_ones() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join(".gitignore"), "build/\n").unwrap();
+        fs::create_dir(tmp.path().join("build")).unwrap();
+        fs::write(tmp.path().join("build/gen.rs"), "TOKEN\n").unwrap();
+        fs::create_dir(tmp.path().join(".cache")).unwrap();
+        fs::write(tmp.path().join(".cache/x.rs"), "TOKEN\n").unwrap();
+        let r = grep(
+            tmp.path(),
+            serde_json::json!({ "pattern": "TOKEN", "no_ignore": true }),
+        )
+        .await;
+        assert!(r.content.contains("gen.rs"), "{}", r.content);
+        assert!(!r.content.contains(".cache"), "{}", r.content);
+    }
+    /// A matching line that is not UTF-8 is shown, not the whole file lost.
+    #[tokio::test]
+    async fn a_line_in_another_encoding_still_matches() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("a.txt"), b"HIT ok\nHIT caf\xe9\n").unwrap();
+        let r = grep(tmp.path(), serde_json::json!({ "pattern": "HIT" })).await;
+        assert!(r.content.contains("a.txt:1:HIT ok"), "{}", r.content);
+        assert!(
+            r.content.contains("a.txt:2:HIT caf\u{fffd}"),
+            "{}",
+            r.content
+        );
     }
 }

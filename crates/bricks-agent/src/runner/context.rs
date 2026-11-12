@@ -205,7 +205,7 @@ pub(crate) fn context_status(agent: &Agent) -> ContextStatus {
         system: system.as_deref(),
         tools: &tools,
         messages: &messages,
-        max_output: agent.max_tokens,
+        max_output: agent.output_limit(),
     };
     agent.context.lock().status(&model_view(agent), &view)
 }

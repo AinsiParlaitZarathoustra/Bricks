@@ -27,7 +27,7 @@ impl Tool for FileWriteTool {
         serde_json::json!({
             "type": "object",
             "properties": {
-                "file_path": { "type": "string", "description": "Absolute path to the file" },
+                "file_path": { "type": "string", "description": "Path to the file, absolute or relative to the working directory" },
                 "content": { "type": "string", "description": "Content to write" }
             },
             "required": ["file_path", "content"]
@@ -44,6 +44,12 @@ impl Tool for FileWriteTool {
             Err(e) => return Some(crate::preview::ChangePreview::refused(e.content)),
         };
         let absolute = absolute_path(ctx, &input.file_path);
+        if absolute.is_dir() {
+            return Some(crate::preview::ChangePreview::refused(format!(
+                "{} is a directory: Write takes the path of a file.",
+                input.file_path
+            )));
+        }
         let bytes = std::fs::read(&absolute).ok();
         let before = bytes
             .as_deref()

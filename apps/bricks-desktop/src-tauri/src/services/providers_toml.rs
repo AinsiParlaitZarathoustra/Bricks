@@ -392,9 +392,10 @@ fn apply_model_patch(table: &mut Table, patch: &ModelPatch) -> IpcResult<()> {
     if let Some(prices) = &patch.pricing {
         write_prices(table, prices)?;
     }
+    // On by default: only `false` is written.
     match patch.async_tool_calls {
-        Some(true) => set_value(table, "async_tool_calls", Value::from(true)),
-        Some(false) => {
+        Some(false) => set_value(table, "async_tool_calls", Value::from(false)),
+        Some(true) => {
             table.remove("async_tool_calls");
         }
         None => {}
@@ -890,7 +891,7 @@ mod tests {
     }
 
     #[test]
-    fn async_tool_calls_is_written_when_on_and_removed_when_off() {
+    fn async_tool_calls_is_written_when_off_and_removed_when_on() {
         let on = |value| {
             model_update(
                 "local",
@@ -901,10 +902,10 @@ mod tests {
                 },
             )
         };
-        let with = apply(PROVIDERS, &on(true), "test").unwrap();
-        assert!(with.contains("async_tool_calls = true"), "{with}");
-        let without = apply(&with, &on(false), "test").unwrap();
-        assert_eq!(without, PROVIDERS);
+        let off = apply(PROVIDERS, &on(false), "test").unwrap();
+        assert!(off.contains("async_tool_calls = false"), "{off}");
+        let back = apply(&off, &on(true), "test").unwrap();
+        assert_eq!(back, PROVIDERS);
     }
 
     #[test]
