@@ -849,30 +849,13 @@ impl StructuredMemory {
             .collect();
         self.store.transaction(ops)?;
         report.episodes_deleted = episodes.len();
-        let mut p = self.projection.write();
-        for id in &episodes {
-            p.remove_id(id);
-        }
-        for id in facts {
-            let left = self
-                .store
-                .query(q::EVIDENCE_COUNT, P::new().s("fact", &id))?
-                .first()
-                .and_then(|r| as_i64(&r[0]))
-                .unwrap_or(0);
-            if left == 0 {
-                self.store.exec(
-                    W::SetFactStatus,
-                    P::new().s("id", &id).s("status", "unsupported"),
-                )?;
-                report.facts_unsupported.push(id.clone());
-            } else {
-                report.facts_kept.push(id.clone());
-            }
-            if let Some(f) = self.store.fact(&id)? {
-                p.refresh(Item::Fact(Box::new(f)));
+        {
+            let mut p = self.projection.write();
+            for id in &episodes {
+                p.remove_id(id);
             }
         }
+        self.reconcile_facts_after_episode_removal(facts, &mut report)?;
         Ok(report)
     }
 

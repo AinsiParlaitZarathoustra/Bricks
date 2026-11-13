@@ -13,6 +13,7 @@
 	import { Button } from '$lib/components/ui/button';
 	import { Input } from '$lib/components/ui/input';
 	import { Skeleton } from '$lib/components/ui/skeleton';
+	import Trash2 from '@lucide/svelte/icons/trash-2';
 	import { formatInt } from './format';
 
 	let { args }: { args: InspectorState['args'] } = $props();
@@ -29,6 +30,10 @@
 	let offset = $state(0);
 	let page = $state<MemoryEntryPage | null>(null);
 	let loadError = $state<string | null>(null);
+	let confirmingId = $state<string | null>(null);
+	let deletingId = $state<string | null>(null);
+	let deleteError = $state<string | null>(null);
+	let reloadTick = $state(0);
 
 	const FILTERS: { value: MemoryEntryFilter; label: string }[] = [
 		{ value: 'all', get label() { return t('inspect.all') } },
@@ -63,7 +68,14 @@
 	// typing to pause; an older answer never replaces a newer one.
 	let request = 0;
 	$effect(() => {
-		const read = { scope, filter, query: query.trim(), offset, projectId: project?.id ?? null };
+		const read = {
+			scope,
+			filter,
+			query: query.trim(),
+			offset,
+			projectId: project?.id ?? null,
+			reloadTick
+		};
 		const id = ++request;
 		const timer = setTimeout(async () => {
 			try {
@@ -89,6 +101,30 @@
 	function choose(next: () => void) {
 		next();
 		offset = 0;
+	}
+
+	async function removeEntry(entry: MemoryEntry) {
+		if (deletingId !== null) return;
+		const targetScope = scope;
+		const targetProjectId = targetScope === 'project' ? (project?.id ?? null) : null;
+		deletingId = entry.id;
+		deleteError = null;
+		try {
+			await ipc.memoryDeleteEntry(targetScope, targetProjectId, entry.kind, entry.id);
+			confirmingId = null;
+			if (page) {
+				const nextEntries = page.entries.filter((e) => e.id !== entry.id);
+				page = { entries: nextEntries, total: Math.max(0, page.total - 1) };
+				if (nextEntries.length === 0 && offset >= PAGE) {
+					offset = Math.max(0, offset - PAGE);
+				}
+			}
+			reloadTick += 1;
+		} catch (e) {
+			deleteError = ipc.errorMessage(e);
+		} finally {
+			deletingId = null;
+		}
 	}
 
 	function when(at: number): string {
@@ -159,21 +195,60 @@
 	{:else if page.entries.length === 0}
 		<p class="text-ui text-muted-foreground">{t('inspect.noMemory')}</p>
 	{:else}
+		{#if deleteError !== null}
+			<p role="alert" class="text-ui text-pretty text-destructive">{deleteError}</p>
+		{/if}
 		<ul class="flex flex-col divide-y divide-border rounded-lg border border-border">
 			{#each page.entries as entry (entry.id)}
 				<li class="flex min-w-0 flex-col gap-1.5 px-3 py-2.5">
-					<div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-caption text-muted-foreground">
-						<Badge variant="secondary">{KIND[entry.kind]}</Badge>
-						{#if entry.kind === 'exchange' && entry.role}
-							<span>{ROLE[entry.role] ?? entry.role}</span>
-						{/if}
-						{#if entry.status}
-							<span>{STATUS[entry.status] ?? entry.status}</span>
-						{/if}
-						<time datetime={new Date(entry.at).toISOString()}>{when(entry.at)}</time>
-						{#if source(entry)}
-							<span class="min-w-0 truncate">{source(entry)}</span>
-						{/if}
+					<div class="flex min-w-0 items-start justify-between gap-2">
+						<div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-caption text-muted-foreground">
+							<Badge variant="secondary">{KIND[entry.kind]}</Badge>
+							{#if entry.kind === 'exchange' && entry.role}
+								<span>{ROLE[entry.role] ?? entry.role}</span>
+							{/if}
+							{#if entry.status}
+								<span>{STATUS[entry.status] ?? entry.status}</span>
+							{/if}
+							<time datetime={new Date(entry.at).toISOString()}>{when(entry.at)}</time>
+							{#if source(entry)}
+								<span class="min-w-0 truncate">{source(entry)}</span>
+							{/if}
+						</div>
+						<div class="flex shrink-0 items-center gap-1">
+							{#if confirmingId === entry.id}
+								<Button
+									variant="destructive"
+									size="sm"
+									disabled={deletingId !== null}
+									onclick={() => void removeEntry(entry)}
+								>
+									{t('common.delete')}
+								</Button>
+								<Button
+									variant="ghost"
+									size="sm"
+									disabled={deletingId !== null}
+									onclick={() => (confirmingId = null)}
+								>
+									{t('common.cancel')}
+								</Button>
+							{:else}
+								<Button
+									variant="ghost"
+									size="icon-sm"
+									aria-label={t('inspect.deleteMemoryEntry')}
+									title={t('common.delete')}
+									disabled={deletingId !== null}
+									onclick={() => {
+										deleteError = null;
+										confirmingId = entry.id;
+									}}
+								>
+									<Trash2 aria-hidden="true" />
+								</Button>
+							{/if}
+						</div>
 					</div>
 					<p class="text-ui break-words whitespace-pre-wrap">{entry.text}</p>
 					{#if entry.evidence.length > 0}

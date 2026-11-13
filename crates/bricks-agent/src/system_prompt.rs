@@ -370,7 +370,7 @@ const READ_IMAGE_BULLET: &str =
     "- Read ouvre aussi les images du disque (PNG, JPEG, GIF, WebP) et te les montre.";
 const MEMORY_SEARCH_BULLET: &str =
     "- Use memory_search before asking the user to repeat relevant context.";
-const MEMORY_WRITE_BULLET: &str = "- Use memory_write for durable notes. Write to global memory only for a lasting preference or an explicit request to remember across projects.";
+const MEMORY_WRITE_BULLET: &str = "- Use memory_write for very brief, single-line durable notes (max 280 chars; one atomic fact per note). Write to global memory only for a lasting preference or an explicit request to remember across projects.";
 
 /// The foundation's bullet kept only when a web tool is announced.
 const WEB_BULLET: &str = "- Pour une information incertaine ou susceptible d'avoir changé (API, version, comportement d'une bibliothèque), cherche d'abord dans le code puis, si nécessaire, sur le web en privilégiant les sources officielles.";

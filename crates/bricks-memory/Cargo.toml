@@ -63,9 +63,5 @@ optional = true
 serde_json = { workspace = true }
 
 [[example]]
-name = "memory_bench"
-required-features = ["graph"]
-
-[[example]]
 name = "measure_memory"
 required-features = ["structured"]

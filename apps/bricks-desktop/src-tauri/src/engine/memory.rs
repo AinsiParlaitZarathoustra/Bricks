@@ -248,6 +248,26 @@ impl AppState {
         .map_err(crate::services::join_error)?
     }
 
+    /// Deletes a single stored memory entry (`note`, `exchange`, or `fact`).
+    pub async fn memory_delete_entry(
+        &self,
+        s: MemoryScope,
+        project_id: Option<String>,
+        kind: MemoryEntryKind,
+        id: String,
+    ) -> IpcResult<bool> {
+        let project = self.scoped_project(s, project_id.as_deref())?;
+        let entry_kind = match kind {
+            MemoryEntryKind::Note => EntryKind::Note,
+            MemoryEntryKind::Exchange => EntryKind::Exchange,
+            MemoryEntryKind::Fact => EntryKind::Fact,
+        };
+        self.memory
+            .delete_entry(scope(s), project.as_deref(), entry_kind, &id)
+            .await
+            .map_err(ipc_error)
+    }
+
     /// Clears a scope's store; refused while a run or a maintenance uses it.
     pub async fn memory_delete(&self, s: MemoryScope, project_id: Option<String>) -> IpcResult<()> {
         let project = self.scoped_project(s, project_id.as_deref())?;

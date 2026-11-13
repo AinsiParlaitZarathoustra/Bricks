@@ -159,3 +159,13 @@ describe('empty and failed reads', () => {
 		expect(view).toContain('<Skeleton class="h-14 w-full" />');
 	});
 });
+
+describe('entry deletion', () => {
+	it('offers an easy delete button per entry with inline confirmation via shadcn Button', () => {
+		expect(view).toContain("import Trash2 from '@lucide/svelte/icons/trash-2';");
+		expect(view).toContain(bound('aria-label', 'Supprimer cette entrée mémoire'));
+		expect(view).toContain('await ipc.memoryDeleteEntry(targetScope, targetProjectId, entry.kind, entry.id);');
+		expect(view).toContain('<Button\n\t\t\t\t\t\t\t\t\tvariant="destructive"\n\t\t\t\t\t\t\t\t\tsize="sm"');
+		expect(view).toContain('<p role="alert" class="text-ui text-pretty text-destructive">{deleteError}</p>');
+	});
+});

@@ -44,7 +44,7 @@ ignore = { workspace = true }
 [features]
 # Benchmark features — opt-in for general_agent_bench example.
 jemalloc-bench = ["dep:tikv-jemallocator", "dep:tikv-jemalloc-ctl"]
-graph-bench    = ["bricks-memory/graph"]
+graph-bench    = ["bricks-memory/structured"]
 bench-full     = ["jemalloc-bench", "graph-bench"]
 
 [dependencies.tikv-jemallocator]

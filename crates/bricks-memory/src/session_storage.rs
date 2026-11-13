@@ -67,9 +67,23 @@ pub struct TombstoneEntry {
 
 // ─── Path resolution ─────────────────────────────────────────────────────────
 
+/// Sanitize a path component for use as a directory name.
+/// Keeps alphanumeric, `-`, `_`, `.`. Replaces everything else with `_`.
+pub fn sanitize_path_component(path: &str) -> String {
+    path.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 /// Compute the base transcript file path for a session.
 pub fn transcript_path(project_root: &Path, session_id: &str) -> PathBuf {
-    let sanitized = super::memdir::sanitize_path_component(&project_root.display().to_string());
+    let sanitized = sanitize_path_component(&project_root.display().to_string());
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
     home.join(".claude")
         .join("projects")

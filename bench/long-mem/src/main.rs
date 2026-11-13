@@ -167,9 +167,6 @@ impl DatasetArg {
 enum ConfigArg {
     All,
     Baseline,
-    Embed,
-    Graph,
-    Hybrid,
     #[value(name = "structured-vector")]
     StructuredVector,
     #[value(name = "structured-hybrid")]
@@ -254,9 +251,8 @@ async fn main() -> Result<()> {
     let selected: Vec<ConfigArg> = match &cli.config {
         ConfigArg::All => vec![
             ConfigArg::Baseline,
-            ConfigArg::Embed,
-            ConfigArg::Graph,
-            ConfigArg::Hybrid,
+            ConfigArg::StructuredVector,
+            ConfigArg::StructuredHybrid,
         ],
         other => vec![other.clone()],
     };
@@ -311,9 +307,6 @@ async fn main() -> Result<()> {
 fn config_slug(c: &ConfigArg) -> &'static str {
     match c {
         ConfigArg::Baseline => "a-baseline-jsonl",
-        ConfigArg::Embed => "b-embed-only",
-        ConfigArg::Graph => "c-graph-substring",
-        ConfigArg::Hybrid => "d-hybrid-embed-graph",
         ConfigArg::StructuredVector => "e-structured-vector",
         ConfigArg::StructuredHybrid => "f-structured-hybrid",
         ConfigArg::All => "all",
@@ -482,24 +475,6 @@ where
     match choice {
         ConfigArg::Baseline => {
             let mut c = configs::baseline::BaselineConfig::new();
-            runner::run_question(&mut c, provider, answerer_model, judge_model, q).await
-        }
-        ConfigArg::Embed => {
-            let mut c = configs::embed::EmbedConfig::new(embed_factory).with_top_k(top_k);
-            runner::run_question(&mut c, provider, answerer_model, judge_model, q).await
-        }
-        ConfigArg::Graph => {
-            let mut c = configs::graph::GraphConfig::new().with_top_k(top_k);
-            runner::run_question(&mut c, provider, answerer_model, judge_model, q).await
-        }
-        ConfigArg::Hybrid => {
-            let mut c =
-                configs::hybrid::HybridConfig::<AnyEmbeddings, dyn Provider + Send + Sync>::new(
-                    embed_factory,
-                    provider.clone(),
-                    extractor_model.to_string(),
-                )
-                .with_top_k(top_k);
             runner::run_question(&mut c, provider, answerer_model, judge_model, q).await
         }
         ConfigArg::StructuredVector => {

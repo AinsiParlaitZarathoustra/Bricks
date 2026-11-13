@@ -114,7 +114,7 @@ impl Tool for MemoryWriteTool {
         "memory_write"
     }
     fn description(&self) -> &str {
-        "Save a durable note in the long-term memory, found by later searches at once. \
+        "Save a very brief, single-fact durable note in long-term memory (at most 280 chars). \
          To correct a note, write a new one."
     }
     fn permission_level(&self) -> PermissionLevel {
@@ -128,7 +128,11 @@ impl Tool for MemoryWriteTool {
         serde_json::json!({
             "type": "object",
             "properties": {
-                "text": { "type": "string", "description": "The note, self-contained" },
+                "text": {
+                    "type": "string",
+                    "maxLength": bricks_memory::NOTE_MAX_CHARS,
+                    "description": "Ultra-concise atomic note (1 short sentence, max 280 chars)"
+                },
                 "scope": scope_schema()
             },
             "required": ["text"]
@@ -168,4 +172,18 @@ impl Tool for MemoryWriteTool {
 /// The two memory tools.
 pub fn memory_tools() -> Vec<Box<dyn Tool>> {
     vec![Box::new(MemorySearchTool), Box::new(MemoryWriteTool)]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn write_tool_schema_matches_note_char_limit() {
+        let schema = MemoryWriteTool.input_schema();
+        assert_eq!(
+            schema["properties"]["text"]["maxLength"].as_u64(),
+            Some(bricks_memory::NOTE_MAX_CHARS as u64)
+        );
+    }
 }

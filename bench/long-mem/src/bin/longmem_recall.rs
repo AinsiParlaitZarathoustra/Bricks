@@ -14,8 +14,6 @@
 //! questions (`_abs`) have no evidence and are left out of recall.
 //!
 //! Modes, compared on the same questions and embeddings:
-//! * `legacy` — the former `GraphMemory::recall_top_k` (substring), the
-//!   starting point;
 //! * `vector` — structured memory, vector lane only;
 //! * `vector-lexical` — vector and lexical lanes (no extraction);
 //! * `hybrid` — vector, lexical and relational lanes over facts extracted
@@ -26,7 +24,7 @@
 //!
 //! ```text
 //! cargo run --release -p longmem-bench --bin longmem-recall -- \
-//!     --dataset oracle --modes legacy,vector,vector-lexical --embeddings hashing --sample 60
+//!     --dataset oracle --modes vector,vector-lexical --embeddings hashing --sample 60
 //! ```
 
 #[path = "../dataset.rs"]
@@ -58,8 +56,8 @@ struct Cli {
     /// Explicit dataset file (overrides --dataset).
     #[arg(long)]
     data_file: Option<PathBuf>,
-    /// Comma-separated: legacy, vector, vector-lexical, hybrid.
-    #[arg(long, default_value = "legacy,vector,vector-lexical")]
+    /// Comma-separated: vector, vector-lexical, hybrid.
+    #[arg(long, default_value = "vector,vector-lexical")]
     modes: String,
     /// hashing | openai | gemini
     #[arg(long, default_value = "hashing")]
@@ -244,40 +242,6 @@ async fn run_structured(
     Ok(row)
 }
 
-fn run_legacy(q: &Question, ks: &[usize]) -> Result<Row> {
-    let g = bricks_memory::graph::GraphMemory::open_in_memory().map_err(|e| anyhow!("{e}"))?;
-    let t0 = Instant::now();
-    let mut by_content: HashMap<String, String> = HashMap::new();
-    for (i, session) in q.haystack_sessions.iter().enumerate() {
-        let sid = q.haystack_session_ids.get(i).cloned().unwrap_or_default();
-        let date = q.haystack_dates.get(i).map(String::as_str).unwrap_or("");
-        for turn in session {
-            // Same formatting as the former `graph` configuration.
-            let content = format!("[{date}] {}: {}", turn.role, turn.content);
-            let _ = g.store_memory(&content, bricks_memory::memdir::MemoryType::Project, 0.9);
-            by_content.entry(content).or_insert(sid.clone());
-        }
-    }
-    let ingest_ms = t0.elapsed().as_secs_f64() * 1000.0;
-    let t1 = Instant::now();
-    let kmax = *ks.iter().max().unwrap_or(&10);
-    let hits = g.recall_top_k(&q.question, kmax * 4);
-    let recall_us = t1.elapsed().as_micros() as u64;
-    let sessions = hits
-        .into_iter()
-        .filter_map(|(c, _)| by_content.get(&c).cloned());
-    let mut row = Row {
-        question_id: q.question_id.clone(),
-        question_type: q.question_type.as_str().into(),
-        evidence_sessions: q.answer_session_ids.len(),
-        ingest_ms,
-        recall_us,
-        ..Default::default()
-    };
-    score(&mut row, distinct(sessions), &q.answer_session_ids, ks);
-    Ok(row)
-}
-
 fn pct(v: &mut [f64], p: f64) -> f64 {
     if v.is_empty() {
         return 0.0;
@@ -347,7 +311,6 @@ async fn main() -> Result<()> {
         let mut rows = Vec::new();
         for (i, q) in questions.iter().enumerate() {
             let row = match mode.as_str() {
-                "legacy" => run_legacy(q, &ks)?,
                 "vector" | "vector-lexical" => run_structured(q, mode, &cli, &ks, None).await?,
                 "hybrid" => run_structured(q, mode, &cli, &ks, extractor.clone()).await?,
                 other => return Err(anyhow!("unknown mode `{other}`")),

@@ -423,6 +423,20 @@ impl MemoryService {
         }
     }
 
+    /// Delete a single stored memory entry (`Note`, `Exchange`, or `Fact`).
+    pub async fn delete_entry(
+        &self,
+        scope: MemoryScope,
+        project_id: Option<&str>,
+        kind: bricks_memory::structured::EntryKind,
+        id: &str,
+    ) -> Result<bool, MemoryError> {
+        match self.existing(scope, project_id)? {
+            Some(s) => s.memory.delete_entry(kind, id).await,
+            None => Ok(false),
+        }
+    }
+
     /// Clear a scope's store. Refused with [`MemoryError::InUse`] while a
     /// run or a maintenance uses it. The sessions' histories are untouched.
     pub async fn delete(

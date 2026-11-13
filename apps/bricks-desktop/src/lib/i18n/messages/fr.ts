@@ -588,6 +588,7 @@ export const fr: Record<MessageKey, Message> = {
 	'inspect.contextUsage': 'Occupation du contexte',
 	'inspect.cost': 'Coût',
 	'inspect.couldNotReloadTheTotals': 'Impossible de relire les totaux : {loadError}',
+	'inspect.deleteMemoryEntry': 'Supprimer cette entrée mémoire',
 	'inspect.disputed': 'contesté',
 	'inspect.engineResult': 'Résultat du moteur : {outcome}',
 	'inspect.exchange': 'Échange',

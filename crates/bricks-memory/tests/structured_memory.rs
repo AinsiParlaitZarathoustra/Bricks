@@ -1066,9 +1066,13 @@ async fn legacy_v2_memories_migrate_to_searchable_episodes() {
         "the legacy creation time is the source time"
     );
     m.close().unwrap();
-    // The old API still reads its nodes.
-    let g = bricks_memory::graph::GraphMemory::open(&path).unwrap();
-    assert_eq!(g.stats().memory_count, 1);
+    // Legacy `:Memory` nodes remain untouched alongside the migrated `:Episode`.
+    let db = grafeo::GrafeoDB::open(&path).unwrap();
+    let count = db
+        .session()
+        .execute("MATCH (m:Memory) RETURN count(m)")
+        .unwrap();
+    assert_eq!(count.rows()[0][0], grafeo::Value::Int64(1));
 }
 
 #[tokio::test]

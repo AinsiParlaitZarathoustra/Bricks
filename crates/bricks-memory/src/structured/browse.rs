@@ -9,11 +9,10 @@
 
 use super::index::{Item, Projection};
 use super::model::*;
-use super::store::{P, W, as_str, q};
+use super::store::{P, W, as_i64, as_str, q};
 use super::{MemoryError, MemoryResult, StructuredMemory};
 
-/// Characters a note may hold.
-pub const NOTE_MAX_CHARS: usize = 4_000;
+pub use crate::NOTE_MAX_CHARS;
 
 /// A note to write.
 #[derive(Debug, Clone, PartialEq)]
@@ -394,6 +393,98 @@ impl StructuredMemory {
         *self.projection.write() = Projection::new(&model, dims).map_err(MemoryError::Store)?;
         Ok(report)
     }
+
+    /// Update facts linked to removed episodes: facts left with zero
+    /// remaining evidence become `unsupported`, and surviving projections are
+    /// refreshed. Caller must hold `self.write`.
+    pub(super) fn reconcile_facts_after_episode_removal(
+        &self,
+        fact_ids: Vec<String>,
+        report: &mut super::ingest::ForgetReport,
+    ) -> MemoryResult<()> {
+        let mut p = self.projection.write();
+        for id in fact_ids {
+            let left = self
+                .store
+                .query(q::EVIDENCE_COUNT, P::new().s("fact", &id))
+                .map_err(MemoryError::Store)?
+                .first()
+                .and_then(|r| as_i64(&r[0]))
+                .unwrap_or(0);
+            if left == 0 {
+                self.store
+                    .exec(
+                        W::SetFactStatus,
+                        P::new().s("id", &id).s("status", "unsupported"),
+                    )
+                    .map_err(MemoryError::Store)?;
+                report.facts_unsupported.push(id.clone());
+            } else {
+                report.facts_kept.push(id.clone());
+            }
+            if let Some(f) = self.store.fact(&id).map_err(MemoryError::Store)? {
+                p.refresh(Item::Fact(Box::new(f)));
+            }
+        }
+        Ok(())
+    }
+
+    /// Delete one stored memory entry (`Note`, `Exchange`, or `Fact`).
+    ///
+    /// Deleting a note or exchange removes the `:Episode` node and its
+    /// vector entry; any fact left with no remaining evidence becomes
+    /// `unsupported`. Deleting a fact removes the `:Fact` node and its
+    /// vector entry. Returns `true` when the entry existed.
+    pub async fn delete_entry(&self, kind: EntryKind, id: &str) -> MemoryResult<bool> {
+        let _pass = self.maintenance.lock().await;
+        let _w = self.write.lock().await;
+        match kind {
+            EntryKind::Note | EntryKind::Exchange => {
+                let Some(ep) = self.store.episode(id).map_err(MemoryError::Store)? else {
+                    return Ok(false);
+                };
+                if ep.role.is_empty() {
+                    return Ok(false);
+                }
+                let is_note = ep.role == ROLE_NOTE;
+                if (kind == EntryKind::Note && !is_note)
+                    || (kind == EntryKind::Exchange && is_note)
+                {
+                    return Ok(false);
+                }
+                let fact_ids: Vec<String> = self
+                    .store
+                    .adjacent(id, false, &["SUPPORTED_BY"])
+                    .map_err(MemoryError::Store)?
+                    .into_iter()
+                    .filter(|(_, _, is_fact)| *is_fact)
+                    .map(|(fid, _, _)| fid)
+                    .collect();
+                self.store
+                    .exec(W::DeleteNode, P::new().s("id", id))
+                    .map_err(MemoryError::Store)?;
+                self.projection.write().remove_id(id);
+                let mut report = super::ingest::ForgetReport::default();
+                self.reconcile_facts_after_episode_removal(fact_ids, &mut report)?;
+                Ok(true)
+            }
+            EntryKind::Fact => {
+                let is_fact = self
+                    .store
+                    .fact(id)
+                    .map_err(MemoryError::Store)?
+                    .is_some_and(|f| !f.subject_id.is_empty());
+                if !is_fact {
+                    return Ok(false);
+                }
+                self.store
+                    .exec(W::DeleteNode, P::new().s("id", id))
+                    .map_err(MemoryError::Store)?;
+                self.projection.write().remove_id(id);
+                Ok(true)
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -518,5 +609,97 @@ pub(crate) mod tests {
         // Still usable afterwards.
         m.write_note(note("after"), false).await.unwrap();
         assert_eq!(m.counts().unwrap().notes, 1);
+    }
+
+    #[tokio::test]
+    async fn notes_enforce_concise_character_limit() {
+        let m = memory();
+        let exact = "a".repeat(NOTE_MAX_CHARS);
+        assert!(m.write_note(note(&exact), false).await.is_ok());
+
+        let too_long = "a".repeat(NOTE_MAX_CHARS + 1);
+        let err = m.write_note(note(&too_long), false).await.unwrap_err();
+        assert!(
+            matches!(err, NoteError::Invalid(ref msg) if msg.contains(&NOTE_MAX_CHARS.to_string())),
+            "{err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn delete_entry_removes_notes_and_facts_and_marks_orphan_facts_unsupported() {
+        use crate::structured::EpisodeInput;
+        use crate::structured::extract::{ExtractError, ExtractionRequest, Extractor};
+
+        struct FixedExtractor;
+        #[async_trait::async_trait]
+        impl Extractor for FixedExtractor {
+            fn id(&self) -> String {
+                "test/fixed".into()
+            }
+            async fn extract(
+                &self,
+                _request: &ExtractionRequest,
+                _cancel: &tokio_util::sync::CancellationToken,
+            ) -> Result<String, ExtractError> {
+                Ok(r#"{"entities":[{"ref":"e1","name":"Bricks","type":"Project"}],"facts":[{"subject":"e1","predicate":"uses","value":"Axum","confidence":0.9,"quote":"Bricks uses Axum."}]}"#.into())
+            }
+        }
+
+        let m = StructuredMemory::builder(Arc::new(HashingEmbeddings::new(64)))
+            .extractor(Arc::new(FixedExtractor))
+            .open()
+            .unwrap();
+
+        // Write a note and verify single-entry deletion removes it from entries & search.
+        let note_written = m.write_note(note("prefers short answers"), false).await.unwrap();
+        assert_eq!(m.counts().unwrap().notes, 1);
+        assert!(m.delete_entry(EntryKind::Fact, &note_written.id).await.unwrap() == false);
+        assert!(m.delete_entry(EntryKind::Exchange, &note_written.id).await.unwrap() == false);
+        assert!(m.delete_entry(EntryKind::Note, &note_written.id).await.unwrap());
+        assert!(!m.delete_entry(EntryKind::Note, &note_written.id).await.unwrap());
+        assert_eq!(m.counts().unwrap().notes, 0);
+
+        let mut q = crate::structured::RecallQuery::new("short answers");
+        q.spaces = Some(vec![GLOBAL_SPACE.into()]);
+        assert!(m.recall(&q).await.unwrap().items.is_empty());
+
+        // Record an exchange, extract a fact supported by it, then delete the exchange:
+        // the fact must become `unsupported`, and then deleting the fact removes it completely.
+        m.ingest(
+            vec![EpisodeInput {
+                space: GLOBAL_SPACE.into(),
+                project_id: Some("p1".into()),
+                session_id: Some("s1".into()),
+                role: "user".into(),
+                author: None,
+                content: "Bricks uses Axum.".into(),
+                occurred_at: Some(1_700_000_000_000),
+                source_ref: None,
+            }],
+            &tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+
+        let exchanges = m.entries(EntryFilter::Exchanges, "", 0, 10).unwrap();
+        assert_eq!(exchanges.total, 1);
+        let ep_id = exchanges.entries[0].id.clone();
+
+        let facts = m.entries(EntryFilter::Facts, "", 0, 10).unwrap();
+        assert_eq!(facts.total, 1);
+        let fact_id = facts.entries[0].id.clone();
+
+        assert!(!m.delete_entry(EntryKind::Exchange, &fact_id).await.unwrap());
+        assert!(!m.delete_entry(EntryKind::Note, &ep_id).await.unwrap());
+        assert!(m.delete_entry(EntryKind::Exchange, &ep_id).await.unwrap());
+        assert_eq!(m.counts().unwrap().exchanges, 0);
+        assert_eq!(m.counts().unwrap().facts, 0);
+
+        let history = m.entries(EntryFilter::FactHistory, "", 0, 10).unwrap();
+        assert_eq!(history.total, 1);
+        assert_eq!(history.entries[0].status, Some(FactStatus::Unsupported));
+
+        assert!(m.delete_entry(EntryKind::Fact, &fact_id).await.unwrap());
+        assert_eq!(m.entries(EntryFilter::FactHistory, "", 0, 10).unwrap().total, 0);
     }
 }

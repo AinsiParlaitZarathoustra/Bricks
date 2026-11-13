@@ -6,9 +6,6 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 pub mod baseline;
-pub mod embed;
-pub mod graph;
-pub mod hybrid;
 pub mod structured;
 
 /// A memory configuration under test. One instance is built per question

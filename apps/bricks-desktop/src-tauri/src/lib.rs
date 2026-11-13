@@ -64,6 +64,7 @@ pub fn run() {
             commands::memory::memory_overview,
             commands::memory::memory_counts,
             commands::memory::memory_entries,
+            commands::memory::memory_delete_entry,
             commands::memory::memory_delete,
             commands::memory::memory_delete_retired,
             // Conversations (Haiku 1)

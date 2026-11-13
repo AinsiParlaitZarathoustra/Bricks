@@ -14,6 +14,7 @@ import type { GitStatus } from './bindings/GitStatus'
 import type { IpcErrorCode } from './bindings/IpcErrorCode'
 import type { MemoryCounts } from './bindings/MemoryCounts'
 import type { MemoryEntryFilter } from './bindings/MemoryEntryFilter'
+import type { MemoryEntryKind } from './bindings/MemoryEntryKind'
 import type { MemoryEntryPage } from './bindings/MemoryEntryPage'
 import type { MemoryOverview } from './bindings/MemoryOverview'
 import type { MemoryScope } from './bindings/MemoryScope'
@@ -174,6 +175,13 @@ export const memoryEntries = (
   offset: number,
   limit: number,
 ) => call<MemoryEntryPage>('memory_entries', { scope, projectId, filter, query, offset, limit })
+/** Deletes a single entry (`note`, `exchange`, or `fact`) from a memory store. */
+export const memoryDeleteEntry = (
+  scope: MemoryScope,
+  projectId: string | null,
+  kind: MemoryEntryKind,
+  id: string,
+) => call<boolean>('memory_delete_entry', { scope, projectId, kind, id })
 /** Clears a memory; refused while a run uses it. */
 export const memoryDelete = (scope: MemoryScope, projectId: string | null) =>
   call<void>('memory_delete', { scope, projectId })

@@ -4,20 +4,18 @@
 //! conversations and long-term knowledge storage.
 //!
 //! ## Modules
-//! - `memdir` — Flat file memory scanning
-//! - `claudemd` — Hierarchical CLAUDE.md loading
 //! - `session_storage` — JSONL transcript persistence
+//! - `graph_migrate` — Schema versioning & legacy `:Memory` migration
+//! - `structured` (`feature = "structured"`) — Long-term structured memory
 
-pub mod claudemd;
-#[cfg(feature = "embed")]
-pub mod embedding_memory;
-pub mod graph;
 pub mod graph_migrate;
-pub mod manager;
-pub mod memdir;
 pub mod session_storage;
 #[cfg(feature = "structured")]
 pub mod structured;
+
+/// Maximum length in characters for an explicit memory note, keeping notes
+/// concise and atomic.
+pub const NOTE_MAX_CHARS: usize = 280;
 
 use async_trait::async_trait;
 use bricks_types::*;

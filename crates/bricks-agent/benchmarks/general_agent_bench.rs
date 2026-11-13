@@ -447,46 +447,47 @@ async fn axis_3_max_concurrent(steps: &[usize]) -> Vec<ConcurrencyPoint> {
 
 #[cfg(feature = "graph-bench")]
 async fn axis_4_graph_under_load() -> ScalingLatency {
-    use bricks_memory::manager::MemoryManager;
-    use bricks_memory::memdir::MemoryType;
+    use bricks_embeddings::HashingEmbeddings;
+    use bricks_memory::structured::{NoteInput, RecallQuery, StructuredMemory};
 
     async fn measure(n_nodes: usize) -> LatencyStats {
         let tmp = tempfile::tempdir().unwrap();
         let graph_path = tmp.path().join("bench.grafeo");
-        let mm = Arc::new(
-            MemoryManager::new(tmp.path())
-                .with_graph(&graph_path)
-                .expect("open graph"),
+        let embedder = Arc::new(HashingEmbeddings::new(64));
+        let mem = Arc::new(
+            StructuredMemory::builder(embedder)
+                .path(&graph_path)
+                .open()
+                .expect("open structured memory"),
         );
 
-        println!("  axis-4  seeding {n_nodes} nodes...");
+        println!("  axis-4  seeding {n_nodes} notes...");
         for i in 0..n_nodes {
-            mm.store_memory(
-                &format!("Memory {i}: topic_{} about rust {}", i % 20, i % 7),
-                match i % 4 {
-                    0 => MemoryType::User,
-                    1 => MemoryType::Feedback,
-                    2 => MemoryType::Project,
-                    _ => MemoryType::Reference,
+            mem.write_note(
+                NoteInput {
+                    space: "global".into(),
+                    project_id: None,
+                    session_id: Some("bench".into()),
+                    text: format!("Memory {i}: topic_{} about rust {}", i % 20, i % 7),
                 },
-                0.8,
-            );
+                false,
+            )
+            .await
+            .expect("write_note");
         }
 
-        // 10 concurrent "agents" × 100 recalls each. Graph recall is sync
-        // (spawn_blocking) so higher concurrency just measures blocking-pool
-        // contention, not per-query latency.
+        // 10 concurrent "agents" × 100 recalls each.
         let concurrency = 10usize;
         let per_agent = 100usize;
         let mut handles = Vec::with_capacity(concurrency);
         for a in 0..concurrency {
-            let mm = Arc::clone(&mm);
-            handles.push(tokio::task::spawn_blocking(move || {
+            let mem = Arc::clone(&mem);
+            handles.push(tokio::spawn(async move {
                 let mut samples = Vec::with_capacity(per_agent);
                 for q in 0..per_agent {
-                    let query = format!("topic_{} rust", (a + q) % 20);
+                    let query = RecallQuery::new(format!("topic_{} rust", (a + q) % 20));
                     let t = Instant::now();
-                    let _ = mm.recall(&query, 5);
+                    let _ = mem.recall(&query).await;
                     samples.push(us(t.elapsed()));
                 }
                 samples

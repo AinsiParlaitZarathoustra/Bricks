@@ -589,6 +589,7 @@ export const en = {
 	'inspect.contextUsage': 'Context usage',
 	'inspect.cost': 'Cost',
 	'inspect.couldNotReloadTheTotals': 'Could not reload the totals: {loadError}',
+	'inspect.deleteMemoryEntry': 'Delete this memory entry',
 	'inspect.disputed': 'disputed',
 	'inspect.engineResult': 'Engine result: {outcome}',
 	'inspect.exchange': 'Exchange',
