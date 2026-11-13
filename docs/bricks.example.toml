@@ -218,6 +218,9 @@ weight_vector = 1.0
 weight_relational = 1.2
 weight_lexical = 0.8
 max_results = 8
+scoped_max_results = 5
+project_weight = 1.5
+global_weight = 1.0
 max_tokens = 1200               # the agent also caps it at a tenth of the prompt budget
 passage_chars = 600
 

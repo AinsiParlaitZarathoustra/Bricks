@@ -212,3 +212,194 @@ async fn a_remembered_fact_is_recalled_into_the_next_session_within_budget() {
         );
     }
 }
+
+#[tokio::test]
+async fn contextualized_recall_and_post_compaction_refresh_work_in_multi_turn_runs() {
+    let dir = tempfile::tempdir().unwrap();
+    let memory = Arc::new(
+        StructuredMemory::builder(Arc::new(HashingEmbeddings::new(256)))
+            .path(dir.path().join("memory.grafeo"))
+            .config(MemoryConfig::default().with_space("project:acme"))
+            .open()
+            .unwrap(),
+    );
+    memory
+        .write_note(
+            bricks_memory::structured::NoteInput {
+                space: "project:acme".into(),
+                project_id: None,
+                session_id: Some("seed".into()),
+                text: "Acme Gateway listens on port 8443 with mTLS enabled".into(),
+            },
+            false,
+        )
+        .await
+        .unwrap();
+    let ltm: Arc<dyn LongTermMemory> = memory.clone();
+
+    // Multi-turn history where the new prompt alone doesn't name "Acme Gateway",
+    // so contextualized recall pulls it from recent session history.
+    let (url, seen) = model(vec![text("Port 8443.")]);
+    let agent = Agent::builder()
+        .provider(common::provider(&url, "chat_completions", 100_000))
+        .system_prompt("You are Bricks.")
+        .session_id("s_ctx")
+        .with_messages(vec![
+            bricks_types::Message::user("Let's inspect Acme Gateway configuration"),
+            bricks_types::Message::assistant("Sure, checking Acme Gateway TLS and listeners."),
+        ])
+        .long_term_memory(ltm)
+        .build()
+        .unwrap();
+    agent.run("What port does it listen on?").await.unwrap();
+    let sys = system_of(&seen.lock().unwrap()[0]);
+    assert!(
+        sys.contains("Acme Gateway listens on port 8443"),
+        "expected contextualized recall block in system prompt, got: {sys}"
+    );
+}
+
+#[tokio::test]
+async fn tool_outputs_and_cancelled_runs_still_capture_and_maintain_memory() {
+    use bricks_agent::control::scripted::{Reply, Script, ScriptedProvider};
+    use bricks_memory::structured::EntryFilter;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+
+    struct DummyTool(Arc<AtomicBool>);
+    #[async_trait]
+    impl bricks_tools::Tool for DummyTool {
+        fn name(&self) -> &str {
+            "Inspect"
+        }
+        fn description(&self) -> &str {
+            "Inspect a component"
+        }
+        fn input_schema(&self) -> Value {
+            json!({"type": "object", "properties": {"path": {"type": "string"}}})
+        }
+        async fn execute(
+            &self,
+            _input: Value,
+            _ctx: &bricks_tools::ToolContext,
+        ) -> bricks_tools::ToolResult {
+            self.0.store(true, Ordering::SeqCst);
+            bricks_tools::ToolResult::success("postgres pool_size = 32 configured cleanly")
+        }
+    }
+
+    struct ToolExtractor;
+    #[async_trait]
+    impl Extractor for ToolExtractor {
+        fn id(&self) -> String {
+            "scripted/tool".into()
+        }
+        async fn extract(
+            &self,
+            r: &ExtractionRequest,
+            _: &CancellationToken,
+        ) -> Result<String, ExtractError> {
+            if r.role == "tool" && r.content.contains("pool_size = 32") {
+                return Ok(json!({
+                    "entities": [{"ref": "e1", "name": "Postgres", "type": "database"}],
+                    "facts": [{"subject": "e1", "predicate": "pool_size", "value": "32",
+                               "quote": "pool_size = 32"}]
+                })
+                .to_string());
+            }
+            Ok(r#"{"entities":[],"facts":[]}"#.into())
+        }
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let memory = Arc::new(
+        StructuredMemory::builder(Arc::new(HashingEmbeddings::new(256)))
+            .path(dir.path().join("tool_cancel.grafeo"))
+            .config(MemoryConfig::default().with_space("project:acme"))
+            .extractor(Arc::new(ToolExtractor))
+            .open()
+            .unwrap(),
+    );
+    let ltm: Arc<dyn LongTermMemory> = memory.clone();
+
+    // First run completes after a tool call -> captures Origin::ToolOutput ("tool" role)
+    // and extracts an active fact from tool output.
+    let ran_tool = Arc::new(AtomicBool::new(false));
+    let script = Script::new(vec![
+        Reply::tool("t1", "Inspect", json!({"path": "db.toml"})),
+        Reply::text("Checked db.toml."),
+    ]);
+    let provider = ScriptedProvider::new("a", script);
+    let agent = Agent::builder()
+        .provider(provider)
+        .tool(DummyTool(Arc::clone(&ran_tool)))
+        .system_prompt("You are Bricks.")
+        .session_id("s_tool")
+        .long_term_memory(ltm.clone())
+        .build()
+        .unwrap();
+    agent.run("Check the database config").await.unwrap();
+    assert!(ran_tool.load(Ordering::SeqCst));
+    let exchanges = memory
+        .entries(EntryFilter::Exchanges, "", 0, 50)
+        .unwrap();
+    assert!(
+        exchanges
+            .entries
+            .iter()
+            .any(|e| e.role.as_deref() == Some("tool") && e.text.contains("pool_size = 32")),
+        "expected tool episode, got {:?}",
+        exchanges.entries
+    );
+    assert!(
+        memory
+            .current_facts("project:acme")
+            .unwrap()
+            .iter()
+            .any(|f| f.predicate == "pool_size" && f.value == "32"),
+        "expected fact extracted from Origin::ToolOutput"
+    );
+
+    // Second run executes a valid tool turn and is cancelled on turn 2:
+    // capture and maintenance MUST still run cleanly.
+    let cancel_after_tool = Arc::new(AtomicBool::new(false));
+    let tool2 = DummyTool(Arc::clone(&cancel_after_tool));
+    let script2 = Script::new(vec![
+        Reply::tool("t2", "Inspect", json!({"path": "cache.toml"})),
+        Reply::hang(),
+    ]);
+    let agent2 = Arc::new(
+        Agent::builder()
+            .provider(ScriptedProvider::new("a", script2))
+            .tool(tool2)
+            .system_prompt("You are Bricks.")
+            .session_id("s_cancelled")
+            .long_term_memory(ltm)
+            .build()
+            .unwrap(),
+    );
+    let cancel_handle = Arc::clone(&agent2);
+    let waiter = tokio::spawn(async move {
+        while !cancel_after_tool.load(Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        cancel_handle.cancel();
+    });
+    let err = agent2.run("Check cache config").await.unwrap_err();
+    waiter.await.unwrap();
+    assert!(err.to_string().to_lowercase().contains("cancel"), "{err}");
+
+    let after = memory
+        .entries(EntryFilter::Exchanges, "cache.toml", 0, 50)
+        .unwrap();
+    assert!(
+        after
+            .entries
+            .iter()
+            .any(|e| e.role.as_deref() == Some("tool") && e.text.contains("cache.toml")),
+        "expected cancelled run after valid tool turn to capture tool output: {:?}",
+        after.entries
+    );
+    assert_eq!(memory.pending_work().unwrap(), 0, "maintenance should have processed cancelled run capture");
+}

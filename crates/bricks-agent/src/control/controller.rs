@@ -2320,7 +2320,8 @@ impl Controller {
             let _ = m.save(&files_dir(&self.inner.cfg, &m.id));
         }
 
-        let maintain = result.is_ok() && run_memory.memory.is_some();
+        let had_capture = agent.take_needs_memory_maintenance();
+        let maintain = (result.is_ok() || had_capture) && run_memory.memory.is_some();
         let maintenance = CancellationToken::new();
         if maintain {
             *self.inner.maintenance.lock() = Some(maintenance.clone());

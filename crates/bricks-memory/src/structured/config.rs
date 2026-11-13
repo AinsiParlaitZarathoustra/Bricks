@@ -40,6 +40,12 @@ pub struct RecallConfig {
     pub weight_lexical: f64,
     /// Items returned.
     pub max_results: usize,
+    /// Items returned after fusing scoped stores (`Project` + `Global`).
+    pub scoped_max_results: usize,
+    /// RRF weight multiplier for project-scoped recall results.
+    pub project_weight: f64,
+    /// RRF weight multiplier for global-scoped recall results.
+    pub global_weight: f64,
     /// Estimated tokens of the rendered recall.
     pub max_tokens: usize,
     /// Characters of an episode passage shown.
@@ -60,6 +66,9 @@ impl Default for RecallConfig {
             weight_relational: 1.2,
             weight_lexical: 0.8,
             max_results: 8,
+            scoped_max_results: super::scoped::RECALL_MAX,
+            project_weight: 1.5,
+            global_weight: 1.0,
             max_tokens: 1200,
             passage_chars: 600,
         }
@@ -205,6 +214,7 @@ impl MemoryConfig {
         range("max_neighbors", r.max_neighbors, 1, 100)?;
         range("max_visited", r.max_visited, 1, 10_000)?;
         range("max_results", r.max_results, 1, 100)?;
+        range("scoped_max_results", r.scoped_max_results, 1, 100)?;
         range("max_tokens", r.max_tokens, 50, 50_000)?;
         range("passage_chars", r.passage_chars, 50, 10_000)?;
         if !(r.rrf_k.is_finite() && r.rrf_k >= 0.0) {
@@ -214,6 +224,8 @@ impl MemoryConfig {
             ("weight_vector", r.weight_vector),
             ("weight_relational", r.weight_relational),
             ("weight_lexical", r.weight_lexical),
+            ("project_weight", r.project_weight),
+            ("global_weight", r.global_weight),
         ] {
             if !(w.is_finite() && w >= 0.0) {
                 return Err(format!("memory.recall.{n} must be a non-negative number"));
@@ -249,15 +261,34 @@ impl MemoryConfig {
 
     /// The `[memory]` section of a `bricks.toml` text (defaults when absent).
     pub fn from_bricks_toml(text: &str) -> Result<Self, String> {
+        Ok(Self::parse_bricks_toml(text)?.config)
+    }
+
+    /// Parse `[memory]` from a `bricks.toml` text together with which keys
+    /// were explicitly present, so frontends such as Desktop can merge them
+    /// cleanly with UI preferences.
+    pub fn parse_bricks_toml(text: &str) -> Result<MemoryToml, String> {
         let value: toml::Value = toml::from_str(text).map_err(|e| e.to_string())?;
         let mut c = Self::default();
         let Some(section) = value.get("memory") else {
-            return Ok(c);
+            return Ok(MemoryToml {
+                has_section: false,
+                config: c,
+                explicit_enabled: None,
+                explicit_embeddings: false,
+                explicit_extractor_model: false,
+                explicit_path_or_space: false,
+            });
         };
         let f: FileMemory = section
             .clone()
             .try_into()
             .map_err(|e: toml::de::Error| format!("[memory]: {}", e.to_string().trim()))?;
+        let explicit_enabled = f.enabled;
+        let explicit_embeddings = f.embeddings.is_some();
+        let explicit_extractor_model = f.extractor_model.is_some();
+        let explicit_path_or_space =
+            f.path.is_some() || f.space.is_some() || f.recall_spaces.is_some();
         set(&mut c.enabled, f.enabled);
         c.path = f.path.or(c.path);
         set(&mut c.embeddings, f.embeddings);
@@ -286,6 +317,9 @@ impl MemoryConfig {
             set(&mut d.weight_relational, r.weight_relational);
             set(&mut d.weight_lexical, r.weight_lexical);
             set(&mut d.max_results, r.max_results);
+            set(&mut d.scoped_max_results, r.scoped_max_results);
+            set(&mut d.project_weight, r.project_weight);
+            set(&mut d.global_weight, r.global_weight);
             set(&mut d.max_tokens, r.max_tokens);
             set(&mut d.passage_chars, r.passage_chars);
         }
@@ -301,8 +335,27 @@ impl MemoryConfig {
             set(&mut d.max_attempts, e.max_attempts);
         }
         c.validate()?;
-        Ok(c)
+        Ok(MemoryToml {
+            has_section: true,
+            config: c,
+            explicit_enabled,
+            explicit_embeddings,
+            explicit_extractor_model,
+            explicit_path_or_space,
+        })
     }
+}
+
+/// Parsed `[memory]` section plus presence metadata for callers that merge
+/// `bricks.toml` with UI preferences.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MemoryToml {
+    pub has_section: bool,
+    pub config: MemoryConfig,
+    pub explicit_enabled: Option<bool>,
+    pub explicit_embeddings: bool,
+    pub explicit_extractor_model: bool,
+    pub explicit_path_or_space: bool,
 }
 
 fn set<T>(slot: &mut T, v: Option<T>) {
@@ -339,6 +392,9 @@ struct FileRecall {
     weight_relational: Option<f64>,
     weight_lexical: Option<f64>,
     max_results: Option<usize>,
+    scoped_max_results: Option<usize>,
+    project_weight: Option<f64>,
+    global_weight: Option<f64>,
     max_tokens: Option<usize>,
     passage_chars: Option<usize>,
 }
@@ -404,5 +460,30 @@ mod tests {
             let e = MemoryConfig::from_bricks_toml(t).unwrap_err();
             assert!(e.contains(needle), "{t}: {e}");
         }
+    }
+
+    #[test]
+    fn parse_bricks_toml_tracks_explicit_presence_and_scoped_recall_fields() {
+        let absent = MemoryConfig::parse_bricks_toml("[context]\nx = 1\n").unwrap();
+        assert!(!absent.has_section);
+        assert_eq!(absent.explicit_enabled, None);
+        assert!(!absent.explicit_embeddings);
+
+        let partial = MemoryConfig::parse_bricks_toml(
+            "[memory]\nembeddings = \"openai:text-embedding-3-small\"\n\
+             [memory.recall]\nscoped_max_results = 9\nproject_weight = 2.0\nglobal_weight = 0.75\n",
+        )
+        .unwrap();
+        assert!(partial.has_section);
+        assert_eq!(partial.explicit_enabled, None);
+        assert!(partial.explicit_embeddings);
+        assert!(!partial.explicit_extractor_model);
+        assert_eq!(partial.config.embeddings, "openai:text-embedding-3-small");
+        assert_eq!(partial.config.recall.scoped_max_results, 9);
+        assert_eq!(partial.config.recall.project_weight, 2.0);
+        assert_eq!(partial.config.recall.global_weight, 0.75);
+
+        let disabled = MemoryConfig::parse_bricks_toml("[memory]\nenabled = false\n").unwrap();
+        assert_eq!(disabled.explicit_enabled, Some(false));
     }
 }

@@ -36,7 +36,7 @@ pub use browse::{
     StoredEntry,
 };
 pub use clock::{Clock, ManualClock, SystemClock};
-pub use config::{ExtractionConfig, MemoryConfig, RecallConfig};
+pub use config::{ExtractionConfig, MemoryConfig, MemoryToml, RecallConfig};
 pub use extract::{Extractor, LlmExtractor};
 pub use ingest::{ForgetReport, IngestReport, Recorded};
 pub use model::*;
@@ -83,6 +83,20 @@ impl From<MemoryError> for bricks_types::BricksError {
 
 pub type MemoryResult<T> = Result<T, MemoryError>;
 
+/// How [`MemoryBuilder::open`] handles a store whose recorded embedding model
+/// differs from the configured embedder.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum MismatchMode {
+    /// Fail with [`MemoryError::EmbeddingMismatch`].
+    #[default]
+    Error,
+    /// Clear existing embeddings, update store metadata, and re-embed.
+    Rebuild,
+    /// Keep existing metadata and stored embeddings untouched and run in
+    /// lexical + relational recall mode without writing new embeddings.
+    LexicalFallback,
+}
+
 /// Opens a [`StructuredMemory`].
 pub struct MemoryBuilder {
     path: Option<PathBuf>,
@@ -90,7 +104,7 @@ pub struct MemoryBuilder {
     clock: Arc<dyn Clock>,
     embedder: Arc<dyn EmbeddingProvider>,
     extractor: Option<Arc<dyn Extractor>>,
-    rebuild_embeddings: bool,
+    mismatch_mode: MismatchMode,
 }
 
 impl MemoryBuilder {
@@ -101,7 +115,7 @@ impl MemoryBuilder {
             clock: Arc::new(SystemClock),
             embedder,
             extractor: None,
-            rebuild_embeddings: false,
+            mismatch_mode: MismatchMode::Error,
         }
     }
 
@@ -131,7 +145,18 @@ impl MemoryBuilder {
     /// Accept an embedder different from the one the store was built with,
     /// and re-embed every record with it (explicit, never automatic).
     pub fn rebuild_embeddings(mut self, yes: bool) -> Self {
-        self.rebuild_embeddings = yes;
+        self.mismatch_mode = if yes {
+            MismatchMode::Rebuild
+        } else {
+            MismatchMode::Error
+        };
+        self
+    }
+
+    /// Configure how an embedding model mismatch against an existing store is
+    /// handled at open time.
+    pub fn mismatch_mode(mut self, mode: MismatchMode) -> Self {
+        self.mismatch_mode = mode;
         self
     }
 
@@ -150,6 +175,8 @@ impl MemoryBuilder {
         let model = self.embedder.model_id();
         let dims = self.embedder.dimensions();
         let meta = store.query(q::META, P::new())?;
+        let mut vector_enabled = true;
+        let mut stored_embedding_model = model.clone();
         match meta.first() {
             None => store.exec(
                 W::InsertMeta,
@@ -158,17 +185,25 @@ impl MemoryBuilder {
             Some(row) => {
                 let stored = as_str(&row[0]).unwrap_or_default();
                 if stored != model {
-                    if !self.rebuild_embeddings {
-                        return Err(MemoryError::EmbeddingMismatch {
-                            stored,
-                            configured: model,
-                        });
+                    match self.mismatch_mode {
+                        MismatchMode::Error => {
+                            return Err(MemoryError::EmbeddingMismatch {
+                                stored,
+                                configured: model,
+                            });
+                        }
+                        MismatchMode::Rebuild => {
+                            store.exec(W::ClearEmbeddings, P::new())?;
+                            store.exec(
+                                W::SetMeta,
+                                P::new().s("model", &model).i("dims", dims as i64),
+                            )?;
+                        }
+                        MismatchMode::LexicalFallback => {
+                            vector_enabled = false;
+                            stored_embedding_model = stored;
+                        }
                     }
-                    store.exec(W::ClearEmbeddings, P::new())?;
-                    store.exec(
-                        W::SetMeta,
-                        P::new().s("model", &model).i("dims", dims as i64),
-                    )?;
                 }
             }
         }
@@ -180,10 +215,14 @@ impl MemoryBuilder {
             embedder: self.embedder,
             extractor: self.extractor,
             projection: parking_lot::RwLock::new(projection),
+            vector_enabled,
+            stored_embedding_model,
             write: tokio::sync::Mutex::new(()),
             maintenance: tokio::sync::Mutex::new(()),
         };
-        memory.rebuild_projection()?;
+        if vector_enabled {
+            memory.rebuild_projection()?;
+        }
         Ok(memory)
     }
 }
@@ -219,6 +258,8 @@ pub struct StructuredMemory {
     embedder: Arc<dyn EmbeddingProvider>,
     extractor: Option<Arc<dyn Extractor>>,
     projection: parking_lot::RwLock<Projection>,
+    vector_enabled: bool,
+    stored_embedding_model: String,
     /// Ingestion is serialised (identity resolution reads then writes).
     write: tokio::sync::Mutex<()>,
     /// One maintenance pass (extraction, embeddings) at a time. Recording
@@ -250,10 +291,21 @@ impl StructuredMemory {
         Processing::of(&self.config, self.extractor.clone())
     }
 
-    /// Model id and dimensions of the embedder.
+    /// Model id and dimensions of the embedder configured for this handle.
     pub fn embedding_identity(&self) -> (String, usize) {
         let p = self.projection.read();
         (p.model.clone(), p.dims)
+    }
+
+    /// Whether vector search and embedding writes are active on this handle
+    /// (`false` when opened in [`MismatchMode::LexicalFallback`]).
+    pub fn is_vector_enabled(&self) -> bool {
+        self.vector_enabled
+    }
+
+    /// Embedding model recorded in the store metadata.
+    pub fn stored_embedding_model(&self) -> &str {
+        &self.stored_embedding_model
     }
 
     pub fn now(&self) -> Millis {
@@ -266,14 +318,17 @@ impl StructuredMemory {
             episodes: self.store.count(q::COUNT_EPISODES),
             entities: self.store.count(q::COUNT_ENTITIES),
             facts: self.store.count(q::COUNT_FACTS),
-            indexed: p.len(),
-            embedding_model: p.model.clone(),
+            indexed: if self.vector_enabled { p.len() } else { 0 },
+            embedding_model: self.stored_embedding_model.clone(),
         }
     }
 
     /// Rebuild the vector projection from the store (records embedded with
     /// the current model only).
     pub fn rebuild_projection(&self) -> MemoryResult<()> {
+        if !self.vector_enabled {
+            return Ok(());
+        }
         let model = self.projection.read().model.clone();
         let dims = self.projection.read().dims;
         let facts: std::collections::HashMap<String, Fact> = self

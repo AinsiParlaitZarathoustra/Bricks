@@ -196,44 +196,50 @@ impl StructuredMemory {
                 }
         };
 
-        // Vector lane.
-        let t0 = Instant::now();
-        let qv = self
-            .embedder
-            .embed(&query.text)
-            .await
-            .map_err(|e| MemoryError::Embedding(e.to_string()))?;
-        out.timings.embed_us = t0.elapsed().as_micros() as u64;
-        let t0 = Instant::now();
-        let vector: Vec<(Key, f32, Item)> = {
-            let p = self.projection.read();
-            p.search(&qv, cfg.candidates, admit)
-                .map_err(MemoryError::Store)?
-                .into_iter()
-                .filter_map(|(key, sim)| {
-                    p.item(key).map(|it| {
-                        let kind = match it {
-                            Item::Fact(_) => Kind::Fact,
-                            Item::Episode(_) => Kind::Episode,
-                        };
-                        ((kind, it.id().to_string()), sim, it.clone())
+        // Vector lane (skipped when opened in LexicalFallback mode).
+        let vector: Vec<(Key, f32, Item)> = if self.vector_enabled {
+            let t0 = Instant::now();
+            let qv = self
+                .embedder
+                .embed(&query.text)
+                .await
+                .map_err(|e| MemoryError::Embedding(e.to_string()))?;
+            out.timings.embed_us = t0.elapsed().as_micros() as u64;
+            let t0 = Instant::now();
+            let v: Vec<(Key, f32, Item)> = {
+                let p = self.projection.read();
+                p.search(&qv, cfg.candidates, admit)
+                    .map_err(MemoryError::Store)?
+                    .into_iter()
+                    .filter_map(|(key, sim)| {
+                        p.item(key).map(|it| {
+                            let kind = match it {
+                                Item::Fact(_) => Kind::Fact,
+                                Item::Episode(_) => Kind::Episode,
+                            };
+                            ((kind, it.id().to_string()), sim, it.clone())
+                        })
                     })
-                })
-                .collect()
+                    .collect()
+            };
+            out.timings.vector_us = t0.elapsed().as_micros() as u64;
+            v
+        } else {
+            Vec::new()
         };
-        out.timings.vector_us = t0.elapsed().as_micros() as u64;
 
         // Lexical lane.
         let t0 = Instant::now();
         let mut lexical: Vec<(Key, f64)> = Vec::new();
-        let lexical_lanes: &[(&'static str, &'static str, Kind)] = if cfg.weight_lexical > 0.0 {
-            &[
-                ("Fact", "statement", Kind::Fact),
-                ("Episode", "content", Kind::Episode),
-            ]
-        } else {
-            &[]
-        };
+        let lexical_lanes: &[(&'static str, &'static str, Kind)] =
+            if cfg.weight_lexical > 0.0 || !self.vector_enabled {
+                &[
+                    ("Fact", "statement", Kind::Fact),
+                    ("Episode", "content", Kind::Episode),
+                ]
+            } else {
+                &[]
+            };
         for &(label, prop, kind) in lexical_lanes {
             for (id, score) in self
                 .store
@@ -260,11 +266,19 @@ impl StructuredMemory {
 
         // Relational lane.
         let t0 = Instant::now();
-        let seeds: Vec<(Key, f64)> = vector
-            .iter()
-            .take(cfg.seeds)
-            .map(|(key, sim, _)| (key.clone(), (*sim as f64).max(0.0)))
-            .collect();
+        let seeds: Vec<(Key, f64)> = if self.vector_enabled {
+            vector
+                .iter()
+                .take(cfg.seeds)
+                .map(|(key, sim, _)| (key.clone(), (*sim as f64).max(0.0)))
+                .collect()
+        } else {
+            lexical
+                .iter()
+                .take(cfg.seeds)
+                .map(|(key, score)| (key.clone(), (*score).max(0.0)))
+                .collect()
+        };
         let (relational, stats) = if cfg.weight_relational > 0.0 && cfg.hops > 0 {
             self.expand(cfg, &seeds, &spaces, t, k, query.include_proposed)?
         } else {

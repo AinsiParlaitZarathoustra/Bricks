@@ -218,6 +218,9 @@ impl StructuredMemory {
     /// Embed one episode with the current model, unless it already is, and
     /// add it to the projection.
     async fn index_episode(&self, id: &str) -> Result<(), String> {
+        if !self.vector_enabled {
+            return Ok(());
+        }
         let model = self.projection.read().model.clone();
         let current = self
             .store

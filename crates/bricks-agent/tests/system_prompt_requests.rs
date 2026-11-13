@@ -255,12 +255,33 @@ async fn the_session_and_its_child_send_the_foundation_with_their_own_bullets() 
     assert_eq!(p.matches("## Skills").count(), 1);
 
     // The child: the same foundation, decided by its own tools (it has the
-    // delegation tools of the runtime), its role once, its profile once,
+    // delegation tools of the runtime and inherits read-only memory_search
+    // from the parent's long_term_memory), its role once, its profile once,
     // nothing of the parent's custom sections.
     let c = system(child);
     let names: Vec<&str> = child.tools.iter().map(|t| t.name.as_str()).collect();
-    assert!(names.contains(&"Agent") && names.contains(&"CodeScout"));
-    assert!(c.starts_with(&reference(true, true)), "{c}");
+    assert!(
+        names.contains(&"Agent")
+            && names.contains(&"CodeScout")
+            && names.contains(&"memory_search"),
+        "{names:?}"
+    );
+    let child_tool_names: Vec<String> = names.iter().map(|s| (*s).to_string()).collect();
+    assert!(
+        c.starts_with(&bricks_agent::system_prompt::bricks_foundation(
+            &child_tool_names
+        )),
+        "{c}"
+    );
+    assert!(
+        c.replacen(
+            "\n- Use memory_search before asking the user to repeat relevant context.",
+            "",
+            1,
+        )
+        .starts_with(&reference(true, true)),
+        "{c}"
+    );
     assert_eq!(c.matches(INTRO).count(), 1);
     assert_eq!(c.matches("## Your role").count(), 1);
     assert_eq!(c.matches("MARK-PROFILE").count(), 1);

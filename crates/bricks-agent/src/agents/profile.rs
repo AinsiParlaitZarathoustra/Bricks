@@ -174,6 +174,29 @@ impl Isolation {
     }
 }
 
+/// Memory access level requested by a sub-agent profile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MemoryAccess {
+    Off,
+    #[default]
+    ReadOnly,
+    ReadWrite,
+}
+
+impl MemoryAccess {
+    pub fn parse(raw: &str) -> Result<Self, String> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "off" | "none" | "false" => Ok(Self::Off),
+            "read" | "read_only" | "readonly" | "ro" => Ok(Self::ReadOnly),
+            "read_write" | "readwrite" | "write" | "rw" => Ok(Self::ReadWrite),
+            other => Err(format!(
+                "memory `{other}`: expected `off`, `read_only`, or `read_write`"
+            )),
+        }
+    }
+}
+
 /// A parsed, validated profile.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AgentProfile {
@@ -187,6 +210,8 @@ pub struct AgentProfile {
     pub tools: String,
     pub isolation: Isolation,
     pub background: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory: Option<MemoryAccess>,
     pub skills: Vec<String>,
     /// The Markdown body, verbatim.
     pub instructions: String,
@@ -213,6 +238,8 @@ struct Frontmatter {
     isolation: Option<String>,
     #[serde(default)]
     background: Option<bool>,
+    #[serde(default)]
+    memory: Option<String>,
     #[serde(default)]
     skills: Option<Vec<String>>,
     /// Keys this version does not know: ignored, and reported as notes.
@@ -318,6 +345,7 @@ pub fn parse_profile(text: &str, source: ProfileSource) -> Result<AgentProfile, 
         }
     }
     let isolation = Isolation::parse(f.isolation.as_deref().unwrap_or("auto"))?;
+    let memory = f.memory.as_deref().map(MemoryAccess::parse).transpose()?;
     let notes = f
         .unknown
         .keys()
@@ -339,6 +367,7 @@ pub fn parse_profile(text: &str, source: ProfileSource) -> Result<AgentProfile, 
         tools: "inherit".into(),
         isolation,
         background: f.background.unwrap_or(false),
+        memory,
         skills,
         instructions: body.to_string(),
         source,
@@ -495,5 +524,23 @@ mod tests {
             "x1"
         );
         assert_eq!(intended_name("garbage", "file"), "file");
+    }
+
+    #[test]
+    fn memory_access_frontmatter_parses_and_rejects_invalid_values() {
+        let p = parse_profile(
+            "---\nname: a\ndescription: d\nmemory: read_write\n---\n",
+            src(),
+        )
+        .unwrap();
+        assert_eq!(p.memory, Some(MemoryAccess::ReadWrite));
+
+        let p = parse_profile("---\nname: a\ndescription: d\nmemory: off\n---\n", src()).unwrap();
+        assert_eq!(p.memory, Some(MemoryAccess::Off));
+
+        let p = parse_profile("---\nname: a\ndescription: d\n---\n", src()).unwrap();
+        assert_eq!(p.memory, None);
+
+        assert!(parse_profile("---\nname: a\ndescription: d\nmemory: admin\n---\n", src()).is_err());
     }
 }

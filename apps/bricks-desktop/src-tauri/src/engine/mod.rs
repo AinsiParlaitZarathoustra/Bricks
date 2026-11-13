@@ -121,6 +121,13 @@ impl AppState {
         let prefs = Arc::new(PrefsStore::at(desktop.join("preferences.json")));
         let journal = Arc::new(ChangeJournal::at(desktop.join("changes")));
         let catalog = DesktopCatalog::new(registry);
+        let memory = {
+            let catalog = Arc::clone(&catalog);
+            Arc::new(
+                bricks_config::MemoryService::in_home(&home)
+                    .with_registry(move || catalog.registry().ok()),
+            )
+        };
         Self {
             catalog,
             providers_path,
@@ -132,7 +139,7 @@ impl AppState {
             attachments_dir: desktop.join("attachments"),
             computer_use: ComputerUse::new(Arc::clone(&prefs)),
             prefs,
-            memory: Arc::new(bricks_config::MemoryService::in_home(&home)),
+            memory,
             skills: Arc::new(SkillsCatalogStore::new(home.join("skills"))),
             run_labels: Arc::new(RunLabelStore::at(desktop.join("run-labels"))),
             run_records: Arc::new(RunRecordStore::at(desktop.join("run-records"))),

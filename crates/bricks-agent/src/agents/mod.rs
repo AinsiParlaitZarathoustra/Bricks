@@ -11,7 +11,9 @@ pub mod tool;
 pub mod workspace;
 
 pub use messagent::{MAIN, MessagentTool};
-pub use profile::{AgentProfile, Isolation, ModelPref, ProfileScope, ProfileSource, ReasoningPref};
+pub use profile::{
+    AgentProfile, Isolation, MemoryAccess, ModelPref, ProfileScope, ProfileSource, ReasoningPref,
+};
 pub use registry::{
     ProfileCatalog, ProfileDiagnostic, ProfileListing, ProfileRegistry, ProfileSources,
 };

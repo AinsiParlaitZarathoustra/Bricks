@@ -686,3 +686,203 @@ impl bricks_tools::permissions::PermissionPolicy for AllowAll {
         bricks_tools::permissions::PermissionDecision::Allow
     }
 }
+
+#[tokio::test]
+async fn subagents_inherit_read_only_memory_and_respect_profile_memory_access() {
+    use bricks_agent::control::scripted::ScriptedCatalog;
+    use common::follow::{FollowHandles, Waited};
+
+    struct FollowCatalog {
+        inner: Arc<ScriptedCatalog>,
+        waited: Arc<Waited>,
+        enabled: Arc<AtomicBool>,
+    }
+    impl ModelCatalog for FollowCatalog {
+        fn models(&self) -> Vec<ModelChoice> {
+            self.inner.models()
+        }
+        fn build(
+            &self,
+            selection: &str,
+            reasoning: Option<&str>,
+        ) -> Result<Box<dyn bricks_provider::Provider>, String> {
+            let inner = self.inner.build(selection, reasoning)?;
+            Ok(Box::new(FollowHandles {
+                inner,
+                selection: selection.to_string(),
+                waited: Arc::clone(&self.waited),
+                enabled: Arc::clone(&self.enabled),
+            }))
+        }
+    }
+
+    let (home_dir, stores) = home();
+    let resolver = Resolver::new(&stores, home_dir.path(), Some("pa"), true);
+    let dir = tempfile::tempdir().unwrap();
+    let agents_dir = dir.path().join(".bricks").join("agents");
+    std::fs::create_dir_all(&agents_dir).unwrap();
+    std::fs::write(
+        agents_dir.join("reader.md"),
+        "---\nname: reader\ndescription: Reads project context\nisolation: shared\n---\nSearch memory before answering.\n",
+    )
+    .unwrap();
+    std::fs::write(
+        agents_dir.join("writer.md"),
+        "---\nname: writer\ndescription: Records durable notes\nisolation: shared\nmemory: read_write\n---\nWrite notes when asked.\n",
+    )
+    .unwrap();
+    std::fs::write(
+        agents_dir.join("amnesiac.md"),
+        "---\nname: amnesiac\ndescription: Isolated helper\nisolation: shared\nmemory: off\n---\nNo memory.\n",
+    )
+    .unwrap();
+
+    // Seed project memory with a fact before spawning sub-agents, then run all
+    // three sub-agent profiles sequentially via FollowHandles.
+    let script = Script::new(vec![
+        // Run 1: write note in main agent so project memory has a known entry.
+        Reply::tool(
+            "w0",
+            "memory_write",
+            json!({"text": "Service uses Redis sentinel", "scope": "project"}),
+        ),
+        Reply::text("Seeded."),
+        // Run 2: main spawns `reader` (default ReadOnly), `writer` (ReadWrite), `amnesiac` (Off).
+        Reply::tool(
+            "a1",
+            "Agent",
+            json!({"profile": "reader", "task": "Find Redis setup"}),
+        ),
+        // reader child calls memory_search and answers
+        Reply::tool("r_s", "memory_search", json!({"query": "Redis sentinel"})),
+        Reply::text("Found Redis sentinel."),
+        // main spawns `writer`
+        Reply::tool(
+            "a2",
+            "Agent",
+            json!({"profile": "writer", "task": "Record PostgreSQL note"}),
+        ),
+        // writer child calls memory_write and answers
+        Reply::tool(
+            "w_w",
+            "memory_write",
+            json!({"text": "Database uses PostgreSQL 16", "scope": "project"}),
+        ),
+        Reply::text("Wrote PostgreSQL note."),
+        // main spawns `amnesiac`
+        Reply::tool(
+            "a3",
+            "Agent",
+            json!({"profile": "amnesiac", "task": "Say hello"}),
+        ),
+        Reply::text("Hello without memory."),
+        // main finishes Run 2
+        Reply::text("All subagents finished."),
+    ]);
+    let catalog = Arc::new(FollowCatalog {
+        inner: ScriptedCatalog::new(&["a"], script.clone()),
+        waited: Arc::new(Waited::default()),
+        enabled: Arc::new(AtomicBool::new(true)),
+    });
+    let mut cfg = EngineConfig::new(dir.path(), catalog, bricks(), dir.path().join(".sessions"));
+    cfg.agent_profile_sources = Some(ProfileSources {
+        project_dir: Some(dir.path().join(".bricks/agents")),
+        user_dir: None,
+    });
+    cfg.memory_resolver = Some(resolver.clone());
+    cfg.permissions = Some(common::default_store(dir.path(), &execute()));
+    let (ctl, mut events) = Controller::open(
+        cfg,
+        OpenOptions {
+            session: SessionChoice::New,
+            model: None,
+            reasoning: None,
+        },
+    )
+    .await
+    .unwrap();
+    next(&mut events).await; // session_opened
+    let mut env = Env {
+        ctl,
+        events,
+        script,
+        dir,
+    };
+
+    run_with(&mut env, "Seed memory", |_| {}).await;
+    run_with(&mut env, "Run subagents", |_| {}).await;
+
+    let reqs = requests(&env);
+    // Find sub-agent requests by their profile headers in the system prompt.
+    let reader_req = reqs
+        .iter()
+        .find(|r| system(r).contains("## Profile `reader`"))
+        .expect("reader request");
+    let reader_tools = offered(reader_req);
+    assert!(
+        reader_tools.contains(&"memory_search".to_string()),
+        "reader should inherit memory_search: {reader_tools:?}"
+    );
+    assert!(
+        !reader_tools.contains(&"memory_write".to_string()),
+        "default sub-agent must NOT get memory_write: {reader_tools:?}"
+    );
+    assert!(
+        system(reader_req).contains("Service uses Redis sentinel"),
+        "reader should inherit <long_term_memory>: {}",
+        system(reader_req)
+    );
+
+    let writer_req = reqs
+        .iter()
+        .find(|r| system(r).contains("## Profile `writer`"))
+        .expect("writer request");
+    let writer_tools = offered(writer_req);
+    assert!(
+        writer_tools.contains(&"memory_search".to_string())
+            && writer_tools.contains(&"memory_write".to_string()),
+        "writer should get memory_search + memory_write: {writer_tools:?}"
+    );
+
+    let amnesiac_req = reqs
+        .iter()
+        .find(|r| system(r).contains("## Profile `amnesiac`"))
+        .expect("amnesiac request");
+    let amnesiac_tools = offered(amnesiac_req);
+    assert!(
+        !amnesiac_tools.contains(&"memory_search".to_string())
+            && !amnesiac_tools.contains(&"memory_write".to_string()),
+        "memory: off profile must not receive memory tools: {amnesiac_tools:?}"
+    );
+    assert!(
+        !system(amnesiac_req).contains("<long_term_memory"),
+        "memory: off profile must not inherit <long_term_memory>: {}",
+        system(amnesiac_req)
+    );
+
+    // Verify writer's explicit memory_write note was persisted, while sub-agent
+    // conversations were NOT auto-captured as exchanges (main runs 1+2 produce
+    // 2 user + 2 assistant + 1 summarized tool output = 5 exchanges).
+    let p_store = resolver.project_store().unwrap();
+    let counts = p_store.memory.counts().unwrap();
+    assert!(counts.notes >= 2, "writer note should persist: {counts:?}");
+    assert_eq!(
+        counts.exchanges, 5,
+        "sub-agent conversations must not auto-capture into exchanges: {counts:?}"
+    );
+    let exchanges = p_store
+        .memory
+        .entries(bricks_memory::structured::EntryFilter::Exchanges, "", 0, 50)
+        .unwrap();
+    for forbidden in [
+        "Found Redis sentinel.",
+        "Wrote PostgreSQL note.",
+        "Hello without memory.",
+    ] {
+        assert!(
+            !exchanges.entries.iter().any(|e| e.text.contains(forbidden)),
+            "sub-agent turn {forbidden:?} should not be auto-captured: {:?}",
+            exchanges.entries
+        );
+    }
+}

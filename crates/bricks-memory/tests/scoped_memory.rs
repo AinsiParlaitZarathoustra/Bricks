@@ -661,3 +661,172 @@ async fn extracted_facts_are_listed_with_their_status_and_source_and_counted_apa
         1
     );
 }
+
+#[tokio::test]
+async fn project_weight_prefers_project_over_global_and_scoped_max_results_is_configurable() {
+    let s = Stores::new();
+    let pa = s.project("pa");
+    let g = s.global();
+    let mut processing = Processing::default();
+    processing.recall.project_weight = 2.0;
+    processing.recall.global_weight = 1.0;
+    processing.recall.scoped_max_results = 8;
+
+    let (m, _l) = run_memory(Some(("pa", Some(pa))), Some(g), processing);
+    for i in 0..8 {
+        let scope = if i % 2 == 0 {
+            MemoryScope::Global
+        } else {
+            MemoryScope::Project
+        };
+        m.write_note(scope, Some("s1"), &format!("release cadence note alpha {i}"))
+            .await
+            .unwrap();
+    }
+
+    let ctx = m
+        .recall_context("release cadence alpha", 20_000)
+        .await
+        .unwrap()
+        .expect("recalled");
+    assert!(
+        ctx.items > RECALL_MAX && ctx.items <= 8,
+        "expected configurable limit > {RECALL_MAX}: {}",
+        ctx.items
+    );
+    let r1 = ctx
+        .text
+        .lines()
+        .find(|l| l.contains("[R1]"))
+        .expect("expected [R1] line");
+    assert!(
+        r1.contains("project memory"),
+        "expected project item weighted first at [R1], got: {r1}"
+    );
+}
+
+#[tokio::test]
+async fn lexical_fallback_preserves_semantic_store_and_reopens_cleanly_when_idle() {
+    use bricks_memory::structured::MismatchMode;
+    struct FakeSemanticEmbedder(&'static str, usize);
+    #[async_trait::async_trait]
+    impl bricks_embeddings::EmbeddingProvider for FakeSemanticEmbedder {
+        fn name(&self) -> &str {
+            "openai"
+        }
+        fn model_id(&self) -> String {
+            self.0.into()
+        }
+        fn dimensions(&self) -> usize {
+            self.1
+        }
+        async fn embed_batch(
+            &self,
+            texts: &[String],
+        ) -> std::result::Result<Vec<Vec<f32>>, bricks_embeddings::EmbeddingError> {
+            Ok(texts
+                .iter()
+                .map(|t| {
+                    let mut v = vec![0.0_f32; self.1];
+                    v[0] = (t.len() as f32).max(1.0);
+                    v
+                })
+                .collect())
+        }
+    }
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("project.grafeo");
+    let open = OpenMemories::default();
+    let semantic: Arc<dyn EmbeddingProvider> =
+        Arc::new(FakeSemanticEmbedder("openai/text-embedding-3-small", 8));
+    let hashing: Arc<dyn EmbeddingProvider> = Arc::new(HashingEmbeddings::new(384));
+    let cfg = MemoryConfig::default();
+
+    // Create store with semantic embedder and write a note (indexed with semantic model).
+    let s1 = open
+        .open_with_mode(
+            &path,
+            "project:p1",
+            Arc::clone(&semantic),
+            &cfg,
+            None,
+            MismatchMode::Error,
+        )
+        .unwrap();
+    assert!(s1.memory.is_vector_enabled());
+    s1.memory
+        .write_note(
+            bricks_memory::structured::NoteInput {
+                space: "project:p1".into(),
+                project_id: Some("p1".into()),
+                session_id: Some("s1".into()),
+                text: "deployment pipeline uses blue green rollout".into(),
+            },
+            false,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        s1.memory.stored_embedding_model(),
+        "openai/text-embedding-3-small"
+    );
+    drop(s1);
+
+    // Reopen idle store offline with HashingEmbeddings in LexicalFallback mode.
+    let s2 = open
+        .open_with_mode(
+            &path,
+            "project:p1",
+            Arc::clone(&hashing),
+            &cfg,
+            None,
+            MismatchMode::LexicalFallback,
+        )
+        .unwrap();
+    assert!(!s2.memory.is_vector_enabled());
+    assert_eq!(
+        s2.memory.stored_embedding_model(),
+        "openai/text-embedding-3-small"
+    );
+    // Write a note while in LexicalFallback: persisted without overwriting metadata/vectors.
+    s2.memory
+        .write_note(
+            bricks_memory::structured::NoteInput {
+                space: "project:p1".into(),
+                project_id: Some("p1".into()),
+                session_id: Some("s2".into()),
+                text: "staging cluster uses canary rollout".into(),
+            },
+            false,
+        )
+        .await
+        .unwrap();
+    let recall = s2
+        .memory
+        .recall(&bricks_memory::structured::RecallQuery::new("blue green rollout"))
+        .await
+        .unwrap();
+    assert!(
+        recall
+            .items
+            .iter()
+            .any(|i| i.episode.as_ref().is_some_and(|e| e.content.contains("blue green"))),
+        "lexical fallback should still recall existing episodes"
+    );
+    drop(s2);
+
+    // Reopen once semantic key returns: idle fallback handle is evicted and upgraded.
+    let s3 = open
+        .open_with_mode(
+            &path,
+            "project:p1",
+            semantic,
+            &cfg,
+            None,
+            MismatchMode::LexicalFallback,
+        )
+        .unwrap();
+    assert!(s3.memory.is_vector_enabled());
+    assert_eq!(s3.memory.stats().episodes, 2);
+}

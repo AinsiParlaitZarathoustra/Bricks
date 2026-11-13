@@ -1,10 +1,7 @@
 //! The long-term memory of the desktop: each run's memory, from the
-//! preference and the session's project as they are when it starts, and
-//! the reading and clearing of the stores for the settings.
-//!
-//! The preference (`memory_enabled`) is the only switch: the `[memory]`
-//! section of a project's `bricks.toml` is not read here. Reading and
-//! clearing work whatever the preference.
+//! preference, configured providers, and the session's project `bricks.toml`
+//! `[memory]` overrides when active. Reading and clearing work whatever the
+//! preference.
 
 use super::AppState;
 use crate::contract::*;
@@ -38,8 +35,11 @@ impl MemoryResolver for DesktopMemory {
             .get(&self.project_id)
             .ok()
             .filter(|p| !p.chats);
-        self.service
-            .for_run(project.as_ref().map(|p| (p.id.as_str(), p.name.as_str())))
+        self.service.for_run_in_project(
+            project
+                .as_ref()
+                .map(|p| (p.id.as_str(), p.name.as_str(), Some(Path::new(&p.path)))),
+        )
     }
 }
 
@@ -79,14 +79,23 @@ fn counts(c: bricks_memory::structured::EntryCounts) -> MemoryCounts {
     }
 }
 
-/// Whether the `bricks.toml` of `folder` has a `[memory]` section.
-fn toml_has_memory(folder: &Path) -> bool {
-    std::fs::read_to_string(folder.join("bricks.toml")).is_ok_and(|t| {
-        t.lines().any(|l| {
-            let l = l.trim_start();
-            l.starts_with("[memory]") || l.starts_with("[memory.")
-        })
-    })
+/// Whether the `bricks.toml` of `folder` has a `[memory]` setting that Desktop
+/// does not apply (either `memory_enabled` is off in Desktop preferences, or
+/// `path`/`space`/`recall_spaces` were set where Desktop enforces scoped stores).
+fn toml_section_ignored(folder: &Path, prefs_memory_enabled: bool) -> bool {
+    let Ok(text) = std::fs::read_to_string(folder.join("bricks.toml")) else {
+        return false;
+    };
+    let Ok(parsed) = bricks_memory::structured::MemoryConfig::parse_bricks_toml(&text) else {
+        return false;
+    };
+    if !parsed.has_section {
+        return false;
+    }
+    if !prefs_memory_enabled {
+        return parsed.explicit_enabled != Some(false);
+    }
+    parsed.explicit_path_or_space
 }
 
 impl AppState {
@@ -122,6 +131,7 @@ impl AppState {
             None => None,
         };
         let known: Vec<String> = self.projects.list().into_iter().map(|p| p.id).collect();
+        let prefs_memory_enabled = self.prefs.get().memory_enabled;
         let service = Arc::clone(&self.memory);
         tokio::task::spawn_blocking(move || {
             let global = service.counts(Scope::Global, None).map_err(ipc_error)?;
@@ -137,7 +147,8 @@ impl AppState {
                 global: counts(global),
                 project: project_counts,
                 legacy_store: service.legacy_store_exists(),
-                toml_section_ignored: folder.is_some_and(|f| toml_has_memory(Path::new(&f))),
+                toml_section_ignored: folder
+                    .is_some_and(|f| toml_section_ignored(Path::new(&f), prefs_memory_enabled)),
                 retired: service
                     .retired(&known)
                     .into_iter()
@@ -260,5 +271,38 @@ impl AppState {
             .await
             .map(|_| ())
             .map_err(ipc_error)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn toml_section_ignored_reflects_effective_overrides() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!toml_section_ignored(dir.path(), true));
+
+        std::fs::write(
+            dir.path().join("bricks.toml"),
+            "[memory]\nembeddings = \"openai\"\n",
+        )
+        .unwrap();
+        assert!(!toml_section_ignored(dir.path(), true));
+        assert!(toml_section_ignored(dir.path(), false));
+
+        std::fs::write(
+            dir.path().join("bricks.toml"),
+            "[memory]\nenabled = false\n",
+        )
+        .unwrap();
+        assert!(!toml_section_ignored(dir.path(), false));
+
+        std::fs::write(
+            dir.path().join("bricks.toml"),
+            "[memory]\nspace = \"project:custom\"\n",
+        )
+        .unwrap();
+        assert!(toml_section_ignored(dir.path(), true));
     }
 }

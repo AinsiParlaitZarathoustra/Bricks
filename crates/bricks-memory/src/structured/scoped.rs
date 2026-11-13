@@ -126,7 +126,11 @@ impl ScopedMemory {
         max_tokens: usize,
         warnings: Vec<String>,
     ) -> Result<Option<RecalledContext>> {
-        let groups = fuse(lists);
+        let groups = fuse(
+            lists,
+            self.processing.recall.project_weight,
+            self.processing.recall.global_weight,
+        );
         let now = chrono::Utc::now().timestamp_millis();
         let mut text = format!(
             "<long_term_memory as_of=\"{}\">\nRecalled from the project and global memories: \
@@ -220,9 +224,17 @@ struct Group<'a> {
 }
 
 /// Fuse ranked lists of the scopes (see the module): groups in order.
-fn fuse<'a>(lists: &'a [(MemoryScope, &'a SharedStore, Vec<RecallItem>)]) -> Vec<Group<'a>> {
+fn fuse<'a>(
+    lists: &'a [(MemoryScope, &'a SharedStore, Vec<RecallItem>)],
+    project_weight: f64,
+    global_weight: f64,
+) -> Vec<Group<'a>> {
     let mut groups: HashMap<String, Group<'a>> = HashMap::new();
     for (scope, store, items) in lists {
+        let weight = match scope {
+            MemoryScope::Project => project_weight,
+            MemoryScope::Global => global_weight,
+        };
         for (i, item) in items.iter().enumerate() {
             let g = groups.entry(content_key(item)).or_insert_with(|| Group {
                 score: 0.0,
@@ -230,7 +242,7 @@ fn fuse<'a>(lists: &'a [(MemoryScope, &'a SharedStore, Vec<RecallItem>)]) -> Vec
                 id: item.id.clone(),
                 sources: Vec::new(),
             });
-            g.score += 1.0 / (FUSION_K + (i + 1) as f64);
+            g.score += weight / (FUSION_K + (i + 1) as f64);
             g.from_project |= *scope == MemoryScope::Project;
             if item.id < g.id {
                 g.id = item.id.clone();
@@ -255,19 +267,20 @@ impl LongTermMemory for ScopedMemory {
         query: &str,
         max_tokens: usize,
     ) -> Result<Option<RecalledContext>> {
+        let limit = self.processing.recall.scoped_max_results.max(1);
         let mut warnings = Vec::new();
         let mut lists: Vec<(MemoryScope, &SharedStore, Vec<RecallItem>)> = Vec::new();
         for scope in [MemoryScope::Project, MemoryScope::Global] {
             match self.slot(scope) {
                 None => {}
                 Some(Err(why)) => warnings.push(unavailable(scope, why)),
-                Some(Ok(store)) => match self.ranked(store, query, RECALL_MAX, max_tokens).await {
+                Some(Ok(store)) => match self.ranked(store, query, limit, max_tokens).await {
                     Ok(items) => lists.push((scope, store, items)),
                     Err(e) => warnings.push(unavailable(scope, &e.to_string())),
                 },
             }
         }
-        self.render(&lists, RECALL_MAX, max_tokens, warnings)
+        self.render(&lists, limit, max_tokens, warnings)
     }
 
     async fn record_turns(&self, session_id: Option<&str>, turns: &[MemoryTurn]) -> Result<()> {

@@ -285,6 +285,12 @@ pub struct Agent {
     /// Token budget of the recalled block (also capped at a tenth of the
     /// prompt budget).
     pub(crate) memory_recall_tokens: usize,
+    /// Whether this agent records finished/progressed turns into long-term
+    /// memory (`false` for sub-agents).
+    pub(crate) capture_memory: bool,
+    /// Set during a run when turns or `memory_write` were recorded and need
+    /// post-run maintenance even if the run ended incomplete or cancelled.
+    pub(crate) needs_memory_maintenance: std::sync::atomic::AtomicBool,
     /// The block recalled for the current run, appended to the system prompt.
     pub(crate) recalled: parking_lot::Mutex<Option<String>>,
     session_id: Option<String>,
@@ -436,8 +442,10 @@ impl Agent {
                     let _ = event_tx.send(AgentEvent::Error(e.to_string())).await;
                 }
             }
-            if ok {
-                runner::maintain_memory(&agent, &cancel, Some(&event_tx)).await;
+            let had_capture = agent.take_needs_memory_maintenance();
+            if ok || had_capture {
+                let maint_cancel = runner::maintenance_cancel_token(&cancel);
+                runner::maintain_memory(&agent, &maint_cancel, Some(&event_tx)).await;
             }
         });
 
@@ -672,6 +680,16 @@ impl Agent {
     /// its own, recall, tools, capture and maintenance included.
     pub fn set_long_term_memory(&self, memory: Option<Arc<dyn bricks_memory::LongTermMemory>>) {
         *self.long_term_memory.write() = memory;
+    }
+
+    pub(crate) fn mark_needs_memory_maintenance(&self) {
+        self.needs_memory_maintenance
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    pub(crate) fn take_needs_memory_maintenance(&self) -> bool {
+        self.needs_memory_maintenance
+            .swap(false, std::sync::atomic::Ordering::SeqCst)
     }
 
     /// The session's permission policy, when this agent was built with one
@@ -1184,6 +1202,7 @@ pub struct AgentBuilder {
     memory: Option<Arc<dyn Memory>>,
     long_term_memory: Option<Arc<dyn bricks_memory::LongTermMemory>>,
     memory_recall_tokens: usize,
+    capture_memory: bool,
     session_id: Option<String>,
     hooks: Vec<Arc<dyn Hook>>,
     mcp_servers: Vec<McpServerConfig>,
@@ -1232,6 +1251,7 @@ impl Default for AgentBuilder {
             memory: None,
             long_term_memory: None,
             memory_recall_tokens: 1200,
+            capture_memory: true,
             session_id: None,
             hooks: Vec::new(),
             mcp_servers: Vec::new(),
@@ -1393,6 +1413,13 @@ impl AgentBuilder {
     /// than a tenth of the model's prompt budget).
     pub fn memory_recall_tokens(mut self, tokens: usize) -> Self {
         self.memory_recall_tokens = tokens;
+        self
+    }
+
+    /// Control whether this agent automatically records run turns into
+    /// long-term memory (default `true`; sub-agents set `false`).
+    pub fn capture_memory(mut self, capture: bool) -> Self {
+        self.capture_memory = capture;
         self
     }
 
@@ -1737,6 +1764,8 @@ impl AgentBuilder {
             memory: self.memory,
             long_term_memory: parking_lot::RwLock::new(self.long_term_memory),
             memory_recall_tokens: self.memory_recall_tokens,
+            capture_memory: self.capture_memory,
+            needs_memory_maintenance: std::sync::atomic::AtomicBool::new(false),
             recalled: parking_lot::Mutex::new(None),
             session_id: self.session_id,
             hooks: self.hooks,

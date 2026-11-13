@@ -382,6 +382,7 @@ pub(super) async fn run_compaction(
                 },
             )
             .await;
+            super::refresh_memory_after_compaction(agent, tx).await;
         }
         // A cancellation is not an attempt on this history: the next
         // compaction may try it again, and it never counts as a failure.

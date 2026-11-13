@@ -13,7 +13,7 @@
 //! is granted while it runs: the check and the start of the deletion are one
 //! step for both sides.
 
-use super::{MemoryConfig, MemoryError, MemoryResult, StructuredMemory};
+use super::{MemoryConfig, MemoryError, MemoryResult, MismatchMode, StructuredMemory};
 use bricks_embeddings::EmbeddingProvider;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -127,39 +127,83 @@ impl OpenMemories {
         config: &MemoryConfig,
         extractor: Option<Arc<dyn super::Extractor>>,
     ) -> MemoryResult<SharedStore> {
+        self.open_with_mode(
+            path,
+            space,
+            embedder,
+            config,
+            extractor,
+            MismatchMode::Error,
+        )
+    }
+
+    /// Open (or share) a store with an explicit [`MismatchMode`]. If an
+    /// existing cached handle has a conflicting configuration (for instance,
+    /// after providers or `bricks.toml` changed) and is no longer referenced
+    /// or in use, the idle handle is closed and reopened cleanly.
+    pub fn open_with_mode(
+        &self,
+        path: &Path,
+        space: &str,
+        embedder: Arc<dyn EmbeddingProvider>,
+        config: &MemoryConfig,
+        extractor: Option<Arc<dyn super::Extractor>>,
+        mismatch_mode: MismatchMode,
+    ) -> MemoryResult<SharedStore> {
         let key = canonical(path)?;
         let mut stores = self.stores.lock();
         if let Some(open) = stores.get(&key) {
             let (model, dims) = open.memory.embedding_identity();
-            let conflict = |param: &str, active: &str, asked: &str| {
-                MemoryError::Config(format!(
-                    "{}: {param} is `{active}` for the store already open, `{asked}` requested",
-                    key.display()
-                ))
-            };
-            if open.space != space {
-                return Err(conflict("the space", &open.space, space));
+            let wants_upgrade = !open.memory.is_vector_enabled()
+                && mismatch_mode != MismatchMode::LexicalFallback;
+            let mismatch = open.space != space
+                || model != embedder.model_id()
+                || dims != embedder.dimensions()
+                || wants_upgrade;
+            if mismatch {
+                if !open.in_use() && Arc::strong_count(&open.memory) == 1 {
+                    if let Some(stale) = stores.remove(&key) {
+                        let _ = stale.memory.close();
+                    }
+                } else {
+                    let conflict = |param: &str, active: &str, asked: &str| {
+                        MemoryError::Config(format!(
+                            "{}: {param} is `{active}` for the store already open, `{asked}` requested",
+                            key.display()
+                        ))
+                    };
+                    if open.space != space {
+                        return Err(conflict("the space", &open.space, space));
+                    }
+                    if model != embedder.model_id() {
+                        return Err(conflict(
+                            "the embedding model",
+                            &model,
+                            &embedder.model_id(),
+                        ));
+                    }
+                    if dims != embedder.dimensions() {
+                        return Err(conflict(
+                            "the embedding dimensions",
+                            &dims.to_string(),
+                            &embedder.dimensions().to_string(),
+                        ));
+                    }
+                    return Err(conflict(
+                        "the embedding mode",
+                        "lexical-fallback",
+                        "vector",
+                    ));
+                }
+            } else {
+                return Ok(open.clone());
             }
-            if model != embedder.model_id() {
-                return Err(conflict(
-                    "the embedding model",
-                    &model,
-                    &embedder.model_id(),
-                ));
-            }
-            if dims != embedder.dimensions() {
-                return Err(conflict(
-                    "the embedding dimensions",
-                    &dims.to_string(),
-                    &embedder.dimensions().to_string(),
-                ));
-            }
-            return Ok(open.clone());
         }
         let config = config.clone().with_space(space);
         let mut builder = StructuredMemory::builder(embedder)
             .path(&key)
-            .config(config);
+            .config(config)
+            .mismatch_mode(mismatch_mode);
         if let Some(x) = extractor {
             builder = builder.extractor(x);
         }

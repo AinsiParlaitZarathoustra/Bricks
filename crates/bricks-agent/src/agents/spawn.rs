@@ -65,6 +65,9 @@ pub struct DelegationSettings {
     /// Bytes of profile skills preloaded into a child, in total. A profile
     /// whose skills exceed it is refused (nothing is cut).
     pub skills_max_bytes: usize,
+    /// Allow sub-agents to use `memory_write` by default (profiles can
+    /// explicitly set `memory: off | read_only | read_write`).
+    pub subagent_memory_write: bool,
 }
 
 impl Default for DelegationSettings {
@@ -82,6 +85,7 @@ impl Default for DelegationSettings {
             admission_timeout_ms: 60_000,
             background_drain_ms: 600_000,
             skills_max_bytes: 24_000,
+            subagent_memory_write: false,
         }
     }
 }
@@ -490,6 +494,7 @@ pub fn neutral_profile() -> Arc<AgentProfile> {
         tools: "inherit".into(),
         isolation: Isolation::Auto,
         background: false,
+        memory: None,
         skills: Vec::new(),
         instructions: String::new(),
         source: ProfileSource {
@@ -782,6 +787,10 @@ fn parent_ctx(ctx: &ToolContext, depth: u32) -> ParentCtx {
             .extensions
             .get::<bricks_tools::shell::ShellConfig>()
             .map(|c| (*c).clone()),
+        long_term_memory: ctx
+            .extensions
+            .get::<bricks_tools::memory_tools::RunMemory>()
+            .and_then(|m| m.0.clone()),
     }
 }
 
@@ -821,6 +830,8 @@ struct ParentCtx {
     /// in place: a worktree child uses its origin project's skills). The
     /// parent's activations are not passed on.
     skills: Option<bricks_skills::SkillAccess>,
+    /// The parent's long-term memory handle for this run, if active.
+    long_term_memory: Option<Arc<dyn bricks_memory::LongTermMemory>>,
 }
 
 /// One per session (or embedding): shared by every delegation tool.
@@ -2021,6 +2032,29 @@ impl AgentSpawner {
         if !tools.iter().any(|t| t.name() == "Messagent") {
             tools.push(Box::new(super::messagent::MessagentTool));
         }
+        let memory_access = profile.memory.unwrap_or({
+            if self.bricks.agents.subagent_memory_write {
+                super::profile::MemoryAccess::ReadWrite
+            } else {
+                super::profile::MemoryAccess::ReadOnly
+            }
+        });
+        let child_memory = match memory_access {
+            super::profile::MemoryAccess::Off => None,
+            super::profile::MemoryAccess::ReadOnly | super::profile::MemoryAccess::ReadWrite => {
+                pc.long_term_memory.clone()
+            }
+        };
+        if child_memory.is_some() {
+            if !tools.iter().any(|t| t.name() == "memory_search") {
+                tools.push(Box::new(bricks_tools::memory_tools::MemorySearchTool));
+            }
+            if memory_access == super::profile::MemoryAccess::ReadWrite
+                && !tools.iter().any(|t| t.name() == "memory_write")
+            {
+                tools.push(Box::new(bricks_tools::memory_tools::MemoryWriteTool));
+            }
+        }
         let names: Vec<String> = tools.iter().map(|t| t.name().to_string()).collect();
         let ext = subagent::child_extensions(pc.depth);
         // Services: the code engine only within the same workspace (a
@@ -2051,6 +2085,7 @@ impl AgentSpawner {
         // Assembled for each of its requests, from its own tools, model,
         // directory and plan.
         let mut prompt = child_prompt_options(profile, cwd);
+        prompt.has_memory = child_memory.is_some();
         let mut skills = Vec::new();
         let mut preloaded = Vec::new();
         for a in preload {
@@ -2081,7 +2116,11 @@ impl AgentSpawner {
             .bricks_config(self.bricks.clone())
             .extensions(ext)
             .system_prompt_options(prompt)
+            .capture_memory(false)
             .cancel_token(cancel.child_token());
+        if let Some(ltm) = child_memory {
+            b = b.long_term_memory(ltm);
+        }
         if let Some(r) = reasoning {
             b = b.reasoning_profile(r);
         }

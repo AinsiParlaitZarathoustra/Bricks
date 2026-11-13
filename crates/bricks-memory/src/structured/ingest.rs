@@ -221,11 +221,13 @@ impl StructuredMemory {
                 P::new().list("states", &["extracted".into()]),
             )?
             .len();
-        let model = self.projection.read().model.clone();
-        n += self
-            .store
-            .query(q::UNEMBEDDED, P::new().s("model", &model))?
-            .len();
+        if self.vector_enabled {
+            let model = self.projection.read().model.clone();
+            n += self
+                .store
+                .query(q::UNEMBEDDED, P::new().s("model", &model))?
+                .len();
+        }
         Ok(n)
     }
 
@@ -737,6 +739,9 @@ impl StructuredMemory {
     /// stays without a vector for the next pass.
     pub async fn embed_pending_until(&self, cancel: &CancellationToken) -> IngestReport {
         let mut report = IngestReport::default();
+        if !self.vector_enabled {
+            return report;
+        }
         let report = &mut report;
         let model = self.projection.read().model.clone();
         let rows = match self.store.query(q::UNEMBEDDED, P::new().s("model", &model)) {

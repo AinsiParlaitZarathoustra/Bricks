@@ -133,16 +133,23 @@ pub async fn run_agent(agent: &Agent, input: &UserInput) -> Result<AgentOutput> 
     drop(event_rx);
 
     let result = run_agent_streaming(agent, input, event_tx).await;
+    let had_capture = agent.take_needs_memory_maintenance();
 
     match result {
         Ok(output) => {
             agent.emit(AgentEvent::Complete(output.clone()));
-            let cancel = agent.run_cancellation();
-            maintain_memory(agent, &cancel, None).await;
+            let run_cancel = agent.run_cancellation();
+            let maint_cancel = maintenance_cancel_token(&run_cancel);
+            maintain_memory(agent, &maint_cancel, None).await;
             Ok(output)
         }
         Err(e) => {
             agent.emit(AgentEvent::Error(e.to_string()));
+            if had_capture {
+                let run_cancel = agent.run_cancellation();
+                let maint_cancel = maintenance_cancel_token(&run_cancel);
+                maintain_memory(agent, &maint_cancel, None).await;
+            }
             Err(e)
         }
     }
@@ -179,6 +186,13 @@ pub async fn run_prepared(
     .await
 }
 
+#[derive(Default)]
+struct RunCaptureState {
+    start_idx: usize,
+    tool_calls: Vec<ToolCallRecord>,
+    recorded: bool,
+}
+
 pub(crate) async fn run_prepared_controlled(
     agent: &Agent,
     input: &UserInput,
@@ -187,6 +201,7 @@ pub(crate) async fn run_prepared_controlled(
     controls: Option<Arc<crate::events::StreamControls>>,
     permissions: Arc<dyn bricks_tools::permissions::PermissionPolicy>,
 ) -> Result<AgentOutput> {
+    let mut capture = RunCaptureState::default();
     let result = run_loop(
         agent,
         input,
@@ -194,6 +209,7 @@ pub(crate) async fn run_prepared_controlled(
         &cancel,
         controls.as_deref(),
         permissions,
+        &mut capture,
     )
     .await;
     end_root_run_commands(agent).await;
@@ -211,6 +227,25 @@ pub(crate) async fn run_prepared_controlled(
         }
         repair_interrupted(agent, why);
         inject_pending(agent, controls.as_deref());
+        if !capture.recorded && has_valid_run_progress(agent, capture.start_idx, &capture.tool_calls)
+        {
+            let partial_assistant = agent
+                .messages
+                .lock()
+                .iter()
+                .skip(capture.start_idx)
+                .rev()
+                .find(|m| m.role == Role::Assistant)
+                .and_then(|m| m.get_text().map(str::to_string));
+            capture_run_turns(
+                agent,
+                &input.text,
+                partial_assistant.as_deref(),
+                &capture.tool_calls,
+                Some(&event_tx),
+            )
+            .await;
+        }
         match save_session(agent).await {
             Ok(true) => {
                 if let Some(session_id) = &agent.session_id {
@@ -255,6 +290,298 @@ async fn end_root_run_commands(agent: &Agent) {
     }
 }
 
+/// Returns a cancellation token for post-run memory maintenance: links to
+/// `run_cancel` when the run completed normally, or creates a fresh
+/// timeout-bounded token if the run was already cancelled after valid progress.
+pub(crate) fn maintenance_cancel_token(
+    run_cancel: &tokio_util::sync::CancellationToken,
+) -> tokio_util::sync::CancellationToken {
+    if !run_cancel.is_cancelled() {
+        return run_cancel.child_token();
+    }
+    let token = tokio_util::sync::CancellationToken::new();
+    let timer_token = token.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+        timer_token.cancel();
+    });
+    token
+}
+
+fn compact_snippet(text: &str, max_chars: usize) -> String {
+    let mut out = String::new();
+    let mut prev_space = false;
+    let mut count = 0usize;
+    for ch in text.trim().chars() {
+        let ch = if ch.is_whitespace() { ' ' } else { ch };
+        if ch == ' ' && prev_space {
+            continue;
+        }
+        prev_space = ch == ' ';
+        if count >= max_chars {
+            out.push_str("...");
+            break;
+        }
+        out.push(ch);
+        count += 1;
+    }
+    out
+}
+
+/// Build a contextualized recall query from the current prompt and compact
+/// recent session messages (prioritizing user/assistant dialogue without
+/// trailing duplicate of `prompt`).
+pub(crate) fn build_recall_query(prompt: &str, history: &[Message]) -> String {
+    let prompt_trimmed = prompt.trim();
+    let mut skipped_trailing_prompt = false;
+    let mut context_lines = Vec::new();
+    let mut total_chars = 0usize;
+
+    for msg in history.iter().rev() {
+        if msg.role != Role::User && msg.role != Role::Assistant {
+            continue;
+        }
+        let Some(text) = msg.get_text() else {
+            continue;
+        };
+        let t = text.trim();
+        if t.is_empty() || t.starts_with("[system]") {
+            continue;
+        }
+        if !skipped_trailing_prompt && msg.role == Role::User && t == prompt_trimmed {
+            skipped_trailing_prompt = true;
+            continue;
+        }
+        let role_label = if msg.role == Role::User {
+            "user"
+        } else {
+            "assistant"
+        };
+        let snippet = compact_snippet(t, 160);
+        if snippet.is_empty() {
+            continue;
+        }
+        let line = format!("- {role_label}: {snippet}");
+        if total_chars + line.len() > 600 && !context_lines.is_empty() {
+            break;
+        }
+        total_chars += line.len();
+        context_lines.push(line);
+        if context_lines.len() >= 4 {
+            break;
+        }
+    }
+
+    if context_lines.is_empty() {
+        return prompt.to_string();
+    }
+    context_lines.reverse();
+    if prompt_trimmed.is_empty() {
+        return context_lines.join("\n");
+    }
+    format!("{prompt_trimmed}\nContext:\n{}", context_lines.join("\n"))
+}
+
+pub(crate) async fn recall_memory_for_run(
+    agent: &Agent,
+    query: &str,
+    event_tx: Option<&mpsc::Sender<AgentEvent>>,
+    notes: &mut Vec<String>,
+) {
+    *agent.recalled.lock() = None;
+    let Some(ltm) = agent.long_term_memory() else {
+        return;
+    };
+    let budget = (agent.memory_recall_tokens as u64)
+        .min(context_status(agent).input_limit / 10)
+        .max(1) as usize;
+    match ltm.recall_context(query, budget).await {
+        Ok(Some(r)) if r.items == 0 => {
+            notes.extend(r.warnings);
+            send(
+                agent,
+                event_tx,
+                AgentEvent::MemoryRecalled {
+                    items: 0,
+                    tokens: 0,
+                    omitted: 0,
+                    budget,
+                },
+            )
+            .await;
+        }
+        Ok(Some(r)) => {
+            notes.extend(r.warnings);
+            send(
+                agent,
+                event_tx,
+                AgentEvent::MemoryRecalled {
+                    items: r.items,
+                    tokens: r.tokens,
+                    omitted: r.omitted,
+                    budget,
+                },
+            )
+            .await;
+            *agent.recalled.lock() = Some(r.text);
+        }
+        Ok(None) => {
+            send(
+                agent,
+                event_tx,
+                AgentEvent::MemoryRecalled {
+                    items: 0,
+                    tokens: 0,
+                    omitted: 0,
+                    budget,
+                },
+            )
+            .await;
+        }
+        Err(e) => notes.push(format!("long-term memory unavailable for this run: {e}")),
+    }
+}
+
+pub(crate) async fn refresh_memory_after_compaction(
+    agent: &Agent,
+    event_tx: Option<&mpsc::Sender<AgentEvent>>,
+) {
+    if agent.long_term_memory().is_none() {
+        return;
+    }
+    let msgs = agent.messages.lock().clone();
+    let anchor = msgs
+        .iter()
+        .rev()
+        .find_map(|m| {
+            if m.role != Role::User {
+                return None;
+            }
+            m.get_text()
+                .map(str::trim)
+                .filter(|t| !t.is_empty() && !t.starts_with("[system]"))
+                .map(str::to_string)
+        })
+        .unwrap_or_default();
+    let query = build_recall_query(&anchor, &msgs);
+    if query.trim().is_empty() {
+        return;
+    }
+    let mut notes = Vec::new();
+    recall_memory_for_run(agent, &query, event_tx, &mut notes).await;
+    for note in notes {
+        send(agent, event_tx, AgentEvent::Status(format!("Configuration: {note}"))).await;
+    }
+}
+
+fn summarize_tool_input(input: &serde_json::Value) -> String {
+    if let Some(obj) = input.as_object() {
+        for key in ["file_path", "path", "command", "query", "pattern", "url"] {
+            if let Some(val) = obj.get(key).and_then(|v| v.as_str()) {
+                return format!("{key}={}", compact_snippet(val, 72));
+            }
+        }
+    }
+    compact_snippet(&input.to_string(), 72)
+}
+
+/// Compact summary of qualifying tool calls so structured memory captures
+/// `Origin::ToolOutput` facts/decisions without inflating store size.
+pub(crate) fn summarize_tool_outputs(tool_calls: &[ToolCallRecord]) -> Option<String> {
+    let qualifying: Vec<&ToolCallRecord> = tool_calls
+        .iter()
+        .filter(|tc| tc.name != "memory_search" && tc.name != "memory_write")
+        .collect();
+    if qualifying.is_empty() {
+        return None;
+    }
+    let total = qualifying.len();
+    let start = total.saturating_sub(8);
+    let mut lines = Vec::new();
+    lines.push(format!("Tool execution summary ({total} calls):"));
+    let mut len = lines[0].len();
+    for tc in &qualifying[start..] {
+        let arg = summarize_tool_input(&tc.input);
+        let status = if tc.is_error { "error" } else { "ok" };
+        let out = compact_snippet(&tc.result, 140);
+        let line = if arg.is_empty() {
+            format!("- {} [{status}]: {out}", tc.name)
+        } else {
+            format!("- {}({arg}) [{status}]: {out}", tc.name)
+        };
+        if len + line.len() + 1 > 1500 && lines.len() > 1 {
+            break;
+        }
+        len += line.len() + 1;
+        lines.push(line);
+    }
+    Some(lines.join("\n"))
+}
+
+fn has_valid_run_progress(agent: &Agent, start_idx: usize, tool_calls: &[ToolCallRecord]) -> bool {
+    if !tool_calls.is_empty() {
+        return true;
+    }
+    agent
+        .messages
+        .lock()
+        .iter()
+        .skip(start_idx)
+        .any(|m| m.role == Role::Assistant && m.get_text().is_some_and(|t| !t.trim().is_empty()))
+}
+
+async fn capture_run_turns(
+    agent: &Agent,
+    prompt: &str,
+    assistant_text: Option<&str>,
+    tool_calls: &[ToolCallRecord],
+    event_tx: Option<&mpsc::Sender<AgentEvent>>,
+) {
+    if !agent.capture_memory {
+        return;
+    }
+    let Some(ltm) = agent.long_term_memory() else {
+        return;
+    };
+    let now = chrono::Utc::now().timestamp_millis();
+    let mut turns = Vec::new();
+    if !prompt.trim().is_empty() {
+        turns.push(bricks_memory::MemoryTurn {
+            role: "user".into(),
+            content: prompt.to_string(),
+            at: Some(now),
+        });
+    }
+    if let Some(tool_summary) = summarize_tool_outputs(tool_calls) {
+        turns.push(bricks_memory::MemoryTurn {
+            role: "tool".into(),
+            content: tool_summary,
+            at: Some(now),
+        });
+    }
+    if let Some(text) = assistant_text.filter(|t| !t.trim().is_empty()) {
+        turns.push(bricks_memory::MemoryTurn {
+            role: "assistant".into(),
+            content: text.to_string(),
+            at: Some(now),
+        });
+    }
+    if turns.is_empty() {
+        return;
+    }
+    match ltm.record_turns(agent.session_id.as_deref(), &turns).await {
+        Ok(()) => agent.mark_needs_memory_maintenance(),
+        Err(e) => {
+            send(
+                agent,
+                event_tx,
+                AgentEvent::Status(format!("Long-term memory not updated: {e}")),
+            )
+            .await;
+        }
+    }
+}
+
 /// The long-term memory's maintenance after a run, reported as its own
 /// phase: started, then finished (completed, cancelled or failed). The
 /// answer was already delivered; a failure here never changes it.
@@ -279,6 +606,7 @@ async fn run_loop(
     cancel: &tokio_util::sync::CancellationToken,
     controls: Option<&crate::events::StreamControls>,
     permissions: Arc<dyn bricks_tools::permissions::PermissionPolicy>,
+    capture: &mut RunCaptureState,
 ) -> Result<AgentOutput> {
     let prompt = input.text.as_str();
     // Nothing to do: refused before the session is loaded or a request sent.
@@ -323,60 +651,13 @@ async fn run_loop(
     let mut notes = std::mem::take(&mut *agent.config_notes.lock());
     notes.extend(agent.connect_mcp().await);
     agent.refresh_lent_tools();
-    // Long-term memory: recall for this prompt, within its budget (at most
-    // a tenth of the prompt budget), appended to the system prompt.
-    *agent.recalled.lock() = None;
-    if let Some(ltm) = &long_term {
-        let budget = (agent.memory_recall_tokens as u64)
-            .min(context_status(agent).input_limit / 10)
-            .max(1) as usize;
-        match ltm.recall_context(prompt, budget).await {
-            Ok(Some(r)) if r.items == 0 => {
-                // Nothing recalled, and part of the memory unavailable.
-                notes.extend(r.warnings);
-                send(
-                    agent,
-                    Some(&event_tx),
-                    AgentEvent::MemoryRecalled {
-                        items: 0,
-                        tokens: 0,
-                        omitted: 0,
-                        budget,
-                    },
-                )
-                .await;
-            }
-            Ok(Some(r)) => {
-                notes.extend(r.warnings);
-                send(
-                    agent,
-                    Some(&event_tx),
-                    AgentEvent::MemoryRecalled {
-                        items: r.items,
-                        tokens: r.tokens,
-                        omitted: r.omitted,
-                        budget,
-                    },
-                )
-                .await;
-                *agent.recalled.lock() = Some(r.text);
-            }
-            Ok(None) => {
-                send(
-                    agent,
-                    Some(&event_tx),
-                    AgentEvent::MemoryRecalled {
-                        items: 0,
-                        tokens: 0,
-                        omitted: 0,
-                        budget,
-                    },
-                )
-                .await;
-            }
-            Err(e) => notes.push(format!("long-term memory unavailable for this run: {e}")),
-        }
-    }
+    // Long-term memory: recall for this prompt enriched with recent session
+    // context, within its budget (at most a tenth of the prompt budget).
+    let recall_query = {
+        let msgs = agent.messages.lock();
+        build_recall_query(prompt, &msgs)
+    };
+    recall_memory_for_run(agent, &recall_query, Some(&event_tx), &mut notes).await;
     for note in notes {
         send(
             agent,
@@ -405,7 +686,7 @@ async fn run_loop(
     }
     let mut overflow_recoveries: u32 = 0;
 
-    let mut tool_calls: Vec<ToolCallRecord> = Vec::new();
+    capture.start_idx = agent.messages.lock().len();
     let mut turn: u32 = 0;
     let mut last_stop_reason: StopReason;
     let mut _last_usage = Usage::default();
@@ -1075,7 +1356,7 @@ async fn run_loop(
             if agent.benchmark_mode
                 && let Some((message, status)) = benchmark_nudge(
                     prompt,
-                    &tool_calls,
+                    &capture.tool_calls,
                     turn,
                     &mut completion_verified,
                     &mut benchmark_retries,
@@ -1296,7 +1577,10 @@ async fn run_loop(
                     p.result.is_error,
                     p.own_output.clone(),
                 ));
-                tool_calls.push(ToolCallRecord {
+                if p.name == "memory_write" && !p.result.is_error {
+                    agent.mark_needs_memory_maintenance();
+                }
+                capture.tool_calls.push(ToolCallRecord {
                     name: p.name,
                     id: p.id.clone(),
                     input: p.input,
@@ -1427,36 +1711,23 @@ async fn run_loop(
     // Remember the exchange durably (failures are reported, never fatal).
     // Processing it — extraction, embeddings — is the maintenance phase
     // that follows the answer.
-    if let Some(ltm) = &long_term {
-        let now = chrono::Utc::now().timestamp_millis();
-        let mut turns = vec![bricks_memory::MemoryTurn {
-            role: "user".into(),
-            content: prompt.to_string(),
-            at: Some(now),
-        }];
-        if let Some(text) = last_message.get_text().filter(|t| !t.trim().is_empty()) {
-            turns.push(bricks_memory::MemoryTurn {
-                role: "assistant".into(),
-                content: text.to_string(),
-                at: Some(now),
-            });
-        }
-        if let Err(e) = ltm.record_turns(agent.session_id.as_deref(), &turns).await {
-            send(
-                agent,
-                Some(&event_tx),
-                AgentEvent::Status(format!("Long-term memory not updated: {e}")),
-            )
-            .await;
-        }
-    }
+    let assistant_text = last_message.get_text().map(str::to_string);
+    capture_run_turns(
+        agent,
+        prompt,
+        assistant_text.as_deref(),
+        &capture.tool_calls,
+        Some(&event_tx),
+    )
+    .await;
+    capture.recorded = true;
 
     let output = AgentOutput {
         message: last_message,
         usage: agent.cumulative_usage.lock().clone(),
         stop_reason: last_stop_reason,
         turns: turn,
-        tool_calls,
+        tool_calls: std::mem::take(&mut capture.tool_calls),
         termination,
     };
 
@@ -1965,5 +2236,124 @@ mod compaction_cancel_tests {
         assert!(!st.disabled);
         assert_eq!(st.last_unsuccessful, None);
         assert_eq!(st.applied, 0);
+    }
+
+    #[test]
+    fn build_recall_query_enriches_prompt_with_recent_context_without_duplicating_prompt() {
+        let history = vec![
+            Message::user("We run Acme Gateway on port 8443"),
+            Message::assistant("Understood, Acme Gateway uses TLS on 8443."),
+            Message::user("What about the timeout?"),
+        ];
+        let q = build_recall_query("What about the timeout?", &history);
+        assert!(q.starts_with("What about the timeout?\nContext:\n"), "{q}");
+        assert!(q.contains("Acme Gateway on port 8443"), "{q}");
+        assert!(!q.contains("- user: What about the timeout?"), "{q}");
+
+        // Empty history stays verbatim.
+        assert_eq!(build_recall_query("hello", &[]), "hello");
+    }
+
+    #[test]
+    fn summarize_tool_outputs_skips_memory_tools_and_bounds_output() {
+        assert!(summarize_tool_outputs(&[]).is_none());
+        let mem_only = vec![ToolCallRecord {
+            name: "memory_search".into(),
+            id: "1".into(),
+            input: serde_json::json!({"query": "x"}),
+            result: "ok".into(),
+            is_error: false,
+            duration: std::time::Duration::from_millis(1),
+        }];
+        assert!(summarize_tool_outputs(&mem_only).is_none());
+
+        let calls = vec![ToolCallRecord {
+            name: "Edit".into(),
+            id: "2".into(),
+            input: serde_json::json!({"file_path": "src/main.rs"}),
+            result: "Updated   src/main.rs\nwith\npooling = 16".into(),
+            is_error: false,
+            duration: std::time::Duration::from_millis(5),
+        }];
+        let s = summarize_tool_outputs(&calls).unwrap();
+        assert!(s.contains("Edit(file_path=src/main.rs) [ok]:"), "{s}");
+        assert!(s.contains("pooling = 16"), "{s}");
+    }
+
+    #[tokio::test]
+    async fn refresh_memory_after_compaction_updates_recalled_block_from_compacted_history() {
+        use bricks_memory::{LongTermMemory, MaintenanceReport, MemoryTurn, RecalledContext};
+
+        struct SpyLtm {
+            seen_queries: parking_lot::Mutex<Vec<String>>,
+        }
+        #[async_trait::async_trait]
+        impl LongTermMemory for SpyLtm {
+            async fn recall_context(
+                &self,
+                query: &str,
+                _max_tokens: usize,
+            ) -> Result<Option<RecalledContext>> {
+                self.seen_queries.lock().push(query.to_string());
+                Ok(Some(RecalledContext {
+                    text: "<long_term_memory>\nRefreshed: failover uses 9443\n</long_term_memory>"
+                        .into(),
+                    tokens: 12,
+                    items: 1,
+                    omitted: 0,
+                    warnings: Vec::new(),
+                }))
+            }
+            async fn record_turns(
+                &self,
+                _session_id: Option<&str>,
+                _turns: &[MemoryTurn],
+            ) -> Result<()> {
+                Ok(())
+            }
+            async fn maintain(
+                &self,
+                _cancel: &tokio_util::sync::CancellationToken,
+            ) -> Result<MaintenanceReport> {
+                Ok(MaintenanceReport::default())
+            }
+        }
+
+        let spy = Arc::new(SpyLtm {
+            seen_queries: parking_lot::Mutex::new(Vec::new()),
+        });
+        let agent = Agent::builder()
+            .provider(crate::control::scripted::ScriptedProvider::new(
+                "a",
+                crate::control::scripted::Script::new(vec![]),
+            ))
+            .with_messages(vec![
+                Message::user("Summary: Acme Gateway uses failover port 9443."),
+                Message::assistant("Noted."),
+                Message::user("Continue verification"),
+            ])
+            .long_term_memory(spy.clone())
+            .build()
+            .unwrap();
+        *agent.recalled.lock() = Some("stale recall".into());
+
+        let (tx, mut rx) = mpsc::channel(8);
+        refresh_memory_after_compaction(&agent, Some(&tx)).await;
+
+        let queries = spy.seen_queries.lock().clone();
+        assert_eq!(queries.len(), 1);
+        assert!(queries[0].contains("Continue verification"), "{queries:?}");
+        assert!(queries[0].contains("failover port 9443"), "{queries:?}");
+        assert!(
+            agent
+                .recalled
+                .lock()
+                .as_deref()
+                .is_some_and(|s| s.contains("failover uses 9443"))
+        );
+        match rx.recv().await {
+            Some(AgentEvent::MemoryRecalled { items: 1, .. }) => {}
+            other => panic!("expected MemoryRecalled(items: 1), got {other:?}"),
+        }
     }
 }
