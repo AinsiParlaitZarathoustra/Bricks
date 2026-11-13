@@ -38,12 +38,14 @@ The report ran 10 workers with 100 queries each, so 1,000 samples, against a gra
 
 The report notes that the binary's banner still announced 100 agents, while the code ran 10 workers. The 100,000-node step was not run, and its zero fields in the JSON output are not measurements.
 
-## Reproduce
+## Reproduce on current code
 
-From the repository root:
+The old `memory_bench.rs` example and standalone `GraphMemory` API have been removed. `bricks-memory` now provides structured memory (`crates/bricks-memory/src/structured/`), which stores episodes, entities, and facts in Grafeo alongside a `usearch` vector index.
+
+To measure structured memory latency on a synthetic corpus from the repository root:
 
 ```bash
-cargo run --release -p bricks-memory --features graph --example memory_bench
+cargo run --release -p bricks-memory --features structured --example measure_memory
 ```
 
-The example is `crates/bricks-memory/examples/memory_bench.rs`. It is the successor of the `memory_bench` example that lived in the removed `abstract-cli` package.
+The example lives at `crates/bricks-memory/examples/measure_memory.rs` and reports ingestion time per episode, reopen time, and recall p50/p95 over 200 queries.

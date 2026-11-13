@@ -1,8 +1,11 @@
 # Memory
 
-This page is a summary. The reference is [Memory API](/docs/api-memory) on the documentation site.
+This page is a summary. The full reference is [Memory API](/docs/api-memory) on the documentation site.
 
-- A conversation memory implements the `Memory` trait: `store` and `load` a session, `search`, `sessions` and `delete`. `JsonlMemory` keeps each session as JSON lines in a directory.
-- Attach a memory with `Agent::builder().memory(...)` and a `session_id`. The history of that session is loaded when the agent is built.
-- `MemoryManager` builds a context for the system prompt from the `CLAUDE.md` instruction files and the `MEMORY.md` index of the memory files. It does not add graph results.
-- `GraphMemory` stores memories as graph nodes, with tags, links, confidence decay and revalidation. It needs the `graph` feature of `bricks-memory`, which the facade does not enable.
+Bricks separates short-term session history from long-term structured memory:
+
+- **Session history (`Memory` trait):** Saves and reloads conversation messages by `session_id` (for example with `JsonlMemory` in `bricks-memory`). Attach it with `Agent::builder().memory(...)` and `.session_id(...)`.
+- **Long-term memory (`StructuredMemory`, feature `structured`):** Stores episodes, entities, and facts in a Grafeo database and indexes them for vector, lexical, and relational recall.
+- **Scoped runs (`ScopedMemory`):** Combines a project store and a global store for a single run. Recall reads from both stores, while automatic capture writes only to the project store.
+- **Notes and length limit:** Models can search memory with `memory_search` and save concise notes with `memory_write`. Each note is capped at `NOTE_MAX_CHARS` (280 characters).
+- **Deleting entries:** `StructuredMemory::delete_entry(EntryKind, id)` removes an individual note, exchange, or fact. The desktop app exposes this in `MemoryView`.

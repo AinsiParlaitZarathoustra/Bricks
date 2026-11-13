@@ -91,7 +91,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 fn load_docs() -> Vec<(u64, String)> {
-    // your loader — reads files, DB rows, API responses, etc.
+    // your loader: reads files, DB rows, API responses, etc.
     vec![]
 }
 ```
@@ -168,7 +168,7 @@ let agent = Agent::builder()
 
 ## Writing a custom provider
 
-Implement the trait for any other API — here is Cohere as an example.
+Implement the trait for any other API. Here is Cohere as an example.
 
 ```rust
 use async_trait::async_trait;

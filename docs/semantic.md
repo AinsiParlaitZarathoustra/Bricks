@@ -1,43 +1,45 @@
 # Code understanding: `bricks-semantic`
 
-One engine per workspace (`SemanticEngine`), shared through an
-`Arc<SemanticEngine>` by every client of the process: the agents'
-`CodeScout` tool, their sub-agents, and frontends through the controller
-(`search` command, `/search` in the terminal interface). It answers typed
-queries with **sourced** results (path, exact range, content revision, how
-the relation was established) and **bounded** ones (limits, context budget).
-It does not claim to understand the whole program.
+`bricks-semantic` helps Bricks find and understand code. There is one engine
+per workspace. Everything in the process shares it: the `CodeScout` tool, the
+sub-agents, and the frontends (the `search` command and `/search` in the
+terminal interface).
 
-## Backends and routing
+An answer always says where it comes from: path, exact range, and how the
+link was found. Answers are bounded by limits and by a token budget. The
+engine does not claim to understand the whole program.
 
-| backend | library | used for |
+No language model, embedding or vector index is used here.
+
+## Three backends
+
+| backend | what it uses | used for |
 |---|---|---|
-| lexical | ripgrep's `ignore` (walker) and `grep` (matcher, searcher); no `rg` binary | text and regex search, candidate files |
-| syntax | Tree-sitter (Rust, TypeScript, TSX, JavaScript via the TSX grammar, Python, Go) | definitions by name, enclosing function/type/block, signatures |
-| LSP | `bricks-lsp` (optional; servers started on demand, shared) | definition, references, hover, diagnostics |
+| lexical | ripgrep's libraries (`ignore`, `grep`). No `rg` binary needed. | text and regex search |
+| syntax | Tree-sitter (Rust, TypeScript, TSX, JavaScript through the TSX grammar, Python, Go) | definitions by name, the enclosing function or type, signatures |
+| LSP | `bricks-lsp`. Optional. Servers start on demand and are shared. | definition, references, hover, diagnostics |
 
-Routing is deterministic (`planner.rs`) and reported in every response
-(`plan.intent`, `plan.reason`, `plan.steps`, `plan.fallbacks`):
+The engine picks the route by fixed rules (`planner.rs`). Every response
+reports its plan (`plan.intent`, `plan.reason`, `plan.steps`,
+`plan.fallbacks`).
 
 | intent | route |
 |---|---|
-| `text_search` | lexical; syntax context only if asked (`context = function/type/block`) |
-| `find_symbol` | lexical (whole word, code files) → syntax definitions with that name, confirmed (or completed) by `workspace/symbol` when a server **already runs**; homonyms are all listed with `ambiguity` |
-| `definition`, `references` with a target | LSP directly (started if allowed), then syntax context |
-| `definition`, `references` with a name only | candidates first; one candidate → its position goes to the LSP; several → `ambiguous`, nothing chosen |
-| `understand` | enclosing scope (syntax) + hover, definition and, from `normal`, a few references (LSP); on a whole file (`target = file`), its outline: document symbols (LSP), else the syntax tree's definitions, signatures only |
-| `diagnostics` | LSP, with the freshness state |
-| `auto` | a target → `understand`; an identifier → `find_symbol` (text search if no definition); anything else → `text_search` |
+| `text_search` | lexical. Syntax context only if asked. |
+| `find_symbol` | lexical, then syntax definitions with that name. A running language server confirms them. Same names are all listed as `ambiguity`. |
+| `definition`, `references` with a position | language server first, then syntax context |
+| `definition`, `references` with a name only | find candidates first. One candidate goes to the server. Several candidates give `ambiguous` and nothing is chosen. |
+| `understand` | enclosing scope (syntax), plus hover, definition and a few references (LSP). For a whole file, its outline. |
+| `diagnostics` | language server, with a freshness state |
+| `auto` | a target means `understand`. An identifier means `find_symbol`. Anything else means `text_search`. |
 
-No LLM, embedding model or vector index is involved. A text search never
-starts a language server.
+A text search never starts a language server.
 
-Fallbacks keep what worked and say what is missing: without a server, a
-definition becomes "definitions named `x` by syntax; which one the target
-uses is not established" (`partial`, or `ambiguous` with several), and
-references become **text mentions, not confirmed references** (`partial`).
+When a server is missing, the engine keeps what it can and says what is
+missing. A definition becomes "definitions named `x` by syntax". References
+become text mentions, marked `partial` and not confirmed.
 
-## The contract
+## Using it
 
 ```rust
 use bricks_semantic::SemanticRegistry;
@@ -45,246 +47,158 @@ let engine = SemanticRegistry::global().engine_for(workspace, &config);
 let response = engine.query(query, &requester).await;
 ```
 
-`CodeQuery`: `text`, `mode` (`literal` | `regex`), `case_insensitive`,
-`intent`, `target` (`position {path, line, column}` 1-based with the column
-in characters, `offset {path, offset}`, `item {id}` from an earlier response,
-`file {path}`), `scope` (`paths`, `extensions`, `exclude`), `limits`
-(`max_files`, `max_matches`, `max_results`, `max_file_bytes`, `timeout_ms`,
-`budget_tokens`), `context` (`none`, `lines {n}`, `block`, `function`,
-`type`, `auto`), `detail` (`compact`, `normal`, `deep`).
+A query has: `text`, `mode` (`literal` or `regex`), `case_insensitive`,
+`intent`, `target` (a position, an offset, an `item` id from an earlier
+answer, or a file), `scope` (`paths`, `extensions`, `exclude`), `limits`,
+`context` and `detail` (`compact`, `normal`, `deep`). Limits are capped by the
+configuration. A query can lower them, never raise them.
 
-`Requester`: scope (absolute folders inside the workspace), view (shared by
-default), cancellation token, whether it may start a server, the active file
-when it really is known. Limits are capped by the configuration: a query can
-lower them, never lift them.
+A response has a `status`: `complete`, `partial`, `ambiguous`,
+`unavailable`, `cancelled` or `error`.
 
-`CodeResponse`: `status` (`complete`, `partial`, `ambiguous`, `unavailable`,
-`cancelled`, `error`), `plan`, `items`, `ambiguity`, `omissions`, `budget`,
-`metrics`, `continuation`, `generation`, `diagnostics`.
+Each result item carries:
 
-Each item carries apart:
+* **certainty**: `confirmed` (a language server, for that exact file version),
+  `syntactic` (the syntax tree shows a definition with that name), or
+  `textual` (the text matches).
+* **freshness**: `current`, or `stale` with the reason (the file changed during
+  the query, or the server answered for another version).
+* **score**: a ranking hint. It is not a probability.
+* an `id` (`path#start-end@hash`) that can be reused as a target. It is
+  refused once the file changes.
+* `relation` (`definition`, `reference`, `text_mention`, `candidate`,
+  `context`, `diagnostic`), `symbol`, `signature`, `snippet`, and `provenance`.
 
-* **certainty**: `confirmed` (a language server, for that exact version),
-  `syntactic` (the syntax tree shows a definition with that name), `textual`
-  (the text matches);
-* **freshness**: `current`, or `stale` with the reason (the file changed
-  during the query, the server answered for another version);
-* **score**: a ranking heuristic for the intent (table in `rank.rs`), not
-  a probability.
+Lines and columns shown to users are 1-based, with columns counted in
+characters.
 
-Plus `id` (`path#start-end@hash`, reusable as a target; refused with "search
-again" once the file changed), `relation` (`definition`, `reference`,
-`text_mention`, `candidate`, `context`, `diagnostic`, …), `symbol`,
-`signature`, `snippet`, `documentation` and `provenance` (backend + method,
-several when results were merged).
-
-### Positions
-
-Inside the engine: byte offsets, half-open ranges, 0-based lines with byte
-columns; lines end at `\n`, `\r\n` or a lone `\r` (the LSP rule).
-`PositionMapper` converts, for one exact text, between offsets, line/column,
-Tree-sitter points (rows at `\n` only) and LSP positions in the encoding the
-server negotiated (UTF-16 unless it chose UTF-8 or UTF-32). Columns are never
-terminal cells or graphemes. 1-based `line:column` in characters is the
-display convention, applied only by `render` and the frontends.
-
-### Documents and views
+### Views
 
 * The **shared view** is the disk. Approved edits are on disk, so the next
   query sees them.
-* A **private view** (`engine.open_view()`) overlays buffers a client really
-  gave the engine (`set_buffer`). In the CLI today, no editor sends buffers:
-  the disk is the base.
-* A **preview** (`view.preview(changes)`) overlays pending diffs, isolated:
-  only its handle reads it.
+* A **private view** (`engine.open_view()`) adds buffers that a client gave
+  the engine. The CLI does not send buffers today.
+* A **preview** shows pending diffs. Only its own handle can read it.
 
-A query reads each document at most once (`Snapshot`): every offset, tree and
-excerpt refers to that text. Files that changed while the query ran are
-flagged `stale` (their positions still refer to the version read). Language
-servers only ever see the shared view: a query on a private or preview
-document gets syntax and text results, with the reason.
+A query reads each file at most once, so all offsets refer to one text. A file
+that changes mid-query is marked `stale`. Language servers only see the shared
+view.
 
-### Context and budget
+### Budget
 
-The budget counts everything an item costs once rendered (path, relation,
-provenance, signature, snippet), estimated with the Context Manager's local
-heuristic (`bricks_types::tokens`); the selection keeps the estimate's upper
-bound under the budget: a margin, not the provider's exact count
-(`budget.method` says so). Snippets are verbatim with their ranges; a scope
-larger than the detail level allows (12 / 40 / 120 lines) becomes an explicit
-excerpt (signature, a window around the match, the closing line, and the
-number of lines left out). `detail` changes the amount of context only, not
-permissions, time or memory ceilings. The same scope is never sent twice.
+The budget counts what each item costs once rendered. It uses the Context
+Manager's local estimate, kept under the budget with a margin. Snippets are
+exact text with their ranges. A scope that is too large for the detail level
+(12, 40 or 120 lines) becomes an excerpt: signature, a window around the
+match, the closing line, and how many lines were left out.
 
 ## Language servers
 
-* One instance per (server, project root), started on first semantic use;
-  concurrent first uses share one start. A monorepo gets one instance per
-  project root (Rust: the outermost `Cargo.toml` with `[workspace]`; TS:
-  `tsconfig.json`/`package.json`; Go: `go.work`/`go.mod`; Python:
-  `pyproject.toml`…).
-* Capabilities come from `initialize`: position encoding, synchronization
-  kind, providers. An unsupported request is reported and falls back.
-* Synchronization: `didOpen`, then versioned full-content `didChange`
-  before each request, under a per-document lock held for the request (no
-  lock across documents or servers); open documents are re-synchronized after
-  a workspace change; at most `max_open_documents` stay open (LRU,
-  `didClose`).
-* **Server stderr** is kept as a tail (the last 2 KiB). A server that fails at
-  start is shut down at once, and that shutdown reads its stderr to the end
-  (at most 500 ms more, not a fixed wait); the failure names the last line.
-  A process left behind that holds the pipe open does not delay shutdown
-  beyond that bound, and what was read is kept.
-* URIs are percent-encoded and normalized (a folder with spaces works);
-  `Location`, `Location[]`, `LocationLink[]` and `null` are all accepted.
-* Features: document symbols, workspace symbols (only on a running
+* One server instance per (server, project root), started on first use. A
+  monorepo gets one per project root.
+* Bricks never downloads or installs a server. Install it yourself. For
+  Rust: `rustup component add rust-analyzer`.
+* Built-in servers include rust-analyzer, typescript-language-server,
+  pyright, gopls, clangd, and a few more (`crates/bricks-lsp/src/config.rs`).
+* If a server is missing or fails to start, the reason is reported and the
+  engine keeps working with syntax and text only.
+* Used features: document symbols, workspace symbols (only on a running
   server), definition, references, hover, diagnostics. Call hierarchy,
   implementations and inlay hints are not implemented.
-* Requests time out (`request_timeout_ms`), are cancelled with the requester
-  (`$/cancelRequest`), and fail at once if the server exits. A crashed server
-  is restarted up to `max_restarts` times; idle servers stop after
-  `idle_shutdown_secs`. Server requests (`workspace/configuration`, …) are
-  answered, never mistaken for responses.
-* **Diagnostics** never rely on a fixed delay. A report is `analyzed` only if
-  it was published for the version sent (or, unversioned, received after it
-  was sent) or pulled (`textDocument/diagnostic`); otherwise `outdated`,
-  `pending` (no conclusion possible) or `unavailable`. After an edit, the
-  report compares with the last analyzed version of the file
-  (`introduced`, `preexisting`, `resolved`, matched on severity, code and
-  message), so an existing error is not announced as new. No report is ever
-  taken as proof that the code compiles.
+* Requests time out, are cancelled with the requester, and fail at once if
+  the server exits. A crashed server restarts up to `max_restarts` times.
+  Idle servers stop after `idle_shutdown_secs`.
+* Diagnostics never depend on a fixed delay. A report is `analyzed` only if it
+  matches the file version sent. Otherwise it is `outdated`, `pending` or
+  `unavailable`. After an edit, results are compared with the last analyzed
+  version (`introduced`, `preexisting`, `resolved`). A report is never proof
+  that the code compiles.
 
-**Installation is manual**: Bricks never downloads or installs a server.
-Built-in configurations: rust-analyzer, typescript-language-server, pyright,
-gopls and others (`bricks-lsp/src/config.rs`); `[[semantic.lsp.servers]]`
-adds or overrides one. For Rust: `rustup component add rust-analyzer`. A
-server that is missing or fails to start is reported with its reason (for the
-rustup proxy without the component: "Unknown binary 'rust-analyzer'…"), and
-the engine works in degraded mode (syntax and text).
+To add or override a server:
 
-## Caches and invalidation
+```toml
+[[semantic.lsp.servers]]
+name = "rust-analyzer"
+command = "rust-analyzer"
+file_patterns = ["*.rs"]
+extension_to_language = { ".rs" = "rust" }
+```
 
-| cache | key | invalidation |
-|---|---|---|
-| trees | path + content hash (one version per path, LRU `tree_cache_entries`) | none needed (content-addressed); an older version is reparsed incrementally |
-| responses | query, scope, view and its generation, workspace generation, permission to start servers, active file | any change notification; restart of a server; `result_cache_ttl_ms` |
-| identical queries in flight | same key | shared until done; a requester that cancels stops waiting, the work stops only when no one waits any more |
+A server entry can also have `args`, `env` and `initialization_options`.
 
-Only responses that used a language server are cached (lexical searches
-re-read the disk each time). A semantic answer can depend on other files
-than its own, so **any** change notification drops all cached responses.
-Notifications come from the agent runner after every non-read-only tool
-call (Write, Edit, Bash…), through `bricks_tools::code_scout::notify_workspace_changed`
-(which calls `notify_any_change`). `SemanticEngine::notify_changed(paths)`
-drops the same cached responses; the tests and the bench call it. Edits made
-outside Bricks are not observed. A cached response is bounded only by its TTL
-(`result_cache_ttl_ms`, 30 000 ms by default, `crates/bricks-semantic/src/config.rs`):
-its cache key (`crates/bricks-semantic/src/engine.rs`, the fingerprint of the
-query) contains no document hash. Language-server documents are re-synchronised
-before each request (`crates/bricks-semantic/src/lsp.rs`, module header).
+## Caches
 
-Memory: the engine bounds its own caches (`tree_cache_entries`,
-`result_cache_entries`, `max_open_documents`); it cannot bound a language
-server's memory, which is reported separately (pid in `EngineStats`).
+| cache | invalidation |
+|---|---|
+| syntax trees (up to `tree_cache_entries`) | keyed by file content, so no invalidation needed |
+| responses (up to `result_cache_entries`) | any change notification, a server restart, or `result_cache_ttl_ms` (30 000 ms) |
 
-## Permissions and scope
+Only responses that used a language server are cached. Any change drops all
+cached responses, because an answer can depend on other files. The agent
+runner sends the change notification after every tool call that is not
+read-only (Write, Edit, Bash and so on). Edits made outside Bricks are not
+seen, so the TTL is the only limit for those.
 
-Every query, cached or not, is limited to the requester's scope (results
-outside are dropped and counted). A sub-folder shares its workspace's engine;
-a worktree or another checkout (a `.git` boundary) has its own. Private
-buffers and previews are capabilities: only their handle reads them.
+The engine bounds its own caches. It cannot bound a language server's memory.
 
-## Configuration (`[semantic]` in `bricks.toml`)
+## Scope
 
-See `docs/bricks.example.toml`. Every value is a ceiling.
+Every query is limited to the requester's scope. Results outside it are
+dropped and counted. A sub-folder shares its workspace's engine. A worktree or
+another checkout (a `.git` boundary) has its own.
+
+## Settings
+
+Set them in `[semantic]` and `[semantic.lsp]` of `bricks.toml`. See
+[bricks.example.toml](bricks.example.toml) for every key and default. Every
+value is a ceiling.
+
+```toml
+[semantic]
+max_results = 50
+timeout_ms = 15000
+default_budget_tokens = 4000
+max_budget_tokens = 16000
+
+[semantic.lsp]
+enabled = true
+request_timeout_ms = 10000
+ready_wait_ms = 10000
+```
 
 ## Limits
 
-* Syntax resolution is by name: macros, `use` renames, dynamic dispatch,
-  generated code and re-exports are invisible to it; that is what the
-  `syntactic` certainty says.
+* Syntax resolution works by name. Macros, `use` renames, dynamic dispatch,
+  generated code and re-exports are invisible to it.
 * Without a server, references are text mentions.
-* No cross-language relations (Rust ↔ TS bindings, FFI, SQL in strings).
-* A server that indexes: the engine waits up to `ready_wait_ms` (and the
-  query's limit), then reports `partial`; a server that never reports its
+* No links across languages (Rust and TypeScript bindings, FFI, SQL in
+  strings).
+* A server that is still indexing may answer too little. The engine waits up
+  to `ready_wait_ms`, then reports `partial`. A server that never reports its
   activity is taken as ready after `startup_settle_ms`.
-* JavaScript uses the TSX grammar (no separate JavaScript grammar).
+* JavaScript uses the TSX grammar.
 
 ## Benchmark
 
 ```sh
 cargo run --release -p bricks-tools --example semantic_bench -- \
-    --root . --runs 7 --out target/semantic-bench.json        # add --lsp to allow servers
+    --root . --runs 7 --out target/semantic-bench.json
 ```
 
-Corpus: `bench/semantic/corpus.json`, 11 questions on this repository with
-annotated answers (path + text of the line, robust to line shifts):
-5 definitions (one qualified), 2 with homonyms, 2 text searches, 2
-reference searches, plus a file edited between two queries.
+Add `--lsp` to allow language servers. The corpus is
+`bench/semantic/corpus.json`: 11 questions on this repository with known
+answers. The baseline is the `Grep` tool followed by `Read` on the first
+matching files. The other side is one `CodeScout` query.
 
-Baseline ("existing path"): the real `Grep` tool on the name, then the real
-`Read` tool on the first 1–3 matching files, as an agent does without
-CodeScout. New path: one `CodeScout` query (the rendered response is what is
-counted). Tokens: the Context Manager's estimate for both sides (`tokens_raw`
-= everything the baseline tools returned). Precision / recall: returned
-locations vs annotated ones. "Useful tokens" would need a reading protocol
-and are not reported.
+Results on macOS (Apple silicon), release build, without a language server:
 
-Measured on 2026-10-07, macOS (Apple silicon), release build, 7 runs.
+* Estimated tokens fell from about 264k to 8.2k over the 11 questions.
+* Definitions and homonyms: precision went from 0.01 to 0.17 up to 1.00.
+* Text search: the same precision as `Grep` (0.25).
+* References without a server are no better than `Grep`. With rust-analyzer
+  they were exact.
+* `CodeScout` is slower than `Grep` on a cold start and close to it when warm.
+  With a language server, indexing the repository took about 15 s.
 
-**Without a language server** ("cold" = a fresh engine, "warm" = the
-long-lived engine, its cached answers dropped before each query):
-
-| category | calls (baseline → scout) | estimated tokens (baseline → scout) | precision (baseline → scout) | recall | p50 ms baseline / scout cold / scout warm |
-|---|---|---|---|---|---|
-| definition (5) | 4 → 1 | 12.7k–43.3k → 215–483 (−98 to −99 %) | 0.01–0.17 → 1.00 | 1.00 both | 14–17 / 18–61 / 13–30 |
-| homonyms (2) | 4 → 1 | 24.8k–34.9k → 371–1 109 (−97 to −99 %) | 0.12–0.14 → 1.00 | 1.00 both | 15–17 / 23–29 / 16–19 |
-| text (2) | 2 → 1 | ~1.96k → ~0.77k (−60 %) | 0.25 → 0.25 | 1.00 both | 13–14 / 16–21 / 15–16 |
-| references, text fallback (2) | 4 → 1 | 12.7k–33.5k → 1.2k–2.3k (−82 to −96 %) | 0.25–0.40 → 0.20–0.33 | 1.00 both | 14–16 / 34–48 / 30–35 |
-
-Total: 264 k → 8.2 k estimated tokens. Warm engine: tree cache hit rate
-91 % (46 trees, 781 KiB of source held); bench process RSS 6.9 → 45 MB.
-Edited file: the re-query found the new line (1 → 4) in 0.6 ms with one
-incremental reparse.
-
-**With rust-analyzer 1.98.1** (`--lsp`; started and indexed once, measured
-apart; warm queries only):
-
-| | |
-|---|---|
-| start + indexing of this repository | 14.6 s (first query, waiting for indexing within the 15 s limit); server RSS 1.58 GB while indexing, 343 MB after the runs |
-| references (2) | precision 0.25–0.40 (Grep) → **1.00**, recall 1.00, 314–563 tokens; warm p50 16–21 ms, p95 up to 7 s (the first query after a change notification re-synchronizes the open documents and the server re-analyses) |
-| definitions (5) | precision 1.00 except `parse_locations`: 0.50 — the server also lists the re-export `pub use client::parse_locations`, reported as a confirmed **reference** (re-export), not as a second definition |
-| homonyms (2) | the syntactic candidates are confirmed by `workspace/symbol`; still listed as ambiguous |
-| latency | every query was slower while the server ran (it uses CPU in the background): Grep p50 14–35 ms, CodeScout warm p50 16–78 ms |
-
-Reading these numbers:
-
-* The token reduction depends on the baseline protocol: reading 3 whole
-  files (up to 2 000 lines each) dominates it. An agent that reads with
-  offsets would spend less; the "60–70 %" and "7 calls → 1–2" hypotheses
-  are neither confirmed nor refuted in general by this protocol. Text
-  searches, where the baseline reads one file, gain 60 %.
-* **Regression: latency.** CodeScout is slower than Grep when cold (up to
-  ~4× on a common name such as `global`, which makes 20+ files to parse),
-  and close to it when warm. A first version was 3–5× slower everywhere;
-  the search was then parallelized and files are only decoded and hashed
-  when they match.
-* **References without a server are no better than Grep** (text mentions
-  include definitions, comments and the corpus itself); they are labelled
-  as such. With rust-analyzer they are exact. Text-search precision is 0.25
-  for both because the benchmark's own files contain the searched strings.
-* **A server that is indexing answers incompletely.** The first `--lsp` run
-  exposed it: rust-analyzer answered "no reference" before indexing, and
-  the engine reported `complete`. The engine now follows `$/progress` and
-  `experimental/serverStatus`, waits (bounded by `ready_wait_ms` and the
-  query's time limit), and reports `partial` — with syntax/text results when
-  the server answered nothing — while it still indexes.
-
-### Tested
-
-| | |
-|---|---|
-| platform | macOS 27 (Apple silicon) |
-| servers, real | rust-analyzer 1.98.1 (rustup component), negotiated UTF-8: `tests/rust_analyzer.rs` (homonyms resolved, references, edit then re-query; ignored by default, run with `--ignored`) and the `--lsp` benchmark on this repository. Other servers not tested |
-| servers, scripted | `bricks_lsp::mock` (UTF-8 and UTF-16, versioned sync, all response shapes, pending/old diagnostics, timeout, cancellation, crash) |
+The token gain depends on the baseline. Reading three whole files dominates
+it. An agent that reads with offsets would spend less.

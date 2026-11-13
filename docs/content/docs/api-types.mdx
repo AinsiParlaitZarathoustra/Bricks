@@ -1,6 +1,6 @@
 ---
 title: Types (bricks-types)
-description: Provider-agnostic core types — messages, content blocks, usage, errors, stream events.
+description: Provider-agnostic core types: messages, content blocks, usage, errors, and stream events.
 ---
 
 # bricks-types
@@ -83,7 +83,7 @@ ContentBlock::image_url("https://x/y.png");      // remote image
 ContentBlock::document_bytes("application/pdf", &pdf);
 ```
 
-A block a provider cannot carry is refused before the request is sent, with `CerseiError::Unsupported`; it is never dropped silently.
+A block a provider cannot carry is refused before the request is sent, with `BricksError::Unsupported`; it is never dropped silently.
 
 ## Usage
 
@@ -145,10 +145,10 @@ pub enum StreamEvent {
 }
 ```
 
-## CerseiError
+## BricksError
 
 ```rust
-pub enum CerseiError {
+pub enum BricksError {
     Provider(String),
     ProviderStatus { status: u16, message: String, retry_after: Option<Duration> },
     Auth(String),
@@ -168,6 +168,6 @@ pub enum CerseiError {
 }
 ```
 
-`CerseiError::retry_after()` and `http_status()` expose the server's answer for a failed request. A `ProviderStatus` error keeps the `Retry-After` value; whether a request is retried is decided by the error's kind, not by the header.
+`BricksError::retry_after()` and `http_status()` expose the server's answer for a failed request. A `ProviderStatus` error keeps the `Retry-After` value; whether a request is retried is decided by the error's kind, not by the header.
 
-All errors implement `std::error::Error`. Use `Result<T>` which is `std::result::Result<T, CerseiError>`.
+All errors implement `std::error::Error`. Use `Result<T>` which is `std::result::Result<T, BricksError>`.

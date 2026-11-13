@@ -61,12 +61,12 @@ repository. An agent you build with the library chooses its own tools.
 ## Sub-agents
 
 When `[agents] enabled` is true, which is the default in a session, the agent
-can start sub-agents with the native tools `Agent`, `Agents`, `AgentControl`
-and `AgentProfiles`.
+can start sub-agents with the native tools `Agent`, `AgentControl`,
+`AgentProfiles` and `Messagent`.
 
 * A sub-agent runs its own loop with a fresh context. It gets its parent's
   permissions and at most its parent's tools.
-* `Agents` runs several independent tasks at the same time. Each parallel
+* `Agent` can run one mission (`task`) or several independent tasks at the same time (`missions`). Each parallel
   writer works in its own git worktree, and its changes come back as a
   ChangeSet that is inspected and applied separately.
 * A sub-agent is cancelled with the run that started it.

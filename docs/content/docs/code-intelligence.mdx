@@ -9,8 +9,8 @@ import { TypeTable } from 'fumadocs-ui/components/type-table';
 
 Bricks provides two layers of code intelligence available as both SDK library APIs and agent tools:
 
-- **`bricks-lsp`** — Language Server Protocol client for semantic operations (hover, definitions, references, symbols, diagnostics)
-- **Tree-sitter modules** in `bricks-tools` — AST-based import extraction, symbol discovery, dependency ranking, and bash command safety analysis
+- **`bricks-lsp`**: Language Server Protocol client for semantic operations (hover, definitions, references, symbols, diagnostics)
+- **Tree-sitter modules** in `bricks-tools`: AST-based import extraction, symbol discovery, dependency ranking, and bash command safety analysis
 
 Both are library APIs that let an agent understand a codebase without reading every file. `bricks-lsp` is used by `bricks-semantic`; the Cersei-era `abstract` CLI used both systems (see below).
 
@@ -24,7 +24,7 @@ A standalone LSP client crate with on-demand server management. Spawns language 
 
 ```toml
 [dependencies]
-bricks-lsp = "0.6"
+bricks-lsp = { path = "/path/to/bricks/crates/bricks-lsp" }
 ```
 
 ### Architecture
@@ -265,9 +265,9 @@ let intels = scan_project(Path::new("/path/to/project"), 20);
 // Print ranked file summaries
 println!("{}", format_project_intel(&intels));
 // Output:
-// - src/main.rs — fn main | imports: use crate::config, use std::sync::Arc
-// - src/config.rs — struct Config, fn load_config | imports: use serde::Serialize
-// - src/lib.rs — mod config, mod server, mod routes
+// - src/main.rs: fn main | imports: use crate::config, use std::sync::Arc
+// - src/config.rs: struct Config, fn load_config | imports: use serde::Serialize
+// - src/lib.rs: mod config, mod server, mod routes
 ```
 
 ### Scoring Algorithm

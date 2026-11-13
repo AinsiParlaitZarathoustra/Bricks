@@ -1,6 +1,6 @@
 ---
 title: Built-in Tools Reference
-description: Complete reference for the built-in tools — input schemas, permission levels, and usage notes.
+description: Complete reference for the built-in tools: input schemas, permission levels, and usage notes.
 ---
 
 import { TypeTable } from 'fumadocs-ui/components/type-table';
@@ -8,16 +8,16 @@ import { Callout } from 'fumadocs-ui/components/callout';
 
 # Built-in Tools Reference
 
-The 16 tools of `bricks::tools::all()` are in the categories below, and each is available through the composition functions in `bricks::tools`. `Skill` is not in those sets: an agent with a skills service adds it. The sub-agent tools (`Agent`, `Agents`, `AgentControl`, `AgentProfiles`, `SendMessage`) are not in those sets either: see [Sub-agent tools](#sub-agent-tools).
+The built-in tools in `bricks::tools::all()` are in the categories below, and each is available through the composition functions in `bricks::tools`. `CodeSearch` is not in those sets (add `CodeSearchTool::with_embeddings` when embeddings are configured), `PowerShell` is included only on Windows or when `pwsh` is on `PATH`, and `Skill` is added by an agent with a skills service. The sub-agent tools (`Agent`, `AgentControl`, `AgentProfiles`, `Messagent`) are not in those sets either: see [Sub-agent tools](#sub-agent-tools).
 
 ```text
-bricks::tools::all()                     // all 16: coding() + planning()
-bricks::tools::coding()                  // filesystem + shell_with_jobs + web (15)
-bricks::tools::filesystem()              // 10 tools
-bricks::tools::shell()                   // 2 tools: Bash, PowerShell (no job registry)
-bricks::tools::shell_with_jobs(registry) // 3 tools: Bash, Job, PowerShell
-bricks::tools::web()                     // 2 tools
-bricks::tools::planning()                // 1 tool (TodoWrite)
+bricks::tools::all()                     // coding() + planning() (13 or 14 tools)
+bricks::tools::coding()                  // filesystem() + shell_with_jobs() + web() (12 or 13)
+bricks::tools::filesystem()              // 8 tools
+bricks::tools::shell()                   // Bash, plus PowerShell when available (no job registry)
+bricks::tools::shell_with_jobs(registry) // Bash, Job, plus PowerShell when available
+bricks::tools::web()                     // 2 tools: WebFetch, WebSearch
+bricks::tools::planning()                // 1 tool: TodoWrite
 ```
 
 `all()` and `coding()` put `Bash` and `Job` on a registry of their own. An agent
@@ -30,7 +30,7 @@ built with a session's registry puts them on it; see
 
 ### Read
 
-Read a file with optional line offset and limit. Returns content with line numbers.
+Read a text file (with optional line offset and limit) or an image file (PNG, JPEG, GIF or WebP). For text files, returns content with line numbers. For images, the type is read from the file's bytes, and the model receives the image itself (up to 3,750,000 bytes and 8,000 pixels on a side; see [Multimodal Input](/docs/multimodal#images-returned-by-tools)). A relative `file_path` resolves against the working directory.
 
 **Permission:** ReadOnly
 
@@ -38,33 +38,17 @@ Read a file with optional line offset and limit. Returns content with line numbe
   type={{
     file_path: {
       type: 'string',
-      description: 'Absolute path to the file.',
+      description: 'Path to the file, absolute or relative to the working directory.',
       required: true,
     },
     offset: {
       type: 'integer',
-      description: 'Line number to start reading from (0-based).',
+      description: '1-based line number to start reading from (default 1; 0 also starts at line 1).',
     },
     limit: {
       type: 'integer',
       description: 'Number of lines to read.',
       default: '2000',
-    },
-  }}
-/>
-
-### ViewImage
-
-Show the model an image file (PNG, JPEG, GIF or WebP). The type is read from the file's bytes, not its name. The model receives the image itself; the result text names the path, the type, the dimensions (not for WebP) and the size. Refused: a directory, a file of another type, more than 3,750,000 bytes, and more than 8,000 pixels on a side. A relative `file_path` resolves against the working directory. How the image reaches the model depends on the model: see [Multimodal Input](/docs/multimodal#images-returned-by-tools).
-
-**Permission:** ReadOnly
-
-<TypeTable
-  type={{
-    file_path: {
-      type: 'string',
-      description: 'Path to the image file.',
-      required: true,
     },
   }}
 />
@@ -146,7 +130,7 @@ Find files matching a glob pattern, sorted by path.
 
 ### Grep
 
-Search file contents using regex. Uses ripgrep if available, falls back to system grep.
+Search file contents using regex or literal text. Uses ripgrep if available, falls back to built-in search.
 
 **Permission:** ReadOnly
 
@@ -154,7 +138,7 @@ Search file contents using regex. Uses ripgrep if available, falls back to syste
   type={{
     pattern: {
       type: 'string',
-      description: 'Regex pattern to search for.',
+      description: 'Regex pattern to search for (or exact text when `literal` is true).',
       required: true,
     },
     path: {
@@ -165,6 +149,41 @@ Search file contents using regex. Uses ripgrep if available, falls back to syste
     glob: {
       type: 'string',
       description: 'Glob pattern to filter files (e.g., "*.rs").',
+    },
+    case_insensitive: {
+      type: 'boolean',
+      description: 'Case-insensitive matching.',
+      default: 'false',
+    },
+    hidden: {
+      type: 'boolean',
+      description: 'Include hidden files and directories.',
+      default: 'false',
+    },
+    literal: {
+      type: 'boolean',
+      description: 'Match `pattern` as exact text, without regex syntax.',
+      default: 'false',
+    },
+    no_ignore: {
+      type: 'boolean',
+      description: 'Also search files excluded by .gitignore or .ignore.',
+      default: 'false',
+    },
+    output_mode: {
+      type: '"content" | "files_with_matches" | "count"',
+      description: 'Output format: matching lines, matching file paths, or match counts per file.',
+      default: 'content',
+    },
+    context: {
+      type: 'integer',
+      description: 'Lines shown before and after each match (content mode only, max 10).',
+      default: '0',
+    },
+    limit: {
+      type: 'integer',
+      description: 'Maximum matching lines or files to return.',
+      default: '100',
     },
   }}
 />
@@ -420,21 +439,21 @@ Create and update the plan of the conversation: the complete list of its steps, 
 
 ## Sub-agent tools
 
-`Agent` (one sub-agent), `Agents` (several), `AgentControl` (ids, results,
-resumes, cancellation and ChangeSets), `SendMessage` and `AgentProfiles` (list and
+`Agent` (one mission with `task`, or several with `missions`), `AgentControl` (ids, results,
+resumes, cancellation and ChangeSets), `Messagent` (send messages to running sub-agents) and `AgentProfiles` (list and
 search the profiles) are native tools. The CLI and the controller register
 them when `[agents] enabled` is true (the default). They are not in
 `bricks::tools::all()`.
 
-Sub-agents always run in parallel. `Agent` and `Agents` return their ids at
+Sub-agents always run in parallel. `Agent` returns their ids at
 once; `AgentControl wait` and `result` give the results. There is no
 `background` parameter.
 
-**Permission:** `Agent` and `Agents`: Execute. Allowing one allows that
+**Permission:** `Agent`: Execute. Allowing it allows that
 delegation only: each child's own tool calls go through the policy one by one.
 `AgentControl`: ReadOnly for `list`, `status`, `result`, `wait` and
 `inspect_changes`, Execute for `resume` and `cancel`, Write for
-`apply_changes` and `discard_changes`. `AgentProfiles`: ReadOnly.
+`apply_changes` and `discard_changes`. `AgentProfiles`: ReadOnly. `Messagent`: Execute.
 
 The `AgentControl` actions, by their parameters:
 
@@ -450,9 +469,9 @@ Their parameters, the limits (`max_depth` = 1, `max_concurrent` = 16, `max_queue
 = 64, `admission_timeout_ms` = 60000, `summary_chars` = 30000) and the
 isolation rules are in `docs/agents.md` in the repository.
 
-### SendMessage
+### Messagent
 
-Send a message to one of your running sub-agents. It is a native tool registered with the agent runtime, outside `bricks::tools::all()` (see [Sub-agent tools](#sub-agent-tools)). The sub-agent reads it at its next model request, never between a tool call and its result. Refusals are explicit (unknown or out of scope, not running, empty, over 16 KiB, 32 messages already waiting); nothing is reported as sent when it was not. Without an agent runtime in the session, nothing is sent.
+Send a message to one of your running sub-agents, or to `"main"`. It is a native tool registered with the agent runtime, outside `bricks::tools::all()` (see [Sub-agent tools](#sub-agent-tools)). The recipient reads it at its next model request, never between a tool call and its result. Refusals are explicit (unknown or out of scope, not running, empty, over 16 KiB, 32 messages already waiting); nothing is reported as sent when it was not. Without an agent runtime in the session, nothing is sent.
 
 **Permission:** Execute
 
@@ -477,7 +496,7 @@ Send a message to one of your running sub-agents. It is a native tool registered
 
 ### Skill
 
-Activates an [Agent Skill](https://agentskills.io/specification) — reads its full instructions — lists the skills the agent may activate, locates one of a skill's files, checks a skill folder (`validate`) or installs one in Bricks' store (`install`). Activating runs nothing and grants no permission. Present only on agents built with a skills service (`AgentBuilder::skills`; the `bricks` CLI does it).
+Activates an [Agent Skill](https://agentskills.io/specification) (reads its full instructions), lists the skills the agent may activate, locates one of a skill's files, checks a skill folder (`validate`) or installs one in Bricks' store (`install`). Activating runs nothing and grants no permission. Present only on agents built with a skills service (`AgentBuilder::skills`; the `bricks` CLI does it).
 
 **Permission:** ReadOnly, except `install`, which writes in the store and asks the write permission.
 
@@ -515,6 +534,6 @@ See `docs/skills.md` in the repository for sources, the store, activation, withd
 | Level | Tools |
 |-------|-------|
 | **None** (1) | TodoWrite |
-| **ReadOnly** (10) | Read, ViewImage, Glob, Grep, CodeSearch, CodeScout, CodeStats, WebFetch, WebSearch, Skill (ReadOnly except `install`) |
+| **ReadOnly** (8) | Read, Glob, Grep, CodeScout, CodeStats, WebFetch, WebSearch, Skill (ReadOnly except `install`) |
 | **Write** (3) | Write, Edit, ApplyPatch |
-| **Execute** (4) | Bash, PowerShell, SendMessage, Job (ReadOnly for `list`, `status`, `output`, `wait`) |
+| **Execute** (4) | Bash, PowerShell (when available), Messagent, Job (ReadOnly for `list`, `status`, `output`, `wait`) |

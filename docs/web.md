@@ -1,265 +1,202 @@
 # Web search and reading
 
-`WebSearch` and `WebFetch` run on `bricks-web`: search → bounded downloads →
-Markdown extraction → structural passages → lexical ranking (BM25) →
-citable passages. Everything is configured in `bricks.toml` `[web]`
-(annotated in [bricks.example.toml](bricks.example.toml)).
+`WebSearch` and `WebFetch` run on the `bricks-web` crate. The steps are:
+search, download a few pages with strict limits, turn them into Markdown, cut
+them into passages, rank the passages with BM25, and return passages you can
+cite.
 
-What this is, and is not:
+Everything is set in the `[web]` section of `bricks.toml`. Every key is
+shown in [bricks.example.toml](bricks.example.toml).
 
-* **Selecting passages loses information.** It is not a reading of the
-  page. The full extracted document is always kept and readable in order.
-* **BM25 is lexical.** It rewards shared terms weighted by rarity; it does
-  not understand paraphrases. A zero score means "no shared term", not "no
-  information". Scores order passages within one search only: they are not
-  probabilities and are not comparable across searches. They appear in the
-  structured data, not in the text.
-* **Splitting follows Markdown structure** (headings, paragraphs, code
-  blocks, tables). It does not understand how concepts relate.
-* **DuckDuckGo's HTML interface is not an API.** It has no service-level
-  commitment, its markup can change, and it can refuse automated requests.
-  Bricks reports a challenge page or an unknown layout as such. It never
-  answers or works around a challenge.
-* **No latency target is promised.** Timings are measured per stage (see
-  *Measurements*).
+What to know:
+
+* **Choosing passages loses information.** The full extracted page is always
+  kept and can be read in order with `WebFetch`.
+* **BM25 matches words.** It rewards shared words that are rare. It does not
+  understand paraphrases. A zero score means "no shared word", not "no
+  information". Scores only order passages within one search.
+* **Splitting follows Markdown structure** (headings, paragraphs, code blocks,
+  tables).
+* **DuckDuckGo's HTML page is not an API.** The markup can change and it can
+  refuse automated requests. Bricks reports a challenge page or an unknown
+  layout as an error. It never answers or works around a challenge.
+* **No speed is promised.** Speed depends on the network and the provider.
 
 ## Search providers
 
-| Provider | Key | Endpoint (overridable) | Errors mapped |
-|---|---|---|---|
-| `duckduckgo` (default) | none | `https://html.duckduckgo.com/html/` | challenge (even HTTP 200), unknown layout, 403/429 refusal, no results |
-| `brave` | `X-Subscription-Token` | `https://api.search.brave.com/res/v1/web/search` | 401/403 key, 402 quota, 429 + `X-RateLimit-Reset` |
-| `tavily` | `Authorization: Bearer` | `https://api.tavily.com/search` | 401 key, 432/433 plan or pay-as-you-go limit, 429 + `Retry-After` |
-| `exa` | `x-api-key` | `https://api.exa.ai/search` | 401/403 key, 402 credits, 429, 503 |
+| provider | key header | default endpoint |
+|---|---|---|
+| `duckduckgo` (default, no key) | none | `https://html.duckduckgo.com/html/` |
+| `brave` | `X-Subscription-Token` | `https://api.search.brave.com/res/v1/web/search` |
+| `tavily` | `Authorization: Bearer` | `https://api.tavily.com/search` |
+| `exa` | `x-api-key` | `https://api.exa.ai/search` |
 
-* **Choosing a provider.** `provider` is tried first, then `fallback` in
-  order, within `max_attempts` requests and `budget_ms`. A key is read only
-  from the variable named by `api_key_env`. A provider is never chosen
-  because some variable happens to be set.
-* **Validation at load.** Endpoints must be HTTPS (plain HTTP only to a
-  loopback address), carry no credentials, and timeouts must be in range.
-  A variable name that looks like a key is refused. A configured provider
-  whose variable is unset is reported at load, then reported as
-  unavailable when it is tried.
-* **When a fallback happens.** A timeout, a quota, a rate limit, an
-  unavailable service, a refused key, a challenge or an unknown layout moves
-  to the next provider. A rate limit is retried once when its stated wait
-  fits within `max_retry_wait_ms`. A refused key is reported and never
+```toml
+[web.search]
+provider = "duckduckgo"   # duckduckgo | brave | tavily | exa
+fallback = []             # for example ["tavily", "duckduckgo"], tried in order
+max_attempts = 3          # provider requests per search, retries included
+timeout_ms = 5000         # one provider request
+budget_ms = 12000         # the whole search, fallbacks included
+max_retry_wait_ms = 2000  # longest rate-limit wait honoured once
+
+[web.search.brave]
+api_key_env = "BRAVE_SEARCH_API_KEY"
+```
+
+* The key is read only from the environment variable named in `api_key_env`.
+  A provider is never chosen just because a variable is set. A name that looks
+  like a key itself is refused.
+* `provider` is tried first, then each `fallback` in order, within
+  `max_attempts` and `budget_ms`.
+* Endpoints must be HTTPS (plain HTTP only to a loopback address) and must not
+  contain credentials. Wrong values are reported when the file loads.
+* A timeout, quota, rate limit, unavailable service, refused key, challenge
+  or unknown layout moves on to the next provider. A rate limit is retried
+  once if its wait fits in `max_retry_wait_ms`. A refused key is never
   retried. An empty result list is an answer, not a failure.
-* **Every attempt is shown.** Each attempt appears in the result: provider,
-  outcome and duration. A fallback is named (`answered by duckduckgo
-  (fallback; preferred: brave)`), and a refused key comes with a
-  suggestion. A key never appears in results, logs, errors or `Debug`
-  output.
-* **Uniform results.** Every hit has a source id (`S1`…), title, direct URL,
-  snippet, provider and the provider's own rank. DuckDuckGo's `uddg` link
-  is decoded only on its `/l/` redirect path. Duplicate URLs are compared
-  ignoring case, fragment and `utm_*` parameters; other parameters
-  (identifiers, signatures) are never dropped.
+* Every attempt is shown in the result (provider, outcome, time). A fallback is
+  named, for example `answered by duckduckgo (fallback; preferred: brave)`.
+  A key never appears in results, logs or errors.
+* Each hit has a source id (`S1`, `S2`...), title, URL, snippet, provider and
+  rank. Duplicate URLs are merged, ignoring case, fragment and `utm_*`
+  parameters.
 
 ## Downloads
 
-| `[web.fetch]` | default |
-|---|---|
-| `max_pages` | 5 |
-| `concurrency` / `per_host` | 5 / 2 |
-| `page_timeout_ms` (connection, redirects and body) | 4000 |
-| `max_page_bytes` (decoded, after gzip/brotli/deflate) | 1 500 000 |
-| `max_total_bytes` (all pages of a call) | 8 000 000 |
-| `max_redirects` | 5 |
-| `budget_ms` (all downloads of a call) | 12 000 |
+```toml
+[web.fetch]
+max_pages = 5             # pages read after a search
+concurrency = 5           # downloads at once
+per_host = 2              # downloads at once to one host
+page_timeout_ms = 4000    # connection, redirects and body of one page
+max_page_bytes = 1500000  # decoded bytes kept per page
+max_total_bytes = 8000000 # decoded bytes for all pages of one call
+max_redirects = 5
+budget_ms = 12000         # all downloads of one call
+allow_private = []        # explicit exceptions such as ["127.0.0.1:8080"]
+```
 
-* **Client.** One shared `reqwest` client with a connection pool. HTTP/2 is
-  used when the server negotiates it.
-* **Bounded reading.** Bodies are read as a stream and cut at the decoded
-  limit, whether `Content-Length` is absent, wrong or truthful. A cut page is
-  marked *partial* everywhere: the stored raw file is the beginning of the
-  page, never the page. A transfer that breaks off keeps what arrived,
-  marked incomplete.
-* **Ordering and cancellation.** Results come back in the order of the
-  sources, whatever finished first, with one error per URL (timeout, HTTP
-  status, redirect loop, policy refusal, budget). Dropping the call (a
-  cancelled turn) aborts downloads still running and starts no new ones.
-* **Network policy.** Only `http`/`https`. Private, loopback, link-local,
-  carrier-grade NAT, multicast, documentation and reserved addresses are
-  refused, IPv4-mapped and NAT64 forms included. The check runs on the URL
-  of every hop, redirects included, and on every DNS answer, in the
-  resolver the client connects with. A name that resolves to `127.0.0.1` is
-  therefore refused at connection time.
-* **Local exceptions.** `allow_private` names explicit exceptions (`host` or
-  `host:port`) for local servers and tests. It is separate from the public
-  default.
-* **Search keys stay with the search client.** Pages are downloaded by
-  another client that never carries them, and the search client follows no
-  redirects.
+* Bodies are read as a stream and cut at the limit. A cut page is marked
+  *partial* everywhere.
+* Results come back in source order. Each URL has its own error if it
+  failed. A cancelled turn stops running downloads.
+* Only `http` and `https` are allowed. Private, loopback, link-local,
+  multicast and reserved addresses are refused. This is checked on every
+  redirect and on every DNS answer, so a name that resolves to `127.0.0.1` is
+  refused at connection time.
+* `allow_private` is the only way to allow local servers.
+* Search keys stay with the search client. Pages are downloaded by another
+  client that never carries them.
 
 ## Extraction
 
-* **Decoding.** HTML, Markdown, plain text and JSON are read. The charset
-  comes from `Content-Type`, then a BOM, then `<meta charset>`, else UTF-8.
-  Undeclared bytes that are not UTF-8 are decoded as windows-1252, and a
-  note says so. An unknown charset label is reported as an unsupported
-  encoding.
-* **HTML, two ways.**
-  * Readability (`dom_smoothie`) is good on articles.
-  * A conservative pass over `main` / `[role=main]` / `article` / `#content`
-    / `body` removes scripts, styles, navigation, footers, sidebars and
-    forms, and is better on documentation, whose tables and code Readability
-    may drop.
-  * The conservative result is kept when Readability failed, is very short,
-    has fewer code blocks or tables, or is less than half as long.
-  * The strategy and both sizes are reported. An extraction under
-    `min_reliable_chars` is flagged as possibly incomplete.
-* **What is kept.** Both paths write Markdown with the same DOM library
-  (`dom_query`): headings, tables, fenced code and links resolved against
-  the final URL. Escapes that only hurt reading (`v2\.1`) are removed
-  outside code; meaningful escapes stay.
-* **Not shown.** PDF and binary content are reported with their type and the
-  bytes received, or the announced length labelled as such; they are never
-  displayed. A JavaScript shell (an empty mount point plus scripts) is
-  reported as "needs JavaScript", not read as an empty page.
-* **Bounded work.** Parsing runs on blocking threads, at most
-  `[web.extract] concurrency` at once, on input already bounded by the
-  download limit and an element cap (`max_elements`). That bound is what
-  guarantees a parse ends: a blocking task that has started is not stopped
-  by an async timeout or an abort.
+* HTML, Markdown, plain text and JSON are read. The charset comes from
+  `Content-Type`, then a BOM, then `<meta charset>`, else UTF-8. Bytes that are
+  not UTF-8 are decoded as windows-1252 and a note says so.
+* HTML is read two ways: Readability (`dom_smoothie`, good on articles) and a
+  careful pass over `main`, `article`, `#content` or `body` that removes
+  scripts, navigation, footers and forms (better on documentation). The
+  careful result is kept when Readability fails, is very short, or has fewer
+  code blocks or tables.
+* The output is Markdown with headings, tables, fenced code and links
+  resolved against the final URL.
+* PDF and binary content are reported with their type and size, never shown.
+  A page that needs JavaScript is reported as such.
+* An extraction shorter than `min_reliable_chars` is flagged as possibly
+  incomplete. Pages above `max_elements` are not parsed.
+
+```toml
+[web.extract]
+max_elements = 60000
+concurrency = 2
+min_reliable_chars = 400
+```
 
 ## Passages and ranking
 
-* **Splitting.** Blocks are packed into passages of 500–1 500 characters
-  (`[web.passages]`). Each passage keeps its heading path, its exact range
-  in the extracted document (characters and bytes) and its verbatim text.
-* **Oversized blocks.** Prose is split at sentence ends, code and tables at
-  line ends. Each piece says which part it is
-  (`part 2/3 of a code block (document lines 40–62)`). A table piece
-  carries the table's header.
-* **Index.** One BM25 index per search, over the passages of its pages only
-  (`bm25` crate, own tokenizer).
-* **Tokenizer.** The same for French and English text and for queries:
-  lowercase, accents folded, a short stop-word list, plural `s` removed on
-  long words. Identifiers are kept whole and also split: `max_retries`,
-  `HttpClient`, `rate-limit`. `v2.1` stays whole.
-* **Selection.**
-  * Passages are chosen within `budget_chars` and `max_passages`, at most
-    `per_source` per page on a first pass, so several sources contribute.
-  * The preceding passage is added as context when a chosen one starts
-    mid-thought.
-  * Near-duplicates are dropped, but never two statements that differ by a
-    number, version, date or negation.
-* **Weak or no match.** No shared term gives an explicit `None` state, with
-  the results and pages still listed. Matches covering less than a third of
-  the query give `Weak`. No answer is made up in either case.
+```toml
+[web.passages]
+min_chars = 500
+max_chars = 1500
+max_passages = 5
+budget_chars = 6000   # characters of passages in one result
+per_source = 2        # first pass: at most this many per page
+```
+
+* Each passage keeps its heading path, its exact range in the extracted page
+  and its exact text.
+* Large blocks are split at sentence ends (prose) or line ends (code and
+  tables). Each piece says which part it is. A table piece carries the table
+  header.
+* One BM25 index is built per search, over the passages of its pages only.
+* The tokenizer is the same for French and English: lowercase, accents
+  removed, a short stop-word list. Identifiers are kept whole and also split
+  (`max_retries`, `HttpClient`).
+* Passages are chosen within `budget_chars` and `max_passages`, with at most
+  `per_source` per page at first, so several sources contribute.
+* Near-duplicates are dropped, but never two passages that differ by a number,
+  version, date or negation.
+* If no word matches, the state is `None`. If matches cover less than a third
+  of the query, it is `Weak`. Nothing is made up in either case.
 
 ## Tools
 
 ### `WebSearch`
 
-Input: `query`, `num_results` (default 8, max 20), `read_pages` (default
-`max_pages`; 0 = results only).
+Input: `query`, `num_results` (default 8, max 20), `read_pages` (default is
+`max_pages`; 0 means results only).
 
 The result contains, in order:
 
 1. The provider line, with every attempt.
-2. The results `[S1] title — url` and their snippets.
-3. Each page read: `[S1 · D1] final url — strategy, N characters
-   (complete | partial…)`, or why it was not read.
-4. The passages:
+2. The results (`[S1] title, url`) and their snippets.
+3. Each page read (`[S1 · D1]`), or why it was not read.
+4. The passages, each with its source, document, heading path and character
+   range.
+5. What was left out: other passages, the budget, duplicates.
 
-   ```text
-   --- P1 [S1 · D1 · Retry policy › Configuration · characters 812–1630] https://… ---
-   <verbatim text of the stored document>
-   ```
-
-5. What was omitted: other passages, the budget, duplicates.
-
-The structured data carries attempts, results, per-page outcomes, scores,
-coverage and timings. No secondary model call is made.
+No second model call is made.
 
 ### `WebFetch`
 
-Input: `url` or `doc` (`D1`…), `max_chars` (Unicode characters, default
-20 000, max 40 000, separate from the byte limit of the download), `offset`
-(characters), `question`, `format` (`markdown` | `raw` | `json_summary`),
-`refresh`.
+Input: `url` or `doc` (`D1`...), `max_chars` (characters, default 20 000, max
+40 000), `offset` (characters), `question`, `format` (`markdown`, `raw` or
+`json_summary`), `refresh`.
 
-* **No `question`.** The extracted Markdown comes in document order, one
-  window at a time, ending on a line break when one is near. The output
-  states `Showing characters a–b of N`, the next offset, what came before,
-  and how many characters remain. Nothing is reordered or dropped.
-* **With `question`.** The passages most related to the question come with
-  their ranges, plus how many of the document's passages were omitted
-  (lossy, said so).
-* **`raw`.** The bytes as received, paged the same way.
-* **`json_summary`.** The JSON summary of the compression engine.
-* **Stored copies.** A page is downloaded once per session. Later windows,
-  `doc`, and a restored session read the stored copy; `refresh: true`
-  downloads it again.
-* **Compression.** Output compression leaves the web tools' text unchanged.
-  Over the hard cap it is cut once on a line end, never thinned out.
+* **No `question`.** You get the Markdown in order, one window at a time. The
+  output says which characters are shown, the next offset and how many remain.
+* **With `question`.** You get the passages most related to the question, and
+  how many were left out.
+* **`raw`.** The text as served, paged the same way.
+* **`json_summary`.** A summary of a JSON document.
+* A page is downloaded once per session. Later windows, `doc`, and a restored
+  session read the stored copy. `refresh: true` downloads it again.
+* Output compression does not change the text of the web tools.
 
-## Storage and provenance
+## Storage and safety
 
-* **Where documents live.** Each document (`D1`, `D2`, … in source order)
-  is kept with the session's saved originals
-  (`<raw store>/web/D1.raw`, `D1.md`, `index.json`). It survives a restore
-  and is deleted with the session.
-* **Quota.** When `[web.store] max_session_bytes` is exceeded, the oldest
-  documents are removed.
-* **Untrusted content.** Page text is external content. It is rendered as
-  data: tool descriptions and result headings say so. Nothing in it changes
+* Each document (`D1`, `D2`...) is kept with the session's saved originals
+  under `web/` (`D1.raw`, `D1.md`, `index.json`). It survives a restore and is
+  deleted with the session.
+* When `[web.store] max_session_bytes` (default 64 MiB) is exceeded, the
+  oldest documents are removed.
+* Page text is untrusted content. It is shown as data. Nothing in it changes
   permissions, configuration, tools or prompts.
 
-## Measurements
+## Measuring
 
-`cargo run --release -p bricks-web --example measure_web` runs on the local
-corpus ([tests/fixtures](../crates/bricks-web/tests/fixtures), synthetic,
-provenance in its README). The figures below come from one run on macOS
-arm64, release build. This document does not record the date of that run or
-a report that holds it, so treat them as an example of the output format, and
-run the command again for current figures. They are not a promise of size or
-speed.
-
-* **Columns.** Sizes and estimated tokens (`bricks_types::tokens`, local
-  heuristic) for HTML → Markdown → passages, the median time of
-  extraction, splitting and ranking, the allocations of one extraction, and
-  whether the reference passage of each query was kept.
-* **Run on macOS arm64, release build:**
-
-| page | query | HTML tok | Markdown tok | passages tok | kept vs HTML | extract ms | rank ms | reference kept |
-|---|---|---|---|---|---|---|---|---|
-| retry.html | max_retries default value | 906 | 376 | 374 | −58.7 % | 0.47 | 0.36 | yes |
-| retry.html | POST /payments idempotent | 906 | 376 | 96 | −89.4 % | 0.45 | 0.22 | yes |
-| timeouts_fr.html | délai total par défaut | 556 | 295 | 294 | −47.1 % | 0.25 | 0.27 | yes |
-| nav_heavy.html | Retry-After 429 | 531 | 72 | 71 | −86.6 % | 0.32 | 0.06 | yes |
-| retry.html ×10 | backoff_ms initial delay | 5 745 | 3 765 | 278 | −95.2 % | 4.07 | 4.54 | yes |
-| retry.html ×50 | backoff_ms initial delay | 27 249 | 18 803 | 278 | −99.0 % | 18.28 | 24.22 | yes |
-
-* **Reading the numbers.** Small pages fit in the budget, so their passages
-  are the whole page. The enlarged pages repeat one section: their passages
-  shrink mostly because repeats are removed as near-duplicates. A real long
-  page would keep more. The "80–90 %" reduction is a hypothesis to measure
-  on real corpora; it is not a guarantee.
-* **Loopback download.** 5 pages × 50 ms server delay, 2 per host: 164 ms,
-  2 in flight on the host. This shows overlap, not Internet latency.
-* **One live run** (DuckDuckGo, query "tokio JoinSet documentation", not a
-  benchmark, not dated in this repository): search 876 ms, download 486 ms,
-  extraction 221 ms, ranking 260 ms, total 1.84 s. Network conditions and the
-  search provider's responses change these numbers.
+`cargo run --release -p bricks-web --example measure_web` runs on a local
+synthetic corpus (`crates/bricks-web/tests/fixtures`). It prints sizes,
+estimated tokens, and timings for extraction and ranking. Run it to get
+current numbers.
 
 ## Dependencies
 
-| crate | version | why | licence |
-|---|---|---|---|
-| `dom_smoothie` | 0.18.2 | Readability extraction | MIT |
-| `dom_query` | 0.28 | DOM, selectors, Markdown writer (no second converter needed) | MIT |
-| `bm25` | 2.3.2, no default features | BM25 scoring (own tokenizer) | MIT |
-| `encoding_rs` | 0.8.42 | charsets | Apache-2.0/MIT + BSD-3 |
-| `hickory-resolver` | 0.26.3 | DNS of every HTTP client (`bricks_types::http`), so policy checks see the answers the client uses | MIT/Apache-2.0 |
-
-* **Evaluated, not added.** `htmd` (dom_query's writer was enough on the
-  fixtures) and `text-splitter` (its Markdown feature brings a large
-  Unicode segmentation stack and does not give heading paths or labelled
-  pieces of oversized blocks; the splitter is about 300 lines here).
-* **Minimum Rust version.** The repository declares no MSRV. The build used
-  rustc 1.98.1. No `floor_char_boundary` is used: boundaries are found with
-  `is_char_boundary`.
+| crate | why |
+|---|---|
+| `dom_smoothie` 0.18.2 | Readability extraction |
+| `dom_query` 0.28 | DOM, selectors, Markdown writer |
+| `bm25` 2.3.2 | BM25 scoring (own tokenizer) |
+| `encoding_rs` 0.8.42 | charsets |
+| `hickory-resolver` 0.26.3 | DNS for every HTTP client, so the policy checks see the answers the client uses |

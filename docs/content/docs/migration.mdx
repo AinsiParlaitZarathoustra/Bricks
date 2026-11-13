@@ -199,9 +199,8 @@ The same release changes some waits without a setting:
 These identities are not renamed. Keep them as they are in configuration,
 scripts, data and external systems.
 
-* `CerseiError`, the error type of the SDK.
+* `BricksError` (renamed from `CerseiError`), the error type of the SDK.
 * Environment variables that start with `CERSEI_`: for example
-  `CERSEI_MEMORY_PATH_OVERRIDE`,
   `CERSEI_HOOK_CONTEXT` (the JSON context a shell hook receives),
   `CERSEI_ENVD_SOCKET`, and the `CERSEI_BENCH_*` variables of the benchmarks.
 * The `.cersei` directories used by the VMS crate (`~/.cersei/vms/…`). The
@@ -550,3 +549,9 @@ The historical `abstract` harnesses and their documentation have been removed.
 Use `scripts/bench_cli.py` for CLI startup measurements and the active
 `tbench-agent` harness for Terminal-Bench. Run Rust tests with
 `cargo nextest run`, or `scripts/run_tests.sh` for the workspace.
+
+## 20. Later changes (tools and memory)
+
+* **`ViewImage` merged into `Read`:** `Read` now handles both text files and images (PNG, JPEG, GIF, WebP). `ViewImage` is no longer a separate tool.
+* **`SendMessage` replaced by `Messagent`:** Team messaging between agents uses `Messagent` (`bricks_agent::agents::MessagentTool`).
+* **Legacy memory modules removed:** `memdir`, `claudemd`, `manager`, `graph`, and `embedding_memory` have been removed from `bricks-memory`. Use `StructuredMemory` and `ScopedMemory` (behind the `structured` feature) with `memory_search`, `memory_write` (notes capped at `NOTE_MAX_CHARS = 280`), and `delete_entry(EntryKind, id)`.

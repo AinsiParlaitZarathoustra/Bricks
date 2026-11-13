@@ -2,8 +2,8 @@
 
 How many live agent instances can each framework handle on one host?
 
-This suite benchmarks **Bricks** (Rust) against four Python frameworks — **Agno**,
-**LangGraph**, **CrewAI**, **PydanticAI** — on five axes:
+This suite benchmarks **Bricks** (Rust) against four Python frameworks (**Agno**,
+**LangGraph**, **CrewAI**, **PydanticAI**) on five axes:
 
 | # | Axis | What it answers |
 |---|---|---|
@@ -14,7 +14,7 @@ This suite benchmarks **Bricks** (Rust) against four Python frameworks — **Agn
 | 5 | Semantic search under load | (Bricks-only) how fast is HNSW search at 10k / 100k chunks under 100 concurrent agents? |
 
 The first three axes are measured for every framework. The last two are
-reported as Bricks-only reference points — the Python frameworks don't ship
+reported as Bricks-only reference points: the Python frameworks don't ship
 an in-process graph or vector index at all, which is itself the point.
 
 ## Ground rules (methodology honesty)
@@ -35,10 +35,10 @@ Python dependencies are managed with [**uv**](https://docs.astral.sh/uv/)
 so Agno's deps never collide with LangGraph's.
 
 ```bash
-# All frameworks (host processes via uv — default)
+# All frameworks (host processes via uv, default)
 ./run.sh
 
-# Single framework — isolated venv, handled by uv under the hood
+# Single framework (isolated venv, handled by uv under the hood)
 ./run.sh --only cersei
 ./run.sh --only agno
 
@@ -64,8 +64,7 @@ BENCH_STEPS=100,500,1000,5000 ./run.sh
 
 Python frameworks hit asyncio / GIL scaling walls around 1–5k concurrent
 coroutines, so axis-3 defaults cap there. Bricks' harness sweeps to 10k+
-because Rust + tokio actually gets there without thrashing. The difference
-*is* the story — the scale caps aren't "hiding" anything.
+because Rust + tokio actually gets there without thrashing. The difference *is* the story: the scale caps aren't "hiding" anything.
 
 ## Re-running just Bricks
 
@@ -103,9 +102,9 @@ See `results/cersei.json` for the canonical shape. Every harness emits:
 
 ## Contributing a new framework
 
-1. Add a new `bench_<framework>.py` script that implements axes 1–3 and writes
+1. Add a new `bench_<framework>.py` script that implements axes 1-3 and writes
    the same JSON shape to `results/<framework>.json`. (The `bench_` prefix is
-   required — naming the file after the package shadows its imports.)
+   required, because naming the file after the package shadows its imports.)
 2. Pin it in `pyproject.toml` or add its own `requirements.txt`.
 3. Add a service in `docker-compose.yml` mirroring the others.
 4. Open a PR.

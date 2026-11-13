@@ -1,6 +1,6 @@
 ---
 title: "Cookbook: General Agent"
-description: Assemble a general-purpose agent from Bricks ADK parts — provider selection, built-in and LSP tools, MCP servers, streaming events, memory context, sessions, and a lifecycle hook.
+description: Assemble a general-purpose agent from Bricks ADK parts: provider selection, built-in and LSP tools, MCP servers, streaming events, memory context, sessions, and a lifecycle hook.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -15,7 +15,6 @@ This recipe assembles a general-purpose agent from the parts of the SDK. Each pa
 use async_trait::async_trait;
 use bricks::prelude::*;
 use bricks::mcp::McpServerConfig;
-use bricks::memory::manager::MemoryManager;
 use bricks::tools::lsp_tool::LspTool;
 use std::sync::Arc;
 
@@ -31,18 +30,14 @@ async fn main() -> anyhow::Result<()> {
     let mut tools = bricks::tools::all();
     tools.push(Box::new(LspTool::new(&working_dir)));
 
-    // 3. Memory context for the system prompt: CLAUDE.md instructions and the MEMORY.md index
-    let memory = MemoryManager::new(&working_dir);
-    let memory_context = memory.build_context();
-
-    // 4. MCP servers, started by the agent
+    // 3. MCP servers, started by the agent
     let filesystem = McpServerConfig::stdio("filesystem", "npx", &["-y", "@modelcontextprotocol/server-filesystem", "."]);
 
-    // 5. The agent
+    // 4. The agent
     let agent = Agent::builder()
         .provider(provider)
         .tools(tools)
-        .system_prompt(format!("You are a general coding agent.\n\n{memory_context}"))
+        .system_prompt("You are a general coding agent.")
         .max_tokens(16384)
         .auto_compact(true)
         .enable_broadcast(512)
@@ -85,12 +80,7 @@ The MCP server above is started with `npx`, and the package names are examples. 
 
 ## Memory
 
-`MemoryManager::build_context()` returns two parts, which the example puts into the system prompt:
-
-- the **CLAUDE.md instruction files** of the working directory hierarchy;
-- the **`MEMORY.md` index** of the memory files (the `memdir` folder).
-
-The graph store is separate. Add graph results with `MemoryManager::recall` or `GraphMemory::recall`, as shown in [Graph Memory](/docs/cookbook-graph-memory#using-it-with-an-agent).
+For long-term cross-session memory, enable the `structured` feature of `bricks-memory` and attach a `ScopedMemory` via `.long_term_memory(...)` (see [Structured Graph Memory](/docs/cookbook-graph-memory)).
 
 For a conversation that survives restarts, give the agent a conversation memory such as `JsonlMemory` and the same `session_id` on each start:
 

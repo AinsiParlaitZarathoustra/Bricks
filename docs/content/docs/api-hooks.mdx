@@ -55,7 +55,7 @@ pub struct HookContext {
 pub enum HookAction {
     Continue,                  // go on
     Block(String),             // PreToolUse: the tool does not run and the model gets "Blocked by hook: …".
-                               // PostModelTurn: the run fails with CerseiError::Provider("Blocked by hook: …")
+                               // PostModelTurn: the run fails with BricksError::Provider("Blocked by hook: …")
     ModifyInput(Value),        // PreToolUse: the call is decided again if the change differs from the approved one, then runs with the new input
     InjectMessage(Box<Message>), // returned by the hook API, but the runner does not apply it (no arm in runner.rs)
 }

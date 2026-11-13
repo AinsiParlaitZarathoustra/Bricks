@@ -66,7 +66,7 @@ Linux and Windows have not yet been validated in those runs.
 
   | Area | Tools |
   |---|---|
-  | Files | `Read`, `ViewImage`, `Write`, `Edit`, `ApplyPatch` |
+  | Files | `Read` (text and images), `Write`, `Edit`, `ApplyPatch` |
   | Search and code | `Glob`, `Grep`, `CodeSearch`, `CodeScout`, `CodeStats` |
   | Commands | `Bash`, `PowerShell`, `Job` |
   | Web | `WebFetch`, `WebSearch` |
@@ -90,8 +90,9 @@ Linux and Windows have not yet been validated in those runs.
   cover individual calls.
 - **Context management.** Track usage, compact or clear a conversation, and
   reduce tool outputs while keeping their originals accessible.
-- **Memory.** Optional long-term memory with sourced records, global and
-  project scopes, and hybrid recall.
+- **Memory.** Optional long-term memory with short notes (280 characters
+  at most), global and project scopes, and hybrid recall. You can delete
+  entries in the desktop memory view.
 - **Skills.** Install Agent Skills in Bricks’ own store. Project skills run
   only once you have trusted them.
 - **Web tools.** Search with DuckDuckGo, Brave, Tavily or Exa, read pages as

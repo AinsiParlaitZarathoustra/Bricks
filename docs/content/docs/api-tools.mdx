@@ -110,11 +110,11 @@ Convenience functions that return pre-configured tool collections:
 
 | Function | Count | Tools Included |
 |----------|-------|----------------|
-| `bricks::tools::all()` | 16 | `coding()` plus `TodoWrite` |
-| `bricks::tools::coding()` | 15 | filesystem + shell_with_jobs (on a fresh registry) + web |
-| `bricks::tools::filesystem()` | 10 | Read, ViewImage, Write, Edit, ApplyPatch, Glob, Grep, CodeSearch, CodeScout, CodeStats |
-| `bricks::tools::shell()` | 2 | Bash (no job registry: commands that may become a job are refused), PowerShell |
-| `bricks::tools::shell_with_jobs(registry)` | 3 | Bash and Job on `registry`, PowerShell |
+| `bricks::tools::all()` | 13 (14 with PowerShell) | `coding()` plus `TodoWrite` |
+| `bricks::tools::coding()` | 12 (13 with PowerShell) | filesystem + shell_with_jobs (on a fresh registry) + web |
+| `bricks::tools::filesystem()` | 8 | Read (text and images), Write, Edit, ApplyPatch, Glob, Grep, CodeScout, CodeStats |
+| `bricks::tools::shell()` | 1 (2 with PowerShell) | Bash (no job registry: commands that may become a job are refused), PowerShell (on Windows or when `pwsh` is on `PATH`) |
+| `bricks::tools::shell_with_jobs(registry)` | 2 (3 with PowerShell) | Bash and Job on `registry`, PowerShell (when available) |
 | `bricks::tools::web()` | 2 | WebFetch, WebSearch |
 | `bricks::tools::planning()` | 1 | TodoWrite |
 | `bricks::tools::none()` | 0 | Empty (for chat-only agents) |
@@ -123,20 +123,20 @@ Convenience functions that return pre-configured tool collections:
 
 The permission level is the one each tool declares in code (`permission_level()`).
 
-**Filesystem (10 tools)**
+**Filesystem (8 tools)**
 
 | Tool | Permission | Description |
 |------|-----------|-------------|
-| `FileReadTool` | ReadOnly | Read files with optional line offset/limit. Numbered lines, binary and encoding detection. |
-| `ViewImageTool` | ReadOnly | Show the model an image file (PNG, JPEG, GIF or WebP); the model receives the image itself. |
-| `FileWriteTool` | Write | Create or overwrite files. Creates parent directories automatically. |
-| `FileEditTool` | Write | String replacement: one replacement, or several (`edits`) applied in order and written all or nothing. Tolerates indentation drift; refuses ambiguous matches. Replaces the former `MultiEditTool`. |
-| `ApplyPatchTool` | Write | Apply a patch with strict parsing and rollback on failure. |
-| `GlobTool` | ReadOnly | Pattern matching across directories. |
-| `GrepTool` | ReadOnly | Regex search with ripgrep's libraries, gitignore-aware. No external `rg` binary is needed. |
-| `CodeSearchTool` | ReadOnly | Search the workspace's code index. |
-| `CodeScoutTool` | ReadOnly | Code understanding queries (symbols, definitions, references, diagnostics) on the shared engine (`bricks-semantic`). |
-| `CodeStatsTool` | ReadOnly | Count the code, comment and blank lines of a file or a tree, in total, per language or per file (Tokei, in process). Totals cover the whole analysis; check `partial` before presenting them as complete. |
+| `FileReadTool` (`Read`) | ReadOnly | Read text files (with optional line offset/limit, numbered lines) and image files (PNG, JPEG, GIF, WebP, sent as images to the model). |
+| `FileWriteTool` (`Write`) | Write | Create or overwrite files. Creates parent directories automatically. |
+| `FileEditTool` (`Edit`) | Write | String replacement: one replacement, or several (`edits`) applied in order and written all or nothing. Tolerates indentation drift; refuses ambiguous matches. |
+| `ApplyPatchTool` (`ApplyPatch`) | Write | Apply a patch with strict parsing and rollback on failure. |
+| `GlobTool` (`Glob`) | ReadOnly | Pattern matching across directories. |
+| `GrepTool` (`Grep`) | ReadOnly | Regex search with ripgrep's libraries, gitignore-aware. No external `rg` binary is needed. |
+| `CodeScoutTool` (`CodeScout`) | ReadOnly | Code understanding queries (symbols, definitions, references, diagnostics) on the shared engine (`bricks-semantic`). |
+| `CodeStatsTool` (`CodeStats`) | ReadOnly | Count the code, comment and blank lines of a file or a tree, in total, per language or per file (Kodestats, in process). Totals cover the whole analysis; check `partial` before presenting them as complete. |
+
+`CodeSearchTool` (`CodeSearchTool::with_embeddings`) is not included in `filesystem()`: add it separately when an embedding provider is set up.
 
 **Shell (3 tools)**
 
@@ -161,11 +161,11 @@ The permission level is the one each tool declares in code (`permission_level()`
 |------|-----------|-------------|
 | `TodoWriteTool` | None | Create and update the plan of a conversation: the complete list of steps, validated (at most one `in_progress`) and written with a revision. Its plan is the `PlanHandle` extension (`todo_write::PlanService`): kept in `plan.json` when the agent has a session folder, in memory otherwise. |
 
-**Sub-agent tools**: `Agent`, `Agents`, `AgentControl` and `AgentProfiles` are described in [Sub-agent tools](/docs/built-in-tools#sub-agent-tools). The native runtime tool `SendMessage` is registered with them, not by `bricks::tools::all()`:
+**Sub-agent tools**: `Agent`, `Agents`, `AgentControl` and `AgentProfiles` are described in [Sub-agent tools](/docs/built-in-tools#sub-agent-tools). The native runtime tool `Messagent` is registered with them, not by `bricks::tools::all()`:
 
 | Tool | Permission | Description |
 |------|-----------|-------------|
-| `bricks_agent::agents::SendMessageTool` | Execute | Native runtime tool: send a message to a running sub-agent (`to`, `content`). Registered with the native agent tools, not by `bricks::tools::all()`. |
+| `bricks_agent::agents::MessagentTool` | Execute | Native runtime tool: send and read team messages between agents in a run. Registered with the native agent tools, not by `bricks::tools::all()`. |
 
 **Other (1 tool)**
 
@@ -227,7 +227,7 @@ fn do_search(_query: &str, _limit: usize) -> Vec<String> { Vec::new() }
 
 The `Input` type must derive `Deserialize` (serde) and `JsonSchema` (schemars). Field doc comments become parameter descriptions in the schema. An input field the tool does not declare is an error, with a message that suggests the correct name.
 
-The expansion names the types it uses by their full paths under `bricks_tools` (`bricks_tools::PermissionLevel`, `bricks_tools::ToolCategory`, …). A crate that uses `#[derive(Tool)]` therefore declares `bricks-tools` as a dependency next to `bricks`, as it had to declare `cersei-tools` before the rename. See [Migration](/docs/migration).
+The expansion names the types it uses by their full paths under `bricks_tools` (`bricks_tools::PermissionLevel`, `bricks_tools::ToolCategory`, …). A crate that uses `#[derive(Tool)]` therefore declares `bricks-tools` as a dependency next to `bricks`. See [Migration](/docs/migration).
 
 ### Manual Implementation
 
@@ -273,7 +273,7 @@ impl Tool for ManualTool {
 ```rust
 let agent = Agent::builder()
     .provider(bricks::provider_from_config(None, "my-provider/my-model")?)
-    .tools(bricks::tools::coding())  // 15 built-in tools
+    .tools(bricks::tools::coding())  // built-in coding tools
     .tool(SearchTool)                // + your custom tool
     .tool(ManualTool)                // + another
     .build()?;
@@ -455,7 +455,7 @@ let registry = bricks_tools::jobs::JobRegistry::new(Default::default(), None);
 let tools = bricks_tools::shell_with_jobs(Arc::clone(&registry));
 ```
 
-When an agent is built, `AgentBuilder::build` looks at its job tools. If its extensions hold a `JobsHandle` (sessions and sub-agents get one), the tools are put on that registry. Otherwise the registry of the tools becomes the agent's `JobsHandle`. Tools on two different registries are refused with `CerseiError::Config` before any model call.
+When an agent is built, `AgentBuilder::build` looks at its job tools. If its extensions hold a `JobsHandle` (sessions and sub-agents get one), the tools are put on that registry. Otherwise the registry of the tools becomes the agent's `JobsHandle`. Tools on two different registries are refused with `BricksError::Config` before any model call.
 
 A job belongs to the agent that started it: `JobTool` and `Bash` read the `JobOwner` in the tool context, which the runner sets for each agent. Without an owner, `Bash` refuses a command that may become a job, and `Job` answers with an error.
 

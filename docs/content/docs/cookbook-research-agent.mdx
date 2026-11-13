@@ -14,7 +14,7 @@ User query → research agent
   ├── WebSearch / WebFetch   → results and page passages
   ├── Read / Glob / Grep     → local code and documents
   ├── LspTool                → code symbols and references
-  └── GraphMemory            → store and recall findings
+  └── StructuredMemory       → store and recall findings
 ```
 
 ## The agent
@@ -93,43 +93,44 @@ let answers = futures::future::join_all(runs).await;
 
 `join_all` comes from the `futures` crate. Then ask a final agent to combine the answers. This keeps the coordination in your code, where you can see it, instead of in the model's choice of tools.
 
-## Persistent findings with graph memory
+## Persistent findings with structured memory
 
-Store findings in a graph store and recall them in later sessions. This needs the `graph` feature of `bricks-memory` (see [Graph Memory](/docs/cookbook-graph-memory)):
+Store findings in `StructuredMemory` and recall them in later sessions. This needs the `structured` feature of `bricks-memory` (see [Structured Graph Memory](/docs/cookbook-graph-memory)):
 
 ```rust
-use bricks::memory::graph::GraphMemory;
-use bricks::memory::memdir::MemoryType;
-use std::path::Path;
+use bricks_embeddings::HashingEmbeddings;
+use bricks_memory::structured::{EpisodeInput, RecallQuery, StructuredMemory, GLOBAL_SPACE};
+use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 
-let graph = GraphMemory::open(Path::new("./research.db"))?;
+let memory = StructuredMemory::builder(Arc::new(HashingEmbeddings::new(384)))
+    .path("./research.db")
+    .open()?;
 
-let id = graph.store_memory(
-    "tokio: <throughput figure and source URL, as found>",
-    MemoryType::Reference,
-    0.9,
-)?;
-graph.tag_memory(&id, "rust-async")?;
-graph.tag_memory(&id, "benchmarks")?;
-
-let id2 = graph.store_memory(
-    "async-std: <status statement and source URL, as found>",
-    MemoryType::Reference,
-    0.85,
-)?;
-graph.link_memories(&id, &id2, "COMPARES_TO")?;
+memory
+    .record(EpisodeInput {
+        space: GLOBAL_SPACE.into(),
+        project_id: Some("rust-async".into()),
+        session_id: Some("research-session-1".into()),
+        role: "user".into(),
+        author: None,
+        content: "tokio: <throughput figure and source URL, as found>".into(),
+        occurred_at: None,
+        source_ref: None,
+    })
+    .await?;
+memory.process(&CancellationToken::new()).await?;
 
 // In a later session:
-for finding in graph.by_topic("rust-async") {
-    println!("{finding}");
+let recalled = memory.recall(&RecallQuery::new("rust-async benchmarks")).await?;
+for item in recalled.items {
+    if let Some(ep) = item.episode {
+        println!("{}", ep.content);
+    }
 }
 ```
 
 Store the text of a finding, with its source, and not only a conclusion, so that a later session can check it.
-
-<Callout type="info">
-Put recalled findings into the prompt of the next session yourself. [Graph Memory](/docs/cookbook-graph-memory#using-it-with-an-agent) shows how to combine `MemoryManager::recall` with `build_context()`. The graph store is not a conversation memory.
-</Callout>
 
 ## The report format
 

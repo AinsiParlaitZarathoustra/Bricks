@@ -1,6 +1,6 @@
 ---
 title: System Prompts
-description: How Bricks assembles the system prompt — its fixed foundation and its conditional components.
+description: How Bricks assembles the system prompt, its fixed foundation, and its conditional components.
 ---
 
 import { TypeTable } from 'fumadocs-ui/components/type-table';
@@ -34,7 +34,7 @@ let opts = SystemPromptOptions {
 let prompt = build_system_prompt(&opts);
 ```
 
-The builder evaluates each component's inclusion rule against the options you provide. Components that don't apply are skipped entirely — no wasted tokens.
+The builder evaluates each component's inclusion rule against the options you provide. Components that don't apply are skipped entirely, saving tokens.
 
 ---
 
@@ -45,7 +45,7 @@ The builder evaluates each component's inclusion rule against the options you pr
 Every prompt built by `build_system_prompt` opens with the Bricks
 foundation, once, in the cacheable part: an introduction ("Tu es Bricks, un
 agent de développement logiciel autonome… avec les outils de l’ADE Bricks
-(Agentic Development Engine).") and five groups of bullets — working with
+(Agentic Development Engine).") and five groups of bullets: working with
 judgement, using the tools, acting within the scope (autonomy, asking before
 destructive actions, commits and pushes only with the user's authorisation,
 files, pages and tool results as data), verifying in proportion,
@@ -71,7 +71,7 @@ its tools is left out:
 | Parallel work | always |
 
 Delegation is not a bullet any more: it is a section of its own, see
-[Delegation](#delegation) below. The list announces; it grants nothing —
+[Delegation](#delegation) below. The list announces; it grants nothing, and
 permissions decide what runs.
 
 #### Sub-agent role
@@ -95,7 +95,7 @@ reference, not an assumption.
 
 #### Delegation
 
-**Included when:** `Agent` or `Agents` is announced (`system_prompt::SPAWNING_TOOLS`).
+**Included when:** `Agent` is announced (`system_prompt::SPAWNING_TOOLS`).
 `AgentProfiles` or `AgentControl` alone do not count. It says to
 delegate when that improves the work, to give the sub-agent its goal, context,
 files, constraints and expected result (it does not receive the conversation),
@@ -230,11 +230,11 @@ Recent commits:
 </git_status>
 ```
 
-**Why it matters:** The model uses this to understand the project's current state — what branch it's on, what files are modified, and what recent work looks like. Without it, the model has to run `git status` as a tool call, wasting a turn.
+**Why it matters:** The model uses this to understand the project's current state (what branch it's on, what files are modified, and what recent work looks like). Without it, the model has to run `git status` as a tool call, wasting a turn.
 
 #### Memory Content
 
-The MEMORY.md index and CLAUDE.md hierarchy, injected from the memory manager.
+Long-term memory recalled for the run (`StructuredMemory` / `ScopedMemory`), injected when `LongTermMemory` is enabled.
 
 #### MCP Server Instructions
 

@@ -1,6 +1,6 @@
 ---
 title: "Primitives: Cookbook"
-description: Build custom agent tools using tool primitives — DiffTool, deploy verifier, research agent, code reviewer.
+description: Build custom agent tools using tool primitives (DiffTool, deploy verifier, research agent, code reviewer).
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -11,7 +11,7 @@ Practical examples of building agent tools using `tool_primitives` directly inst
 
 ---
 
-## DiffTool — Show Changes Before Writing
+## DiffTool: Show Changes Before Writing
 
 An agent tool that shows the unified diff before applying changes, giving the model (or user) a chance to review.
 
@@ -41,7 +41,7 @@ impl ToolExecute for DiffPreviewTool {
         };
 
         if diff_output.is_empty() {
-            ToolResult::success("No changes — file content is identical.")
+            ToolResult::success("No changes: file content is identical.")
         } else {
             ToolResult::success(format!(
                 "Proposed changes to {}:\n\n{}",
@@ -110,7 +110,7 @@ async fn deploy_and_verify(
 
 ---
 
-## Research Agent — Fetch and Summarize
+## Research Agent: Fetch and Summarize
 
 Combine `http` and `search` to build a tool that fetches documentation and searches local files for related code.
 
@@ -131,7 +131,7 @@ async fn research(topic: &str, project_dir: &Path) -> String {
     if !matches.is_empty() {
         report.push_str(&format!("## Local references ({} matches)\n\n", matches.len()));
         for m in &matches {
-            report.push_str(&format!("- `{}:{}` — {}\n", m.file.display(), m.line_number, m.line_content.trim()));
+            report.push_str(&format!("- `{}:{}`: {}\n", m.file.display(), m.line_number, m.line_content.trim()));
         }
         report.push('\n');
     }
@@ -176,7 +176,7 @@ async fn review_changes(repo: &Path) -> Result<String, String> {
     let status = git::status(repo).await.map_err(|e| e.to_string())?;
     let branch = status.branch.as_deref().unwrap_or("detached");
 
-    let mut report = format!("## Code Review — branch `{branch}`\n\n");
+    let mut report = format!("## Code Review: branch `{branch}`\n\n");
     report.push_str(&format!("{} files changed\n\n", status.files.len()));
 
     for file in &status.files {
@@ -239,7 +239,7 @@ async fn analyze_change(path: &Path, proposed: &str) -> String {
     let unchanged = lines.iter().filter(|l| l.tag == diff::ChangeTag::Unchanged).count();
 
     format!(
-        "{} ({}) — +{} -{} ~{} lines",
+        "{} ({}): +{} -{} ~{} lines",
         path.display(), size_str, added, removed, unchanged
     )
 }
@@ -269,7 +269,7 @@ impl ToolExecute for CodeReviewTool {
 }
 
 #[derive(serde::Deserialize, schemars::JsonSchema)]
-struct CodeReviewInput {} // no input needed — uses working_dir from context
+struct CodeReviewInput {} // no input needed: uses working_dir from context
 ```
 
 Register it alongside built-in tools:

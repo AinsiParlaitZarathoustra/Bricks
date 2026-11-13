@@ -1,6 +1,6 @@
 ---
 title: "Workflows Cookbook"
-description: Complete, runnable bricks-workflows recipes — sequential pipelines, parallel fan-out, branching, shared state, agent and tool steps, nested workflows, suspend/resume, and driving it all from a UI.
+description: Complete, runnable bricks-workflows recipes: sequential pipelines, parallel fan-out, branching, shared state, agent and tool steps, nested workflows, suspend/resume, and driving it all from a UI.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -12,7 +12,7 @@ Practical recipes built on `bricks-workflows`. Each is self-contained. They assu
 
 ```toml
 [dependencies]
-bricks = { version = "0.6", features = ["workflows"] }
+bricks = { version = "1.0.0-alpha.1", features = ["workflows"] }
 tokio = { version = "1", features = ["full"] }
 serde_json = "1"
 ```
@@ -27,7 +27,7 @@ use std::sync::Arc;
 
 ## Sequential pipeline
 
-The "hello world" — three steps, each receiving the previous step's output.
+The "hello world": three steps, each receiving the previous step's output.
 
 ```rust
 #[tokio::main]
@@ -83,7 +83,7 @@ let out = wf.start(json!({})).await?;
 // out.result == [ { "temp_c": 21 }, { "headline": "Rust 2.0 announced" } ]
 ```
 
-A common pattern is a `Map` step after the join to reshape the array into a named object — see [Reshaping data](#reshaping-data-with-map).
+A common pattern is a `Map` step after the join to reshape the array into a named object (see [Reshaping data](#reshaping-data-with-map)).
 
 ---
 
@@ -144,14 +144,14 @@ let out = wf.start(json!({})).await?;
 ```
 
 <Callout type="warn">
-`ctx.state()` clones the state; `ctx.set_state(v)` replaces it. The underlying lock is synchronous — never hold it across an `.await`.
+`ctx.state()` clones the state; `ctx.set_state(v)` replaces it. The underlying lock is synchronous, so never hold it across an `.await`.
 </Callout>
 
 ---
 
 ## Reshaping data with `Map`
 
-A `Map` node is a pure JSON transform (no registry lookup). Each output field is filled from a JSON-pointer path into the scope — handy right after a parallel `Join`.
+A `Map` node is a pure JSON transform (no registry lookup). Each output field is filled from a JSON-pointer path into the scope, which is handy right after a parallel `Join`.
 
 ```rust
 use std::collections::HashMap;
@@ -195,7 +195,7 @@ let out = wf.start(json!({ "review": "Best purchase of the year." })).await?;
 // out.result has the shape { "text", "turns", "stop_reason" } (see the AgentStep row in the API reference).
 ```
 
-You can mix agent and function steps freely — e.g. `.then("classify").then("route")` where `route` is a `FnStep` that branches on the agent's text.
+You can mix agent and function steps freely, e.g. `.then("classify").then("route")` where `route` is a `FnStep` that branches on the agent's text.
 
 ---
 
@@ -239,7 +239,7 @@ let out = parent.start(json!({ "raw": "…" })).await?;
 
 ## Human-in-the-loop (suspend / resume)
 
-A step returns `StepOutcome::Suspended` to pause the run — e.g. waiting on an approval. The run comes back with status `Suspended` and a `SuspendPoint`. Later, `Workflow::resume` replays the completed steps from the snapshot and continues from the suspended node, injecting `resume_data`.
+A step returns `StepOutcome::Suspended` to pause the run (for example, waiting on an approval). The run comes back with status `Suspended` and a `SuspendPoint`. Later, `Workflow::resume` replays the completed steps from the snapshot and continues from the suspended node, injecting `resume_data`.
 
 ```rust
 let registry = StepRegistry::new();
@@ -278,7 +278,7 @@ The MVP `RunStore` is in-memory, so resume must happen in the same process. The 
 
 ## Streaming live status to a UI
 
-`stream()` returns serializable events — forward them to a browser to animate the graph in real time.
+`stream()` returns serializable events that you can forward to a browser to animate the graph in real time.
 
 ```rust
 let wf = Workflow::compile(def, &registry)?; // Arc<Workflow>
@@ -291,7 +291,7 @@ while let Some(event) = stream.next().await {
         WorkflowEvent::WorkflowCompleted { result }  => println!("done: {:?}", result.status),
         _ => {}
     }
-    // Every event is Serialize — push it straight to the client:
+    // Every event is Serialize; push it straight to the client:
     let _frame = serde_json::to_string(&event)?;
     // ws.send(_frame).await?;
 }
@@ -322,7 +322,7 @@ let wf = Workflow::compile(def, &registry)?; // fails loudly if a step_id isn't 
 let out = wf.start(json!({ "message": "hi" })).await?;
 ```
 
-Expose the available steps to the builder palette with `registry.catalog()` — each `StepInfo` carries the id, description, and input/output schemas the UI needs to render a node and validate wiring.
+Expose the available steps to the builder palette with `registry.catalog()`. Each `StepInfo` carries the id, description, and input/output schemas the UI needs to render a node and validate wiring.
 
 ```rust
 let palette = registry.catalog();
@@ -330,5 +330,5 @@ let palette_json = serde_json::to_string(&palette)?; // -> the builder's node me
 ```
 
 <Callout type="info">
-**Validation is at compile time, not run time.** `Workflow::compile` rejects an unknown `step_id` (`unknown step: '…'`) and a malformed graph (missing entry, a branch with no arms, a loop body that doesn't exist) before any step executes — so a bad drawing from the UI fails fast with a clear message.
+**Validation is at compile time, not run time.** `Workflow::compile` rejects an unknown `step_id` (`unknown step: '…'`) and a malformed graph (missing entry, a branch with no arms, a loop body that doesn't exist) before any step executes, so a bad drawing from the UI fails fast with a clear message.
 </Callout>

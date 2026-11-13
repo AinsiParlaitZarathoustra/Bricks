@@ -107,7 +107,7 @@ impl AgentStream {
     pub async fn next(&mut self) -> Option<AgentEvent>;
     pub async fn collect(self) -> Result<AgentOutput>;
     pub async fn collect_text(self) -> Result<String>;
-    pub fn cancel(&self);                                    // takes effect
+    pub fn cancel(&self);                                    // cancels the run
     pub fn respond_permission(&self, request_id: String, decision: PermissionDecision);
     pub fn inject_message(&self, message: String);
 }
@@ -128,7 +128,7 @@ Structured event consumers implementing the `Reporter` trait:
 pub trait Reporter: Send + Sync {
     async fn on_event(&self, event: &AgentEvent);
     async fn on_complete(&self, output: &AgentOutput) {}
-    async fn on_error(&self, error: &CerseiError) {}
+    async fn on_error(&self, error: &BricksError) {}
 }
 ```
 
@@ -211,16 +211,15 @@ Agent::builder()
 The enum is defined in [`crates/bricks-agent/src/events.rs`](../crates/bricks-agent/src/events.rs). Its variants, grouped by theme:
 
 - **Streaming:** `TextDelta`, `ThinkingDelta`
-- **Tools:** `ToolStart`, `ToolProgress`, `ToolPermissionCheck`, `ToolEnd` (with `duration` and compression stats)
-- **Permissions and approvals:** `PermissionRequired` (with the stream approver: a call the policy asks about), `ApprovalRequested`, `ApprovalResolved` (with `decision`, `allow` or `deny`, and `by`), `PermissionPolicyChanged` (the session's policy and its revision)
+- **Tools:** `ToolStart`, `ToolProgress`, `ToolPermissionCheck`, `ToolEnd` (with `duration`, `executed`, `status`, and compression stats)
+- **Permissions:** `PermissionRequired` (with the stream approver: a call the policy asks about)
 - **Turns and model requests:** `TurnStart`, `TurnComplete`, `ModelRequestStart`, `ModelResponseStart`
 - **Context:** `TokenWarning`, `CompactStart`, `CompactEnd`, `CompactionResult`, `ContextUpdate`
-- **Sessions:** `SessionLoaded`, `SessionSaved`
+- **Sessions and plans:** `SessionLoaded`, `SessionSaved`, `PlanUpdated`
 - **Cost:** `CostUpdate`
-- **Sub-agents and jobs:** `SubAgentSpawned`, `SubAgentComplete`, `SubAgent`, `Job`
+- **Sub-agents:** `SubAgentSpawned`, `SubAgentComplete`
 - **Hooks:** `HookFired`, `HookBlocked`
 - **Memory:** `MemoryRecalled`, `MemoryMaintenanceStarted`, `MemoryMaintenanceFinished`
-- **Edits and skills:** `EditApplied`, `SkillActivated`, `SkillNotActivated`
 - **Terminal:** `Status`, `Error`, `Complete`
 
 Consult the file for the fields of each variant; the enum evolves between releases.

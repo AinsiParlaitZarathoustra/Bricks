@@ -1,6 +1,6 @@
 ---
 title: "Compression Overview"
-description: Structural and command-aware compression for tool outputs — trims 20–60% of input tokens billed by OpenAI and Gemini in measured end-to-end runs.
+description: Structural and command-aware compression for tool outputs. Trims 20-60% of input tokens billed by OpenAI and Gemini in measured end-to-end runs.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -10,7 +10,7 @@ import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
 
 `bricks-compression` sits between a tool's raw `execute()` result and the agent's tool-result budget (`apply_tool_result_budget`), trimming the part of every tool output that is ANSI codes, blank lines, `Compiling …` progress spam, boilerplate comments, and unchanged function bodies.
 
-Savings are **measurable on real provider bills** — `gpt-4o-mini` billed us 29.1% fewer input tokens on a `cargo test` turn, `gemini-2.5-flash` billed 62.1% fewer on the same fixture. Full numbers with reproduction commands live on the [Compression Benchmarks](/docs/compression-benchmarks) page.
+Savings are **measurable on real provider bills**: `gpt-4o-mini` billed 29.1% fewer input tokens on a `cargo test` turn, and `gemini-2.5-flash` billed 62.1% fewer on the same fixture. Full numbers with reproduction commands live on the [Compression Benchmarks](/docs/compression-benchmarks) page.
 
 <Callout type="info">
 **Port with credit.** The rule engine, language-aware code filter, and TOML DSL are ports of [**rtk** (Rust Token Killer)](https://github.com/rtk-ai/rtk) by **Patrick Szymkowiak**, MIT licensed. `bricks-compression/LICENSE` + the per-module `//! Credits:` headers document which rtk file each module derives from.
@@ -20,9 +20,9 @@ Savings are **measurable on real provider bills** — `gpt-4o-mini` billed us 29
 
 | Level | Behaviour |
 |---|---|
-| `Off` | Byte-for-byte passthrough. **Default** — zero behavioural change for existing users. |
-| `Minimal` | Strip ANSI, collapse blank runs, drop non-doc comments in source files. Safe for JSON/YAML/TOML (never code-stripped). |
-| `Aggressive` | Minimal **+** function body stubbing for source files (keeps signatures + imports). The command rules described under [Built-in rule files](#built-in-rule-files) apply at every level above `Off`. |
+| `Off` | Only the hard size cap (byte-for-byte passthrough for ordinary outputs). **Default**: zero behavioural change for existing users. |
+| `Minimal` | Compresses command logs (strips ANSI and progress spam, keeps diagnostics, applies command rules) and summarizes JSON outputs of 16 KiB or more. |
+| `Aggressive` | Everything in `Minimal`, plus Tree-sitter skeletons for source files read without `offset`/`limit`, and JSON summaries starting at 4 KiB. |
 
 ## How it decides what to do
 
@@ -44,7 +44,7 @@ Every call emits a structured `tracing::info!` event on the `bricks_compression`
 
 ```toml
 [dependencies]
-bricks-compression = "0.6"
+bricks-compression = "1.0.0-alpha.1"
 ```
 
 The crate is pure Rust. It depends on `bricks-types` and shared workspace crates (`regex`, `serde`, `serde_json`, `toml`, `tracing`), plus tree-sitter grammars for the code filter.
@@ -79,11 +79,11 @@ let out = compress_tool_output(
 );
 ```
 
-Infallible — on any internal error the raw input is returned unchanged so the agent loop never breaks.
+Infallible: on any internal error the raw input is returned unchanged so the agent loop never breaks.
 </Tab>
 <Tab value="From bricks">
 ```toml
-# bricks.toml (project) — see docs/compression.md in the repository
+# bricks.toml (project): see docs/compression.md in the repository
 [compression]
 level = "aggressive"
 ```
@@ -103,7 +103,7 @@ let agent = Agent::builder()
     .compression_level(CompressionLevel::Aggressive)
     .build()?;
 
-// Runtime change — takes effect on the next tool call
+// Runtime change: takes effect on the next tool call
 agent.set_compression_level(CompressionLevel::Off);
 let current = agent.compression_level();
 ```
@@ -188,5 +188,5 @@ Fields emitted per call:
 
 ## Next steps
 
-- **[Compression Benchmarks](/docs/compression-benchmarks)** — exact token counts from live OpenAI + Gemini runs, reproducible commands, per-call log dumps.
-- **[Changelog](/docs/changelog)** — the 0.1.7 release notes.
+- **[Compression Benchmarks](/docs/compression-benchmarks)**: exact token counts from live OpenAI and Gemini runs, reproducible commands, and per-call log dumps.
+- **[Changelog](/docs/changelog)**: release notes.

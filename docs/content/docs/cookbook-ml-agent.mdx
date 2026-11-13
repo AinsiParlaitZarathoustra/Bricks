@@ -1,6 +1,6 @@
 ---
 title: "Cookbook: ML Coding Agent"
-description: Build a coding agent for machine-learning work — run training scripts with custom tools, read model code with the code-intelligence primitives, and keep experiment results in graph memory.
+description: Build a coding agent for machine-learning work: run training scripts with custom tools, read model code with the code-intelligence primitives, and keep experiment results in structured memory.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -195,29 +195,42 @@ for intel in code_intel::scan_project(Path::new("./"), 20) {
 }
 ```
 
-## Experiment tracking with graph memory
+## Experiment tracking with structured memory
 
-Record each run in a graph store, so that a later session can find the results. This needs the `graph` feature of `bricks-memory` (see [Graph Memory](/docs/cookbook-graph-memory)):
+Record each run in `StructuredMemory`, so a later session can recall the results. This needs the `structured` feature of `bricks-memory` (see [Structured Graph Memory](/docs/cookbook-graph-memory)):
 
 ```rust
-use bricks::memory::graph::GraphMemory;
-use bricks::memory::memdir::MemoryType;
-use std::path::Path;
+use bricks_embeddings::HashingEmbeddings;
+use bricks_memory::structured::{EpisodeInput, RecallQuery, StructuredMemory, GLOBAL_SPACE};
+use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 
-let graph = GraphMemory::open(Path::new("./memory.db"))?;
+let memory = StructuredMemory::builder(Arc::new(HashingEmbeddings::new(384)))
+    .path("./memory.db")
+    .open()?;
 
-let id = graph.store_memory(
-    "experiment: lr=1e-4, epochs=10, val_loss=0.23, val_acc=0.91",
-    MemoryType::Project,
-    0.95,
-)?;
-graph.tag_memory(&id, "experiment-results")?;
+memory
+    .record(EpisodeInput {
+        space: GLOBAL_SPACE.into(),
+        project_id: Some("ml-project".into()),
+        session_id: Some("train-run-1".into()),
+        role: "user".into(),
+        author: None,
+        content: "experiment-results: lr=1e-4, epochs=10, val_loss=0.23, val_acc=0.91".into(),
+        occurred_at: None,
+        source_ref: None,
+    })
+    .await?;
+memory.process(&CancellationToken::new()).await?;
 
 // In a later session:
-let results: Vec<String> = graph.by_topic("experiment-results");
+let recalled = memory.recall(&RecallQuery::new("experiment-results val_loss")).await?;
+for item in recalled.items {
+    if let Some(ep) = item.episode {
+        println!("{}", ep.content);
+    }
+}
 ```
-
-`by_topic` returns the matching memories as text. It does not sort them.
 
 ## An illustrative flow
 

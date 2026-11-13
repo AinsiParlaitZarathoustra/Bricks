@@ -1,6 +1,6 @@
 ---
 title: "Sandboxes & VMs Overview"
-description: bricks-vms — sandbox runtimes for Bricks ADK agents. Run commands in isolated environments, snapshot and restore them, and share state between sandboxes through host-mediated primitives.
+description: bricks-vms provides sandbox runtimes for Bricks ADK agents. Run commands in isolated environments, snapshot and restore them, and share state between sandboxes through host-mediated primitives.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -8,7 +8,7 @@ import { Cards, Card } from 'fumadocs-ui/components/card';
 
 # Sandboxes & VMs
 
-`bricks-vms` is the crate that provides a **sandbox runtime layer** for Bricks ADK. A sandbox is an environment in which commands run and files are read and written, separate from the host filesystem and process namespace. The same crate provides three **host-mediated primitives** — `Volume`, `Mailbox`, `KvStore` — that let several sandboxes exchange files and messages and share key/value state.
+`bricks-vms` is the crate that provides a **sandbox runtime layer** for Bricks ADK. A sandbox is an environment in which commands run and files are read and written, separate from the host filesystem and process namespace. The same crate provides three **host-mediated primitives** (`Volume`, `Mailbox`, `KvStore`) that let several sandboxes exchange files and messages and share key/value state.
 
 <Callout type="warn">
 **Nothing here is on by default in a session.** The crate is compiled by the default `vms` feature of the `bricks` facade, but the `bricks` command-line tool and the desktop app do not create sandboxes, do not register the agent-facing VM tools, and do not expose a backend choice. Sandboxes are used when you assemble an agent yourself in Rust. See [What is wired today](#what-is-wired-today).

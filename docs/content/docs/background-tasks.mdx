@@ -103,6 +103,6 @@ Prefer `background: true`, or a yield, to `cmd &` inside a foreground command. T
 
 ## Sub-agents
 
-`Agent` and `Agents` start sub-agents, which always run in parallel: the call returns their ids at once. `AgentControl` gives their results (`wait`, then `result`), and each sub-agent works in its own git worktree by default (`isolation: auto`). Its changes come back as a ChangeSet, which `AgentControl` inspects, applies (`apply_changes`) or discards (`discard_changes`); nothing reaches the working directory before that. The tools are listed in [Built-in Tools](/docs/built-in-tools#sub-agent-tools). Their limits and isolation rules are in `docs/agents.md` in the repository.
+`Agent` starts one or more sub-agents (`task` for one, `missions` for several), which always run in parallel: the call returns their ids at once. `AgentControl` gives their results (`wait`, then `result`), and `Messagent` sends messages between them. Each sub-agent works in its own git worktree by default (`isolation: auto`). Its changes come back as a ChangeSet, which `AgentControl` inspects, applies (`apply_changes`) or discards (`discard_changes`); nothing reaches the working directory before that. The tools are listed in [Built-in Tools](/docs/built-in-tools#sub-agent-tools). Their limits and isolation rules are in `docs/agents.md` in the repository.
 
 To work on another branch by hand, use `Bash` with `git worktree add -b {branch} {path}` and, when done, `git worktree remove {path}` (without `--force`: git refuses a worktree with uncommitted changes).

@@ -1,6 +1,6 @@
 ---
 title: "Workflows API"
-description: API reference for bricks-workflows — the Step trait, the WorkflowDef IR, conditions, the registry, the builder, execution, events, and results.
+description: API reference for bricks-workflows: the Step trait, the WorkflowDef IR, conditions, the registry, the builder, execution, events, and results.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -17,7 +17,7 @@ use bricks::workflows::prelude::*;
 
 ---
 
-## `Step` — the unit of work
+## `Step`: the unit of work
 
 A step is the workflow analogue of a [`Tool`](/docs/api-tools): an id, input/output JSON schemas, and an async `execute`.
 
@@ -65,7 +65,7 @@ impl StepContext {
 ```
 
 <Callout type="warn">
-`state` is a synchronous lock. Read or write it and drop the guard — never hold it across an `.await`.
+`state` is a synchronous lock. Read or write it and drop the guard; never hold it across an `.await`.
 </Callout>
 
 ### `StepRun` (typed)
@@ -143,7 +143,7 @@ WorkflowStep::new("subflow", Arc::new(child_workflow));
 
 ---
 
-## The IR — `WorkflowDef`
+## The IR: `WorkflowDef`
 
 The serializable graph. Identical whether produced by the builder or the UI.
 
@@ -250,7 +250,7 @@ registry.register(Arc::new(my_step));
 
 registry.get("upper");      // Option<Arc<dyn Step>>
 registry.ids();             // Vec<String>
-registry.catalog();         // Vec<StepInfo> — the UI builder palette
+registry.catalog();         // Vec<StepInfo> for the UI builder palette
 
 // Builder-style chaining:
 let registry = StepRegistry::new()
@@ -307,7 +307,7 @@ Compilation rejects an unknown step id with `CerseiError::Tool("unknown step: '�
 
 ---
 
-## Events — `WorkflowEvent` / `WorkflowStream`
+## Events: `WorkflowEvent` / `WorkflowStream`
 
 Every variant is `Serialize` (externally tagged, `snake_case`), so it can be forwarded to a browser to drive the live graph.
 
@@ -339,7 +339,7 @@ impl WorkflowStream {
 
 ---
 
-## Results — `WorkflowResult` / `RunStatus`
+## Results: `WorkflowResult` / `RunStatus`
 
 Shaped so that a UI can render it directly.
 
@@ -370,7 +370,7 @@ pub struct SuspendPoint { pub node_id: NodeId, pub resume_schema: Value, pub pay
 
 ---
 
-## Persistence — `RunStore`
+## Persistence: `RunStore`
 
 Backs suspend/resume. The MVP is an in-memory store keyed by `run_id`; the same API is intended to gain a durable JSONL / `bricks-memory` backend so suspended runs survive a restart.
 

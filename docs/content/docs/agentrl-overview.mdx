@@ -1,6 +1,6 @@
 ---
 title: "AgentRL Overview"
-description: AgentRL — an orchestration loop for Bricks ADK. When an agent fails a verifier, AgentRL plans fixes, tries them in isolated working copies, keeps the one that passes, and registers it as a reusable tool.
+description: AgentRL is an orchestration loop for Bricks ADK. When an agent fails a verifier, AgentRL plans fixes, tries them in isolated working copies, keeps the one that passes, and registers it as a reusable tool.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -126,7 +126,7 @@ This repository does not keep a recorded result of a live AgentRL run, so no suc
 
 ```toml
 [dependencies]
-bricks = { version = "0.6", features = ["agentrl"] }
+bricks = { version = "1.0.0-alpha.1", features = ["agentrl"] }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 ```

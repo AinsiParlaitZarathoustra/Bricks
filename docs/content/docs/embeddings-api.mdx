@@ -1,6 +1,6 @@
 ---
 title: "Embeddings API"
-description: Full API reference for the bricks-embeddings crate — trait, providers, index, store, and factory.
+description: Full API reference for the bricks-embeddings crate: trait, providers, index, store, and factory.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -30,7 +30,7 @@ pub trait EmbeddingProvider: Send + Sync {
 
 | Method | Description |
 |---|---|
-| `name()` | Short identifier (`"openai"`, `"gemini"`, …) — handy for logging. |
+| `name()` | Short identifier (`"openai"`, `"gemini"`, …), handy for logging. |
 | `dimensions()` | Vector width. Used by `VectorIndex` to size the HNSW graph. |
 | `model_id()` | Identifies the vector space. Vectors from two different ids must not be compared. The default is `name:dimensions`. The index does not store it. |
 | `embed(text)` | Embed one string. Default impl calls `embed_batch(&[text])`. |

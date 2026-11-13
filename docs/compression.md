@@ -28,7 +28,7 @@ are written and loaded, and how to read the original. Settings live in the
 
 | Level | Logs | Files (`Read` without `offset`/`limit`) | JSON |
 | --- | --- | --- | --- |
-| `off` (default) | hard cap only | hard cap only (paged) | — |
+| `off` (default) | hard cap only | hard cap only (paged) | none |
 | `minimal` | cleaned, rules, budget | exact text | summary from `json_summary_min_bytes` (16 KiB) |
 | `aggressive` | same | Tree-sitter skeleton from `skeleton_min_lines` (150) | summary from a quarter of it |
 
@@ -37,7 +37,7 @@ it from `bricks.toml`.
 
 `WebFetch` and `WebSearch` outputs are already paged and selected by the web
 tools (`docs/web.md`): at every level they are passed unchanged, and only
-above `max_output_chars` cut once on a line end — never thinned out line by
+above `max_output_chars` cut once on a line end, never thinned out line by
 line, so a page window stays a contiguous, in-order part of the page.
 
 ## 3. Logs
@@ -145,12 +145,12 @@ the file names → `[compression.filters]` of `bricks.toml`. A rule with an
 existing id replaces it entirely; `disabled = true` removes it. When several
 rules match a command, the most specific wins (longest sub-command path), then
 the higher layer, then the later source. Rules are read when the configuration
-is loaded (`BricksConfig::load`), so changes apply on the next start — no
+is loaded (`BricksConfig::load`), so changes apply on the next start, no
 recompilation.
 
 An invalid rule (bad regex, unknown field, wrong type, missing `match`) yields a
 diagnostic naming the file, the rule id and the field; only that rule is
-skipped — an earlier valid rule with the same id stays active. A file that is
+skipped, an earlier valid rule with the same id stays active. A file that is
 not valid TOML is reported and skipped as a whole; other files still load.
 Diagnostics are shown as `Status` events at the first run
 (`BricksConfig::diagnostics` also lists them).
@@ -204,7 +204,7 @@ column of the error.
 
 ## 7. Reading the original
 
-* Command and tool outputs: the header names a file saved by the output store —
+* Command and tool outputs: the header names a file saved by the output store:
   `full output: Read file_path="…/00007-Bash-call_x.txt" (N lines; use
   offset/limit to page)`. The store belongs to the session: with a session
   memory it is the session's files directory (`JsonlMemory`:

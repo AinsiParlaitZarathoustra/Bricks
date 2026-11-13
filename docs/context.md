@@ -9,7 +9,7 @@ passed with `AgentBuilder::context_policy`.
 
 | Value | Rust | Meaning |
 | --- | --- | --- |
-| `contextUsed` | `ContextStatus::context_used` (`ContextUsed`) | Occupation of the active context — what the next request carries — with its **provenance**. |
+| `contextUsed` | `ContextStatus::context_used` (`ContextUsed`) | Occupation of the active context, what the next request carries, with its **provenance**. |
 | `contextWindow` | `ContextStatus::context_window` (`ContextWindow`) | Limits of the selected model, from its configuration: `max_input_tokens` and `max_output_tokens`. |
 | `totalTokens` | `ContextStatus::total_tokens` / `totals` (`SessionTotals`) | Everything the session consumed. Never decreases; compaction calls are included, once. |
 
@@ -29,7 +29,7 @@ occupation of the request being sent.
 The local estimate (`bricks_types::tokens`, "local character-class heuristic
 (v1)") weighs ASCII letters, punctuation, whitespace and non-ASCII characters
 separately and carries an upper bound (+25 %). After a measurement it is
-calibrated per model on the request just measured (ratio bounded to 0.5–2).
+calibrated per model on the request just measured (ratio bounded to 0.5 to 2).
 There is no universal tokenizer: the estimate is a fallback, not a count.
 
 ### What a measurement covers
@@ -39,7 +39,7 @@ identity (`provider_id/model_id`), the version of the context, and the identity
 of the instructions and tool definitions. The next occupation is that
 measurement plus:
 
-* the response kept in the history — from its own `output_tokens`, minus the
+* the response kept in the history, from its own `output_tokens`, minus the
   reasoning the protocol does **not** send back (`chat_completions` without
   `compat.reasoning_field`). Reasoning that is re-sent (`anthropic_messages`
   thinking blocks, `responses` reasoning items, chat with `reasoning_field`)
@@ -52,7 +52,7 @@ not the size: it never enlarges the window. `reasoning_tokens` is a part of
 `output_tokens`, never added to it.
 
 The measurement is dropped (and the context re-estimated) when the history is
-rewritten — compaction, removal of old tool results, session restore — when the
+rewritten, compaction, removal of old tool results, session restore, when the
 instructions or tool definitions change, and when the model changes.
 
 ### Session totals
@@ -82,7 +82,7 @@ light check (measured base + estimated additions, or full estimate)
   → close, large injection, rewritten    → pre-flight (§3) → send if it fits
   → manifestly over (central estimate)   → compaction, check again
                                            → still over: not sent,
-                                             CerseiError::ContextOverflow + Status
+                                             BricksError::ContextOverflow + Status
 ```
 
 A pre-flight is triggered when the upper bound exceeds the budget, when more
@@ -111,7 +111,7 @@ A server counting endpoint is used **only** when the model configures it:
 
 Accepted for `anthropic_messages` (`messages/count_tokens`) and `responses`
 (`responses/input_tokens`), which document a counting request; refused at load
-time for `chat_completions`, which has none — no route is guessed for a custom
+time for `chat_completions`, which has none, no route is guessed for a custom
 server. The request sent is the real one (same messages, system, tools,
 reasoning parameters) restricted to the fields the route accepts. If counting
 fails, the local estimate is used and the event says so. A count is valid for
@@ -138,7 +138,7 @@ refusal; or on demand (`Agent::compact()`).
 1. The tail is kept verbatim: at least `keep_recent_messages`, never splitting a
    tool call from its result, shortened down to the last message group if it
    exceeds `max_recent_ratio` of the budget. Kept messages are copied as they
-   are — reasoning blocks, signatures and opaque protocol items included.
+   are, reasoning blocks, signatures and opaque protocol items included.
 2. The older part is rendered as a transcript sized for the summary call itself
    (budget minus `summary_max_tokens`, its instructions and a margin): tool
    results and long assistant text are shortened first, user words last; if it
@@ -161,8 +161,8 @@ attempt), `Cancelled`. Only `Compacted` changes the history. After
 compaction stops for the session (manual compaction still runs). There is no
 silent fallback that drops messages.
 
-**Cancellation and time limit.** A compaction attempt — automatic, manual,
-or the recovery of an overflow — watches its cancellation while it waits for
+**Cancellation and time limit.** A compaction attempt, automatic, manual,
+or the recovery of an overflow, watches its cancellation while it waits for
 the response headers and while it reads the stream. During a run, the run's
 token; `Agent::compact()` (the `/compact` command) has an operation token of
 its own, new at each call, that `Agent::cancel()` (the `cancel` command,
@@ -178,9 +178,9 @@ apply. Usage counts only for a summary received whole, once.
 
 **Nothing is lost:**
 
-* `Agent::raw_history()` — every message as it happened, tool results
+* `Agent::raw_history()`, every message as it happened, tool results
   unreduced; compaction never shortens it.
-* `Agent::compaction_snapshots()` — the active history just before each
+* `Agent::compaction_snapshots()`, the active history just before each
   compaction.
 * With a session memory (`AgentBuilder::memory` + `session_id`), both are stored
   with the session's own backend. The active and raw histories are saved as
@@ -221,7 +221,7 @@ apply. Usage counts only for a summary received whole, once.
 | `image_tokens` | 1600 | Estimate per image (the real cost depends on its size). |
 | `document_tokens` | 3000 | Estimate per document/audio/video item. |
 
-These are starting points for models with 100k–200k-token windows and typical
+These are starting points for models with 100k to 200k-token windows and typical
 coding sessions, not universal values: small local models want a lower
 `compact_threshold` and `keep_recent_messages`; very large windows can afford a
 higher threshold. `AgentBuilder::compact_threshold` still overrides the policy's

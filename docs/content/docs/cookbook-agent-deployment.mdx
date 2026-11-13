@@ -117,32 +117,43 @@ let agent = Agent::builder()
 // Run it as usual; a later process that uses the same session_id resumes the history.
 ```
 
-## With graph memory
+## With structured memory
 
-`MemoryManager` keeps project facts that the agent can recall later. Its graph store is behind the `graph` feature of `bricks-memory`, which the `bricks` facade does not turn on; enable it in your own `Cargo.toml`:
+`StructuredMemory` keeps project facts and episodes in Grafeo and `usearch`, so the agent can recall them in later sessions. Its store is behind the `structured` feature of `bricks-memory`, which the `bricks` facade does not turn on. Enable it in your own `Cargo.toml`:
 
 ```toml
-bricks-memory = { version = "0.6", features = ["graph"] }
+bricks-memory = { version = "1.0.0-alpha.1", features = ["structured"] }
+bricks-embeddings = "1.0.0-alpha.1"
 ```
 
 ```rust
-use bricks::memory::manager::MemoryManager;
-use bricks::memory::memdir::MemoryType;
-use std::path::Path;
+use bricks_embeddings::HashingEmbeddings;
+use bricks_memory::structured::{EpisodeInput, RecallQuery, StructuredMemory, GLOBAL_SPACE};
+use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 
-let mm = MemoryManager::new(Path::new("./my-project"))
-    .with_graph(Path::new("./agent.grafeo"))?;
+let memory = StructuredMemory::builder(Arc::new(HashingEmbeddings::new(384)))
+    .path("./agent.db")
+    .open()?;
 
-// Store a fact the agent learned. The call returns the id, or None when storage fails.
-if let Some(id) = mm.store_memory("User prefers functional patterns", MemoryType::User, 0.9) {
-    mm.tag_memory(&id, "coding-style");
-}
+memory
+    .record(EpisodeInput {
+        space: GLOBAL_SPACE.into(),
+        project_id: Some("my-project".into()),
+        session_id: Some("session-1".into()),
+        role: "user".into(),
+        author: None,
+        content: "User prefers functional patterns.".into(),
+        occurred_at: None,
+        source_ref: None,
+    })
+    .await?;
+memory.process(&CancellationToken::new()).await?;
 
-// Recall during a later conversation.
-let relevant: Vec<String> = mm.recall("coding style preferences", 5);
+let recalled = memory.recall(&RecallQuery::new("coding style preferences")).await?;
 ```
 
-The `MemoryType` values include `User`, `Feedback`, `Project` and `Reference`.
+See [Structured Graph Memory](/docs/cookbook-graph-memory) for full details.
 
 ## Background job
 

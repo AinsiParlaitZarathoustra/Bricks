@@ -112,7 +112,7 @@ adds a message to the run, and `cancel` stops it.
 The event stream is part of the library. The frontends use the versioned
 events of the command/event contract, `bricks_agent::control`, which the JSONL
 output of `bricks run --json` writes. Its schema is in `docs/cli.md` in the
-repository. The schema version is 7.
+repository. The schema version is 9.
 
 The end of a tool call says whether it ran (`executed`: `false` for a call
 refused, denied, or blocked by a hook, which never ran) and how it ended

@@ -34,6 +34,12 @@ export function Tag({ type }) {
 
 <Version version="Unreleased" date="Not yet released">
 
+<Tag type="changed" /> **Memory cleanup and entry deletion.** Removed legacy memory modules (`claudemd`, `embedding_memory`, `graph`, `manager`, `memdir`) in `bricks-memory`. Long-term memory uses `StructuredMemory` and `ScopedMemory` (`structured` feature), with `memory_search` and `memory_write` tools. Notes are capped at `NOTE_MAX_CHARS` (`280` characters), and individual entries can be deleted with `delete_entry(EntryKind, id)`. Desktop memory uses configured providers (with fallback to `HashingEmbeddings`) and respects `[memory]` in `bricks.toml`, while sub-agents inherit memory tools consistently across spawn and resume.
+
+<Tag type="changed" /> **Tools and error type updates.** `ViewImage` was merged into `Read` (which now reads both text files and images). `Messagent` (`bricks_agent::agents::MessagentTool`) handles team messaging between agents. `CerseiError` was renamed to `BricksError`.
+
+<Tag type="added" /> **MCP and provider configuration.** MCP servers can be managed in both the Desktop app and the CLI (`bricks mcp`), configured in `~/.bricks/mcp.toml` and `bricks.toml`. Provider keys are stored in `~/.bricks/providers.toml` (or `$BRICKS_HOME/providers.toml`), and saving the first provider creates the file automatically.
+
 <Tag type="removed" /> **Sprint 15: disconnected APIs and old harnesses (breaking change).** The `agent_tool`, `coordinator`, `auto_dream`, `session_memory` and `context_analyzer` agent modules, the unused prompt section/cache API, the ignored batch `background` argument and the `tool_calls` model setting are removed. Delete `tool_calls` from existing provider files; `async_tool_calls` stays supported. The unused desktop sidebar and the historical `abstract` harnesses/pages are removed. The Rust test launcher uses Nextest. See migration section 19.
 
 <Tag type="changed" /> **Permissions: one engine, one policy per session (breaking change for SDK, CLI and config users).** One engine decides every tool call. Each session has a policy: ASK (reads run; writes, commands, web and sub-agents are asked), EXECUTE (everything runs) or CUSTOM (an effect per action class and per tool; the only profile that refuses calls). The default for new sessions is chosen once and stored in `~/.bricks/permissions.json`; each session keeps its own copy. Settings › General › « Permissions des nouvelles conversations », a first-choice bar above the composer, the `/config` view, and `--permissions ask|execute` on the command line. A request waiting for a person is not answered by a policy change. Answers cover one call: the approval card has Autoriser and Refuser only.
@@ -54,7 +60,7 @@ export function Tag({ type }) {
 
 <Tag type="removed" /> **Fifteen native tools removed (breaking change for ADK users).** `EnterPlanMode`, `ExitPlanMode`, `CronCreate`, `CronList`, `CronDelete`, the six `Task*` tools, `RemoteTrigger`, `Config`, `AskUserQuestion` and `Sleep` are gone, with their modules (`plan_mode`, `cron`, `tasks`, `remote_trigger`, `config_tool`, `ask_user`, `sleep`) and registries. `bricks_tools::all()` has 22 tools (was 38; `SendMessage` moved to the agent runtime, see below). A call to a removed tool is an unknown tool. The replacements are in the migration guide, section 12; background commands are still `Bash` with `background: true`, `BashTaskStatus`, `BashTaskOutput`, `BashTaskStop` and `Job`.
 
-<Tag type="changed" /> **Crates renamed: Bricks ADK.** The facade is `bricks` (was `cersei`); the crates use the `bricks-` prefix (`bricks-agent`, `bricks-tools`, `bricks-memory`, …) and `bricks_*` imports. `bricks-config`, `bricks-semantic`, `bricks-skills`, `bricks-cli` and `bricks-desktop` keep their names. `CerseiError`, `CERSEI_*` variables and a few external identities keep theirs. The table of names is in the migration guide.
+<Tag type="changed" /> **Crates renamed: Bricks ADK.** The facade is `bricks` (was `cersei`); the crates use the `bricks-` prefix (`bricks-agent`, `bricks-tools`, `bricks-memory`, …) and `bricks_*` imports. `bricks-config`, `bricks-semantic`, `bricks-skills`, `bricks-cli` and `bricks-desktop` keep their names. `BricksError` (renamed from `CerseiError`) is the SDK error type; `CERSEI_*` variables and a few external identities keep theirs. The table of names is in the migration guide.
 
 <Tag type="removed" /> **`delegate` and `MultiEdit` are removed.** The `delegate` tool and the `delegate` batch module (`run_batch`, `DelegateConfig`, …) are gone; use the native `Agent` and `Agents` tools, whose parameters differ. `MultiEdit` is gone; `Edit` takes `edits`. Stored histories still display both.
 
@@ -122,7 +128,7 @@ export function Tag({ type }) {
 
 <Tag type="changed" /> **Rust edition 2024.** The workspace (and `examples/benchmark`) moves from edition 2021 to edition 2024. A recent stable Rust is required (1.88 or later for let chains; tested with 1.98.1). The migration was done with `cargo fix --edition` and reviewed by hand; the MCP configuration tests no longer modify the process environment.
 
-<Tag type="added" /> **`/effort` — reasoning profiles per model.** Lists and selects the reasoning profiles declared for the current model in the providers file (`/effort <id>`). `/effort default` returns to the model's declared default. An unknown id is refused with the available choices. The contract gains the command `set_reasoning` and the event `reasoning_changed`; `session_opened` and `model_changed` carry `effective_reasoning`. The JSONL schema stays at 5.
+<Tag type="added" /> **`/effort`: reasoning profiles per model.** Lists and selects the reasoning profiles declared for the current model in the providers file (`/effort <id>`). `/effort default` returns to the model's declared default. An unknown id is refused with the available choices. The contract gains the command `set_reasoning` and the event `reasoning_changed`; `session_opened` and `model_changed` carry `effective_reasoning`. The JSONL schema stays at 5.
 
 <Tag type="changed" /> **`/cost` and `/context` are readable summaries**, with `/cost details` and `/context details` for the full view. Cost distinguishes an estimate, a known zero, `Not priced` and `Not priced (partial)`; cache reads and writes are shown apart from input. Context separates occupation from the session total.
 
@@ -244,7 +250,7 @@ export function Tag({ type }) {
 
 <Version version="0.2.5" date="2026-06-29">
 
-<Tag type="changed" /> **`Grep` is now native and in-process — no external `rg`/`grep` binary required.** It previously shelled out to ripgrep if `which` found it on `PATH`, else fell back to system `grep` (losing gitignore-awareness and speed); since `rg` is rarely preinstalled, models that reached for it failed on stock machines. `Grep` (and the `tool_primitives::search::grep` primitive) now use ripgrep's own library crates — [`ignore`](https://docs.rs/ignore) for a lock-free **parallel, gitignore-aware** recursive walk and [`grep`](https://docs.rs/grep) for the matcher/searcher. Behavior is identical on every machine, and the tool description steers models to `Grep` instead of running `rg` in Bash. Respects `.gitignore`/`.ignore` and skips hidden/binary files by default (gitignore honored even outside a git repo); output is sorted by `(file, line)` for deterministic results. New `GrepOptions` fields `no_ignore`/`hidden` (defaulting to prior behavior); the tool gains `case_insensitive`/`hidden` schema fields. New deps `ignore` + `grep` (Unlicense OR MIT).
+<Tag type="changed" /> **`Grep` is now native and in-process: no external `rg`/`grep` binary required.** It previously shelled out to ripgrep if `which` found it on `PATH`, else fell back to system `grep` (losing gitignore-awareness and speed); since `rg` is rarely preinstalled, models that reached for it failed on stock machines. `Grep` (and the `tool_primitives::search::grep` primitive) now use ripgrep's own library crates: [`ignore`](https://docs.rs/ignore) for a lock-free **parallel, gitignore-aware** recursive walk and [`grep`](https://docs.rs/grep) for the matcher/searcher. Behavior is identical on every machine, and the tool description steers models to `Grep` instead of running `rg` in Bash. Respects `.gitignore`/`.ignore` and skips hidden/binary files by default (gitignore honored even outside a git repo); output is sorted by `(file, line)` for deterministic results. New `GrepOptions` fields `no_ignore`/`hidden` (defaulting to prior behavior); the tool gains `case_insensitive`/`hidden` schema fields. New deps `ignore` + `grep` (Unlicense OR MIT).
 
 <Tag type="changed" /> **Workspace bumped to `0.2.5`** across every crate via `version.workspace = true`.
 
@@ -252,7 +258,7 @@ export function Tag({ type }) {
 
 <Version version="0.2.4" date="2026-06-28">
 
-<Tag type="added" /> **New `MultiEdit` tool — apply several string replacements to one file atomically.** Weaker models bungle refactors that need many separate `Edit` calls (e.g. a variable rename touching several lines): each call re-reads stale context and the sequence drifts. `MultiEdit` takes an ordered `edits: [{old_string, new_string, replace_all?}]` list, applies them **sequentially in memory** (each edit sees the previous edit's result), and writes **all-or-nothing** — if any edit fails to match, the file is left untouched and the failing edit is named (`edit N of M`) with a corrective message. Every edit routes through the same tolerant replacer ladder as `Edit`, so it inherits whitespace/indentation tolerance, the destructive-match guard, and input coercion. For a single-pattern mass replace (rename `foo`→`bar` everywhere), `Edit`/`MultiEdit` with `replace_all: true` already does it in one call; `MultiEdit` adds the case of *several distinct* edits in one atomic call.
+<Tag type="added" /> **New `MultiEdit` tool: apply several string replacements to one file atomically.** Weaker models bungle refactors that need many separate `Edit` calls (e.g. a variable rename touching several lines): each call re-reads stale context and the sequence drifts. `MultiEdit` takes an ordered `edits: [{old_string, new_string, replace_all?}]` list, applies them **sequentially in memory** (each edit sees the previous edit's result), and writes **all-or-nothing**: if any edit fails to match, the file is left untouched and the failing edit is named (`edit N of M`) with a corrective message. Every edit routes through the same tolerant replacer ladder as `Edit`, so it inherits whitespace/indentation tolerance, the destructive-match guard, and input coercion. For a single-pattern mass replace (rename `foo`→`bar` everywhere), `Edit`/`MultiEdit` with `replace_all: true` already does it in one call; `MultiEdit` adds the case of *several distinct* edits in one atomic call.
 
 <Tag type="changed" /> **Workspace bumped to `0.2.4`** across every crate via `version.workspace = true`.
 
@@ -260,7 +266,7 @@ export function Tag({ type }) {
 
 <Version version="0.2.3" date="2026-06-28">
 
-<Tag type="changed" /> **The `Edit` tool tolerates whitespace/indentation drift** instead of requiring a byte-exact `old_string`. Exact matching made edits brittle: weaker BYOK models (Qwen, DeepSeek, Gemini Flash) routinely drift on leading whitespace and indentation, so an otherwise-correct `old_string` failed with `old_string not found` and the model fell back to slow, error-prone `sed`/`cat` edits. `Edit` (and the `tool_primitives::fs::edit_file` primitive) now run a **replacer ladder** — exact match first, then line-trimmed, block-anchor, whitespace-normalized, and indentation-flexible strategies. Every strategy only yields a candidate that *actually exists in the file*, so a fuzzy match relaxes *how* the text is located, never *what* gets written. New primitive: `tool_primitives::replace::replace`.
+<Tag type="changed" /> **The `Edit` tool tolerates whitespace/indentation drift** instead of requiring a byte-exact `old_string`. Exact matching made edits brittle: weaker BYOK models (Qwen, DeepSeek, Gemini Flash) routinely drift on leading whitespace and indentation, so an otherwise-correct `old_string` failed with `old_string not found` and the model fell back to slow, error-prone `sed`/`cat` edits. `Edit` (and the `tool_primitives::fs::edit_file` primitive) now run a **replacer ladder**: exact match first, then line-trimmed, block-anchor, whitespace-normalized, and indentation-flexible strategies. Every strategy only yields a candidate that *actually exists in the file*, so a fuzzy match relaxes *how* the text is located, never *what* gets written. New primitive: `tool_primitives::replace::replace`.
 
 <Tag type="changed" /> **Destructive-match guard.** Line-based strategies require every line to match (after normalization); the anchor-only strategy (block-anchor) is additionally gated by a similarity threshold so a coincidental first/last-line pair can't rewrite an unrelated block. Exact matches are still tried first, so genuine duplicates report `AmbiguousMatch` rather than being silently fuzzed.
 
@@ -272,11 +278,11 @@ export function Tag({ type }) {
 
 <Version version="0.2.2" date="2026-06-24">
 
-<Tag type="added" /> **Multimodal input across the SDK.** Messages can carry images, video, audio, and documents (PDF/text), not just text — and Anthropic, OpenAI, and Gemini each serialize them to their native wire format. The provider-agnostic `ContentBlock::Image` / `ContentBlock::Document` blocks already existed; this release adds the high-level constructors to build them and teaches every provider to send them. Docs: [Multimodal Input](/docs/multimodal).
+<Tag type="added" /> **Multimodal input across the SDK.** Messages can carry images, video, audio, and documents (PDF/text), not just text: and Anthropic, OpenAI, and Gemini each serialize them to their native wire format. The provider-agnostic `ContentBlock::Image` / `ContentBlock::Document` blocks already existed; this release adds the high-level constructors to build them and teaches every provider to send them. Docs: [Multimodal Input](/docs/multimodal).
 
 <Tag type="added" /> **One-line file attachment.** `ContentBlock::from_path(path)` reads a local file, **auto-detects the MIME type** from magic bytes (PNG/JPEG/GIF/WebP/PDF/MP4/MOV/WebM/MP3/WAV/Ogg…) with an extension fallback, base64-encodes it, and routes to an `Image` block (image/video/audio) or a `Document` block (PDF/text). Lower-level `image_bytes`/`image_base64`/`image_url` + `document_*` + `media_bytes(mime, bytes)` are there when you want control, and `Message::user_with_files("caption", &paths)` / `Message::user_with_media(text, blocks)` build a multimodal user message in one call. All re-exported through `cersei::prelude`, alongside `MediaKind` and `detect_mime`.
 
-<Tag type="added" /> **Provider wire formats.** OpenAI emits a typed `parts` array — `image_url` data-URLs for images, `file` parts for PDFs (video/audio dropped, since Chat Completions can't take them). Gemini emits `inlineData` for base64 and `fileData`/`fileUri` for URLs — the same path for images, **video**, audio, and PDFs. Anthropic already round-tripped images and PDFs via direct serde. **`Gemini` is now exported from the `cersei` facade** (`cersei::Gemini`, in the prelude).
+<Tag type="added" /> **Provider wire formats.** OpenAI emits a typed `parts` array: `image_url` data-URLs for images, `file` parts for PDFs (video/audio dropped, since Chat Completions can't take them). Gemini emits `inlineData` for base64 and `fileData`/`fileUri` for URLs: the same path for images, **video**, audio, and PDFs. Anthropic already round-tripped images and PDFs via direct serde. **`Gemini` is now exported from the `cersei` facade** (`cersei::Gemini`, in the prelude).
 
 <Tag type="changed" /> **Workspace bumped to `0.2.2`** across every crate via `version.workspace = true`.
 
@@ -286,11 +292,11 @@ export function Tag({ type }) {
 
 <Version version="0.2.1" date="2026-06-23">
 
-<Tag type="added" /> **New crate: `cersei-workflows`.** A first-party workflow engine built so an entire workflow round-trips to and from a visual builder (React + xyflow) — the engine behind the **Atlas** workflow UI. Mirrors the Mastra DX (`createStep`/`createWorkflow`, `.then`, input/output JSON schemas, `.start()`/`.stream()`, shared state, workflows-as-steps, suspend/resume, status-discriminated run results). Feature-gated behind `workflows`. Docs: [Overview](/docs/workflows-overview) · [API](/docs/workflows-api) · [Cookbook](/docs/workflows-cookbook).
+<Tag type="added" /> **New crate: `cersei-workflows`.** A first-party workflow engine built so an entire workflow round-trips to and from a visual builder (React + xyflow): the engine behind the **Atlas** workflow UI. Mirrors the Mastra DX (`createStep`/`createWorkflow`, `.then`, input/output JSON schemas, `.start()`/`.stream()`, shared state, workflows-as-steps, suspend/resume, status-discriminated run results). Feature-gated behind `workflows`. Docs: [Overview](/docs/workflows-overview) · [API](/docs/workflows-api) · [Cookbook](/docs/workflows-cookbook).
 
 <Tag type="added" /> **One IR, two front-ends.** The serializable `WorkflowDef` (`{ nodes, edges, entry }`) is the single source of truth; the programmatic `WorkflowBuilder` and the xyflow UI emit the *same* IR, compiled once by `Workflow::compile(def, &registry)`. Control flow covers sequential (`then`), parallel fan-out + `Join`, conditional `Branch`, `Loop` (`dowhile`/`dountil`/`foreach`), and `Map` reshape nodes, each with a clean xyflow mapping. `UiHints` (x/y/label) are ignored at execution time, so the IR is lossless across the React Flow boundary.
 
-<Tag type="added" /> **Steps mirror tools.** A `Step` trait shaped like `cersei_tools::Tool` (id + input/output JSON schema + async `execute`), with first-party `FnStep`, `AgentStep` (wraps a `cersei_agent::Agent`), `ToolStep` (wraps any `Tool`), and `WorkflowStep` (nested workflows). A `StepRegistry` (mirroring AgentRL's `ToolRegistry`) maps step-ids to implementations — UI JSON carries only references — and `catalog()` feeds the builder palette. Branch predicates are a small serde `Condition` enum over JSON-pointer paths, so they render and edit structurally in the UI rather than as opaque code.
+<Tag type="added" /> **Steps mirror tools.** A `Step` trait shaped like `cersei_tools::Tool` (id + input/output JSON schema + async `execute`), with first-party `FnStep`, `AgentStep` (wraps a `cersei_agent::Agent`), `ToolStep` (wraps any `Tool`), and `WorkflowStep` (nested workflows). A `StepRegistry` (mirroring AgentRL's `ToolRegistry`) maps step-ids to implementations: UI JSON carries only references: and `catalog()` feeds the builder palette. Branch predicates are a small serde `Condition` enum over JSON-pointer paths, so they render and edit structurally in the UI rather than as opaque code.
 
 <Tag type="added" /> **Live status + resumable runs.** A `Serialize`-able `WorkflowEvent`/`WorkflowStream` streams `StepStarted`/`StepCompleted`/`BranchTaken`/`StateUpdated`/… over SSE or WebSocket for live UI updates, and a snapshot-driven `RunStore` backs in-memory suspend/resume via `Workflow::resume(run_id, node_id, data)`.
 
@@ -300,17 +306,17 @@ export function Tag({ type }) {
 
 <Version version="0.2.0" date="2026-06-19">
 
-<Tag type="added" /> **New crate: `cersei-agentrl`.** AgentRL — a self-evolving orchestration layer on top of the Cersei agent SDK. Governs the run → fail → trace → plan → sandbox → promote → register loop via an `ExecutionGraph` and a dynamic `ToolRegistry`. `graph` / `graph_reporter` build a failure-tracing DAG from agent events; `registry` is a persisted, searchable database of agent-built tools; `orchestrator` is the RL loop over the `AgentRlRunner` trait; `scrub` enforces the hard rule that no secrets reach persisted artifacts. Docs: [Overview](/docs/agentrl-overview) · [API](/docs/agentrl-api) · [Template](/docs/agentrl-template) · [Cookbook](/docs/agentrl-cookbook).
+<Tag type="added" /> **New crate: `cersei-agentrl`.** AgentRL: a self-evolving orchestration layer on top of the Cersei agent SDK. Governs the run → fail → trace → plan → sandbox → promote → register loop via an `ExecutionGraph` and a dynamic `ToolRegistry`. `graph` / `graph_reporter` build a failure-tracing DAG from agent events; `registry` is a persisted, searchable database of agent-built tools; `orchestrator` is the RL loop over the `AgentRlRunner` trait; `scrub` enforces the hard rule that no secrets reach persisted artifacts. Docs: [Overview](/docs/agentrl-overview) · [API](/docs/agentrl-api) · [Template](/docs/agentrl-template) · [Cookbook](/docs/agentrl-cookbook).
 
-<Tag type="added" /> **New crate: `cersei-agentlang`.** The AgentTemplate DSL — a small functional language that LLMs and agents author and that executes on top of the Cersei runtime. Pipeline `parse` → `Program` → `run_program` over an `EvalCtx`; builtins (`io.*`, `net.*`, `agent.*`, `kv.*`) dispatch by tool name through the `ToolDispatch` trait, so the language is decoupled from the concrete tool set. Ships an LLM-facing `AGENTLANG_SPEC`.
+<Tag type="added" /> **New crate: `cersei-agentlang`.** The AgentTemplate DSL: a small functional language that LLMs and agents author and that executes on top of the Cersei runtime. Pipeline `parse` → `Program` → `run_program` over an `EvalCtx`; builtins (`io.*`, `net.*`, `agent.*`, `kv.*`) dispatch by tool name through the `ToolDispatch` trait, so the language is decoupled from the concrete tool set. Ships an LLM-facing `AGENTLANG_SPEC`.
 
-<Tag type="added" /> **New crate: `cersei-tbench`** — a purpose-built Terminal-Bench coding agent on the Cersei SDK + AgentRL.
+<Tag type="added" /> **New crate: `cersei-tbench`**: a purpose-built Terminal-Bench coding agent on the Cersei SDK + AgentRL.
 
 <Tag type="added" /> **`--agentrl` mode in abstract-cli.** Solves a single task with the self-evolving AgentRL orchestrator instead of a one-shot agent. Built for headless / terminal-bench runs: resolves a provider from `--model`, builds a verifier that prefers a task-provided `run-tests.sh` (falling back to accepting the agent's result), runs the `Orchestrator` in the working directory, and prints a machine-readable result line for the harbor adapter.
 
 <Tag type="added" /> **Anthropic via Google Vertex AI** (`AnthropicVertex`, `vertex` registry id). Reuses the direct-Anthropic request body + SSE parser; differs in the Vertex `:streamRawPredict` URL, `Authorization: Bearer <gcp token>` auth, and the `"anthropic_version": "vertex-2023-10-16"` body field. Auth resolves from a self-refreshing service-account JSON (`gcp_auth`, needed for long runs since GCP tokens expire ~1h), a pre-minted `VERTEX_ACCESS_TOKEN`, or `gcloud auth print-access-token`.
 
-<Tag type="added" /> **First-class custom OpenAI-compatible endpoints.** Override any OpenAI-compatible provider's base URL with `<PROVIDER>_BASE_URL` — `OPENAI_BASE_URL`, `DEEPSEEK_BASE_URL`, `OPENROUTER_BASE_URL`, etc. (`OPENAI_API_BASE` is a legacy alias for `openai`). When an override is active, a redacted target line (`provider=… host=… model=… key_present=…`) prints before the first request, so a misrouted endpoint is obvious instead of an opaque `401`. Also adds `deepseek-reasoner` to the DeepSeek registry. Closes [#17](https://github.com/pacifio/cersei/issues/17) (item 2).
+<Tag type="added" /> **First-class custom OpenAI-compatible endpoints.** Override any OpenAI-compatible provider's base URL with `<PROVIDER>_BASE_URL`: `OPENAI_BASE_URL`, `DEEPSEEK_BASE_URL`, `OPENROUTER_BASE_URL`, etc. (`OPENAI_API_BASE` is a legacy alias for `openai`). When an override is active, a redacted target line (`provider=… host=… model=… key_present=…`) prints before the first request, so a misrouted endpoint is obvious instead of an opaque `401`. Also adds `deepseek-reasoner` to the DeepSeek registry. Closes [#17](https://github.com/pacifio/cersei/issues/17) (item 2).
 
 <Tag type="changed" /> **Workspace bumped to `0.2.0`** across every crate via `version.workspace = true` (18-crate layout now includes `cersei-agentrl`, `cersei-agentlang`, `cersei-tbench`).
 
@@ -328,7 +334,7 @@ export function Tag({ type }) {
 
 <Tag type="added" /> **Core traits.** `cersei_vms::runtime::{SandboxRuntime, Sandbox}` plus per-sandbox `Commands` and `Filesystem` surfaces. Mirrors E2B's `Sandbox` / `Commands` / `Filesystem` shape almost 1:1, so E2B mental models port directly.
 
-<Tag type="added" /> **Backends.** `LocalProcessRuntime` (always-on, no isolation — for tests and `--sandbox local`) and `DockerRuntime` (real container isolation via the local `docker` CLI; feature `backend-docker`, default-on). Phase 1 ships without `bollard` / HTTP-over-UDS — `DockerRuntime` shells out to `docker`, which works identically on macOS, Linux, and Windows wherever Docker is installed.
+<Tag type="added" /> **Backends.** `LocalProcessRuntime` (always-on, no isolation: for tests and `--sandbox local`) and `DockerRuntime` (real container isolation via the local `docker` CLI; feature `backend-docker`, default-on). Phase 1 ships without `bollard` / HTTP-over-UDS: `DockerRuntime` shells out to `docker`, which works identically on macOS, Linux, and Windows wherever Docker is installed.
 
 <Tag type="added" /> **Cross-sandbox primitives** in `cersei_vms::primitives`. `Volume` registry (host-side dirs bind-mounted into N sandboxes), `Mailbox` (broadcast pub/sub by topic, backed by `tokio::sync::broadcast`), `KvStore` (DashMap + optional journal file, versioned CAS via `cas(key, expected_version, value)`). All three reachable from sandboxes through a host-side broker; sandboxes never need direct network links between each other.
 
@@ -336,11 +342,11 @@ export function Tag({ type }) {
 
 <Tag type="added" /> **`cersei-envd` binary** (feature `envd`, default-on). Tiny Rust JSON-RPC 2.0 daemon meant to be baked into container images for richer in-VM ops; talks to the host over a bind-mounted Unix socket at `/run/cersei-envd.sock`. Methods: `process.run`, `fs.{read,write,list,stat,mkdir,remove}`, `ping`, `info`. Reuses the JSON-RPC wire shape from `cersei-mcp/src/jsonrpc.rs`.
 
-<Tag type="added" /> **Reference image.** `crates/cersei-vms/docker/Dockerfile` produces `cersei/sandbox-base:latest` — Alpine 3.20 + `bash` + `git` + `cersei-envd`, ~8 MB.
+<Tag type="added" /> **Reference image.** `crates/cersei-vms/docker/Dockerfile` produces `cersei/sandbox-base:latest`: Alpine 3.20 + `bash` + `git` + `cersei-envd`, ~8 MB.
 
 <Tag type="added" /> **cersei-tools integration** behind a new `vms` feature. **Transparent routing in `BashTool`:** when `ctx.extensions.get::<Arc<dyn cersei_vms::Sandbox>>()` is `Some`, the bash tool routes through the sandbox; otherwise it falls back to the existing local `pproc::exec()` path. New agent-facing tools in `cersei_tools::vm_tools`: `SendVmMessage` / `RecvVmMessage`, `SharedStateGet` / `SharedStateSet`, `SandboxSnapshot`.
 
-<Tag type="added" /> **`cersei` facade** — `cersei::vms` re-export behind a new default-on `vms` feature, so `use cersei::prelude::*` gains the sandbox surface without an extra import.
+<Tag type="added" /> **`cersei` facade**: `cersei::vms` re-export behind a new default-on `vms` feature, so `use cersei::prelude::*` gains the sandbox surface without an extra import.
 
 <Tag type="added" /> **9 tests pass on Phase 1.** 4 LocalProcessRuntime (incl. snapshot round-trip preserving FS + KV state), 2 mailbox (cross-sandbox pub/sub + topic isolation), 3 KvStore (concurrent writes, CAS rejecting stale writers, journal-survives-reopen).
 
@@ -352,19 +358,19 @@ export function Tag({ type }) {
 
 <Version version="LongMemEval Benchmark" date="2026-04-24">
 
-<Tag type="added" /> **LongMemEval head-to-head memory benchmark (`bench/long-mem/`).** Runs the 500-question [LongMemEval](https://arxiv.org/abs/2410.10813) (ICLR 2025) dataset — the same benchmark [Mastra](https://mastra.ai/research/observational-memory), [Zep](https://arxiv.org/abs/2501.13956), Supermemory, Hindsight, and EmergenceMem report on — across four Cersei memory configurations. Judge rubric, observer rubric, and context-injection prompts are **verbatim ports** from Mastra's `@mastra/memory` so numbers land on the same public leaderboard. Full methodology + reproduction on [/docs/bench-memory](/docs/bench-memory).
+<Tag type="added" /> **LongMemEval head-to-head memory benchmark (`bench/long-mem/`).** Runs the 500-question [LongMemEval](https://arxiv.org/abs/2410.10813) (ICLR 2025) dataset: the same benchmark [Mastra](https://mastra.ai/research/observational-memory), [Zep](https://arxiv.org/abs/2501.13956), Supermemory, Hindsight, and EmergenceMem report on: across four Cersei memory configurations. Judge rubric, observer rubric, and context-injection prompts are **verbatim ports** from Mastra's `@mastra/memory` so numbers land on the same public leaderboard. Full methodology + reproduction on [/docs/bench-memory](/docs/bench-memory).
 
 <Tag type="added" /> **Final numbers on `longmemeval_s` (500 Qs, all models `gemini-2.5-flash`, 2026-04-24):**
-  - **Hybrid (Observer + embed + graph + RRF): 85.7 % overall, 93.3 % abstention, 432/500 correct, 1.58 M input tokens (34× fewer than baseline).** Best config — wins outright on `knowledge-update` (94.4 %).
+  - **Hybrid (Observer + embed + graph + RRF): 85.7 % overall, 93.3 % abstention, 432/500 correct, 1.58 M input tokens (34× fewer than baseline).** Best config: wins outright on `knowledge-update` (94.4 %).
   - **Embed-only (`EmbeddingMemory` over usearch HNSW + `gemini-embedding-001`): 84.2 % overall, 86.7 % abstention, 429/500, 2.68 M input tokens (20× fewer).** Already beats Mastra OM / `gpt-4o` and Supermemory / `gpt-4o` on its own.
   - Baseline (full-context `JsonlMemory`): 84.6 %, 86.7 % abstention, 422/500, 53.16 M input tokens.
   - Graph-substring floor: 6.6 %, 100 % abstention.
 
 <Tag type="added" /> **Leaderboard position.** Cersei Hybrid 85.7 % lands above **Supermemory / `gemini-3-pro-preview`** (85.2 %), **Supermemory / `gpt-5`** (84.6 %), **Mastra OM / `gpt-4o`** (84.23 %), **Mastra RAG / `gpt-4o`** (80.05 %), **Zep / `gpt-4o`** (71.2 %), and within **0.3 pp** of EmergenceMem Internal on `gpt-4o` (86.0 %). Remaining gap to **Mastra OM / `gemini-3-flash-preview`** (89.2 %) and `gpt-5-mini` (94.87 %) is model-tier, not algorithm.
 
-<Tag type="added" /> **Mastra prompt port** — `bench/long-mem/src/mastra_prompts.rs` ports `OBSERVER_EXTRACTION_INSTRUCTIONS`, `OBSERVER_OUTPUT_FORMAT`, `OBSERVER_GUIDELINES`, `OBSERVATION_CONTEXT_PROMPT`, `OBSERVATION_CONTEXT_INSTRUCTIONS` verbatim from `@mastra/memory`. The context-injection prompt's `KNOWLEDGE UPDATES` / `PLANNED ACTIONS` / `MOST RECENT USER INPUT` clauses are what drive the Hybrid win on `knowledge-update` (94.4 %).
+<Tag type="added" /> **Mastra prompt port**: `bench/long-mem/src/mastra_prompts.rs` ports `OBSERVER_EXTRACTION_INSTRUCTIONS`, `OBSERVER_OUTPUT_FORMAT`, `OBSERVER_GUIDELINES`, `OBSERVATION_CONTEXT_PROMPT`, `OBSERVATION_CONTEXT_INSTRUCTIONS` verbatim from `@mastra/memory`. The context-injection prompt's `KNOWLEDGE UPDATES` / `PLANNED ACTIONS` / `MOST RECENT USER INPUT` clauses are what drive the Hybrid win on `knowledge-update` (94.4 %).
 
-<Tag type="added" /> **`cersei-memory::embedding_memory::EmbeddingMemory`** — thin adapter bridging `cersei-embeddings::EmbeddingStore` into the `Memory` trait. Behind the new optional `embed` feature so consumers opt in.
+<Tag type="added" /> **`cersei-memory::embedding_memory::EmbeddingMemory`**: thin adapter bridging `cersei-embeddings::EmbeddingStore` into the `Memory` trait. Behind the new optional `embed` feature so consumers opt in.
 
 ```rust
 use cersei_memory::embedding_memory::EmbeddingMemory;
@@ -372,37 +378,37 @@ use cersei_embeddings::{GeminiEmbeddings, Metric};
 let mem = EmbeddingMemory::new(GeminiEmbeddings::from_env()?, Metric::Cosine)?;
 ```
 
-<Tag type="added" /> **`GraphMemory::recall_top_k(query, limit) -> Vec<(String, f32)>`** — scored retrieval that re-ranks the substring-match candidates by fraction of query words found. Additive; the existing `recall` signature is unchanged.
+<Tag type="added" /> **`GraphMemory::recall_top_k(query, limit) -> Vec<(String, f32)>`**: scored retrieval that re-ranks the substring-match candidates by fraction of query words found. Additive; the existing `recall` signature is unchanged.
 
 <Tag type="added" /> **`cersei-embeddings::GeminiEmbeddings`** rewritten for `gemini-embedding-001` (3072-d native, Matryoshka `outputDimensionality` supported). Uses the `embedContent` endpoint with bounded concurrent streaming; retries 429 / 5xx / transport errors with exponential backoff (6 attempts, ~30 s window).
 
 <Tag type="fixed" /> **`cersei-embeddings::OpenAiEmbeddings::embed_batch` and `GeminiEmbeddings::embed_batch`** no longer panic on multi-byte UTF-8 input. The pre-call truncation was byte-slicing at index 2000, which crashed when the boundary fell inside a character (Spanish diacritics, emoji, smart quotes). Now walks back to the nearest char boundary.
 
-<Tag type="changed" /> **Gemini API key plumbing (SECURITY).** Keys now ride the `x-goog-api-key` header instead of the `?key=…` URL query string in both `cersei-provider::Gemini` and `cersei-embeddings::GeminiEmbeddings`. The URL contains no secret, so `reqwest::Error` Display (which prints the URL) cannot leak the key. Added a `redact_url_key` helper as belt-and-braces; tightened `.gitignore` to block `bench/**/*.log`, `bench/**/results*/`, `bench/**/runner-*.sh`, `bench/**/abstract-output.jsonl`, and `.env*`. Untracked 38 previously-committed bench artifacts that carried keys. Prompted by two historic leaks — see [`bench-memory`](/docs/bench-memory#security-hygiene) for the post-mortem.
+<Tag type="changed" /> **Gemini API key plumbing (SECURITY).** Keys now ride the `x-goog-api-key` header instead of the `?key=…` URL query string in both `cersei-provider::Gemini` and `cersei-embeddings::GeminiEmbeddings`. The URL contains no secret, so `reqwest::Error` Display (which prints the URL) cannot leak the key. Added a `redact_url_key` helper as belt-and-braces; tightened `.gitignore` to block `bench/**/*.log`, `bench/**/results*/`, `bench/**/runner-*.sh`, `bench/**/abstract-output.jsonl`, and `.env*`. Untracked 38 previously-committed bench artifacts that carried keys. Prompted by two historic leaks: see [`bench-memory`](/docs/bench-memory#security-hygiene) for the post-mortem.
 
 </Version>
 
 <Version version="0.1.7" date="2026-04-20">
 
-<Tag type="added" /> **New crate: `cersei-compression`.** Structural and command-aware compression for tool outputs. Sits between a tool's raw `execute()` result and the existing `cap_tool_result()` safety net, trimming the ANSI codes, `Compiling …` spam, boilerplate comments, and unchanged function bodies that dominate typical tool output. Three levels: `Off` (default, byte-for-byte passthrough), `Minimal` (ANSI + comment stripping, whitespace collapse — safe for JSON/YAML/TOML), `Aggressive` (adds language-aware body stubbing and declarative TOML rules for `git`, `cargo`, `npm`, `pnpm`, `pytest`, `docker`). Docs: [Overview](/docs/compression-overview) · [Benchmarks](/docs/compression-benchmarks).
+<Tag type="added" /> **New crate: `cersei-compression`.** Structural and command-aware compression for tool outputs. Sits between a tool's raw `execute()` result and the existing `cap_tool_result()` safety net, trimming the ANSI codes, `Compiling …` spam, boilerplate comments, and unchanged function bodies that dominate typical tool output. Three levels: `Off` (default, byte-for-byte passthrough), `Minimal` (ANSI + comment stripping, whitespace collapse: safe for JSON/YAML/TOML), `Aggressive` (adds language-aware body stubbing and declarative TOML rules for `git`, `cargo`, `npm`, `pnpm`, `pytest`, `docker`). Docs: [Overview](/docs/compression-overview) · [Benchmarks](/docs/compression-benchmarks).
 
-<Tag type="added" /> **Credit where it's due** — the rule engine, language-aware code filter, and TOML DSL are ports of [**rtk** (Rust Token Killer)](https://github.com/rtk-ai/rtk) by **Patrick Szymkowiak**, MIT licensed. `crates/cersei-compression/LICENSE` + the per-module `//! Credits:` headers document which rtk file each module derives from.
+<Tag type="added" /> **Credit where it's due**: the rule engine, language-aware code filter, and TOML DSL are ports of [**rtk** (Rust Token Killer)](https://github.com/rtk-ai/rtk) by **Patrick Szymkowiak**, MIT licensed. `crates/cersei-compression/LICENSE` + the per-module `//! Credits:` headers document which rtk file each module derives from.
 
-<Tag type="added" /> **Agent builder + runtime knob.** `AgentBuilder::compression_level(level)` for build-time, `agent.set_compression_level(level)` / `agent.compression_level()` for runtime — shared mutex, takes effect on the next tool call. Wired in the runner at `crates/cersei-agent/src/runner.rs:708`, before the existing `cap_tool_result`.
+<Tag type="added" /> **Agent builder + runtime knob.** `AgentBuilder::compression_level(level)` for build-time, `agent.set_compression_level(level)` / `agent.compression_level()` for runtime: shared mutex, takes effect on the next tool call. Wired in the runner at `crates/cersei-agent/src/runner.rs:708`, before the existing `cap_tool_result`.
 
 <Tag type="added" /> **Abstract CLI controls.** `--compress <off|minimal|aggressive>` flag, `ABSTRACT_COMPRESSION` env var, `compression_level` in `~/.abstract/config.toml` / `.abstract/config.toml`, and a live `/compression [on|off|minimal|aggressive]` slash command that flips the active agent mid-session. `/compression` with no argument reports the current level.
 
-<Tag type="added" /> **Live-provider savings benchmark** — `crates/cersei-agent/tests/e2e_openai_compression.rs` (`#[ignore]`). Same prompt, same tool, same fixture run twice per provider with only `CompressionLevel` changing. Token counts are **provider-reported** (`output.usage.input_tokens` from OpenAI, `usageMetadata.promptTokenCount` from Gemini), not our estimate.
-  - **OpenAI `gpt-4o-mini`** — **11,576 → 8,202 input tokens (−29.1%, Δ 3,374 tokens)**; 15 → 13 tool calls over 5 turns.
-  - **Google Gemini `gemini-2.5-flash`** — **4,490 → 1,700 input tokens (−62.1%, Δ 2,790 tokens)**; 1 → 1 tool call over 5 → 3 turns.
-  - **Reproduce it** — commands, per-call logs, and caveats on the [Compression Benchmarks](/docs/compression-benchmarks) page.
-  - **Synthetic floors** — `git log` ≥ 30% at Minimal, `cargo test` ≥ 25% at Minimal, Off is byte-for-byte identity, Rust source at Aggressive drops bodies but keeps signatures + imports. Source: `crates/cersei-compression/tests/savings.rs`.
+<Tag type="added" /> **Live-provider savings benchmark**: `crates/cersei-agent/tests/e2e_openai_compression.rs` (`#[ignore]`). Same prompt, same tool, same fixture run twice per provider with only `CompressionLevel` changing. Token counts are **provider-reported** (`output.usage.input_tokens` from OpenAI, `usageMetadata.promptTokenCount` from Gemini), not our estimate.
+  - **OpenAI `gpt-4o-mini`**: **11,576 → 8,202 input tokens (−29.1%, Δ 3,374 tokens)**; 15 → 13 tool calls over 5 turns.
+  - **Google Gemini `gemini-2.5-flash`**: **4,490 → 1,700 input tokens (−62.1%, Δ 2,790 tokens)**; 1 → 1 tool call over 5 → 3 turns.
+  - **Reproduce it**: commands, per-call logs, and caveats on the [Compression Benchmarks](/docs/compression-benchmarks) page.
+  - **Synthetic floors**: `git log` ≥ 30% at Minimal, `cargo test` ≥ 25% at Minimal, Off is byte-for-byte identity, Rust source at Aggressive drops bodies but keeps signatures + imports. Source: `crates/cersei-compression/tests/savings.rs`.
 
 <Tag type="added" /> **Per-call observability.** Every `compress_tool_output` invocation emits a structured `tracing::info!` event on target `cersei_compression` with `tool`, `level`, `strategy`, `detail` (matched rule name or detected `Language`), `before_bytes`, `after_bytes`, `before_lines`, `after_lines`, and `savings_pct`. Subscribe anywhere with `RUST_LOG=cersei_compression=info`.
 
 <Tag type="changed" /> **Workspace version bumped to `0.1.7`** across every crate (`cersei`, `cersei-agent`, `cersei-compression`, `cersei-embeddings`, `cersei-hooks`, `cersei-lsp`, `cersei-mcp`, `cersei-memory`, `cersei-provider`, `cersei-tools`, `cersei-tools-derive`, `cersei-types`, `abstract-cli`) via `version.workspace = true`.
 
-<Tag type="changed" /> **`cersei-agent::Agent` + `AgentBuilder`** gained a `compression_level` field. Default is `CompressionLevel::Off` — existing users see zero behavioural change without opting in. The pre-existing `cap_tool_result` (80+80 head/tail) and `apply_tool_result_budget` (50k chars, keeps last 6 messages) still run after compression as unconditional safety nets.
+<Tag type="changed" /> **`cersei-agent::Agent` + `AgentBuilder`** gained a `compression_level` field. Default is `CompressionLevel::Off`: existing users see zero behavioural change without opting in. The pre-existing `cap_tool_result` (80+80 head/tail) and `apply_tool_result_budget` (50k chars, keeps last 6 messages) still run after compression as unconditional safety nets.
 
 </Version>
 
@@ -412,10 +418,10 @@ let mem = EmbeddingMemory::new(GeminiEmbeddings::from_env()?, Metric::Cosine)?;
 
 <Tag type="added" /> **`EmbeddingProvider` trait + `VectorIndex` + `EmbeddingStore<P>`.** Implement the trait once, compose with index and store for free. Built-in Cosine / L2 / InnerProduct metrics with automatic similarity conversion. `auto_from_model(&str)` factory picks OpenAI or Gemini from an LLM model string.
 
-<Tag type="added" /> **General-Agent Framework Benchmark.** First-party end-to-end comparison against the Python agent stack — Agno 2.5.17, PydanticAI 1.22.0, LangGraph 1.1.8, CrewAI 1.14.2 — every number measured on Apple M1 Pro via the same harness suite. Methodology mirrors Agno's own cookbook (real agent constructors, no LLM invocation, no stub models). Three new chart components (`AgentInstantiationChart`, `PerAgentMemoryChart`, `MaxConcurrentChart`).
-  - **Headline** — Cersei **704 B per agent** (8× smaller than Agno, 44× smaller than LangGraph). Builds 500 agents concurrently in **4.4 ms on 8.5 MB**; CrewAI needs **50,697 ms on 1,739 MB** for the same N. That's **11,500× faster wall time, 204× less memory**. Cersei sweeps to **10,000 concurrent agents on 22 MB RSS total**.
-  - **Browse the numbers** — [Landing page section](https://cersei.pacifio.dev/docs#vs-general-agent-frameworks) · [Deep dive with all five axes](https://cersei.pacifio.dev/docs/bench-vs-agents) · [Comparisons page](https://cersei.pacifio.dev/docs/comparisons#cersei-vs-general-agent-frameworks-agno-pydanticai-langgraph-crewai).
-  - **Reproduce it** — Rust harness at `crates/cersei-agent/benchmarks/general_agent_bench.rs` (opt-in via `bench-full` feature); `uv`-managed Python harnesses + `./run.sh` at [`bench/general-agents/`](https://github.com/pacifio/cersei/tree/main/bench/general-agents).
+<Tag type="added" /> **General-Agent Framework Benchmark.** First-party end-to-end comparison against the Python agent stack: Agno 2.5.17, PydanticAI 1.22.0, LangGraph 1.1.8, CrewAI 1.14.2: every number measured on Apple M1 Pro via the same harness suite. Methodology mirrors Agno's own cookbook (real agent constructors, no LLM invocation, no stub models). Three new chart components (`AgentInstantiationChart`, `PerAgentMemoryChart`, `MaxConcurrentChart`).
+  - **Headline**: Cersei **704 B per agent** (8× smaller than Agno, 44× smaller than LangGraph). Builds 500 agents concurrently in **4.4 ms on 8.5 MB**; CrewAI needs **50,697 ms on 1,739 MB** for the same N. That's **11,500× faster wall time, 204× less memory**. Cersei sweeps to **10,000 concurrent agents on 22 MB RSS total**.
+  - **Browse the numbers**: [Landing page section](https://cersei.pacifio.dev/docs#vs-general-agent-frameworks) · [Deep dive with all five axes](https://cersei.pacifio.dev/docs/bench-vs-agents) · [Comparisons page](https://cersei.pacifio.dev/docs/comparisons#cersei-vs-general-agent-frameworks-agno-pydanticai-langgraph-crewai).
+  - **Reproduce it**: Rust harness at `crates/cersei-agent/benchmarks/general_agent_bench.rs` (opt-in via `bench-full` feature); `uv`-managed Python harnesses + `./run.sh` at [`bench/general-agents/`](https://github.com/pacifio/cersei/tree/main/bench/general-agents).
 
 <Tag type="changed" /> **`cersei-tools::code_search`** delegates to `cersei-embeddings`. Inline Gemini / OpenAI embedding HTTP and raw `usearch::Index` handling removed from the tool. `CodeSearchTool::with_embeddings` now takes `Arc<dyn EmbeddingProvider>`.
 
@@ -425,9 +431,9 @@ let mem = EmbeddingMemory::new(GeminiEmbeddings::from_env()?, Metric::Cosine)?;
 
 <Tag type="changed" /> **Google provider default model** upgraded from `gemini-2.0-flash` to `gemini-3.1-pro-preview` (2M context). Affects `abstract --model gemini`, `auto` when `GOOGLE_API_KEY` is the only key, and `Gemini::new()` / `Gemini::builder()` when `.model(...)` is omitted.
 
-<Tag type="changed" /> **`abstract login <provider>`** accepts any provider registered in the `cersei-provider` registry (Google, Groq, DeepSeek, xAI, Mistral, Together, Fireworks, Perplexity, Cerebras, OpenRouter, Cohere, SambaNova) — previously only `anthropic` and `openai` were wired up. Saved keys live in a generic `provider_keys` map in `~/.abstract/credentials.json` and export as the provider's first env var at startup. Local providers (Ollama) report "no login needed".
+<Tag type="changed" /> **`abstract login <provider>`** accepts any provider registered in the `cersei-provider` registry (Google, Groq, DeepSeek, xAI, Mistral, Together, Fireworks, Perplexity, Cerebras, OpenRouter, Cohere, SambaNova): previously only `anthropic` and `openai` were wired up. Saved keys live in a generic `provider_keys` map in `~/.abstract/credentials.json` and export as the provider's first env var at startup. Local providers (Ollama) report "no login needed".
 
-<Tag type="fixed" /> **Auto-default silently picking Ollama.** Two changes: (1) `registry::available()` TCP-probes local providers (`env_keys` empty) with a 200ms check on their `api_base`, so `abstract login status` distinguishes `available (local)` from `not running`. (2) `from_model_string("auto")` skips local providers entirely and only considers keyed providers — Ollama must now be selected explicitly via `--model ollama/<model>`. No more silent fallback to `llama3.1` on machines where the user never opted into Ollama.
+<Tag type="fixed" /> **Auto-default silently picking Ollama.** Two changes: (1) `registry::available()` TCP-probes local providers (`env_keys` empty) with a 200ms check on their `api_base`, so `abstract login status` distinguishes `available (local)` from `not running`. (2) `from_model_string("auto")` skips local providers entirely and only considers keyed providers: Ollama must now be selected explicitly via `--model ollama/<model>`. No more silent fallback to `llama3.1` on machines where the user never opted into Ollama.
 
 <Tag type="fixed" /> **`abstract login google`** (and every other registered provider) no longer rejected with "Unknown provider".
 
@@ -437,7 +443,7 @@ let mem = EmbeddingMemory::new(GeminiEmbeddings::from_env()?, Metric::Cosine)?;
 
 <Tag type="added" /> **VibeProxy support.** Route requests through local proxy (VibeProxy or compatible) using existing AI subscriptions instead of API keys. `--proxy` and `--proxy-url` CLI flags. Auto-detection when no API keys set. `/proxy` command shows status and authenticated accounts. `[proxy]` config section.
 
-<Tag type="added" /> **Channel-based TUI permissions.** Rewrote permission system from stdin-based to `mpsc`+`oneshot` channels. TUI renders overlay, user decides, decision flows back — no more stdin race condition or raw mode corruption.
+<Tag type="added" /> **Channel-based TUI permissions.** Rewrote permission system from stdin-based to `mpsc`+`oneshot` channels. TUI renders overlay, user decides, decision flows back: no more stdin race condition or raw mode corruption.
 
 <Tag type="added" /> **Virtualized message list.** O(viewport_height) rendering instead of O(total_lines). Pre-built committed items cached. Buffer cleared before render. Smooth 60fps scrolling for long conversations.
 
@@ -445,7 +451,7 @@ let mem = EmbeddingMemory::new(GeminiEmbeddings::from_env()?, Metric::Cosine)?;
 
 <Tag type="added" /> **Multi-line input.** Textarea with word wrapping, dynamic height (1-10 lines). Option+Enter / Ctrl+J / Shift+Enter for newlines. Kitty keyboard protocol support.
 
-<Tag type="added" /> **4 cookbooks** — ML Coding Agent, Research Agent, General Agent, Graph Memory. **Comparisons page** — Cersei vs Claude Code SDK vs Pydantic AI vs LangChain. **Code & AST Intelligence docs.**
+<Tag type="added" /> **4 cookbooks**: ML Coding Agent, Research Agent, General Agent, Graph Memory. **Comparisons page**: Cersei vs Claude Code SDK vs Pydantic AI vs LangChain. **Code & AST Intelligence docs.**
 
 <Tag type="changed" /> Permission overlay: 75% x 55% with padding. Side panel: focus mode with j/k scroll, compact file tree. Git diff: human-readable status labels. Help overlay lists all commands.
 
@@ -463,11 +469,11 @@ let mem = EmbeddingMemory::new(GeminiEmbeddings::from_env()?, Metric::Cosine)?;
 
 <Tag type="added" /> **Parallel tool execution** via `futures::future::join_all()`. Automatic retry with exponential backoff (5 retries, 1s→16s). LLM-based context compaction at 90% usage. Todo nudge injection. Depth nudge for deeper exploration.
 
-<Tag type="added" /> **File snapshot/undo** — before/after content per tool call with `/undo` command. **ApplyPatch tool** for unified diff patching. **Shell state persistence** via sentinel-based cwd capture.
+<Tag type="added" /> **File snapshot/undo**: before/after content per tool call with `/undo` command. **ApplyPatch tool** for unified diff patching. **Shell state persistence** via sentinel-based cwd capture.
 
-<Tag type="added" /> **GPT-5.x support** — `gpt-5.3-chat-latest` default, `gpt-5.3-chat`, `gpt-5-chat`, `o3-pro`. 1M context. `max_completion_tokens` for GPT-5/o-series. Per-message cost estimation for 15 models.
+<Tag type="added" /> **GPT-5.x support**: `gpt-5.3-chat-latest` default, `gpt-5.3-chat`, `gpt-5-chat`, `o3-pro`. 1M context. `max_completion_tokens` for GPT-5/o-series. Per-message cost estimation for 15 models.
 
-<Tag type="added" /> **AGENTS.md/CLAUDE.md hierarchy** — walks up directory tree for instruction files. **File watching** via `notify` crate. **3 themes** — Enterprise (default), Light, Solarized.
+<Tag type="added" /> **AGENTS.md/CLAUDE.md hierarchy**: walks up directory tree for instruction files. **File watching** via `notify` crate. **3 themes**: Enterprise (default), Light, Solarized.
 
 <Tag type="changed" /> Default OpenAI model: `gpt-4o` → `gpt-5.3-chat-latest`. Default theme: Enterprise (AMOLED black). `Agent::run_stream()` uses `Arc<Self>` (safe). System prompt rewritten for deep exploration. Glob capped at 200 results. Per-result cap at 30KB. max_turns: 20 → 50.
 
@@ -477,9 +483,9 @@ let mem = EmbeddingMemory::new(GeminiEmbeddings::from_env()?, Metric::Cosine)?;
 
 <Version version="0.1.5" date="2026-04-07">
 
-<Tag type="added" /> **`/sessions` and `/ls` slash commands** — list sessions directly from the REPL. Closes [#9](https://github.com/pacifio/cersei/issues/9).
+<Tag type="added" /> **`/sessions` and `/ls` slash commands**: list sessions directly from the REPL. Closes [#9](https://github.com/pacifio/cersei/issues/9).
 
-<Tag type="added" /> **Expanded `/help`** — now shows CLI subcommands alongside REPL commands. Updated model aliases.
+<Tag type="added" /> **Expanded `/help`**: now shows CLI subcommands alongside REPL commands. Updated model aliases.
 
 <Tag type="added" /> **Conditional system prompt components.** 23 sections (8 conditional) replacing 6 static constants. New: output efficiency, tool result summarization, sub-agent guidance, skills guidance, memory guidance, context management warning, structured git snapshot, MCP instructions, language preference.
 
@@ -495,11 +501,11 @@ let mem = EmbeddingMemory::new(GeminiEmbeddings::from_env()?, Metric::Cosine)?;
 
 <Tag type="added" /> **Tool primitives** (`tool_primitives` module). 6 sub-modules: `diff`, `fs`, `process`, `http`, `search`, `git`. Low-level async building blocks for custom tools. 26 new tests.
 
-<Tag type="added" /> **Built-in tools reference** — documentation page with complete input schemas for all 34 tools using TypeTable.
+<Tag type="added" /> **Built-in tools reference**: documentation page with complete input schemas for all 34 tools using TypeTable.
 
-<Tag type="added" /> **Tool primitives documentation** — overview, full API reference, and cookbook with DiffTool, deploy verifier, research agent, and git-aware code reviewer examples.
+<Tag type="added" /> **Tool primitives documentation**: overview, full API reference, and cookbook with DiffTool, deploy verifier, research agent, and git-aware code reviewer examples.
 
-<Tag type="added" /> **Providers documentation** — dedicated page covering all 13 providers with env vars, models, context windows, and usage examples.
+<Tag type="added" /> **Providers documentation**: dedicated page covering all 13 providers with env vars, models, context windows, and usage examples.
 
 <Tag type="changed" /> `file_read.rs`, `file_write.rs`, `file_edit.rs` refactored to delegate to `tool_primitives::fs`.
 
@@ -515,9 +521,9 @@ let mem = EmbeddingMemory::new(GeminiEmbeddings::from_env()?, Metric::Cosine)?;
 
 <Tag type="added" /> **Session auto-fork.** When a session file exceeds 50MB, writes automatically fork to a new part file (`_part2.jsonl`, `_part3.jsonl`, etc.). Loading stitches all parts together. Tombstones apply across parts. Total limit: 200MB.
 
-<Tag type="added" /> **Multi-part session helpers** — `all_part_paths()` and `total_session_size()` for inspecting session files.
+<Tag type="added" /> **Multi-part session helpers**: `all_part_paths()` and `total_session_size()` for inspecting session files.
 
-<Tag type="added" /> **Sessions and Tasks documentation** — two new doc pages covering the full session lifecycle, auto-compact, memory extraction, auto-dream consolidation, task orchestration, cron scheduling, and git worktree isolation.
+<Tag type="added" /> **Sessions and Tasks documentation**: two new doc pages covering the full session lifecycle, auto-compact, memory extraction, auto-dream consolidation, task orchestration, cron scheduling, and git worktree isolation.
 
 <Tag type="changed" /> `load_transcript()` now loads from all part files and applies tombstones across the combined set.
 
@@ -531,15 +537,15 @@ let mem = EmbeddingMemory::new(GeminiEmbeddings::from_env()?, Metric::Cosine)?;
 
 <Tag type="added" /> **Multi-provider model router.** 13 providers via `provider/model` string format. Anthropic, OpenAI, Google, Mistral, Groq, DeepSeek, xAI, Together, Fireworks, Perplexity, Cerebras, Ollama, OpenRouter.
 
-<Tag type="added" /> **`from_model_string()`** — parse `"groq/llama-3.1-70b-versatile"` into a configured provider. Auto-detection from bare model names.
+<Tag type="added" /> **`from_model_string()`**: parse `"groq/llama-3.1-70b-versatile"` into a configured provider. Auto-detection from bare model names.
 
-<Tag type="added" /> **Provider continuity** — interactive model switching on rate limits. Retry, switch to fallback, wait, or skip. History transfers across provider switches.
+<Tag type="added" /> **Provider continuity**: interactive model switching on rate limits. Retry, switch to fallback, wait, or skip. History transfers across provider switches.
 
 <Tag type="added" /> **`--fallback` CLI flag** and `fallback_models` config for provider switching.
 
-<Tag type="added" /> **OpenAI tool calling** — full streaming support. Accumulates `delta.tool_calls` chunks across SSE events. Previously tool calls were silently dropped.
+<Tag type="added" /> **OpenAI tool calling**: full streaming support. Accumulates `delta.tool_calls` chunks across SSE events. Previously tool calls were silently dropped.
 
-<Tag type="added" /> **`AgentBuilder::with_messages()`** — pre-populate conversation history for provider switching mid-session.
+<Tag type="added" /> **`AgentBuilder::with_messages()`**: pre-populate conversation history for provider switching mid-session.
 
 <Tag type="changed" /> Provider resolution replaced with the model router. Model string is the source of truth.
 
@@ -547,7 +553,7 @@ let mem = EmbeddingMemory::new(GeminiEmbeddings::from_env()?, Metric::Cosine)?;
 
 <Tag type="fixed" /> Grafeo dependency uses crates.io instead of local filesystem paths. `cargo install` works on any machine.
 
-<Tag type="fixed" /> OpenAI tool calling loop — tool results now serialize correctly as `role: "tool"` with `tool_call_id`.
+<Tag type="fixed" /> OpenAI tool calling loop: tool results now serialize correctly as `role: "tool"` with `tool_call_id`.
 
 <Tag type="removed" /> Hardcoded local filesystem paths from all `Cargo.toml` files.
 
@@ -563,7 +569,7 @@ let mem = EmbeddingMemory::new(GeminiEmbeddings::from_env()?, Metric::Cosine)?;
 
 <Tag type="added" /> **Centralized GQL queries.** All 15+ scattered query strings in `graph.rs` extracted into a single `mod gql` block.
 
-<Tag type="added" /> **Abstract CLI.** Complete coding agent — REPL, streaming renderer, interactive permissions, session management, slash commands, TOML config, graph memory on by default.
+<Tag type="added" /> **Abstract CLI.** Complete coding agent: REPL, streaming renderer, interactive permissions, session management, slash commands, TOML config, graph memory on by default.
 
 <Tag type="added" /> **Benchmark suite.** `run_tool_bench_claude.sh` and `run_tool_bench_codex.sh` for three-way comparison. `memory_bench.rs` for graph performance.
 
@@ -579,7 +585,7 @@ let mem = EmbeddingMemory::new(GeminiEmbeddings::from_env()?, Metric::Cosine)?;
 
 <Tag type="added" /> **Initial release.** Complete Rust SDK for building coding agents.
 
-<Tag type="added" /> **9 crates** — `cersei` (facade), `cersei-types`, `cersei-provider` (Anthropic + OpenAI), `cersei-tools` (34 tools), `cersei-tools-derive` (proc macro), `cersei-agent` (builder + agentic loop), `cersei-memory` (graph + flat files + CLAUDE.md), `cersei-hooks` (middleware), `cersei-mcp` (JSON-RPC 2.0).
+<Tag type="added" /> **9 crates**: `cersei` (facade), `cersei-types`, `cersei-provider` (Anthropic + OpenAI), `cersei-tools` (34 tools), `cersei-tools-derive` (proc macro), `cersei-agent` (builder + agentic loop), `cersei-memory` (graph + flat files + CLAUDE.md), `cersei-hooks` (middleware), `cersei-mcp` (JSON-RPC 2.0).
 
 <Tag type="added" /> **Graph memory.** Grafeo embedded graph DB. 3 node types, 2 edge types. Recall in 98 microseconds. Graph ON adds zero scan overhead, 92.5% faster recall.
 

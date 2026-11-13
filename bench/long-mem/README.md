@@ -1,7 +1,7 @@
-# LongMemEval — Bricks memory head-to-head
+# LongMemEval: Bricks memory head-to-head
 
 Runs the 500-question [LongMemEval benchmark](https://arxiv.org/abs/2410.10813)
-(ICLR 2025) against four memory configurations built on Bricks primitives, so
+(ICLR 2025) against memory configurations built on Bricks primitives, so
 we can publish numbers line-for-line comparable to Mastra's
 [*Observational Memory*](https://mastra.ai/research/observational-memory)
 research, the Zep Graphiti paper, and Supermemory's claims.
@@ -39,10 +39,9 @@ Outputs land in `./results/` as `<config>-<dataset>.json` summaries plus
 
 | Config | Backend | What it tests |
 |---|---|---|
-| **A. `baseline`** | `JsonlMemory` full haystack in prompt | Control lower bound — how well does the answerer do with perfect recall? |
-| **B. `embed`** | `EmbeddingMemory` (usearch HNSW, cosine) | Pure semantic retrieval. Direct comparison to Mastra's RAG mode. |
-| **C. `graph`** | `GraphMemory` (grafeo) substring+rank | Weakest config — the honest floor. |
-| **D. `hybrid`** | LLM fact extractor → EmbeddingMemory + GraphMemory → RRF fusion | Head-to-head with Mastra's *observational memory* and Zep's Graphiti. |
+| **A. `baseline`** | `JsonlMemory` full haystack in prompt | Control lower bound: how well does the answerer do with full context? |
+| **B. `structured-vector`** | `bricks-memory::structured` (vector channel) | Vector-only recall over structured episodes and facts. |
+| **C. `structured-hybrid`** | `bricks-memory::structured` (LLM extractor + Grafeo + vector + lexical RRF) | Full structured memory with extraction, graph links, and three-way RRF recall. |
 
 ## Where the numbers come from
 
@@ -60,5 +59,5 @@ Outputs land in `./results/` as `<config>-<dataset>.json` summaries plus
 ## What this benchmark is **not**
 
 - It's not a general "does Bricks beat Mastra at everything" test. It measures long-term conversational recall under a specific rubric.
-- It's not apples-to-apples against systems that let the agent call tools during answering (LongMemEval is a single-shot recall benchmark — the retrieval is fixed before the answerer LLM runs).
+- It's not apples-to-apples against systems that let the agent call tools during answering (LongMemEval is a single-shot recall benchmark: the retrieval is fixed before the answerer LLM runs).
 - It's not cheap to run at scale: a full pass on `longmemeval_s` costs the model calls it makes, which depend on the models you choose.

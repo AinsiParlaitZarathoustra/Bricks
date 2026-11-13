@@ -2,7 +2,7 @@
 
 ## Installation
 
-The workspace version is 0.6.1 (`Cargo.toml`). Depend on a checkout of this repository, the `bricks` facade crate in `crates/bricks`:
+The workspace version is `1.0.0-alpha.1` (`Cargo.toml`). To use the SDK in a Rust project, depend on the `bricks` facade crate in `crates/bricks`:
 
 ```toml
 [dependencies]
@@ -11,13 +11,19 @@ tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 ```
 
-To use the `bricks` command-line tool instead, install it from the checkout: `cargo install --path crates/bricks-cli`.
+To use the `bricks` command-line tool instead, install it from the checkout:
+
+```bash
+cargo install --path crates/bricks-cli
+```
+
+The CLI provides `bricks run` (run one prompt or continue a session with `--session <id>`), `bricks mcp` (manage MCP servers), and `bricks sessions` (list stored sessions).
 
 ## Prerequisites
 
-- A recent stable Rust toolchain for edition 2024 (see `Cargo.toml`); the build was tested with Rust 1.98.1
-- A provider declared in `~/.bricks/providers.toml` (see [Providers](02-providers.md)). Start from `docs/providers.example.toml`. Its API key is read from the environment variable named by `api_key_env`.
-- No external tools for `Grep`: it runs in-process. `Bash` uses the `bash` found on `PATH`; `PowerShell` needs `pwsh` or `powershell`.
+- A recent stable Rust toolchain for edition 2024 (see `Cargo.toml`).
+- A provider configured in `~/.bricks/providers.toml` (or `$BRICKS_HOME/providers.toml` when `BRICKS_HOME` is set). Start from `docs/providers.example.toml` and see [Providers](02-providers.md).
+- `Grep` runs in-process and needs no external binary. `Bash` uses `bash` on `PATH`, and `PowerShell` uses `pwsh` (or Windows PowerShell).
 
 ## Your First Agent
 
@@ -29,7 +35,7 @@ async fn main() -> anyhow::Result<()> {
     let output = Agent::builder()
         .provider(provider_from_config(None, "my-provider/my-model")?) // ~/.bricks/providers.toml
         .tools(bricks::tools::coding())                                 // files, shell, web
-        .permission_policy(AllowAll)                                    // the approver says yes to every call asked
+        .permission_policy(AllowAll)                                    // approves every tool call
         .run_with("Count the number of .rs files in this directory")
         .await?;
 
@@ -39,32 +45,32 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-`my-provider/my-model` is a `provider_id/model_id` pair from your `providers.toml`. Nothing is inferred from the model name, and a missing or invalid file is an error.
+`my-provider/my-model` is a `provider_id/model_id` pair from your `providers.toml`. Nothing is guessed from the model name, and a missing or invalid file returns an error.
 
-Set the key variable named in the file, then run:
+Run your program with:
 
 ```bash
-export BRICKS_MY_PROVIDER_KEY=...   # whatever api_key_env names in providers.toml
 cargo run
 ```
 
 ## How It Works
 
-1. **You provide a prompt** to the agent
-2. **The agent sends it to the LLM** (via the Provider) with available tool definitions
-3. **The LLM responds** — either with text (done) or with tool calls
-4. **Tools execute locally** — Bash commands, file reads, grep searches, etc.
-5. **Results feed back** to the LLM for the next turn
-6. **Loop repeats** until the LLM says "end_turn" (there is no turn limit; cancellation, errors and the no-progress guard also stop it)
-7. **You get `AgentOutput`** with the final message, usage stats, and tool call history
+1. You give a prompt to the agent.
+2. The agent sends the prompt and available tool definitions to the model through the provider.
+3. The model replies with either final text or one or more tool calls.
+4. Tools run locally (for example `Bash`, `Read`, or `Grep`).
+5. Tool results go back to the model for the next turn.
+6. The loop repeats until the model finishes its turn, the run is cancelled, an error occurs, or the no-progress guard stops it. There is no fixed turn limit.
+7. `run_with` returns an `AgentOutput` with the final message, token usage, and tool call history.
 
 ## Next Steps
 
-- [Providers](02-providers.md) — declare providers and models, protocols, custom providers
-- [Tools](03-tools.md) — built-in tools, permission levels, and how to create custom ones
-- [Agent Lifecycle](04-agent-lifecycle.md) — the agentic loop in detail
-- [Events & Streaming](05-events-streaming.md) — real-time observation
-- [Memory](06-memory.md) — session persistence
-- [Hooks](07-hooks.md) — middleware and interception
-- [Permissions](08-permissions.md) — controlling what tools can do, and approvals
-- [Benchmarks](10-benchmarks.md) — performance figures and their dates
+- [Providers](02-providers.md): configure providers, models, and API keys
+- [Tools](03-tools.md): built-in tool sets, permission levels, and custom tools
+- [Agent Lifecycle](04-agent-lifecycle.md): how the agent loop runs and compacts history
+- [Events & Streaming](05-events-streaming.md): callbacks, broadcast channels, streams, and reporters
+- [Memory](06-memory.md): session transcripts and structured long-term memory
+- [Hooks](07-hooks.md): intercepting turns and tool calls
+- [Permissions](08-permissions.md): controlling what tools can do
+- [Architecture](09-architecture.md): workspace crates and data flow
+- [Benchmarks](10-benchmarks.md): measured timings and how to run the suites

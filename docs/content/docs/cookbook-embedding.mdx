@@ -1,6 +1,6 @@
 ---
 title: "Cookbook: Embedding in Apps"
-description: Embed Bricks ADK agents inside existing Rust applications — a Tauri command, an Actix-web endpoint, streamed events over a WebSocket, a custom memory backend, and the extension points.
+description: Embed Bricks ADK agents inside existing Rust applications: a Tauri command, an Actix-web endpoint, streamed events over a WebSocket, a custom memory backend, and the extension points.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -153,4 +153,4 @@ This is a sketch: the `?` conversions from `sqlx` and `serde_json` errors into t
 | Custom reporters | `impl Reporter` |
 | MCP servers | `bricks::mcp::McpServerConfig`, in the agent's configuration |
 | Skills | `SKILL.md` folders: the skill store and the built-in `create-skills`, plus any folder you pass explicitly; `AgentBuilder::skills` |
-| Graph memory | the `graph` feature of `bricks-memory` (not forwarded by the `bricks` facade) |
+| Structured memory | the `structured` feature of `bricks-memory` (not forwarded by the `bricks` facade) |

@@ -85,11 +85,11 @@ bricks --providers ./providers.toml --model my-provider/my-model
 
 ## Editing from the desktop app
 
-The settings page « Modèles » of the desktop app edits `providers.toml` in place.
-The file must already exist: the app does not create it.
+The Models settings page of the desktop app edits `providers.toml` in place,
+and creates it when the first provider is saved if it does not exist yet.
 
-* **Adding.** « Ajouter un fournisseur » writes a `[[providers]]` table, and the « + »
-  of a provider writes a `[[providers.models]]` table with its `[limits]`.
+* **Adding.** Adding a provider writes a `[[providers]]` table, and adding a model
+  writes a `[[providers.models]]` table with its `[limits]`.
   Identifiers use letters, digits, `.`, `_` and `-`, start with a letter or a digit,
   and are unique.
 * **Required fields.** A provider needs `name`, `endpoint`, `protocol` and `auth`, and
@@ -262,8 +262,8 @@ which bounds only the single rate-limit wait of a web-search provider.
 * The desktop form makes `input`, `output` and `cache_read` mandatory, in USD per
   million tokens (`0` allowed), and writes `currency = "USD"` and
   `per_tokens = 1000000` with them. `cache_write`, `cache_write_variants` and
-  `variants` are kept as written. The settings page banner « Compléter les coûts
-  manquants à 0 » writes `0` for every missing one. The engine is unchanged: a missing
+  `variants` are kept as written. The settings page banner for filling missing
+  costs with `0` writes `0` for every missing one. The engine is unchanged: a missing
   price is unknown, not free, and a hand-written file may omit any of the three.
 * `input_tokens` is always the uncached prompt; cache reads and writes are
   counted apart. `output_tokens` includes reasoning tokens.

@@ -1,10 +1,10 @@
-# bricks.toml — agent, context, compression, web and memory settings
+# bricks.toml: agent, context, compression, web and memory settings
 # (annotated example).
 #
 # Put it at the root of the project (`BricksConfig::load(working_dir)` reads
 # `<working_dir>/bricks.toml` and `~/.bricks/rules/*.toml`). Every key is
 # optional; the values below are the defaults. They are starting points for
-# models with 100k–200k-token windows, not universal values. Changes apply the
+# models with 100k to 200k-token windows, not universal values. Changes apply the
 # next time the configuration is loaded. An invalid section is reported and
 # replaced by its defaults; an invalid rule only disables itself.
 #
@@ -20,7 +20,7 @@
 #                                  # Above it, no retry is sent and the error says why.
 
 # Permissions are not set in this file. They are chosen in Bricks, per
-# session: Settings › General › "Permissions des nouvelles conversations" for
+# session: Settings › General › "Permissions for new conversations" for
 # the default of new conversations, the first-choice bar above the composer, or
 # the /config view of a conversation. On the command line, `--permissions
 # ask|execute` sets the profile of the run's session; without it, the session
@@ -79,7 +79,7 @@ max_lines = 200
 # ── Web search and reading (docs/web.md) ─────────────────────────────────────
 # Without this section: DuckDuckGo's HTML interface, no key. A keyed provider
 # is used only when named here, and its key is read only from the variable
-# named by `api_key_env` — never write a key in this file.
+# named by `api_key_env`, never write a key in this file.
 
 [web.search]
 provider = "duckduckgo"         # duckduckgo | brave | tavily | exa

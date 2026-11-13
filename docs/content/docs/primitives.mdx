@@ -1,6 +1,6 @@
 ---
 title: Tool Primitives
-description: Low-level building blocks for agent tools — file I/O, command execution, HTTP, search, git, and text diffing.
+description: Low-level building blocks for agent tools: file I/O, command execution, HTTP, search, git, and text diffing.
 ---
 
 import { Cards, Card } from 'fumadocs-ui/components/card';
@@ -8,7 +8,7 @@ import { Callout } from 'fumadocs-ui/components/callout';
 
 # Tool Primitives
 
-The 34 built-in tools are thin wrappers over a set of async primitives. These primitives are the actual building blocks — file reads, process spawning, HTTP fetching, regex search, git operations, text diffing. They return structured types instead of strings, have no JSON schema overhead, and work outside the Tool trait.
+The built-in tools are thin wrappers over a set of async primitives. These primitives are the actual building blocks: file reads, process spawning, HTTP fetching, regex search, git operations, and text diffing. They return structured types instead of strings, have no JSON schema overhead, and work outside the Tool trait.
 
 Use them directly when building custom tools, data pipelines, DevOps automation, or anything that needs fine-grained control over I/O.
 
@@ -32,7 +32,7 @@ Tool primitives are pure async functions and structs. No Tool trait, no JSON ser
     Async file read/write/edit with structured returns. Diff a file against proposed changes. Apply patches. Check metadata.
   </Card>
   <Card title="process" href="/docs/primitives-api#process">
-    Async command execution with shell selection (Sh, Bash, Zsh, PowerShell, Cmd). Stateless — no persistent cwd. Streaming output via channel.
+    Async command execution with shell selection (Sh, Bash, Zsh, PowerShell, Cmd). Stateless, with no persistent cwd. Streaming output via channel.
   </Card>
   <Card title="http" href="/docs/primitives-api#http">
     GET, POST, and HTML-to-text fetching. Configurable timeout, headers, user agent. Built on reqwest.
@@ -41,7 +41,7 @@ Tool primitives are pure async functions and structs. No Tool trait, no JSON ser
     Structured regex search (ripgrep with grep fallback) and glob pattern matching. Returns file paths, line numbers, and matched content.
   </Card>
   <Card title="git" href="/docs/primitives-api#git">
-    Async git CLI operations — status, diff, log, branch detection. Structured types for everything. No libgit2 dependency.
+    Async git CLI operations: status, diff, log, branch detection. Structured types for everything. No libgit2 dependency.
   </Card>
 </Cards>
 
@@ -142,7 +142,7 @@ println!("{} {}", response.status, response.body); // the body as text, unchange
 | Input | `serde_json::Value` | Typed Rust arguments |
 | Output | `ToolResult` (String) | Structured types (`FileContent`, `SearchMatch`, etc.) |
 | Schema | JSON Schema for the model | No schema |
-| Permissions | Checked by the agent runtime | None — caller's responsibility |
+| Permissions | Checked by the agent runtime | None (caller's responsibility) |
 | Async | Yes | Yes |
 | Use case | Model calls it via tool_use | Developer calls it from Rust |
 
@@ -160,5 +160,5 @@ Model → ToolUse("Read", {file_path: "src/main.rs"})
 
 ## Next Steps
 
-- [API Reference](/docs/primitives-api) — every function, struct, enum, and field
-- [Cookbook](/docs/primitives-cookbook) — build a DiffTool, a deploy verifier, a research agent
+- [API Reference](/docs/primitives-api): every function, struct, enum, and field
+- [Cookbook](/docs/primitives-cookbook): build a DiffTool, a deploy verifier, a research agent

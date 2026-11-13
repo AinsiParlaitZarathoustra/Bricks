@@ -5,9 +5,9 @@ description: Every crate of the Bricks workspace, its role, and what depends on 
 
 # Crate Map
 
-The Bricks workspace is at version 0.6.1. Its crates are named `bricks-*`,
-except the facade, `bricks`. Each crate lives under `crates/`, and the two
-applications under `apps/`. The workspace layers are described in
+The Bricks workspace is at version `1.0.0-alpha.1`. Its crates are named `bricks-*`,
+except the facade, `bricks`. Each crate lives under `crates/`, and the desktop
+application lives under `apps/`. The workspace layers are described in
 [Architecture](/docs/architecture).
 
 ## Frontends
@@ -44,18 +44,18 @@ Providers are configuration, not types: the facade exports
 
 | Crate | Role |
 |---|---|
-| `bricks-agent` | The `Agent` builder, the agentic loop, the context manager with compaction, the approval gate, the sub-agent tools (`Agent`, `Agents`, `AgentControl`, `AgentProfiles`), and the command/event contract in `control`. |
+| `bricks-agent` | The `Agent` builder, the agentic loop, the context manager with compaction, the approval gate, the sub-agent tools (`Agent`, `AgentControl`, `AgentProfiles`, `Messagent`), and the command/event contract in `control`. |
 | `bricks-config` | The assembly the frontends share: the Bricks home folder, the provider registry, the project loader and the engine configuration. |
 
 ## Services
 
 | Crate | Role |
 |---|---|
-| `bricks-types` | Messages, content blocks, errors (`CerseiError`), stream events, and the shared HTTP client (`bricks_types::http`). It depends on no other workspace crate. |
+| `bricks-types` | Messages, content blocks, errors (`BricksError`), stream events, and the shared HTTP client (`bricks_types::http`). It depends on no other workspace crate. |
 | `bricks-provider` | The `Provider` trait, the provider registry read from `providers.toml`, and the three protocol adapters: `chat_completions`, `responses` and `anthropic_messages`. Retries, prices and reasoning profiles. |
 | `bricks-tools` | The `Tool` trait and the built-in tools, grouped in sets: `all()`, `coding()`, `filesystem()`, `shell()`, `web()` and `planning()`. Also the `PermissionPolicy` trait, the change previews, and the shell sessions and background jobs. |
 | `bricks-tools-derive` | The `#[derive(Tool)]` procedural macro. |
-| `bricks-memory` | The `Memory` trait and its backends: JSONL session storage, an in-memory store, the memory directory, the CLAUDE.md loader. Graph memory (`graph` feature) and structured long-term memory (`structured`) are feature-gated. |
+| `bricks-memory` | The `Memory` and `LongTermMemory` traits and their backends: `JsonlMemory` for session transcripts, `InMemory` for tests, `session_storage` helpers, and structured long-term memory (`structured` feature, with `StructuredMemory` and `ScopedMemory`). |
 | `bricks-embeddings` | Embedding providers behind one trait, and a USearch vector index. |
 | `bricks-compression` | Reduction of tool outputs: command-aware rules and tree-sitter skeletons of long files. |
 | `bricks-semantic` | The code understanding engine shared per workspace: lexical search, syntax context, and optional language servers. It backs `CodeScout` and `/search`. |

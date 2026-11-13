@@ -1,6 +1,6 @@
 ---
 title: "Primitives: API Reference"
-description: Complete API reference for all 6 tool primitive modules — diff, fs, process, http, search, git.
+description: Complete API reference for all 6 tool primitive modules: diff, fs, process, http, search, git.
 ---
 
 import { TypeTable } from 'fumadocs-ui/components/type-table';
@@ -130,9 +130,9 @@ pub async fn edit_file(
 String replacement in a file. Returns the number of replacements made.
 
 **Errors:**
-- `EditError::NotFound` — `old_text` not present in the file
-- `EditError::AmbiguousMatch { count }` — `old_text` appears multiple times and `replace_all` is false
-- `EditError::Io(e)` — file I/O failure
+- `EditError::NotFound`: `old_text` not present in the file
+- `EditError::AmbiguousMatch { count }`: `old_text` appears multiple times and `replace_all` is false
+- `EditError::Io(e)`: file I/O failure
 
 ### `diff_file`
 
@@ -196,7 +196,7 @@ pub async fn file_metadata(path: &Path) -> Result<FileMetadata, io::Error>
 
 ## process
 
-Async command execution. Stateless — no persistent cwd or env.
+Async command execution. Stateless, with no persistent cwd or env.
 
 ### `exec`
 
@@ -335,15 +335,15 @@ pub async fn post(url: &str, body: &str, opts: HttpOptions) -> Result<HttpRespon
 
 ### `HttpError`
 
-- `RequestFailed(String)` — network or protocol error
-- `Timeout` — request timed out
-- `ClientBuild(String)` — failed to construct the HTTP client
+- `RequestFailed(String)`: network or protocol error
+- `Timeout`: request timed out
+- `ClientBuild(String)`: failed to construct the HTTP client
 
 ---
 
 ## search
 
-Structured file search — grep and glob.
+Structured file search: grep and glob.
 
 ### `grep`
 
@@ -475,6 +475,6 @@ pub async fn list_modified_files(path: &Path) -> Result<Vec<String>, GitError>
 
 ### `GitError`
 
-- `NotARepo` — path is not inside a git repository
-- `CommandFailed(String)` — git command returned an error
-- `IoError(io::Error)` — process spawn failure
+- `NotARepo`: path is not inside a git repository
+- `CommandFailed(String)`: git command returned an error
+- `IoError(io::Error)`: process spawn failure

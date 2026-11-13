@@ -1,6 +1,6 @@
 ---
 title: "Compression Benchmarks"
-description: Real-provider token savings for bricks-compression — commands you can run locally plus the numbers we got on OpenAI and Google Gemini.
+description: Real-provider token savings for bricks-compression: commands you can run locally plus the numbers we got on OpenAI and Google Gemini.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -8,7 +8,7 @@ import { Tabs, Tab } from 'fumadocs-ui/components/tabs';
 
 # Compression Benchmarks
 
-A live-LLM integration test ships with the SDK (`crates/bricks-agent/tests/e2e_live_compression.rs`). It runs the **same prompt, same tool, same fixture** twice — once with `CompressionLevel::Off`, once with `CompressionLevel::Aggressive` — and compares the provider-reported `input_tokens`. Off is a verified byte-for-byte passthrough, so the delta is the measured savings.
+A live-LLM integration test ships with the SDK (`crates/bricks-agent/tests/e2e_live_compression.rs`). It runs the **same prompt, same tool, same fixture** twice (once with `CompressionLevel::Off`, once with `CompressionLevel::Aggressive`) and compares the provider-reported `input_tokens`. Off is a verified byte-for-byte passthrough, so the delta is the measured savings.
 
 ## TL;DR
 
@@ -24,7 +24,7 @@ These figures were measured on 2026-04-20, before each `Bash` call ran in its ow
 </Callout>
 
 <Callout type="info">
-Savings ratios are **not fixed** — they depend on how much of the turn's context is tool output versus system prompt + tool schemas + assistant turns. OpenAI's `gpt-4o-mini` happened to loop on 13–15 tool calls (each re-paying schema tax), Gemini's `gemini-2.5-flash` made a single clean tool call, so Gemini's ratio is closer to the raw byte-level win.
+Savings ratios are **not fixed**: they depend on how much of the turn's context is tool output versus system prompt, tool schemas, and assistant turns. OpenAI's `gpt-4o-mini` happened to loop on 13-15 tool calls (each re-paying schema tax), while Gemini's `gemini-2.5-flash` made a single clean tool call, so Gemini's ratio is closer to the raw byte-level win.
 </Callout>
 
 ## Synthetic fixture baselines
@@ -114,7 +114,7 @@ INFO bricks_compression: tool-output compressed
 
 Each call exposes: `tool`, `level`, `strategy` (the route taken, such as `shell`, `web` or `passthrough`), `detail` (rule name or detected `Language`), byte counts, line counts, and `savings_pct`. Full field reference on the [Compression Overview](/docs/compression-overview#observability).
 
-## Synthetic vs live — why they differ
+## Synthetic vs live: why they differ
 
 Synthetic tests measure the **pipeline in isolation**: input → compress → output. Live tests measure the **full turn the LLM bills you for**: system prompt + tool schemas + previous assistant turns + compressed tool result.
 
@@ -136,7 +136,7 @@ For the OpenAI run:
 
 - The live numbers above were captured on an **Apple M1 Pro** against the current production OpenAI / Google endpoints on **2026-04-20**.
 - Token counts are **provider-reported**, not our estimate (`output.usage.input_tokens` straight from `OpenAI` / `usageMetadata.promptTokenCount` from Gemini).
-- `gpt-4o-mini`'s tool-call loop count is non-deterministic — expect ±2 tool calls across reruns, which shifts OpenAI savings within roughly ±8%. Gemini's single-call pattern is stable.
+- `gpt-4o-mini`'s tool-call loop count is non-deterministic: expect ±2 tool calls across reruns, which shifts OpenAI savings within roughly ±8%. Gemini's single-call pattern is stable.
 
 ## Reference
 

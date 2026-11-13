@@ -1,6 +1,6 @@
 ---
 title: Multimodal Input
-description: Attach images, video, audio, and PDFs to messages — one provider-agnostic API, serialized to each backend's native format.
+description: Attach images, video, audio, and PDFs to messages: one provider-agnostic API, serialized to each backend's native format.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -22,7 +22,7 @@ Model-native output is text only. Media inside a tool result is carried by `anth
 
 ## Attach a file in one line
 
-`ContentBlock::from_path` reads the file, **detects its MIME type** from the leading bytes (with an extension fallback), base64-encodes it, and picks the right block type — an `Image` block for image/video/audio, a `Document` block for PDF/text.
+`ContentBlock::from_path` reads the file, **detects its MIME type** from the leading bytes (with an extension fallback), base64-encodes it, and picks the right block type: an `Image` block for image/video/audio, a `Document` block for PDF/text.
 
 ```rust
 use bricks::prelude::*;
@@ -38,7 +38,7 @@ Everything here is re-exported through `bricks::prelude`.
 
 ## Lower-level constructors
 
-When you already hold bytes, base64, or a URL — or want to set the MIME type explicitly — use the block constructors directly:
+When you already hold bytes, base64, or a URL, or want to set the MIME type explicitly, use the block constructors directly:
 
 ```rust
 // Images
@@ -72,11 +72,11 @@ let mime = detect_mime(&bytes, Some(std::path::Path::new("clip.mp4"))); // Some(
 let kind = MediaKind::from_mime("video/mp4");                            // MediaKind::Video
 ```
 
-If the type can't be determined, `from_path` returns `CerseiError::Config` — pass the MIME explicitly via `media_bytes` in that case.
+If the type can't be determined, `from_path` returns `BricksError::Config`. Pass the MIME explicitly via `media_bytes` in that case.
 
 ## Sending it
 
-Multimodal messages flow through the normal request path — no special call:
+Multimodal messages flow through the normal request path with no special call:
 
 ```rust
 use bricks::prelude::*;
@@ -145,7 +145,7 @@ An image is sent as an image block only when the model of the conversation decla
 
 ## Images returned by tools
 
-A tool shows an image to the model with `ToolResult::with_images(...)`, which takes `ToolImage` values (`bricks::tools::ToolImage`: media type, base64 data, path and byte size). The built-in `ViewImage` tool does this for an image file. It is read-only, reads the type from the bytes (PNG, JPEG, GIF or WebP), and refuses a file over 3,750,000 bytes or over 8,000 pixels on a side. The size is checked only when the header gives it, which is not the case for WebP. These limits are separate from the 5 MiB of an image attached in the desktop.
+A tool shows an image to the model with `ToolResult::with_images(...)`, which takes `ToolImage` values (`bricks::tools::ToolImage`: media type, base64 data, path and byte size). The built-in `Read` tool does this when given an image file. It is read-only, reads the type from the bytes (PNG, JPEG, GIF or WebP), and refuses a file over 3,750,000 bytes or over 8,000 pixels on a side. The size is checked only when the header gives it, which is not the case for WebP. These limits are separate from the 5 MiB of an image attached in the desktop.
 
 The agent sends each image as the model's `ImageTransport` allows, which `Provider::image_transport()` reports. It depends on the model's `input_modalities` (`image`) and on the protocol:
 
@@ -157,13 +157,13 @@ The agent sends each image as the model's `ImageTransport` allows, which `Provid
 
 A provider that does not override `image_transport()` gets `None`.
 
-In Bricks Desktop, a successful `ViewImage` call shows a thumbnail under its line. The thumbnail is read back from the open session's history (`session_tool_image`), so it is the image the model received, not the file as it is now.
+In Bricks Desktop, a successful `Read` call on an image shows a thumbnail under its line. The thumbnail is read back from the open session's history (`session_tool_image`), so it is the image the model received, not the file as it is now.
 
-MCP results are unchanged: an image in an MCP result is still a text placeholder, `[image <type>, <n> bytes — not shown]`. See `docs/mcp.md`.
+MCP results are unchanged: an image in an MCP result is still a text placeholder, `[image <type>, <n> bytes, not shown]`. See `docs/mcp.md`.
 
 ## Runnable examples
 
-- `crates/bricks/examples/multimodal.rs` — takes a `provider_id/model_id` and one or more files (image, audio, PDF), and sends them to that configured model.
+- `crates/bricks/examples/multimodal.rs`: takes a `provider_id/model_id` and one or more files (image, audio, PDF), and sends them to that configured model.
 
 ```bash
 set -a; source .env; set +a

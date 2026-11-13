@@ -1,8 +1,8 @@
-# Providers: configuration, protocols, capabilities, migration
+# Providers: configuration, protocols, capabilities
 
 Which providers and models Bricks can use is decided by **one file**. Adding a
 provider, or a model compatible with one of the three supported wire protocols,
-is a configuration change — no code, no recompilation. Environment variables are
+is a configuration change, no code, no recompilation. Environment variables are
 used for one thing only: resolving the secrets the file explicitly references.
 
 An annotated, secret-free example lives in
@@ -27,9 +27,9 @@ let agent = Agent::builder()
 
 * **Location.** `~/.bricks/providers.toml`, or any explicit path. An explicit
   path **replaces** the default; the two are never merged. A missing file is an
-  error — there is no fallback catalogue.
+  error, there is no fallback catalogue.
 * **Format.** `.toml` or `.json` (same Serde structures, same defaults, same
-  validation — one code path). Any other extension is rejected.
+  validation, one code path). Any other extension is rejected.
 * **`schema_version = 1`** is required.
 * **No cap.** Any number of providers, and of models per provider. Quotas, access
   rights and which models exist remain the server's business.
@@ -43,10 +43,10 @@ let agent = Agent::builder()
 
 ### Editing from the desktop app
 
-The settings page « Modèles » of the desktop app edits this file in place. The
+The Models page of the desktop settings (« Modèles » in French) edits this file in place. The
 file must already exist: the app does not create `providers.toml`.
 
-* **Adding.** « Ajouter un fournisseur » writes a `[[providers]]` table; the « + »
+* **Adding.** "Add a provider" writes a `[[providers]]` table; the "+"
   of a provider writes a `[[providers.models]]` table with its `[limits]`. Identifiers
   use letters, digits, `.`, `_` and `-`, start with a letter or a digit, and are
   unique (in the file for a provider, in the provider for a model). A new provider
@@ -126,8 +126,8 @@ nothing to do with any structured JSON the model is asked to produce.
 
 | Protocol | Relative path | Conventional auth | Required headers |
 |---|---|---|---|
-| `chat_completions` | `chat/completions` | `bearer` | — |
-| `responses` | `responses` | `bearer` | — |
+| `chat_completions` | `chat/completions` | `bearer` | none |
+| `responses` | `responses` | `bearer` | none |
 | `anthropic_messages` | `messages` | `api_key_header` (`x-api-key`) | `anthropic-version: 2023-06-01` |
 
 **Assembly.** `endpoint` is a base; the request URL is base + relative path.
@@ -146,7 +146,7 @@ override the protocol's by name.
 
 Every request, whatever the protocol:
 
-1. **Refuse what cannot be carried** (§7) — before anything is sent.
+1. **Refuse what cannot be carried** (§7), before anything is sent.
 2. Build the protocol request (the adapter).
 3. Apply `remove_parameters`, then the model's `parameters`.
 4. Apply the selected reasoning profile: its `remove`, then its `parameters`.
@@ -192,18 +192,18 @@ remove = ["/temperature"]                          # JSON Pointers removed first
 * A profile id is **never** sent under its local name. `ultra` can be a local
   alias for an option the server accepts; it does not create a level on the
   server. A profile `off` must define the *real* mechanism that disables
-  reasoning on that server — an absent parameter does not necessarily mean "off".
+  reasoning on that server, an absent parameter does not necessarily mean "off".
 * **Merge order** on top of the adapter's request: model `remove_parameters` →
   model `parameters` → profile `remove` → profile `parameters`. Objects merge
   recursively; scalars and arrays replace.
-* **Protected fields** — model, messages/input, system prompt/instructions,
-  tools, tool choice, streaming control — cannot be set or removed (checked at
+* **Protected fields**, model, messages/input, system prompt/instructions,
+  tools, tool choice, streaming control, cannot be set or removed (checked at
   load and again at request time). `parameters` customise the API's options; they
   never overwrite content the engine built.
 * **Selection:** `Agent::builder().reasoning_profile(id)`, a per-request option
   `reasoning_profile`, or `provider().reasoning_profile(id)` at build time; else
   the model's `default`; else none. An unknown id is an error naming the available
-  ones — a refused profile is never replaced silently.
+  ones, a refused profile is never replaced silently.
 * Structure is validated locally; **values are the server's call.** Bricks keeps
   no list of accepted levels.
 
@@ -242,17 +242,17 @@ only the former is represented, and only where the table says so.
 (`bricks_provider::ImageTransport`), which is derived from the model's
 `input_modalities` and the adapter's tool-result media:
 
-* `ToolResult` — `image` declared and carried in a tool result (`anthropic_messages`):
+* `ToolResult`, `image` declared and carried in a tool result (`anthropic_messages`):
   the image is a block of the tool result, after its text;
-* `UserTurn` — `image` declared, but the result is text only (`chat_completions`,
+* `UserTurn`, `image` declared, but the result is text only (`chat_completions`,
   `responses`): the result stays text, and the round's images follow all its
   results in the same user turn, each after the label
   `[image from tool call <id>] <path>, <type>, <n> bytes`;
-* `None` — `image` not declared: the result text ends with
+* `None`, `image` not declared: the result text ends with
   `[the image was not shown: the current model does not accept images]`.
 
 A provider that does not override `image_transport()` is `None`. The built-in
-`ViewImage` tool is the only built-in tool that returns images; MCP image results
+`Read` tool is the only built-in tool that returns images (it shows image files); MCP image results
 stay text placeholders (`docs/mcp.md`).
 
 **Desktop form.** The model form offers `text`, `image`, `audio`, `video` and
@@ -268,15 +268,15 @@ PDF files at import, whatever the model declares. See
 
 **What additional adapters or endpoints would be needed** (not built here):
 
-* video input — a native Gemini-style adapter, or a compatible endpoint with a
+* video input, a native Gemini-style adapter, or a compatible endpoint with a
   video part type;
-* audio output — Chat Completions `modalities`/`audio` parameters (an extension of
+* audio output, Chat Completions `modalities`/`audio` parameters (an extension of
   the existing adapter); speech and music generation use specialised endpoints;
-* image output — the Responses image-generation tool or a dedicated image API;
-* video output — specialised, usually asynchronous, endpoints;
-* media inside tool results on `chat_completions`/`responses` — requires the
+* image output, the Responses image-generation tool or a dedicated image API;
+* video output, specialised, usually asynchronous, endpoints;
+* media inside tool results on `chat_completions`/`responses`, requires the
   content-array forms of tool outputs;
-* cloud-signed access (Bedrock, Vertex) and OAuth flows — not covered; those
+* cloud-signed access (Bedrock, Vertex) and OAuth flows, not covered; those
   providers need a gateway speaking one of the three protocols.
 
 ## 8. Multi-turn tool use
@@ -294,7 +294,7 @@ valid Anthropic history and is not sent.
 * Prices are exact decimals, **USD per 1,000,000 tokens**: `input` (uncached),
   `output`, `cache_read`, optional `cache_write`, optional
   `cache_write_variants` (e.g. `"1h"`), and named alternative tariffs under
-  `pricing.variants.<name>` (peak/off-peak, volume, …). A variant is complete —
+  `pricing.variants.<name>` (peak/off-peak, volume, …). A variant is complete:
   it inherits nothing.
 * An absent price means **unknown, never free**. A cost is estimated only for the
   categories whose counter and price are both known; the estimate carries
@@ -306,7 +306,7 @@ valid Anthropic history and is not sent.
   `cache_read`, in USD per million tokens, written as exact decimals (`0` allowed),
   with `currency = "USD"` and `per_tokens = 1000000`. `cache_write`,
   `cache_write_variants` and `variants` are kept as written and are not edited there.
-  The banner « Compléter les coûts manquants à 0 » on the settings page writes `0` for
+  The banner "Set the missing costs to 0" on the settings page writes `0` for
   every missing input, output or cache-read price of every model, in one edit. This
   requirement belongs to the form only: the engine still treats a missing price as
   unknown, never as free, and a hand-written file may omit any of the three.
@@ -319,65 +319,7 @@ valid Anthropic history and is not sent.
   writes are kept per retention so each can be priced separately.
 * No catalogue or price list is ever downloaded.
 
-## 10. Migration from the previous provider system
-
-There is no second system running in parallel and no fallback to the old one.
-
-| Before | Now |
-|---|---|
-| `Anthropic::from_env()`, `Anthropic::builder()…` | a provider entry with `protocol = "anthropic_messages"`; `provider_from_config(None, "id/model")` |
-| `OpenAi::builder().base_url(..).model(..).api_key(..)` | a provider entry with `protocol = "chat_completions"` (Ollama/vLLM: `auth = "none"`) |
-| `.send_num_ctx(true)` (Ollama) | `parameters = { options = { num_ctx = 32768 } }` on the model |
-| `Gemini`, `AnthropicVertex`, `gemini_vision_test` | removed (no native adapter). A Gemini-compatible endpoint can be used through one of the three protocols. |
-| `Auth`, `AuthProvider`, `OAuthToken`, `oauth_login` | removed. Keys come from `api_key_env`/`api_key`. |
-| `from_model_string("openai/gpt-4o")`, auto-detection from a bare model name | explicit `provider_id/model_id`; nothing is detected |
-| `*_API_KEY`, `*_BASE_URL` read implicitly | removed; reference a key with `api_key_env`, put the URL in `endpoint` |
-| built-in registry, `ApiFormat`, `ProviderQuirks`, `context_window_for_model` | the configuration file (`limits`, `parameters`, `remove_parameters`) |
-| `thinking_budget`, `AnthropicBuilder::thinking`, `EffortLevel`, `--effort` | reasoning profiles; `Agent::builder().reasoning_profile(id)` |
-| built-in price table, `CostTracker::add_with_model`, `estimate_cost*` | `pricing` in the file; the provider attaches the estimate; unknown stays unknown |
-| default model `claude-sonnet-4-6` in the agent | none: a provider *is* one configured model; `.model()` is only a label |
-| `cersei::{Anthropic, OpenAi, Gemini}` (crate `cersei`, renamed `bricks` in 14.6), prelude `Auth` | `bricks::{provider_from_config, ProviderRegistry, ConfiguredProvider}` |
-| `CompletionRequest` options `thinking_budget`, `num_ctx` | only `tool_choice` and `reasoning_profile` remain; new field `output_modalities` |
-| `ContentBlock::media_bytes` put audio/video in `Image` blocks | routed to `Audio`, `Video`, `Document`; new blocks `Audio`, `Video`, `ProtocolItem` |
-| `tbench-agent --model` default `vertex/…` | `--model provider_id/model_id` required, `--providers <file>` optional |
-| `longmem-bench --provider/--answerer-model gemini-…` | `--answerer-model`, `--judge-model`, `--extractor-model` as `provider_id/model_id`, `--providers`, `--embeddings openai|gemini` (embeddings keep their own key variable) |
-
-Services that are not conversational chat are untouched: `bricks-embeddings`
-keeps its own providers and key variables.
-
-**Example.** Before (removed API, for comparison only):
-
-```rust,ignore
-let provider = OpenAi::builder()
-    .base_url("http://localhost:11434/v1")
-    .model("llama3.1:70b").api_key("ollama").build()?;
-```
-
-After — `~/.bricks/providers.toml`:
-
-```toml
-schema_version = 1
-[[providers]]
-id = "ollama"
-name = "Ollama"
-endpoint = "http://localhost:11434/v1"
-protocol = "chat_completions"
-auth = "none"
-[[providers.models]]
-id = "llama"
-name = "Llama 3.1 70B"
-api_model = "llama3.1:70b"
-streaming = true
-[providers.models.limits]
-max_input_tokens = 32000
-max_output_tokens = 8000
-```
-
-```rust
-let provider = bricks::provider_from_config(None, "ollama/llama")?;
-```
-
-## 11. What is verified, and what is not
+## 10. What is verified, and what is not
 
 Covered by tests, with **scripted servers and no paid call**: TOML/JSON
 equivalence, duplicates and invalid fields, secret resolution and absence of
@@ -392,6 +334,3 @@ Not verified: behaviour against the real vendor APIs (their quirks beyond the
 documented formats, rate limits, model-specific option rejections). The adapters
 follow the documented request/stream shapes; run your own configuration against
 your own account before relying on it.
-
-The pages under `docs/content/` and `wiki/` that still describe the previous
-`Anthropic`/`OpenAi`/`Gemini` types are historical and have not been rewritten.

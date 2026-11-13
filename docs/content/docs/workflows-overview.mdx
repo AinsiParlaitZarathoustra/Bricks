@@ -1,6 +1,6 @@
 ---
 title: "Workflows Overview"
-description: The Bricks ADK workflow engine — multi-step pipelines defined as an explicit graph of steps. The whole workflow is serializable data, so a visual builder can draw it and the Rust runtime can run it.
+description: The Bricks ADK workflow engine: multi-step pipelines defined as an explicit graph of steps. The whole workflow is serializable data, so a visual builder can draw it and the Rust runtime can run it.
 ---
 
 import { Callout } from 'fumadocs-ui/components/callout';
@@ -146,7 +146,7 @@ while let Some(event) = stream.next().await {
 
 ```toml
 [dependencies]
-bricks = { version = "0.6", features = ["workflows"] }
+bricks = { version = "1.0.0-alpha.1", features = ["workflows"] }
 ```
 
 Then `use bricks::workflows::prelude::*;`. The main types are also re-exported at the top level of `bricks::workflows`.

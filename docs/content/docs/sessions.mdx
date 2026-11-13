@@ -14,7 +14,7 @@ Every conversation in Bricks is a session. Messages are persisted as append-only
 
 ## Storage Format
 
-Sessions are stored as `.jsonl` files — one JSON object per line, append-only. Each entry is a `TranscriptEntry`:
+Sessions are stored as `.jsonl` files (one JSON object per line, append-only). Each entry is a `TranscriptEntry`:
 
 ```
 {"type":"user","uuid":"a1b2...","timestamp":"2026-04-03T10:00:00Z","session_id":"abc","cwd":"/project","message":{"role":"user","content":"fix the tests"}}
@@ -89,52 +89,65 @@ Sessions are stored as `.jsonl` files — one JSON object per line, append-only.
   }}
 />
 
-**Location:** `~/.claude/projects/{sanitized-project-root}/{session-id}.jsonl`
+**Location:** `~/.bricks/sessions/` (or `$BRICKS_HOME/sessions/`), or any directory passed to `JsonlMemory::new(dir)`.
 
-**Size limit:** 50MB per part file. When a session exceeds this, writes automatically fork to `{session-id}_part2.jsonl`, `_part3.jsonl`, etc. Loading stitches all parts together. Total limit across all parts: 200MB. Compatible with Claude Code's session format.
+**Size limit:** 50MB per part file. When a session exceeds this, writes automatically fork to `{session-id}_part2.jsonl`, `_part3.jsonl`, etc. Loading stitches all parts together. Total limit across all parts: 200MB.
 
 ---
 
 ## Session APIs
 
-### Writing
+### Writing and Loading with `JsonlMemory`
 
 ```rust
-use bricks::memory::manager::MemoryManager;
+use bricks_memory::{JsonlMemory, Memory};
+use bricks_types::Message;
 
-let mm = MemoryManager::new(project_root);
+let mem = JsonlMemory::new("./sessions");
 
-// Write a user message — returns the UUID
-let user_uuid = mm.write_user_message("session-1", Message::user("fix the tests"))?;
-
-// Write an assistant response linked to the user message
-let asst_uuid = mm.write_assistant_message(
-    "session-1",
+// Store conversation messages for a session
+mem.store("session-1", &[
+    Message::user("fix the tests"),
     Message::assistant("I'll fix those tests."),
-    Some(&user_uuid),
-)?;
-```
+]).await?;
 
-### Loading
-
-```rust
-// Load all messages (tombstones applied, summaries included)
-let messages = mm.load_session_messages("session-1")?;
+// Load all messages
+let messages = mem.load("session-1").await?;
 for msg in &messages {
     println!("[{}] {}", msg.role, msg.get_text().unwrap_or(""));
 }
+
+// List sessions
+for session in mem.sessions().await? {
+    println!("{}: {} messages, created {}", session.id, session.message_count, session.created_at);
+}
+```
+
+### Low-Level Transcript Helpers (`session_storage`)
+
+For direct `.jsonl` transcript manipulation (including tombstones and multi-part files), use `bricks_memory::session_storage`:
+
+```rust
+use bricks_memory::session_storage;
+
+let path = session_storage::transcript_path(project_root, "session-1");
+
+// Append a user entry and an assistant entry linked to it
+let user_uuid = session_storage::write_user_entry(&path, "session-1", project_root, Message::user("fix the tests"))?;
+let _asst_uuid = session_storage::write_assistant_entry(
+    &path,
+    "session-1",
+    project_root,
+    Message::assistant("I'll fix those tests."),
+    Some(&user_uuid),
+)?;
+
+// Load transcript (two-pass: collects tombstones first, then skips deleted UUIDs)
+let entries = session_storage::load_transcript(&path)?;
+let messages = session_storage::messages_from_transcript(&entries);
 ```
 
 Loading is a two-pass process: first collect all tombstone UUIDs, then load messages while skipping tombstoned ones. This means soft-deleted messages never appear in the loaded history.
-
-### Listing
-
-```rust
-let sessions = mm.list_sessions();
-for session in &sessions {
-    println!("{} — {} messages, created {}", session.id, session.message_count, session.created_at);
-}
-```
 
 ---
 
@@ -153,10 +166,10 @@ let agent = Agent::builder()
     .session_id("my-session")
     .build()?;
 
-// First run — starts fresh
+// First run: starts fresh
 agent.run("What files are in src/?").await?;
 
-// Later — same session_id, resumes with full history
+// Later: same session_id, resumes with full history
 agent.run("Now fix the bug you found").await?;
 ```
 
@@ -201,13 +214,13 @@ use bricks_memory::session_storage;
 session_storage::tombstone_entry(&session_path, "message-uuid-to-delete")?;
 ```
 
-The message stays in the file but is skipped on load. This preserves the audit trail while removing unwanted content. Tombstones work across part files — a tombstone in `_part3` can delete a message from the base file.
+The message stays in the file but is skipped on load. This preserves the audit trail while removing unwanted content. Tombstones work across part files: a tombstone in `_part3` can delete a message from the base file.
 
 ---
 
 ## Auto-Fork (Multi-Part Sessions)
 
-When a session file grows past 50MB, writes automatically fork to a new part file. This is transparent — you don't need to change any code. The MemoryManager, agent runner, and CLI all handle multi-part sessions automatically.
+When a session file grows past 50MB, writes automatically fork to a new part file. This is transparent, so you don't need to change any code. `JsonlMemory`, `session_storage`, and the agent runner all handle multi-part sessions automatically.
 
 ### How It Works
 
@@ -215,7 +228,7 @@ When a session file grows past 50MB, writes automatically fork to a new part fil
 2. If `file_size + entry_size > 50MB`, the write goes to the next part file instead
 3. Part naming: `session.jsonl` → `session_part2.jsonl` → `session_part3.jsonl` → ...
 4. Loading reads all parts in order and stitches them into a single transcript
-5. Tombstones apply across all parts — a tombstone in any part can delete a message in any other part
+5. Tombstones apply across all parts: a tombstone in any part can delete a message in any other part
 
 ### File Layout
 
@@ -232,7 +245,7 @@ When a session file grows past 50MB, writes automatically fork to a new part fil
 ```rust
 use bricks_memory::session_storage::{all_part_paths, total_session_size};
 
-let base = Path::new("~/.claude/projects/-my-project/abc12345.jsonl");
+let base = Path::new("~/.bricks/sessions/abc12345.jsonl");
 
 // List all parts
 let parts = all_part_paths(base);
@@ -310,7 +323,7 @@ Inspect a session file directly:
 
 ```bash
 # Count messages
-wc -l ~/.claude/projects/-my-project/session-id.jsonl
+wc -l ~/.bricks/sessions/session-id.jsonl
 
 # View user messages only
 grep '"type":"user"' session.jsonl | python3 -c "import sys,json; [print(json.loads(l)['message']['content'][:80]) for l in sys.stdin]"
@@ -323,12 +336,12 @@ Or open it in the desktop application with `/resume abc12345`.
 
 ### Concurrent Access
 
-Session files use append-only writes — multiple processes can safely append to the same file. However, loading is not atomic: if process A appends while process B is reading, B may see a partial last line. For multi-agent setups sharing a session, use file-level locking or separate session IDs per agent.
+Session files use append-only writes, so multiple processes can safely append to the same file. However, loading is not atomic: if process A appends while process B is reading, B may see a partial last line. For multi-agent setups sharing a session, use file-level locking or separate session IDs per agent.
 
 ### Cleanup
 
 ```bash
 # Delete old sessions (older than 30 days)
-find ~/.claude/projects -name "*.jsonl" -mtime +30 -delete
+find ~/.bricks/sessions -name "*.jsonl" -mtime +30 -delete
 
 ```

@@ -49,7 +49,7 @@ cargo run -p bricks --example simple_agent -- acme/fast
 | `stress_core_infrastructure` | The system prompt builder, compaction and the Bash command analysis. |
 | `stress_tools` | Every tool that can run without external services: schemas, execution and the registry. |
 | `stress_skills` | Agent Skills: sources, trust, and the `Skill` tool, on temporary folders only. |
-| `stress_memory` | Memdir, the CLAUDE.md loader, session storage and graph memory. |
+| `stress_memory` | Session storage in JSONL: writing, loading, tombstones, and read/write speed checks. |
 
 The `stress_*` examples check behaviour. They are not performance measurements.
 
@@ -59,7 +59,6 @@ The `stress_*` examples check behaviour. They are not performance measurements.
 |---|---|---|---|
 | `bricks-compression` | `show` | `cargo run -p bricks-compression --example show -- <file> <tool> <command-or-path> [level]` | How one output or file is reduced. |
 | `bricks-compression` | `measure` | `cargo run -p bricks-compression --example measure` | The reductions on the fixture corpus and on real files. |
-| `bricks-memory` | `memory_bench` | `cargo run -p bricks-memory --features graph --example memory_bench` | The memory operations on local files and an in-process graph. |
 | `bricks-memory` | `measure_memory` | `cargo run -p bricks-memory --features structured --example measure_memory` | The latency of structured memory on synthetic corpora. |
 | `bricks-tools` | `semantic_bench` | `cargo run -p bricks-tools --example semantic_bench` | One `CodeScout` query against the `Grep` and `Read` path, on the corpus in `bench/semantic`. |
 | `bricks-web` | `measure_web` | `cargo run -p bricks-web --example measure_web` | The web pipeline on a local corpus: HTML, then Markdown, then passages. |

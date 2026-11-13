@@ -19,7 +19,7 @@ Most users interact with Bricks through this crate. The `bricks` facade re-expor
 
 ## Agent Builder
 
-Every agent starts with a builder. The only required field is `.provider()` — everything else has sensible defaults. The provider is one model configured in `~/.bricks/providers.toml`, selected as `provider_id/model_id`.
+Every agent starts with a builder. The only required field is `.provider()`: everything else has sensible defaults. The provider is one model configured in `~/.bricks/providers.toml`, selected as `provider_id/model_id`.
 
 ```rust
 let agent = Agent::builder()
@@ -156,7 +156,7 @@ let agent = Agent::builder()
 
 ### One-Shot (shorthand)
 
-The simplest way to run an agent — builds, executes, and returns in one call:
+The simplest way to run an agent: it builds, executes, and returns in one call:
 
 ```rust
 let output = Agent::builder()
@@ -182,7 +182,7 @@ let agent = Agent::builder()
 // First turn
 let output1 = agent.run("What files are in src/?").await?;
 
-// Second turn — the agent remembers the first
+// Second turn: the agent remembers the first
 let output2 = agent.run("Now fix the bug in main.rs").await?;
 ```
 
@@ -409,7 +409,7 @@ Passing an id the model does not declare is an error that lists the available on
 
 ## Auto-Compact
 
-When the conversation approaches the context window limit, the agent summarizes older messages to free space. This happens transparently — the model continues working without interruption. Auto-compact is on by default.
+When the conversation approaches the context window limit, the agent summarizes older messages to free space. This happens automatically, so the model continues working without interruption. Auto-compact is on by default.
 
 ```rust
 Agent::builder()
@@ -434,9 +434,9 @@ Events emitted: `CompactStart`, `CompactEnd` (with `messages_after` and `tokens_
 The system prompt is split into two sections separated by `SYSTEM_PROMPT_DYNAMIC_BOUNDARY` (`__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__`):
 
 ```
-[Static section — cached by the provider]
+[Static section: cached by the provider]
 __SYSTEM_PROMPT_DYNAMIC_BOUNDARY__
-[Dynamic section — rebuilt each turn]
+[Dynamic section: rebuilt each turn]
 ```
 
 ```rust

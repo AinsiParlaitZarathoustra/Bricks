@@ -1,4 +1,4 @@
-# Bricks providers configuration — annotated example.
+# Bricks providers configuration: annotated example.
 #
 # Copy to ~/.bricks/providers.toml (or pass any .toml/.json path explicitly) and
 # edit. This file is the ONLY catalogue of providers and models: nothing is

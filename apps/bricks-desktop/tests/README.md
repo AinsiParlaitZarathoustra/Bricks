@@ -15,12 +15,12 @@ Rust tests use temporary folders (`tempfile`, a temporary Bricks home); none rea
 
 ## Layout
 
-- `tests/unit/` — Vitest, pure logic and state: conversation reducer and command labels, drafts and
+- `tests/unit/`: Vitest, pure logic and state: conversation reducer and command labels, drafts and
   session creation, `/` palette and dispatch, `@` mentions, models and reasoning profiles, settings,
   theme and colours, context line, tool lines, run summary, terminals (with fake xterm/PTY ports).
-- `src-tauri/tests/` — Rust integration tests: slash command mapping, provider and profile editing,
+- `src-tauri/tests/`: Rust integration tests: slash command mapping, provider and profile editing,
   preferences, skills prompt, run labels.
-- `tests/e2e/` — WebdriverIO + `tauri-driver` specs. Tauri WebDriver runs on Linux and Windows only
+- `tests/e2e/`: WebdriverIO + `tauri-driver` specs. Tauri WebDriver runs on Linux and Windows only
   (no WKWebView driver on macOS); the WebdriverIO dependencies are not installed by default.
 
 ## Manual checks on macOS
@@ -53,7 +53,7 @@ In the app, with a test project (never a real conversation):
 - `Edit` on a file never read in the session; one `Edit` with `edits` (several replacements, one write).
 - Four Bash calls of one turn run together (same start second); a long command does not block a quick one.
 - Composer ring left of the model select: neutral without a conversation; hover or focus shows
-  « Contexte », the compact value with its percentage, a thin bar and the cache rate (`—` without counts);
+  « Contexte », the compact value with its percentage, a thin bar and the cache rate (a dash without counts);
   light and dark.
 - Context card: one line without `≈`; « Consommation session »: Entrée, Sortie, Cache, Requêtes, Coût.
 - One « Copier » per finished response (after its last item, before the summary): it copies every answer

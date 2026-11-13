@@ -44,15 +44,12 @@ with other products.
 
 - **Validated platforms.** The tests have been run on macOS (arm64) only. Linux
   and Windows have not been validated.
-- **MCP servers in the frontends.** The `bricks.toml` file does not configure
-  MCP servers yet, and `/mcp` says so. The library can add them with
-  `mcp_server`.
 - **A full tool set in the frontends.** A `bricks` session gets the coding
-  tools, the skill tool and the sub-agent tools (with `SendMessage`). A library
+  tools, the skill tool and the sub-agent tools (with `Messagent`). A library
   user gets the sets of `bricks::tools` (`all()` is `coding()` plus
   `TodoWrite`), and the sub-agent tools through the agent runtime only.
 - **A model catalogue.** You declare each model and its limits yourself, and
   the file is the only source of them.
 
-For changes since the Cersei names and behaviour, see the
+For changes from older names and behaviour, see the
 [migration guide](/docs/migration).
