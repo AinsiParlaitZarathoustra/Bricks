@@ -9,17 +9,16 @@ const inter = Inter({
 
 export const metadata: Metadata = {
   title: {
-    default: 'Cersei',
-    template: '%s | Cersei',
+    default: 'Bricks',
+    template: '%s | Bricks',
   },
-  description: 'The Rust SDK for building coding agents. Tool execution, LLM streaming, graph memory, sub-agent orchestration, MCP — as composable library functions.',
-  metadataBase: new URL('https://cersei.dev'),
+  description: 'A desktop coding agent and modular Rust SDK. Tool execution, LLM streaming, memory, sub-agent orchestration, and MCP.',
   openGraph: {
     type: 'website',
-    siteName: 'Cersei',
+    siteName: 'Bricks',
   },
   other: {
-    'github:repo': 'https://github.com/pacifio/cersei',
+    'github:repo': 'https://github.com/AshlarAI/Bricks',
   },
 };
 

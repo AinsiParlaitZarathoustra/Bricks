@@ -9,6 +9,8 @@ description: Build custom tools for database queries, API calls, deploy pipeline
 
 ```rust
 use bricks::prelude::*;
+use schemars::JsonSchema;
+use serde::Deserialize;
 
 #[derive(Tool)]
 #[tool(name = "db_query", description = "Execute a SQL query", permission = "execute")]
@@ -120,6 +122,8 @@ let agent = Agent::builder()
 ## Manual Tool (without derive)
 
 ```rust
+use serde_json::Value;
+
 struct ManualTool;
 
 #[async_trait]

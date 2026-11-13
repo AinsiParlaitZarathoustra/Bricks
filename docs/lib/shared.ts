@@ -1,10 +1,10 @@
-export const appName = 'Cersei';
+export const appName = 'Bricks';
 export const docsRoute = '/docs';
 export const docsImageRoute = '/og/docs';
 export const docsContentRoute = '/llms.mdx/docs';
 
 export const gitConfig = {
-  user: 'pacifio',
-  repo: 'cersei',
+  user: 'AshlarAI',
+  repo: 'Bricks',
   branch: 'main',
 };

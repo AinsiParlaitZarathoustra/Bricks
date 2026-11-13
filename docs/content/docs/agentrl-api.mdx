@@ -7,7 +7,7 @@ import { Callout } from 'fumadocs-ui/components/callout';
 
 # bricks-agentrl: API Reference
 
-Everything below is re-exported under `bricks::agentrl` when the `agentrl` feature of the `bricks` facade is enabled. The crate itself is `bricks-agentrl`. `CerseiRunner` and `CerseiError` keep their names in the code.
+Everything below is re-exported under `bricks::agentrl` when the `agentrl` feature of the `bricks` facade is enabled. The crate itself is `bricks-agentrl`. `CerseiRunner` keeps its name in the code (the error type is `BricksError`).
 
 ## Orchestrator
 
@@ -143,7 +143,7 @@ Every excerpt passes through the scrubber (see [Safety](/docs/agentrl-overview#s
 A persisted list of agent-built tools, with keyword search.
 
 ```rust
-let registry = ToolRegistry::open("~/.cersei/agentrl")?; // returns Arc<ToolRegistry>; a tilde is not expanded
+let registry = ToolRegistry::open("~/.bricks/agentrl")?; // returns Arc<ToolRegistry>; a tilde is not expanded
 // or: let registry = ToolRegistry::in_memory();          // for tests
 
 registry.register(entry)?;                      // scrubs, then appends to entries.jsonl

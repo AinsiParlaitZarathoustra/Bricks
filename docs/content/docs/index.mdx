@@ -1,29 +1,19 @@
 ---
 title: Introduction
-description: Bricks ADK, the Rust kit for building coding agents, and the bricks command and Bricks Desktop built on it.
+description: Bricks is a desktop coding agent, CLI, and modular Rust SDK (bricks-* crates) for building coding agents.
 ---
 
 import { Cards, Card } from 'fumadocs-ui/components/card';
-import { Callout } from 'fumadocs-ui/components/callout';
 
-# Bricks ADK
+# Bricks
 
-Bricks ADK (Agentic Development Kit) is a set of Rust crates for building
-coding agents. It provides the agent loop, providers configured in a file, a
-set of purpose-built tools, an approval policy, context management with
-compaction, sessions, long-term memory, Agent Skills and MCP.
+Bricks is a coding agent built in Rust. It gives you three ways to work with the same engine:
 
-Two frontends use the same engine:
+- **Bricks Desktop**, a desktop app for projects, conversations, diffs, and approvals.
+- **`bricks` CLI**, a command-line tool for single prompts, scripts, and CI.
+- **Bricks Rust SDK**, a set of `bricks-*` crates for building your own coding agents.
 
-- **`bricks`**, the command-line tool, for one prompt, for scripts and for CI.
-- **Bricks Desktop**, the interactive application, with projects, conversations
-  and approvals.
-
-<Callout type="info">
-Bricks is a fork of Cersei, created by Adib Mohsin (Pacifio). Its crates are
-named `bricks-*`. The [migration guide](/docs/migration) lists what changed
-from the Cersei names and behaviour.
-</Callout>
+Source code is hosted at [github.com/AshlarAI/Bricks](https://github.com/AshlarAI/Bricks).
 
 ## A first agent
 

@@ -5,7 +5,7 @@ description: Provider trait, providers configured in providers.toml, and the req
 
 # bricks-provider
 
-Abstraction over LLM backends. A provider is one model declared in `~/.bricks/providers.toml` and driven by one of three wire protocols (`chat_completions`, `responses`, `anthropic_messages`). Every provider implements streaming completion and reports the context window of its model (`context_window`). A provider built from configuration also exposes the model's declared limits through `model_info()` (`crates/bricks-provider/src/lib.rs:204-235`).
+Abstraction over LLM backends. A provider is one model declared in `~/.bricks/providers.toml` and driven by one of three wire protocols (`chat_completions`, `responses`, `anthropic_messages`). Every provider implements streaming completion and reports the context window of its model (`context_window`). A provider built from configuration also exposes the model's declared limits through `model_info()` (`crates/bricks-provider/src/lib.rs`).
 
 ## Provider Trait
 
@@ -41,7 +41,7 @@ use bricks::provider::{provider_from_config, ProviderRegistry};
 let provider = provider_from_config(None, "custom/flash")?;
 
 // Or resolve first, then choose a reasoning profile and a price tariff
-let registry = ProviderRegistry::load(Some("./providers.json".as_ref()))?;
+let registry = ProviderRegistry::load(Some("./providers.toml".as_ref()))?;
 let model = registry.resolve("custom/flash")?;
 let provider = model
     .provider()
@@ -56,8 +56,8 @@ let provider = model
 |---|---|
 | `ProviderRegistry` | The loaded configuration. `models()` lists every model in file order; `resolve(selection)` returns a `ResolvedModel`. |
 | `ResolvedModel` | One configured model. `provider()` returns a `ProviderBuilder`; `build_provider()` builds with the defaults; `selection()` gives `provider_id/model_id`. |
-| `ProviderBuilder` | `reasoning_profile(id)`, `tariff(name)`, `env(lookup)`, `http_client(client)`, `build()`. |
-| `ConfiguredProvider` | The `Provider` implementation for one model. `model()` returns its `ResolvedModel`; `estimate_cost(&Usage)` returns `Option<CostEstimate>`, `None` when no price is known (`crates/bricks-provider/src/provider.rs:269`). |
+| `ProviderBuilder` | `reasoning_profile(id)`, `tariff(name)`, `api_key(key)`, `http_client(client)`, `build()`. |
+| `ConfiguredProvider` | The `Provider` implementation for one model. `model()` returns its `ResolvedModel`; `estimate_cost(&Usage)` returns `Option<CostEstimate>`, `None` when no price is known (`crates/bricks-provider/src/provider.rs`). |
 
 ## Protocols
 

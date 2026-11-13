@@ -181,7 +181,7 @@ Run this under a supervisor such as systemd or a container runtime, so that a cr
 
 ## Sub-agents and orchestration
 
-The agent builder does not add sub-agent tools by itself. `tools::all()` is `coding()` plus `TodoWrite`, and the isolation of sub-agent work is carried by `Agent` and `Agents` (`isolation`), not by a separate worktree tool. The sub-agent tools are not in `tools::all()`. The `bricks` command-line tool and desktop app add the native `Agent`, `Agents`, `AgentControl`, `AgentProfiles` and `SendMessage` tools when `[agents] enabled` is set in `bricks.toml`: those tools are backed by a spawner that the session controller creates. An agent built only with `Agent::builder()` does not get them.
+The agent builder does not add sub-agent tools by itself. `tools::all()` is `coding()` plus `TodoWrite`, and the isolation of sub-agent work is carried by `Agent` (`isolation`), not by a separate worktree tool. The sub-agent tools are not in `tools::all()`. The `bricks` command-line tool and desktop app add the native `Agent`, `AgentControl`, `AgentProfiles` and `Messagent` tools when `[agents] enabled` is set in `bricks.toml`: those tools are backed by a spawner that the session controller creates. An agent built only with `Agent::builder()` does not get them.
 
 ```rust
 let agent = Agent::builder()

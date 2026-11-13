@@ -12,7 +12,7 @@ Bricks provides two layers of code intelligence available as both SDK library AP
 - **`bricks-lsp`**: Language Server Protocol client for semantic operations (hover, definitions, references, symbols, diagnostics)
 - **Tree-sitter modules** in `bricks-tools`: AST-based import extraction, symbol discovery, dependency ranking, and bash command safety analysis
 
-Both are library APIs that let an agent understand a codebase without reading every file. `bricks-lsp` is used by `bricks-semantic`; the Cersei-era `abstract` CLI used both systems (see below).
+Both are library APIs that let an agent understand a codebase without reading every file. `bricks-lsp` is also used by `bricks-semantic`.
 
 ---
 
@@ -414,14 +414,3 @@ User: What type is the `config` variable on line 15 of src/main.rs?
 Agent: [calls LSP tool with action=hover, file=src/main.rs, line=15, column=10]
        The `config` variable is of type `AppConfig` (defined in src/config.rs:17).
 ```
-
----
-
-## Integration in Abstract CLI (historical)
-
-The Cersei-era `abstract` CLI used both systems as follows. That crate is no longer in this workspace, and the Bricks CLI does not call these functions; they remain available to any agent built with `bricks-tools`.
-
-1. **At startup**: `scan_project()` runs tree-sitter analysis on top 20 files, injects dependency-ranked summaries into the system prompt as `project_intel`
-2. **During exploration**: The agent calls the `LSP` tool for semantic queries (hover, definitions, references)
-3. **Before bash execution**: `analyze_command()` classifies risk level for the permission system
-4. **In the TUI**: `/graph` overlay can visualize which LSP servers are available for the project

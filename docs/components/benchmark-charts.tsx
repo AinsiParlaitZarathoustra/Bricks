@@ -16,7 +16,7 @@ const C = {
   claude: "#fb923c",
   tool: "#22d3ee",
   // Python agent frameworks
-  cersei: "#22d3ee",
+  bricks: "#22d3ee",
   agno: "#10b981",
   pydantic: "#f472b6",
   crewai: "#eab308",
@@ -71,7 +71,7 @@ function Grad({ id, color }: { id: string; color: string }) {
   )
 }
 
-// Margin used by all charts — tight
+// Margin used by all charts (tight)
 const M = { left: 0, right: 30, top: 12, bottom: 0 }
 const H = 180
 
@@ -247,7 +247,7 @@ export function ToolDispatchChart() {
   return (
     <ChartContainer config={{ ms: { color: C.tool } }} className="w-full my-3 rounded-lg border border-neutral-800 bg-black px-2 pt-2 pb-1" height={H + 24}>
       <ToolDispatchInner />
-      <Legend items={[{ label: "Cersei SDK dispatch (ms)", color: C.tool }]} />
+      <Legend items={[{ label: "Bricks SDK dispatch (ms)", color: C.tool }]} />
     </ChartContainer>
   )
 }
@@ -285,13 +285,13 @@ export function GraphComparisonChart() {
 
 // ─── General-Agent Framework: Instantiation ────────────────────────────────
 //
-// Cersei figure is measured by
-// crates/cersei-agent/benchmarks/general_agent_bench.rs.
+// Bricks figure is measured by
+// crates/bricks-agent/benchmarks/general_agent_bench.rs.
 // Python figures are from https://docs.agno.com/performance (vendor-reported,
 // Apple M4 Oct 2025). Reproduce end-to-end via bench/general-agents/run.sh.
 
 const L5 = [
-  { label: "Cersei",     color: C.cersei },
+  { label: "Bricks",     color: C.bricks },
   { label: "Agno",       color: C.agno },
   { label: "PydanticAI", color: C.pydantic },
   { label: "CrewAI",     color: C.crewai },
@@ -300,9 +300,9 @@ const L5 = [
 
 function AgentInstantiationInner() {
   const { width } = useChart()
-  // μs per Agent.build() — all measured on Apple M1 Pro via the bench suite.
+  // us per Agent.build(), measured on Apple M1 Pro via the bench suite.
   const data = [
-    { n: "Cersei",     v: 7.12 },      // cersei 0.1.6-patch.2
+    { n: "Bricks",     v: 7.12 },      // bricks-agent benchmark
     { n: "Agno",       v: 6.50 },      // agno 2.5.17
     { n: "PydanticAI", v: 219.12 },    // pydantic-ai 1.22.0
     { n: "LangGraph",  v: 5536.17 },   // langgraph 1.1.8
@@ -310,7 +310,7 @@ function AgentInstantiationInner() {
   ]
   return (
     <AreaChart data={data} width={width} height={H} margin={M}>
-      <defs><Grad id="gai" color={C.cersei} /></defs>
+      <defs><Grad id="gai" color={C.bricks} /></defs>
       <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
       <XAxis dataKey="n" tick={TICK} tickLine={false} axisLine={false} />
       <YAxis
@@ -326,16 +326,16 @@ function AgentInstantiationInner() {
           return <div className="rounded-md border border-neutral-800 bg-black px-2.5 py-1.5 text-[10px] shadow-2xl"><div className="text-neutral-300">{label}</div><div className="font-mono text-neutral-200">{f}</div></div>
         }}
       />
-      <Area type="monotone" dataKey="v" stroke={C.cersei} fill="url(#gai)" strokeWidth={2} dot={{ fill: C.cersei, r: 3 }} />
+      <Area type="monotone" dataKey="v" stroke={C.bricks} fill="url(#gai)" strokeWidth={2} dot={{ fill: C.bricks, r: 3 }} />
     </AreaChart>
   )
 }
 
 export function AgentInstantiationChart() {
   return (
-    <ChartContainer config={{ v: { color: C.cersei } }} className="w-full my-3 rounded-lg border border-neutral-800 bg-black px-2 pt-2 pb-1" height={H + 24}>
+    <ChartContainer config={{ v: { color: C.bricks } }} className="w-full my-3 rounded-lg border border-neutral-800 bg-black px-2 pt-2 pb-1" height={H + 24}>
       <AgentInstantiationInner />
-      <Legend items={[{ label: "All measured on Apple M1 Pro via bench/general-agents/run.sh", color: C.cersei }]} />
+      <Legend items={[{ label: "All measured on Apple M1 Pro via bench/general-agents/run.sh", color: C.bricks }]} />
     </ChartContainer>
   )
 }
@@ -344,11 +344,11 @@ export function AgentInstantiationChart() {
 
 function PerAgentMemoryInner() {
   const { width } = useChart()
-  // bytes per agent — all measured on Apple M1 Pro.
-  // Cersei: jemalloc stats::allocated delta / N.
+  // bytes per agent, measured on Apple M1 Pro.
+  // Bricks: jemalloc stats::allocated delta / N.
   // Python: tracemalloc size_diff / N.
   const data = [
-    { n: "Cersei",     v: 704 },       // cersei 0.1.6-patch.2
+    { n: "Bricks",     v: 704 },       // bricks-agent benchmark
     { n: "Agno",       v: 5938 },      // agno 2.5.17
     { n: "PydanticAI", v: 8892 },      // pydantic-ai 1.22.0
     { n: "CrewAI",     v: 18157 },     // crewai 1.14.2
@@ -356,7 +356,7 @@ function PerAgentMemoryInner() {
   ]
   return (
     <AreaChart data={data} width={width} height={H} margin={M}>
-      <defs><Grad id="gmem" color={C.cersei} /></defs>
+      <defs><Grad id="gmem" color={C.bricks} /></defs>
       <CartesianGrid strokeDasharray="3 3" stroke={GRID} />
       <XAxis dataKey="n" tick={TICK} tickLine={false} axisLine={false} />
       <YAxis
@@ -372,42 +372,42 @@ function PerAgentMemoryInner() {
           return <div className="rounded-md border border-neutral-800 bg-black px-2.5 py-1.5 text-[10px] shadow-2xl"><div className="text-neutral-300">{label}</div><div className="font-mono text-neutral-200">{f}</div></div>
         }}
       />
-      <Area type="monotone" dataKey="v" stroke={C.cersei} fill="url(#gmem)" strokeWidth={2} dot={{ fill: C.cersei, r: 3 }} />
+      <Area type="monotone" dataKey="v" stroke={C.bricks} fill="url(#gmem)" strokeWidth={2} dot={{ fill: C.bricks, r: 3 }} />
     </AreaChart>
   )
 }
 
 export function PerAgentMemoryChart() {
   return (
-    <ChartContainer config={{ v: { color: C.cersei } }} className="w-full my-3 rounded-lg border border-neutral-800 bg-black px-2 pt-2 pb-1" height={H + 24}>
+    <ChartContainer config={{ v: { color: C.bricks } }} className="w-full my-3 rounded-lg border border-neutral-800 bg-black px-2 pt-2 pb-1" height={H + 24}>
       <PerAgentMemoryInner />
-      <Legend items={[{ label: "All measured on Apple M1 Pro. Cersei via jemalloc; Python via tracemalloc.", color: C.cersei }]} />
+      <Legend items={[{ label: "All measured on Apple M1 Pro. Bricks via jemalloc; Python via tracemalloc.", color: C.bricks }]} />
     </ChartContainer>
   )
 }
 
 // ─── General-Agent Framework: Max concurrent (RSS vs agent count) ──────────
 //
-// Cersei line is measured. Python lines will land once bench/general-agents/run.sh
+// Bricks line is measured. Python lines will land once bench/general-agents/run.sh
 // has been executed in a matched environment.
 
 function MaxConcurrentInner() {
   const { width } = useChart()
   // Total RSS in MB after building N agents concurrently and holding them
   // live. All measured on Apple M1 Pro. Python frameworks sampled at [100,
-  // 500] — pushing further on CrewAI in particular would take 10+ minutes
+  // 500]; pushing further on CrewAI in particular would take 10+ minutes
   // per step.
   const data = [
-    { n: 100,   cersei: 8.3,  agno: 79.3,  pydantic_ai: 122.0, langgraph: 193.5, crewai: 1739.3 },
-    { n: 500,   cersei: 8.5,  agno: 82.0,  pydantic_ai: 123.2, langgraph: 193.5, crewai: 1739.3 },
-    { n: 1000,  cersei: 9.3 },
-    { n: 5000,  cersei: 14.0 },
-    { n: 10000, cersei: 22.4 },
+    { n: 100,   bricks: 8.3,  agno: 79.3,  pydantic_ai: 122.0, langgraph: 193.5, crewai: 1739.3 },
+    { n: 500,   bricks: 8.5,  agno: 82.0,  pydantic_ai: 123.2, langgraph: 193.5, crewai: 1739.3 },
+    { n: 1000,  bricks: 9.3 },
+    { n: 5000,  bricks: 14.0 },
+    { n: 10000, bricks: 22.4 },
   ]
   return (
     <AreaChart data={data} width={width} height={H} margin={M}>
       <defs>
-        <Grad id="gmc1" color={C.cersei} />
+        <Grad id="gmc1" color={C.bricks} />
         <Grad id="gmc2" color={C.agno} />
         <Grad id="gmc3" color={C.pydantic} />
         <Grad id="gmc4" color={C.langgraph} />
@@ -448,7 +448,7 @@ function MaxConcurrentInner() {
       <Area type="monotone" dataKey="langgraph"   stroke={C.langgraph} fill="url(#gmc4)" strokeWidth={1.5} dot={{ fill: C.langgraph, r: 2 }} name="LangGraph" connectNulls />
       <Area type="monotone" dataKey="pydantic_ai" stroke={C.pydantic}  fill="url(#gmc3)" strokeWidth={1.5} dot={{ fill: C.pydantic, r: 2 }}  name="PydanticAI" connectNulls />
       <Area type="monotone" dataKey="agno"        stroke={C.agno}      fill="url(#gmc2)" strokeWidth={1.5} dot={{ fill: C.agno, r: 2 }}      name="Agno" connectNulls />
-      <Area type="monotone" dataKey="cersei"      stroke={C.cersei}    fill="url(#gmc1)" strokeWidth={2}   dot={{ fill: C.cersei, r: 3 }}    name="Cersei" connectNulls />
+      <Area type="monotone" dataKey="bricks"      stroke={C.bricks}    fill="url(#gmc1)" strokeWidth={2}   dot={{ fill: C.bricks, r: 3 }}    name="Bricks" connectNulls />
     </AreaChart>
   )
 }
@@ -456,7 +456,7 @@ function MaxConcurrentInner() {
 export function MaxConcurrentChart() {
   return (
     <ChartContainer config={{
-      cersei: { color: C.cersei }, agno: { color: C.agno }, pydantic_ai: { color: C.pydantic },
+      bricks: { color: C.bricks }, agno: { color: C.agno }, pydantic_ai: { color: C.pydantic },
       langgraph: { color: C.langgraph }, crewai: { color: C.crewai },
     }} className="w-full my-3 rounded-lg border border-neutral-800 bg-black px-2 pt-2 pb-1" height={H + 24}>
       <MaxConcurrentInner />

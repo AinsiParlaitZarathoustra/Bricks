@@ -303,7 +303,7 @@ pub async fn resume(&self, run_id: &str, node_id: &NodeId, data: Value) -> Resul
 pub fn def(&self) -> &WorkflowDef;
 ```
 
-Compilation rejects an unknown step id with `CerseiError::Tool("unknown step: '…'")` and a malformed graph with `CerseiError::Config(…)`.
+Compilation rejects an unknown step id with `BricksError::Tool("unknown step: '…'")` and a malformed graph with `BricksError::Config(…)`.
 
 ---
 

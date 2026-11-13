@@ -17,7 +17,7 @@ A live-LLM integration test ships with the SDK (`crates/bricks-agent/tests/e2e_l
 | **OpenAI** | `gpt-4o-mini` | **11,576 → 8,202** | **29.1%** | 15 → 13 | 5 → 5 |
 | **Google Gemini** | `gemini-2.5-flash` | **4,490 → 1,700** | **62.1%** | 1 → 1 | 5 → 3 |
 
-The test asserts `aggressive < off` and `savings ≥ 10%` on real provider bills. The numbers above were captured on 2026-04-20 with an earlier harness (`e2e_openai_compression`), which is no longer in the repository.
+The test asserts `aggressive < off` and `savings ≥ 10%` on real provider bills. The numbers above were captured on 2026-04-20 with an earlier test runner (`e2e_openai_compression`), which is no longer in the repository.
 
 <Callout type="warn">
 These figures were measured on 2026-04-20, before each `Bash` call ran in its own process (commit `4263cd9`). The tool output that reaches the compressor now comes through that path, so rerun the live test before quoting these numbers as current.
@@ -58,7 +58,7 @@ BRICKS_LIVE_MODEL=<provider_id>/gpt-4o-mini \
     -- --ignored --nocapture
 ```
 
-**What we got (2026-04-20, `gpt-4o-mini`, earlier harness):**
+**What we got (2026-04-20, `gpt-4o-mini`, earlier test runner):**
 
 ```
 ── openai run 1: CompressionLevel::Off ──
@@ -78,7 +78,7 @@ BRICKS_LIVE_MODEL=<provider_id>/gemini-2.5-flash \
     -- --ignored --nocapture
 ```
 
-**What we got (2026-04-20, `gemini-2.5-flash`, earlier harness):**
+**What we got (2026-04-20, `gemini-2.5-flash`, earlier test runner):**
 
 ```
 ── gemini run 1: CompressionLevel::Off ──

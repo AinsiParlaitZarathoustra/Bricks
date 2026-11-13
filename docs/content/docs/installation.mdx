@@ -14,14 +14,14 @@ The last development builds were made on macOS (arm64). Linux and Windows have n
 
 ## Get the source
 
-Bricks is built from a checkout of its repository. Bricks ADK is not published on crates.io under the name `bricks`, which another project uses, so depend on the crates by path or by Git, as described below.
+Clone the repository from [github.com/AshlarAI/Bricks](https://github.com/AshlarAI/Bricks). Bricks is not published on crates.io under the name `bricks`, so depend on the `bricks-*` crates by local path or by Git URL.
 
 ## The `bricks` command
 
 From a checkout:
 
 ```bash
-cargo install --path crates/bricks-cli
+cargo install --locked --path crates/bricks-cli
 bricks --version
 ```
 
@@ -56,7 +56,7 @@ From the Git repository, with the revision you want to build against:
 
 ```toml
 [dependencies]
-bricks = { git = "https://github.com/AinsiParlaitZarathoustra/Bricks", rev = "<revision>" }
+bricks = { git = "https://github.com/AshlarAI/Bricks", rev = "<revision>" }
 tokio = { version = "1", features = ["full"] }
 anyhow = "1"
 ```

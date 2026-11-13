@@ -31,7 +31,7 @@ use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let registry = ToolRegistry::open(dirs::home_dir().unwrap().join(".cersei/agentrl"))?;
+    let registry = ToolRegistry::open(dirs::home_dir().unwrap().join(".bricks/agentrl"))?;
 
     let verifier: Arc<dyn Verifier> = Arc::new(CommandVerifier::new(
         "python3 gcd.py 48 36 | grep -qx 12 && python3 gcd.py 0 7 | grep -qx 7",

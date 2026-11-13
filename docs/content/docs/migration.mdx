@@ -545,9 +545,9 @@ Remove the top-level `background` key from `Agents` calls: it was accepted
 but ignored, and is now rejected before any agent starts. The spawner API's
 foreground/background controls and shell background commands are unchanged.
 
-The historical `abstract` harnesses and their documentation have been removed.
+The historical `abstract` runners and their documentation have been removed.
 Use `scripts/bench_cli.py` for CLI startup measurements and the active
-`tbench-agent` harness for Terminal-Bench. Run Rust tests with
+`tbench-agent` runner for Terminal-Bench. Run Rust tests with
 `cargo nextest run`, or `scripts/run_tests.sh` for the workspace.
 
 ## 20. Later changes (tools and memory)

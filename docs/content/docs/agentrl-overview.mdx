@@ -77,7 +77,7 @@ use std::sync::Arc;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Registered solutions persist in this directory.
-    let registry = ToolRegistry::open(dirs::home_dir().unwrap().join(".cersei/agentrl"))?;
+    let registry = ToolRegistry::open(dirs::home_dir().unwrap().join(".bricks/agentrl"))?;
 
     // An independent check: the agent cannot change what this command tests.
     let verifier: Arc<dyn Verifier> =

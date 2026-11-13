@@ -184,8 +184,7 @@ bricks run --session abc12345 "…"   # continue a session headless
 ```
 
 In the desktop application, pick a conversation in the sidebar or use
-`/resume abc12345`. See `docs/cli.md` in the repository. (The `abstract sessions show/rm` commands
-of the Cersei era do not exist in Bricks.)
+`/resume abc12345`. See `docs/cli.md` in the repository.
 
 The desktop application also keeps one record per run in
 `<bricks_home>/desktop/run-records/<session_id>.jsonl`: the run's answer text,
@@ -233,7 +232,7 @@ When a session file grows past 50MB, writes automatically fork to a new part fil
 ### File Layout
 
 ```
-~/.claude/projects/-my-project/
+~/.bricks/sessions/
 ├── abc12345.jsonl          # base file (up to 50MB)
 ├── abc12345_part2.jsonl    # auto-forked when base exceeded 50MB
 ├── abc12345_part3.jsonl    # auto-forked when part2 exceeded 50MB
@@ -266,10 +265,9 @@ println!("Total: {} MB", bytes / 1_000_000);
 
 With auto-compact enabled (default), most sessions never reach a single fork. A typical 100-turn coding session produces ~500KB. You'd need thousands of resumed turns with compaction disabled to hit 50MB.
 
-### CLI
+### Deleting sessions
 
-Deleting a session removes all of its parts. (Historical: the Cersei-era
-`abstract sessions rm` did it; the Bricks CLI has no delete command.)
+Deleting a session in Bricks Desktop removes all of its parts. The `bricks` CLI does not have a delete command.
 
 ---
 

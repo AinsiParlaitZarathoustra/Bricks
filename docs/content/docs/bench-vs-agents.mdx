@@ -10,7 +10,7 @@ import { Callout } from 'fumadocs-ui/components/callout';
 This page compares how much it costs to **build** agents in Bricks and in four Python agent frameworks. The figures come from the benchmark report of **8 October 2026** (`docs/benchmarks-bricks-2026-10-08.md` in the repository): Bricks 0.4.6 at commit `dee981e`, and the Python versions locked in `bench/general-agents/uv.lock`.
 
 <Callout type="warn">
-**What is not measured.** No model call is made. Each harness builds an agent with one tool and does not run a turn, so these numbers say nothing about answer quality, latency to a first token, or token cost. The figures predate the change that runs each `Bash` call in its own process (commit `4263cd9`).
+**What is not measured.** No model call is made. Each benchmark builds an agent with one tool and does not run a turn, so these numbers say nothing about answer quality, latency to a first token, or token cost. The figures predate the change that runs each `Bash` call in its own process (commit `4263cd9`).
 </Callout>
 
 ## Construction
@@ -45,15 +45,15 @@ Bricks also reached **10,000 agents**: total construction 197.37 ms, maximum RSS
 
 ## Reproduce
 
-Python harnesses, from `bench/general-agents`:
+Python benchmarks, from `bench/general-agents`:
 
 ```bash
 uv sync --locked --extra all --python 3.12
 .venv/bin/python bench_agno.py
-.venv/bin/python bench_langgraph.py   # same pattern for the other harnesses
+.venv/bin/python bench_langgraph.py   # same pattern for the other frameworks
 ```
 
-The Rust harness is the `general_agent_bench` example of the `bricks-agent` package:
+The Rust benchmark is the `general_agent_bench` example of the `bricks-agent` package:
 
 ```bash
 CERSEI_BENCH_AXES=1,2,3,4 cargo run --release -p bricks-agent \
