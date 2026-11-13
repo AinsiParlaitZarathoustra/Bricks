@@ -1399,15 +1399,14 @@ impl AgentSpawner {
             }
             p
         };
-        // The same tools: a tool gone since is a refusal, never a silent
-        // change of what the agent can do.
-        let mut available: Vec<String> = subagent::child_tools((self.tools)(), &[])
-            .iter()
-            .map(|t| t.name().to_string())
-            .collect();
-        available.extend(
-            ["Agent", "AgentControl", "AgentProfiles", "Messagent"].map(String::from),
-        );
+        // The same tools (including resolved memory access tools): a tool gone
+        // since launch is a refusal, never a silent change of what the agent can do.
+        let parent_memory = ctx
+            .extensions
+            .get::<bricks_tools::memory_tools::RunMemory>()
+            .and_then(|m| m.0.clone());
+        let (child_tools, _) = self.build_child_tools(&profile, parent_memory.as_ref());
+        let available: Vec<String> = child_tools.iter().map(|t| t.name().to_string()).collect();
         if let Some(missing) = launch.tools.iter().find(|t| !available.contains(t)) {
             return Err(SpawnError::Refused(format!(
                 "`{id}` cannot be resumed: its tool `{missing}` is no longer available."
@@ -2015,46 +2014,10 @@ impl AgentSpawner {
         lease: Arc<super::runtime::ActivityLease>,
         history: Option<Vec<bricks_types::Message>>,
     ) -> Result<(Agent, Vec<SkillLoad>, Vec<String>), String> {
-        // The parent's tools (rebuilt), and the delegation tools of this
-        // runtime: recursion is bounded by the scheduler, not by removing
-        // tools. Legacy delegation tools never pass.
-        let mut tools = subagent::child_tools((self.tools)(), &[]);
-        tools.push(Box::new(super::tool::NativeAgentTool::new(Arc::clone(
-            self,
-        ))));
-        tools.push(Box::new(super::tool::AgentControlTool::new(Arc::clone(
-            self,
-        ))));
-        tools.push(Box::new(super::tool::AgentProfilesTool::new(Arc::clone(
-            self,
-        ))));
-        // Every member of the team writes to the others.
-        if !tools.iter().any(|t| t.name() == "Messagent") {
-            tools.push(Box::new(super::messagent::MessagentTool));
-        }
-        let memory_access = profile.memory.unwrap_or({
-            if self.bricks.agents.subagent_memory_write {
-                super::profile::MemoryAccess::ReadWrite
-            } else {
-                super::profile::MemoryAccess::ReadOnly
-            }
-        });
-        let child_memory = match memory_access {
-            super::profile::MemoryAccess::Off => None,
-            super::profile::MemoryAccess::ReadOnly | super::profile::MemoryAccess::ReadWrite => {
-                pc.long_term_memory.clone()
-            }
-        };
-        if child_memory.is_some() {
-            if !tools.iter().any(|t| t.name() == "memory_search") {
-                tools.push(Box::new(bricks_tools::memory_tools::MemorySearchTool));
-            }
-            if memory_access == super::profile::MemoryAccess::ReadWrite
-                && !tools.iter().any(|t| t.name() == "memory_write")
-            {
-                tools.push(Box::new(bricks_tools::memory_tools::MemoryWriteTool));
-            }
-        }
+        // The parent's tools (rebuilt), delegation tools of this runtime, and
+        // memory tools resolved uniformly with `resume`.
+        let (tools, child_memory) =
+            self.build_child_tools(profile, pc.long_term_memory.as_ref());
         let names: Vec<String> = tools.iter().map(|t| t.name().to_string()).collect();
         let ext = subagent::child_extensions(pc.depth);
         // Services: the code engine only within the same workspace (a
@@ -2597,5 +2560,121 @@ mod tests {
             assert!(matches!(d, PermissionDecision::Deny(r) if r.contains("own rule")));
             assert!(broker.pending().is_empty());
         }
+    }
+
+    #[test]
+    fn child_memory_tools_filter_inherited_and_missing_tools_by_access() {
+        use super::super::profile::MemoryAccess;
+
+        let names = |tools: &[Box<dyn bricks_tools::Tool>]| -> Vec<String> {
+            tools.iter().map(|t| t.name().to_string()).collect()
+        };
+
+        // Inherited memory tools from `(self.tools)()` must be stripped when
+        // ReadOnly (removes memory_write) or Off / !has_memory (removes both).
+        let inherited = || -> Vec<Box<dyn bricks_tools::Tool>> {
+            vec![
+                Box::new(bricks_tools::memory_tools::MemorySearchTool),
+                Box::new(bricks_tools::memory_tools::MemoryWriteTool),
+            ]
+        };
+
+        let mut t = inherited();
+        apply_child_memory_tools(&mut t, true, MemoryAccess::ReadOnly);
+        assert_eq!(names(&t), vec!["memory_search"]);
+
+        let mut t = inherited();
+        apply_child_memory_tools(&mut t, true, MemoryAccess::Off);
+        assert!(t.is_empty(), "{:?}", names(&t));
+
+        let mut t = inherited();
+        apply_child_memory_tools(&mut t, false, MemoryAccess::ReadWrite);
+        assert!(t.is_empty(), "{:?}", names(&t));
+
+        let mut t = inherited();
+        apply_child_memory_tools(&mut t, true, MemoryAccess::ReadWrite);
+        assert_eq!(names(&t), vec!["memory_search", "memory_write"]);
+
+        // Empty parent tool set still adds the allowed memory tools.
+        let mut t = Vec::new();
+        apply_child_memory_tools(&mut t, true, MemoryAccess::ReadOnly);
+        assert_eq!(names(&t), vec!["memory_search"]);
+
+        let mut t = Vec::new();
+        apply_child_memory_tools(&mut t, true, MemoryAccess::ReadWrite);
+        assert_eq!(names(&t), vec!["memory_search", "memory_write"]);
+    }
+}
+
+/// Filter or attach `memory_search` / `memory_write` on a child tool list so
+/// neither leaks from inherited parent tools when disallowed, nor stays missing
+/// when the parent's memory was attached dynamically.
+fn apply_child_memory_tools(
+    tools: &mut Vec<Box<dyn bricks_tools::Tool>>,
+    has_memory: bool,
+    access: super::profile::MemoryAccess,
+) {
+    let allow_search = has_memory && access != super::profile::MemoryAccess::Off;
+    let allow_write = allow_search && access == super::profile::MemoryAccess::ReadWrite;
+    tools.retain(|t| match t.name() {
+        "memory_search" => allow_search,
+        "memory_write" => allow_write,
+        _ => true,
+    });
+    if allow_search && !tools.iter().any(|t| t.name() == "memory_search") {
+        tools.push(Box::new(bricks_tools::memory_tools::MemorySearchTool));
+    }
+    if allow_write && !tools.iter().any(|t| t.name() == "memory_write") {
+        tools.push(Box::new(bricks_tools::memory_tools::MemoryWriteTool));
+    }
+}
+
+impl AgentSpawner {
+    fn resolve_child_memory(
+        &self,
+        profile: &AgentProfile,
+        parent_memory: Option<&Arc<dyn bricks_memory::LongTermMemory>>,
+    ) -> (
+        super::profile::MemoryAccess,
+        Option<Arc<dyn bricks_memory::LongTermMemory>>,
+    ) {
+        let access = profile.memory.unwrap_or(if self.bricks.agents.subagent_memory_write {
+            super::profile::MemoryAccess::ReadWrite
+        } else {
+            super::profile::MemoryAccess::ReadOnly
+        });
+        let memory = match access {
+            super::profile::MemoryAccess::Off => None,
+            super::profile::MemoryAccess::ReadOnly | super::profile::MemoryAccess::ReadWrite => {
+                parent_memory.cloned()
+            }
+        };
+        (access, memory)
+    }
+
+    fn build_child_tools(
+        self: &Arc<Self>,
+        profile: &AgentProfile,
+        parent_memory: Option<&Arc<dyn bricks_memory::LongTermMemory>>,
+    ) -> (
+        Vec<Box<dyn bricks_tools::Tool>>,
+        Option<Arc<dyn bricks_memory::LongTermMemory>>,
+    ) {
+        let mut tools = subagent::child_tools((self.tools)(), &[]);
+        tools.push(Box::new(super::tool::NativeAgentTool::new(Arc::clone(
+            self,
+        ))));
+        tools.push(Box::new(super::tool::AgentControlTool::new(Arc::clone(
+            self,
+        ))));
+        tools.push(Box::new(super::tool::AgentProfilesTool::new(Arc::clone(
+            self,
+        ))));
+        if !tools.iter().any(|t| t.name() == "Messagent") {
+            tools.push(Box::new(super::messagent::MessagentTool));
+        }
+        let (memory_access, child_memory) = self.resolve_child_memory(profile, parent_memory);
+        apply_child_memory_tools(&mut tools, child_memory.is_some(), memory_access);
+        (tools, child_memory)
     }
 }

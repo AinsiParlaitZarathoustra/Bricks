@@ -886,3 +886,197 @@ async fn subagents_inherit_read_only_memory_and_respect_profile_memory_access() 
         );
     }
 }
+
+#[tokio::test]
+async fn subagent_resume_keeps_memory_tools_and_refuses_when_memory_turns_off() {
+    use bricks_agent::control::scripted::{ScriptedCatalog, ScriptedProvider};
+    use bricks_provider::{CompletionRequest, CompletionStream, ModelInfo, Provider};
+
+    struct SplitProvider {
+        parent: Box<dyn Provider>,
+        child: Box<dyn Provider>,
+    }
+    #[async_trait]
+    impl Provider for SplitProvider {
+        fn name(&self) -> &str {
+            self.parent.name()
+        }
+        fn context_window(&self, model: &str) -> u64 {
+            self.parent.context_window(model)
+        }
+        fn model_info(&self) -> Option<ModelInfo> {
+            self.parent.model_info()
+        }
+        async fn complete(&self, request: CompletionRequest) -> bricks_types::Result<CompletionStream> {
+            if request
+                .system
+                .as_deref()
+                .is_some_and(|s| s.contains("You are a sub-agent"))
+            {
+                self.child.complete(request).await
+            } else {
+                self.parent.complete(request).await
+            }
+        }
+    }
+    struct SplitCatalog {
+        parent_script: Arc<Script>,
+        child_script: Arc<Script>,
+        inner: Arc<ScriptedCatalog>,
+    }
+    impl ModelCatalog for SplitCatalog {
+        fn models(&self) -> Vec<ModelChoice> {
+            self.inner.models()
+        }
+        fn build(
+            &self,
+            selection: &str,
+            _reasoning: Option<&str>,
+        ) -> Result<Box<dyn Provider>, String> {
+            Ok(Box::new(SplitProvider {
+                parent: Box::new(ScriptedProvider::new(selection, self.parent_script.clone())),
+                child: Box::new(ScriptedProvider::new(selection, self.child_script.clone())),
+            }))
+        }
+    }
+
+    let (home_dir, stores) = home();
+    let resolver = Resolver::new(&stores, home_dir.path(), Some("pa"), true);
+    let dir = tempfile::tempdir().unwrap();
+    let agents_dir = dir.path().join(".bricks").join("agents");
+    std::fs::create_dir_all(&agents_dir).unwrap();
+    std::fs::write(
+        agents_dir.join("reader.md"),
+        "---\nname: reader\ndescription: Reads project context\nisolation: shared\n---\nSearch memory before answering.\n",
+    )
+    .unwrap();
+
+    let parent_script = Script::new(vec![
+        // Run 1: seed note
+        Reply::tool(
+            "w0",
+            "memory_write",
+            json!({"text": "Database uses Postgres 16", "scope": "project"}),
+        ),
+        Reply::text("Seeded."),
+        // Run 2: spawn reader, wait, resume reader, wait, finish
+        Reply::tool(
+            "a1",
+            "Agent",
+            json!({"profile": "reader", "task": "Find database"}),
+        ),
+        Reply::tool(
+            "wait1",
+            "AgentControl",
+            json!({"action": "wait", "agent_id": "sub_0000"}),
+        ),
+        Reply::tool(
+            "res1",
+            "AgentControl",
+            json!({"action": "resume", "agent_id": "sub_0000", "prompt": "Check database version"}),
+        ),
+        Reply::tool(
+            "wait2",
+            "AgentControl",
+            json!({"action": "wait", "agent_id": "sub_0000"}),
+        ),
+        Reply::text("Resumed ok."),
+        // Run 3 (after memory is turned off): resume must refuse because memory_search is gone
+        Reply::tool(
+            "res_off",
+            "AgentControl",
+            json!({"action": "resume", "agent_id": "sub_0000", "prompt": "Search again"}),
+        ),
+        Reply::text("Refused as expected."),
+    ]);
+    let child_script = Script::new(vec![
+        // Execution 1
+        Reply::tool("c_s1", "memory_search", json!({"query": "Postgres"})),
+        Reply::text("Postgres 16 found."),
+        // Execution 2 (resumed)
+        Reply::tool("c_s2", "memory_search", json!({"query": "Postgres 16"})),
+        Reply::text("Resumed search confirmed Postgres 16."),
+    ]);
+
+    let catalog = Arc::new(SplitCatalog {
+        parent_script: parent_script.clone(),
+        child_script: child_script.clone(),
+        inner: ScriptedCatalog::new(&["a"], parent_script.clone()),
+    });
+    let mut cfg = EngineConfig::new(dir.path(), catalog, bricks(), dir.path().join(".sessions"));
+    cfg.agent_profile_sources = Some(ProfileSources {
+        project_dir: Some(dir.path().join(".bricks/agents")),
+        user_dir: None,
+    });
+    cfg.memory_resolver = Some(resolver.clone());
+    cfg.permissions = Some(common::default_store(dir.path(), &execute()));
+    let (ctl, mut events) = Controller::open(
+        cfg,
+        OpenOptions {
+            session: SessionChoice::New,
+            model: None,
+            reasoning: None,
+        },
+    )
+    .await
+    .unwrap();
+    next(&mut events).await; // session_opened
+    let mut env = Env {
+        ctl,
+        events,
+        script: parent_script,
+        dir,
+    };
+
+    run_with(&mut env, "Seed memory", |_| {}).await;
+    let evs2 = run_with(&mut env, "Spawn and resume reader", |_| {}).await;
+    let res1 = evs2
+        .iter()
+        .find_map(|e| match &e.event {
+            Event::ToolFinished {
+                tool_call_id,
+                is_error,
+                output,
+                ..
+            } if tool_call_id == "res1" => Some((*is_error, output.clone())),
+            _ => None,
+        })
+        .expect("res1 result");
+    assert!(!res1.0, "resume with memory on should succeed: {}", res1.1);
+    assert!(res1.1.contains("resumed (execution 2)"), "{}", res1.1);
+
+    let child_reqs: Vec<CompletionRequest> = child_script
+        .requests()
+        .into_iter()
+        .map(|(_, r)| r)
+        .collect();
+    assert_eq!(child_reqs.len(), 4, "2 turns x 2 executions");
+    for req in &child_reqs {
+        let tools = offered(req);
+        assert!(tools.contains(&"memory_search".to_string()), "{tools:?}");
+        assert!(!tools.contains(&"memory_write".to_string()), "{tools:?}");
+    }
+
+    // Turn memory off for Run 3: resuming a sub-agent launched with memory_search
+    // must now cleanly refuse rather than silently dropping its tool.
+    resolver.on.store(false, Ordering::SeqCst);
+    let evs3 = run_with(&mut env, "Try resume without memory", |_| {}).await;
+    let res_off = evs3
+        .iter()
+        .find_map(|e| match &e.event {
+            Event::ToolFinished {
+                tool_call_id,
+                is_error,
+                output,
+                ..
+            } if tool_call_id == "res_off" => Some((*is_error, output.clone())),
+            _ => None,
+        })
+        .expect("res_off result");
+    assert!(res_off.0, "expected refusal when memory is off: {}", res_off.1);
+    assert!(
+        res_off.1.contains("memory_search") && res_off.1.contains("no longer available"),
+        "{}",
+        res_off.1
+    );
+}
